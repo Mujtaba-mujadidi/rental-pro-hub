@@ -1,0 +1,26 @@
+node_modules/
+.next/
+dist/
+.turbo/
+*.tsbuildinfo
+
+# Secrets (keep examples committed)
+.env
+.env.local
+.env.*.local
+**/.env
+**/.env.local
+**/.env.*.local
+!.env.example
+!**/.env.example
+
+.DS_Store
+.idea/
+.vscode/
+
+apps/mobile/.expo/
+apps/mobile/dist/
+apps/mobile/web-build/
+
+.branches/
+npm-debug.log*
