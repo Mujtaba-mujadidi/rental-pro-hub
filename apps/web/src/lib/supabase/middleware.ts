@@ -1,7 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
+import { resolveSupabasePublishableEnv } from "@/lib/supabase/env";
+import { resolveDriverHomePath } from "@/lib/auth/driver-redirect";
 
-const protectedPrefixes = ["/dashboard", "/admin", "/company"];
+const protectedPrefixes = ["/super-admin", "/driver"];
 
 function isProtectedPath(pathname: string) {
   return protectedPrefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`));
@@ -10,10 +12,11 @@ function isProtectedPath(pathname: string) {
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !anonKey) {
+  let url: string;
+  let anonKey: string;
+  try {
+    ({ url, anonKey } = resolveSupabasePublishableEnv());
+  } catch {
     return response;
   }
 
@@ -23,9 +26,7 @@ export async function updateSession(request: NextRequest) {
         return request.cookies.getAll();
       },
       setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value }) =>
-          request.cookies.set(name, value),
-        );
+        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
         response = NextResponse.next({ request });
         cookiesToSet.forEach(({ name, value, options }) =>
           response.cookies.set(name, value, options),
@@ -49,9 +50,19 @@ export async function updateSession(request: NextRequest) {
 
   if (user && (path === "/login" || path === "/signup")) {
     const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/dashboard";
+    redirectUrl.pathname = await resolveDriverHomePath(supabase, user.id, user.email);
     redirectUrl.search = "";
     return NextResponse.redirect(redirectUrl);
+  }
+
+  if (user && path === "/driver") {
+    const home = await resolveDriverHomePath(supabase, user.id, user.email);
+    if (home !== "/driver") {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = home;
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
   }
 
   return response;

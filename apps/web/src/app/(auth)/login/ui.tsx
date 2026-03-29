@@ -11,7 +11,7 @@ function Submit({ label }: { label: string }) {
     <button
       type="submit"
       disabled={pending}
-      className="mt-2 flex h-10 w-full items-center justify-center rounded-lg bg-zinc-900 text-sm font-medium text-white disabled:opacity-50"
+      className="mt-2 flex h-11 w-full items-center justify-center rounded-lg bg-rph-rail text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50"
     >
       {pending ? "Please wait…" : label}
     </button>
@@ -21,14 +21,28 @@ function Submit({ label }: { label: string }) {
 export function LoginForm({
   registered,
   nextPath,
+  configError,
+  serverError,
 }: {
   registered: boolean;
   nextPath?: string;
+  configError?: boolean;
+  serverError?: string;
 }) {
   const [state, formAction] = useFormState(signInAction, initial);
 
   return (
     <form action={formAction} className="space-y-4">
+      {configError ? (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          App configuration error: check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.
+        </p>
+      ) : null}
+      {serverError ? (
+        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+          {serverError}
+        </p>
+      ) : null}
       {registered ? (
         <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
           Account created. If email confirmation is enabled in Supabase, confirm
@@ -41,7 +55,7 @@ export function LoginForm({
         </p>
       ) : null}
       <div className="space-y-1">
-        <label htmlFor="email" className="text-sm font-medium text-zinc-700">
+        <label htmlFor="email" className="text-sm font-medium text-slate-700">
           Email
         </label>
         <input
@@ -50,11 +64,11 @@ export function LoginForm({
           type="email"
           autoComplete="email"
           required
-          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none ring-zinc-400 focus:ring-2"
+          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-rph-rail focus:ring-2 focus:ring-rph-rail/20"
         />
       </div>
       <div className="space-y-1">
-        <label htmlFor="password" className="text-sm font-medium text-zinc-700">
+        <label htmlFor="password" className="text-sm font-medium text-slate-700">
           Password
         </label>
         <input
@@ -63,7 +77,7 @@ export function LoginForm({
           type="password"
           autoComplete="current-password"
           required
-          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none ring-zinc-400 focus:ring-2"
+          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-rph-rail focus:ring-2 focus:ring-rph-rail/20"
         />
       </div>
       {nextPath ? (
