@@ -2,13 +2,11 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { requireDriverArea } from "@/lib/auth/profile";
 import {
-  addressOnlyLicenceReview,
   driverLicenceReviewRequired,
   driverLicenceReviewSummaryLines,
 } from "@/lib/driver/licence-attention";
 import {
   DRIVER_ONBOARDING_COLUMNS,
-  DRIVER_ADDRESS_COLUMNS,
   driverDrivingLicenceStepComplete,
   driverOnboardingComplete,
 } from "@/lib/driver/licence-check";
@@ -32,7 +30,9 @@ export default async function DriverOnboardingPage() {
   const supabase = await createClient();
   const { data: row, error } = await supabase
     .from("driver_profiles")
-    .select(`updated_at, ${DRIVER_ONBOARDING_COLUMNS}, ${DRIVER_ADDRESS_COLUMNS}`)
+    .select(
+      `updated_at, ${DRIVER_ONBOARDING_COLUMNS}, address_line1, address_line2, address_town, address_county, address_postcode`,
+    )
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -74,7 +74,6 @@ export default async function DriverOnboardingPage() {
 
   const licenceAttentionLines =
     driverLicenceReviewRequired(row) ? driverLicenceReviewSummaryLines(row) : [];
-  const addressOnlyAttention = addressOnlyLicenceReview(row);
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -100,17 +99,8 @@ export default async function DriverOnboardingPage() {
         </p>
       </div>
       <DriverLicencesPage
-        addressOnlyAttention={addressOnlyAttention}
         licenceAttentionLines={licenceAttentionLines}
         licenceRevalidationDue={Boolean(row.licence_revalidation_due_at)}
-        pendingAddress={{
-          line1: row.pending_address_line1 ?? null,
-          line2: row.pending_address_line2 ?? null,
-          town: row.pending_address_town ?? null,
-          county: row.pending_address_county ?? null,
-          postcode: row.pending_address_postcode ?? null,
-          submittedAt: row.pending_address_submitted_at ?? null,
-        }}
         onboardingComplete={complete}
         initialStep={initialStep}
         imageUrls={{ front: imageFront, back: imageBack, phv: imagePhv }}
@@ -123,6 +113,20 @@ export default async function DriverOnboardingPage() {
           driving_licence_front_path: row.driving_licence_front_path ?? null,
           driving_licence_back_path: row.driving_licence_back_path ?? null,
           phv_licence_card_path: row.phv_licence_card_path ?? null,
+          driving_address_confirmed_at: row.driving_address_confirmed_at ?? null,
+          phv_address_confirmed_at: row.phv_address_confirmed_at ?? null,
+          licence_revalidation_due_at: row.licence_revalidation_due_at ?? null,
+          pending_address_submitted_at: row.pending_address_submitted_at ?? null,
+          address_line1: row.address_line1 ?? null,
+          address_line2: row.address_line2 ?? null,
+          address_town: row.address_town ?? null,
+          address_county: row.address_county ?? null,
+          address_postcode: row.address_postcode ?? null,
+          pending_address_line1: row.pending_address_line1 ?? null,
+          pending_address_line2: row.pending_address_line2 ?? null,
+          pending_address_town: row.pending_address_town ?? null,
+          pending_address_county: row.pending_address_county ?? null,
+          pending_address_postcode: row.pending_address_postcode ?? null,
         }}
       />
     </div>

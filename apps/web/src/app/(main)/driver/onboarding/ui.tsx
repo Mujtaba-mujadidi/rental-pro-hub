@@ -9,8 +9,9 @@ import {
   type LicenceActionResult,
 } from "@/app/actions/driver-onboarding";
 import { formatLicenceDate } from "@/lib/driver/licence-display";
+import { phvLicenceNeedsAddressCatchUp } from "@/lib/driver/licence-check";
+import { daysFromTodayToExpiry, LICENCE_EXPIRING_SOON_MAX_DAYS } from "@/lib/driver/licence-attention";
 import { UK_DRIVING_LICENCE_NUMBER_HINT } from "@/lib/validation/driver-signup";
-import { AddressLicenceAttestPhvStep } from "./address-attestation";
 import { LicenceImageGallery, type LicenceGalleryItem } from "./licence-image-gallery";
 
 const initial: LicenceActionResult = {};
@@ -35,6 +36,20 @@ export type DriverLicenceRow = {
   driving_licence_front_path: string | null;
   driving_licence_back_path: string | null;
   phv_licence_card_path: string | null;
+  driving_address_confirmed_at?: string | null;
+  phv_address_confirmed_at?: string | null;
+  licence_revalidation_due_at?: string | null;
+  pending_address_submitted_at?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  address_town?: string | null;
+  address_county?: string | null;
+  address_postcode?: string | null;
+  pending_address_line1?: string | null;
+  pending_address_line2?: string | null;
+  pending_address_town?: string | null;
+  pending_address_county?: string | null;
+  pending_address_postcode?: string | null;
 };
 
 export type LicenceImageUrls = {
@@ -46,6 +61,210 @@ export type LicenceImageUrls = {
 function isoDate(d: string | null): string {
   if (!d) return "";
   return d.slice(0, 10);
+}
+
+function formatAddressForDisplay(parts: {
+  line1: string | null | undefined;
+  line2?: string | null;
+  town: string | null | undefined;
+  county?: string | null;
+  postcode: string | null | undefined;
+}): string {
+  const bits = [parts.line1, parts.line2, parts.town, parts.county, parts.postcode]
+    .map((s) => (s ?? "").trim())
+    .filter(Boolean);
+  return bits.join(", ") || "—";
+}
+
+function licenceConfirmationAddressLine(row: DriverLicenceRow): string {
+  const pending = Boolean(row.pending_address_submitted_at);
+  if (pending) {
+    return formatAddressForDisplay({
+      line1: row.pending_address_line1,
+      line2: row.pending_address_line2,
+      town: row.pending_address_town,
+      county: row.pending_address_county,
+      postcode: row.pending_address_postcode,
+    });
+  }
+  return formatAddressForDisplay({
+    line1: row.address_line1,
+    line2: row.address_line2,
+    town: row.address_town,
+    county: row.address_county,
+    postcode: row.address_postcode,
+  });
+}
+
+type LicenceStatusTone = "ok" | "warn" | "expiring" | "danger";
+
+type LicenceCardStatus = {
+  label: string;
+  tone: LicenceStatusTone;
+  /** Secondary line, e.g. days until expiry (shown when not expired, or extra context). */
+  expiryNote?: string;
+};
+
+function expiringSoonNote(days: number): string {
+  if (days === 0) return "Expires today.";
+  if (days === 1) return "Expiring in 1 day.";
+  return `Expiring in ${days} days.`;
+}
+
+function licenceExpirySignals(iso: string | null | undefined): {
+  days: number | null;
+  expired: boolean;
+  expiringSoon: boolean;
+} {
+  const days = daysFromTodayToExpiry(iso);
+  if (days === null) {
+    return { days: null, expired: false, expiringSoon: false };
+  }
+  return {
+    days,
+    expired: days < 0,
+    expiringSoon: days >= 0 && days <= LICENCE_EXPIRING_SOON_MAX_DAYS,
+  };
+}
+
+function statusPillClass(tone: LicenceStatusTone): string {
+  switch (tone) {
+    case "ok":
+      return "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-100";
+    case "warn":
+      return "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100";
+    case "expiring":
+      return "border-orange-300 bg-orange-50 text-orange-950 dark:border-orange-800/65 dark:bg-orange-950/45 dark:text-orange-100";
+    case "danger":
+      return "border-red-300 bg-red-50 text-red-950 dark:border-red-900/55 dark:bg-red-950/40 dark:text-red-100";
+  }
+}
+
+function applyExpiringPresentation(
+  tone: LicenceStatusTone,
+  expiringSoon: boolean,
+  days: number | null,
+): { tone: LicenceStatusTone; expiryNote?: string } {
+  if (!expiringSoon || days === null) {
+    return { tone };
+  }
+  return { tone: "expiring", expiryNote: expiringSoonNote(days) };
+}
+
+function drivingLicenceStatus(row: DriverLicenceRow): LicenceCardStatus {
+  const hasFront = Boolean(row.driving_licence_front_path);
+  const hasBack = Boolean(row.driving_licence_back_path);
+  const hasDetails = Boolean(row.driving_licence_number?.trim()) && Boolean(row.driving_licence_expiry);
+  const { days, expired, expiringSoon } = licenceExpirySignals(row.driving_licence_expiry);
+
+  if (!hasFront || !hasBack || !hasDetails) {
+    if (expired && row.driving_licence_expiry) {
+      return { label: "Incomplete — licence expired", tone: "danger", expiryNote: "Renew and complete your details and photos." };
+    }
+    if (expiringSoon && row.driving_licence_expiry && days !== null) {
+      return { label: "Incomplete", tone: "expiring", expiryNote: expiringSoonNote(days) };
+    }
+    return { label: "Incomplete", tone: "warn" };
+  }
+
+  if (expired) {
+    return { label: "Expired — update required", tone: "danger" };
+  }
+
+  const pending = Boolean(row.pending_address_submitted_at);
+  const reval = Boolean(row.licence_revalidation_due_at);
+  const confirmed = Boolean(row.driving_address_confirmed_at);
+
+  let label: string;
+  let tone: LicenceStatusTone;
+
+  if (pending) {
+    label = "New address — upload updated photos";
+    tone = "warn";
+  } else if (reval && !confirmed) {
+    label = "Confirm licence matches address";
+    tone = "warn";
+  } else {
+    label = "Current";
+    tone = "ok";
+  }
+
+  const exp = applyExpiringPresentation(tone, expiringSoon, days);
+  return { label, tone: exp.tone, expiryNote: exp.expiryNote };
+}
+
+function phvLicenceStatus(row: DriverLicenceRow): LicenceCardStatus {
+  const hasPhoto = Boolean(row.phv_licence_card_path);
+  const hasDetails =
+    Boolean(row.phv_licence_number?.trim()) &&
+    Boolean(row.phv_licensing_authority?.trim()) &&
+    Boolean(row.phv_licence_expiry);
+  const { days, expired, expiringSoon } = licenceExpirySignals(row.phv_licence_expiry);
+
+  if (!hasPhoto || !hasDetails) {
+    if (expired && row.phv_licence_expiry) {
+      return { label: "Incomplete — licence expired", tone: "danger", expiryNote: "Renew and complete your details and photo." };
+    }
+    if (expiringSoon && row.phv_licence_expiry && days !== null) {
+      return { label: "Incomplete", tone: "expiring", expiryNote: expiringSoonNote(days) };
+    }
+    return { label: "Incomplete", tone: "warn" };
+  }
+
+  if (expired) {
+    return { label: "Expired — update required", tone: "danger" };
+  }
+
+  const pending = Boolean(row.pending_address_submitted_at);
+  const reval = Boolean(row.licence_revalidation_due_at);
+  const phvConfirmed = Boolean(row.phv_address_confirmed_at);
+  const catchUp = phvLicenceNeedsAddressCatchUp(row);
+
+  let label: string;
+  let tone: LicenceStatusTone;
+
+  if (pending) {
+    label = "New address — upload updated photos";
+    tone = "warn";
+  } else if (reval && !phvConfirmed) {
+    label = "Confirm licence matches address";
+    tone = "warn";
+  } else if (catchUp) {
+    label = "Confirm updated address on licence";
+    tone = "warn";
+  } else {
+    label = "Current";
+    tone = "ok";
+  }
+
+  const exp = applyExpiringPresentation(tone, expiringSoon, days);
+  return { label, tone: exp.tone, expiryNote: exp.expiryNote };
+}
+
+function LicenceDualStatus({ row }: { row: DriverLicenceRow }) {
+  const d = drivingLicenceStatus(row);
+  const p = phvLicenceStatus(row);
+  return (
+    <div
+      className="grid gap-3 sm:grid-cols-2"
+      aria-label="Licence status"
+    >
+      <div className={`rounded-xl border px-4 py-3 text-sm ${statusPillClass(d.tone)}`}>
+        <p className="text-xs font-semibold uppercase tracking-wide opacity-80">Driving licence</p>
+        <p className="mt-1 font-medium leading-snug">{d.label}</p>
+        {d.expiryNote ? (
+          <p className="mt-1.5 text-xs font-semibold leading-snug opacity-95">{d.expiryNote}</p>
+        ) : null}
+      </div>
+      <div className={`rounded-xl border px-4 py-3 text-sm ${statusPillClass(p.tone)}`}>
+        <p className="text-xs font-semibold uppercase tracking-wide opacity-80">PHV / taxi licence</p>
+        <p className="mt-1 font-medium leading-snug">{p.label}</p>
+        {p.expiryNote ? (
+          <p className="mt-1.5 text-xs font-semibold leading-snug opacity-95">{p.expiryNote}</p>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 function OnboardingStepProgress({ step }: { step: number }) {
@@ -128,7 +347,7 @@ function OnboardingStepProgress({ step }: { step: number }) {
 const fileInputClass =
   "rph-input-auth py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-slate-200 file:px-3 file:py-1 file:text-sm dark:file:bg-slate-700";
 
-/** Matches checkbox styling in address attestation + gate steps. */
+/** Matches checkbox styling used in licence confirmations. */
 const attestCheckboxClass =
   "mt-1 h-4 w-4 shrink-0 rounded border-slate-300 text-rph-rail focus:ring-rph-rail/30";
 
@@ -146,19 +365,23 @@ function SubmitPaired({ label }: { label: string }) {
   );
 }
 
+const stepSwitchBtn =
+  "inline-flex items-center justify-center rounded-lg border px-3 py-2 text-sm font-medium transition-colors";
+const stepSwitchActive =
+  "border-orange-500 bg-orange-50 text-orange-700 dark:bg-orange-950/30 dark:text-orange-300";
+const stepSwitchIdle =
+  "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800";
+
 export function DriverLicencesOnboardingForm({
   initialRow,
   initialStep,
   onboardingComplete,
   phvRedirectTarget,
-  requireWizardAddressAttestation,
 }: {
   initialRow: DriverLicenceRow;
   initialStep: 1 | 2;
   onboardingComplete: boolean;
   phvRedirectTarget: "driver" | "onboarding";
-  /** After address change: require checkbox(es) on save so the wizard path matches two-step confirmation. */
-  requireWizardAddressAttestation: boolean;
 }) {
   const router = useRouter();
   const [step, setStep] = useState<1 | 2>(initialStep);
@@ -169,10 +392,22 @@ export function DriverLicencesOnboardingForm({
   const hasBack = Boolean(initialRow.driving_licence_back_path);
   const hasPhv = Boolean(initialRow.phv_licence_card_path);
   const drivingPhotosDone = hasFront && hasBack;
+  const confirmAddressLine = licenceConfirmationAddressLine(initialRow);
+  const addressIsPending = Boolean(initialRow.pending_address_submitted_at);
+  const requireDrivingAddressAttestation = Boolean(
+    initialRow.pending_address_submitted_at || initialRow.licence_revalidation_due_at,
+  );
+  const requirePhvAddressAttestation = Boolean(
+    initialRow.pending_address_submitted_at ||
+      initialRow.licence_revalidation_due_at ||
+      phvLicenceNeedsAddressCatchUp(initialRow),
+  );
 
   useEffect(() => {
     if (drivingState.drivingStepSavedAt) {
-      setStep(2);
+      // During initial onboarding we force the user into step 2.
+      // For post-onboarding updates, allow updating a single licence and staying on the same step.
+      if (!onboardingComplete) setStep(2);
       router.refresh();
     }
   }, [drivingState.drivingStepSavedAt, router]);
@@ -183,7 +418,25 @@ export function DriverLicencesOnboardingForm({
 
   return (
     <div className="space-y-6">
-      <OnboardingStepProgress step={step} />
+      {onboardingComplete ? (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setStep(1)}
+            className={[stepSwitchBtn, step === 1 ? stepSwitchActive : stepSwitchIdle].join(" ")}
+          >
+            Driving licence
+          </button>
+          <button
+            type="button"
+            onClick={() => setStep(2)}
+            className={[stepSwitchBtn, step === 2 ? stepSwitchActive : stepSwitchIdle].join(" ")}
+          >
+            PHV / taxi licence
+          </button>
+        </div>
+      ) : null}
+      {!onboardingComplete ? <OnboardingStepProgress step={step} /> : null}
 
       {step === 1 ? (
         <form action={drivingAction} className="space-y-4">
@@ -270,14 +523,17 @@ export function DriverLicencesOnboardingForm({
             </div>
           </div>
 
-          {requireWizardAddressAttestation ? (
+          {requireDrivingAddressAttestation ? (
             <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/40 sm:p-5">
               <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-                Step 1 of 2 — Driving licence
+                Confirm your driving licence
               </h3>
               <p className="rph-muted mt-1 text-sm">
-                Confirm that your driving licence number, expiry, and front/back photos on file are correct
-                for your current address.
+                We need to know the address shown on your photocard matches{" "}
+                {addressIsPending
+                  ? "the new address you have saved (not yet active until your new photos are submitted)."
+                  : "the address we currently hold for your profile."}{" "}
+                <span className="font-medium text-slate-800 dark:text-slate-200">{confirmAddressLine}</span>
               </p>
               <label className="mt-4 flex cursor-pointer gap-3 rounded-lg border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-600 dark:bg-slate-800/50">
                 <input
@@ -288,8 +544,8 @@ export function DriverLicencesOnboardingForm({
                   className={attestCheckboxClass}
                 />
                 <span className="text-sm text-slate-800 dark:text-slate-200">
-                  I confirm my driving licence number, expiry date, and front and back photos match my
-                  current address and are up to date.
+                  I confirm the address on my driving licence matches the address above and these details and
+                  photos are correct.
                 </span>
               </label>
             </div>
@@ -297,10 +553,10 @@ export function DriverLicencesOnboardingForm({
 
           <Submit
             label={
-              requireWizardAddressAttestation
+              requireDrivingAddressAttestation
                 ? onboardingComplete
-                  ? "Continue to step 2"
-                  : "Continue to PHV / taxi licence"
+                  ? "Confirm and save driving licence"
+                  : "Confirm and continue to PHV / taxi licence"
                 : onboardingComplete
                   ? "Save driving licence"
                   : "Continue to PHV / taxi licence"
@@ -391,14 +647,17 @@ export function DriverLicencesOnboardingForm({
             </div>
           </div>
 
-          {requireWizardAddressAttestation ? (
+          {requirePhvAddressAttestation ? (
             <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/40 sm:p-5">
               <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-                Step 2 of 2 — PHV / taxi licence
+                Confirm your PHV / taxi licence
               </h3>
               <p className="rph-muted mt-1 text-sm">
-                Confirm that your PHV / taxi licence details and photo on file are correct for your current
-                address.
+                We need to know the address on your badge or licence record matches{" "}
+                {addressIsPending
+                  ? "the new address you have saved."
+                  : "the address we currently hold for your profile."}{" "}
+                <span className="font-medium text-slate-800 dark:text-slate-200">{confirmAddressLine}</span>
               </p>
               <label className="mt-4 flex cursor-pointer gap-3 rounded-lg border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-600 dark:bg-slate-800/50">
                 <input
@@ -409,31 +668,37 @@ export function DriverLicencesOnboardingForm({
                   className={attestCheckboxClass}
                 />
                 <span className="text-sm text-slate-800 dark:text-slate-200">
-                  I confirm my PHV / taxi licence number, licensing authority, expiry, and photo match my
-                  current address and are up to date.
+                  I confirm the address on my PHV / taxi licence matches the address above and these details
+                  and photo are correct.
                 </span>
               </label>
             </div>
           ) : null}
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(5.5rem,auto)_1fr] sm:items-stretch">
-            <button type="button" className={wizardStepFooterBackClass} onClick={() => setStep(1)}>
-              Back
-            </button>
-            <div className="flex min-w-0 flex-col">
-              <SubmitPaired
-                label={
-                  requireWizardAddressAttestation
-                    ? onboardingComplete
-                      ? "Confirm and go to dashboard"
-                      : "Confirm and continue to driver home"
-                    : onboardingComplete
-                      ? "Save changes"
+          {onboardingComplete ? (
+            <SubmitPaired
+              label={
+                requirePhvAddressAttestation
+                  ? "Confirm and save PHV / taxi licence"
+                  : "Save PHV / taxi licence"
+              }
+            />
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(5.5rem,auto)_1fr] sm:items-stretch">
+              <button type="button" className={wizardStepFooterBackClass} onClick={() => setStep(1)}>
+                Back
+              </button>
+              <div className="flex min-w-0 flex-col">
+                <SubmitPaired
+                  label={
+                    requirePhvAddressAttestation
+                      ? "Confirm and continue to driver home"
                       : "Save and continue to driver home"
-                }
-              />
+                  }
+                />
+              </div>
             </div>
-          </div>
+          )}
         </form>
       ) : null}
     </div>
@@ -442,12 +707,6 @@ export function DriverLicencesOnboardingForm({
 
 const btnOutline =
   "inline-flex h-11 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800";
-
-/** Same padding and line height as paired sibling; grid row stretch + h-full keeps equal heights when one label wraps. */
-const gateChoiceBtnBase =
-  "flex h-full min-h-11 w-full items-center justify-center px-4 py-3 text-center text-sm font-medium leading-snug";
-const gateChoiceBtnPrimary = `${gateChoiceBtnBase} rounded-lg bg-rph-rail text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer`;
-const gateChoiceBtnSecondary = `${gateChoiceBtnBase} rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800`;
 
 function SummaryCard({
   title,
@@ -473,17 +732,13 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-type AddressRevalidationPhase = "gate" | "attest-driving" | "attest-phv" | "wizard" | null;
-
 export function DriverLicencesPage({
   onboardingComplete,
   initialStep,
   initialRow,
   imageUrls,
   licenceAttentionLines = [],
-  addressOnlyAttention = false,
   licenceRevalidationDue = false,
-  pendingAddress,
 }: {
   onboardingComplete: boolean;
   initialStep: 1 | 2;
@@ -491,32 +746,11 @@ export function DriverLicencesPage({
   imageUrls: LicenceImageUrls;
   /** When non-empty, driver must update licences (expiry / address). */
   licenceAttentionLines?: string[];
-  /** Sole reason is address change — show confirm-vs-update gate + two-step attestation. */
-  addressOnlyAttention?: boolean;
   /** `licence_revalidation_due_at` set — wizard saves must include address attestations. */
   licenceRevalidationDue?: boolean;
-  pendingAddress?: {
-    line1: string | null;
-    line2: string | null;
-    town: string | null;
-    county: string | null;
-    postcode: string | null;
-    submittedAt: string | null;
-  };
 }) {
   const mustUpdateLicences = licenceAttentionLines.length > 0;
-
-  const [addressPhase, setAddressPhase] = useState<AddressRevalidationPhase>(() => {
-    if (onboardingComplete && addressOnlyAttention) return "gate";
-    return null;
-  });
-
-  const [drivingAttestChecked, setDrivingAttestChecked] = useState(false);
-
-  const [editing, setEditing] = useState(() => {
-    if (onboardingComplete && addressOnlyAttention) return false;
-    return !onboardingComplete || (onboardingComplete && mustUpdateLicences);
-  });
+  const [editing, setEditing] = useState(() => !onboardingComplete || (onboardingComplete && mustUpdateLicences));
 
   const [galleryOpen, setGalleryOpen] = useState(false);
 
@@ -533,21 +767,11 @@ export function DriverLicencesPage({
     galleryItems.push({ label: "PHV / taxi licence", url: imageUrls.phv });
   }
 
-  const inAddressAttestation =
-    onboardingComplete &&
-    addressOnlyAttention &&
-    addressPhase !== null &&
-    addressPhase !== "wizard";
-
   const showReadOnlySummary =
-    onboardingComplete &&
-    (addressPhase === "gate" ||
-      addressPhase === "attest-driving" ||
-      addressPhase === "attest-phv" ||
-      (addressPhase === null && !editing));
+    onboardingComplete && !editing;
 
   const showForm =
-    !onboardingComplete || editing || addressPhase === "wizard";
+    !onboardingComplete || editing;
 
   const summaryBlock = (
     <div className="space-y-4">
@@ -577,7 +801,7 @@ export function DriverLicencesPage({
           <SummaryRow label="Photo" value={initialRow.phv_licence_card_path ? "On file" : "—"} />
         </SummaryCard>
       </div>
-      {!inAddressAttestation ? (
+      {true ? (
         <>
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-stretch">
             <button
@@ -597,61 +821,12 @@ export function DriverLicencesPage({
             <p className="rph-muted text-sm">Image links are unavailable. Use Update licences to add photos.</p>
           ) : null}
         </>
-      ) : (
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            className={`${btnOutline} sm:mt-0`}
-            disabled={!hasAnyImage}
-            onClick={() => setGalleryOpen(true)}
-          >
-            View images
-          </button>
-        </div>
-      )}
+      ) : null}
     </div>
   );
 
   return (
     <div className="space-y-6">
-      {pendingAddress?.submittedAt ? (
-        <div className="rounded-xl border border-amber-300/90 bg-amber-50 px-4 py-3 dark:border-amber-800/80 dark:bg-amber-950/40 sm:px-5">
-          <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">
-            Pending address awaiting verification
-          </p>
-          <p className="mt-2 text-sm text-amber-950/85 dark:text-amber-100/85">
-            Your current verified address remains active. When your updated licences arrive, upload the new
-            licence images below to verify your pending address.
-          </p>
-          <dl className="mt-3 space-y-1 text-sm text-amber-950/90 dark:text-amber-100/90">
-            <div className="flex flex-wrap gap-x-2">
-              <dt className="font-medium">Line 1</dt>
-              <dd>{pendingAddress.line1 ?? "—"}</dd>
-            </div>
-            {pendingAddress.line2 ? (
-              <div className="flex flex-wrap gap-x-2">
-                <dt className="font-medium">Line 2</dt>
-                <dd>{pendingAddress.line2}</dd>
-              </div>
-            ) : null}
-            <div className="flex flex-wrap gap-x-2">
-              <dt className="font-medium">Town</dt>
-              <dd>{pendingAddress.town ?? "—"}</dd>
-            </div>
-            {pendingAddress.county ? (
-              <div className="flex flex-wrap gap-x-2">
-                <dt className="font-medium">County</dt>
-                <dd>{pendingAddress.county}</dd>
-              </div>
-            ) : null}
-            <div className="flex flex-wrap gap-x-2">
-              <dt className="font-medium">Postcode</dt>
-              <dd>{pendingAddress.postcode ?? "—"}</dd>
-            </div>
-          </dl>
-        </div>
-      ) : null}
-
       {mustUpdateLicences ? (
         <div
           className="rounded-xl border border-amber-300/90 bg-amber-50 px-4 py-3 dark:border-amber-800/80 dark:bg-amber-950/40 sm:px-5"
@@ -665,142 +840,78 @@ export function DriverLicencesPage({
               <li key={i}>{line}</li>
             ))}
           </ul>
-          <p className="mt-2 text-sm text-amber-950/85 dark:text-amber-100/85">
-            {addressOnlyAttention && onboardingComplete ? (
-              <>
-                Either confirm in two steps that both licences on file already match your new address, or open
-                the full updater to change details or replace images. Saving the forms without any changes will
-                not clear this requirement.
-                {onboardingComplete
-                  ? " Your driver dashboard stays unavailable until this is resolved."
-                  : null}
-              </>
+          {initialRow.pending_address_submitted_at ||
+          licenceRevalidationDue ||
+          phvLicenceNeedsAddressCatchUp(initialRow) ? (
+            initialRow.pending_address_submitted_at ? (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-amber-200/90 bg-white/70 px-3 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/30">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-900/80 dark:text-amber-200/90">
+                    Current address (active on profile)
+                  </p>
+                  <p className="mt-1 text-sm font-medium leading-snug text-amber-950 dark:text-amber-50">
+                    {formatAddressForDisplay({
+                      line1: initialRow.address_line1,
+                      line2: initialRow.address_line2,
+                      town: initialRow.address_town,
+                      county: initialRow.address_county,
+                      postcode: initialRow.address_postcode,
+                    })}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-amber-200/90 bg-white/70 px-3 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/30">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-900/80 dark:text-amber-200/90">
+                    New address (pending until licence photos updated)
+                  </p>
+                  <p className="mt-1 text-sm font-medium leading-snug text-amber-950 dark:text-amber-50">
+                    {formatAddressForDisplay({
+                      line1: initialRow.pending_address_line1,
+                      line2: initialRow.pending_address_line2,
+                      town: initialRow.pending_address_town,
+                      county: initialRow.pending_address_county,
+                      postcode: initialRow.pending_address_postcode,
+                    })}
+                  </p>
+                </div>
+              </div>
             ) : (
-              <>
-                Use the steps below to update your details and images.
-                {onboardingComplete
-                  ? " Your driver dashboard stays unavailable until this is resolved."
-                  : null}
-              </>
-            )}
+              <div className="mt-4 rounded-lg border border-amber-200/90 bg-white/70 px-3 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/30">
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-900/80 dark:text-amber-200/90">
+                  Address on your profile
+                </p>
+                <p className="mt-1 text-sm font-medium leading-snug text-amber-950 dark:text-amber-50">
+                  {formatAddressForDisplay({
+                    line1: initialRow.address_line1,
+                    line2: initialRow.address_line2,
+                    town: initialRow.address_town,
+                    county: initialRow.address_county,
+                    postcode: initialRow.address_postcode,
+                  })}
+                </p>
+              </div>
+            )
+          ) : null}
+          <p className="mt-2 text-sm text-amber-950/85 dark:text-amber-100/85">
+            Use the tabs below to update your details and images.
           </p>
         </div>
       ) : null}
+
+      <LicenceDualStatus row={initialRow} />
 
       {showReadOnlySummary ? summaryBlock : null}
-
-      {addressPhase === "gate" ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/40 sm:p-5">
-          <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-            After an address change
-          </h3>
-          <p className="rph-muted mt-1 text-sm">
-            Choose how you want to proceed. If nothing on your licences has changed, use the two-step
-            confirmation. If you need to edit fields or upload new photos, use the full update flow (starts
-            with your driving licence).
-          </p>
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-stretch">
-            <button
-              type="button"
-              className={gateChoiceBtnPrimary}
-              onClick={() => {
-                setDrivingAttestChecked(false);
-                setAddressPhase("attest-driving");
-              }}
-            >
-              Licences already match — confirm
-            </button>
-            <button
-              type="button"
-              className={gateChoiceBtnSecondary}
-              onClick={() => {
-                setAddressPhase("wizard");
-                setEditing(true);
-              }}
-            >
-              Update licence details and photos
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {addressPhase === "attest-driving" ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/40 sm:p-5">
-          <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-            Step 1 of 2 — Driving licence
-          </h3>
-          <p className="rph-muted mt-1 text-sm">
-            Confirm that your driving licence number, expiry, and front/back photos on file are correct for
-            your current address.
-          </p>
-          <label className="mt-4 flex cursor-pointer gap-3 rounded-lg border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-600 dark:bg-slate-800/50">
-            <input
-              type="checkbox"
-              checked={drivingAttestChecked}
-              onChange={(e) => setDrivingAttestChecked(e.target.checked)}
-              className={attestCheckboxClass}
-            />
-            <span className="text-sm text-slate-800 dark:text-slate-200">
-              I confirm my driving licence number, expiry date, and front and back photos match my current
-              address and are up to date.
-            </span>
-          </label>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button
-              type="button"
-              className={btnOutline}
-              onClick={() => {
-                setDrivingAttestChecked(false);
-                setAddressPhase("gate");
-              }}
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              disabled={!drivingAttestChecked}
-              className="rph-btn-primary-wide mt-0 sm:w-auto disabled:opacity-50"
-              onClick={() => setAddressPhase("attest-phv")}
-            >
-              Continue to step 2
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {addressPhase === "attest-phv" ? (
-        <AddressLicenceAttestPhvStep
-          onBack={() => {
-            setAddressPhase("attest-driving");
-          }}
-        />
-      ) : null}
 
       {showForm ? (
         <div className="space-y-4">
           {onboardingComplete && editing ? (
             <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 dark:border-slate-700 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
-                {addressPhase === "wizard"
-                  ? "Update your details or replace document photos. Tick the address confirmations on each step, or clear the check early on the driving step by changing a field or uploading new photos."
-                  : "Update your details or replace document photos below."}
+                Update your details or replace document photos below.
               </p>
               <div className="flex flex-wrap gap-2">
                 {hasAnyImage ? (
                   <button type="button" className={btnOutline} onClick={() => setGalleryOpen(true)}>
                     View images
-                  </button>
-                ) : null}
-                {addressOnlyAttention && addressPhase === "wizard" ? (
-                  <button
-                    type="button"
-                    className={btnOutline}
-                    onClick={() => {
-                      setAddressPhase("gate");
-                      setEditing(false);
-                    }}
-                  >
-                    Back to options
                   </button>
                 ) : null}
                 {!mustUpdateLicences ? (
@@ -827,7 +938,6 @@ export function DriverLicencesPage({
             initialStep={initialStep}
             onboardingComplete={onboardingComplete}
             phvRedirectTarget={onboardingComplete ? "onboarding" : "driver"}
-            requireWizardAddressAttestation={licenceRevalidationDue}
           />
         </div>
       ) : null}

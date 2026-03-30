@@ -25,24 +25,21 @@ export function DriverAddressSection({
   address_town,
   address_county,
   address_postcode,
-  pending_address_line1,
-  pending_address_line2,
-  pending_address_town,
-  pending_address_county,
-  pending_address_postcode,
-  pending_address_submitted_at,
+  previousAddress,
 }: {
   address_line1: string;
   address_line2: string | null;
   address_town: string;
   address_county: string | null;
   address_postcode: string;
-  pending_address_line1: string | null;
-  pending_address_line2: string | null;
-  pending_address_town: string | null;
-  pending_address_county: string | null;
-  pending_address_postcode: string | null;
-  pending_address_submitted_at: string | null;
+  previousAddress: {
+    line1: string;
+    line2: string | null;
+    town: string;
+    county: string | null;
+    postcode: string;
+    effectiveTo: string | null;
+  } | null;
 }) {
   const router = useRouter();
   const [state, formAction] = useActionState(updateDriverAddressAction, initial);
@@ -58,42 +55,36 @@ export function DriverAddressSection({
     <section className="mt-8 border-t border-slate-200 pt-8 dark:border-slate-700">
       <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Home address</h2>
       <p className="rph-muted mt-1 max-w-xl text-sm">
-        Update your address in two stages: submit the new address first (saved as pending), then upload
-        updated licence images on the Licences page once your new documents arrive.
+        Your current address is used across the app. When you update it, we keep your previous address on
+        record for reference.
       </p>
-      {pending_address_submitted_at ? (
-        <div className="mt-4 max-w-xl rounded-xl border border-amber-300/90 bg-amber-50 px-4 py-3 dark:border-amber-800/80 dark:bg-amber-950/40">
-          <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">
-            Pending address awaiting verification
-          </p>
-          <p className="mt-1 text-sm text-amber-950/85 dark:text-amber-100/85">
-            Upload replacement licence images to confirm your new address when you can. Until then, your
-            current verified address remains in use.
-          </p>
-          <dl className="mt-3 space-y-1 text-sm text-amber-950/90 dark:text-amber-100/90">
+      {previousAddress ? (
+        <div className="mt-4 max-w-xl rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900/40">
+          <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Previous address</p>
+          <dl className="mt-2 space-y-1 text-sm text-slate-700 dark:text-slate-200">
             <div className="flex flex-wrap gap-x-2">
               <dt className="font-medium">Line 1</dt>
-              <dd>{pending_address_line1 ?? "—"}</dd>
+              <dd>{previousAddress.line1}</dd>
             </div>
-            {pending_address_line2 ? (
+            {previousAddress.line2 ? (
               <div className="flex flex-wrap gap-x-2">
                 <dt className="font-medium">Line 2</dt>
-                <dd>{pending_address_line2}</dd>
+                <dd>{previousAddress.line2}</dd>
               </div>
             ) : null}
             <div className="flex flex-wrap gap-x-2">
               <dt className="font-medium">Town</dt>
-              <dd>{pending_address_town ?? "—"}</dd>
+              <dd>{previousAddress.town}</dd>
             </div>
-            {pending_address_county ? (
+            {previousAddress.county ? (
               <div className="flex flex-wrap gap-x-2">
                 <dt className="font-medium">County</dt>
-                <dd>{pending_address_county}</dd>
+                <dd>{previousAddress.county}</dd>
               </div>
             ) : null}
             <div className="flex flex-wrap gap-x-2">
               <dt className="font-medium">Postcode</dt>
-              <dd>{pending_address_postcode ?? "—"}</dd>
+              <dd>{previousAddress.postcode}</dd>
             </div>
           </dl>
         </div>
@@ -102,7 +93,7 @@ export function DriverAddressSection({
         {state.error ? <p className="rph-alert-error">{state.error}</p> : null}
         {state.ok ? (
           <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-100">
-            Address submitted. Upload updated licence images to verify it.
+            Address saved.
           </p>
         ) : null}
         <div className="space-y-1">
@@ -170,7 +161,7 @@ export function DriverAddressSection({
             />
           </div>
         </div>
-        <Submit label="Submit new address (pending)" />
+        <Submit label="Save address" />
       </form>
     </section>
   );

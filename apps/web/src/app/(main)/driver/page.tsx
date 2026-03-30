@@ -26,6 +26,14 @@ export default async function DriverHomePage() {
     redirect("/driver/onboarding");
   }
 
+  const { data: prevAddr } = await supabase
+    .from("driver_address_history")
+    .select("address_line1, address_line2, address_town, address_county, address_postcode, effective_to")
+    .eq("user_id", user.id)
+    .order("effective_to", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
   return (
     <div className="space-y-4">
       <h1 className="rph-h1">Dashboard</h1>
@@ -42,12 +50,18 @@ export default async function DriverHomePage() {
         address_town={dp.address_town}
         address_county={dp.address_county}
         address_postcode={dp.address_postcode}
-        pending_address_line1={dp.pending_address_line1 ?? null}
-        pending_address_line2={dp.pending_address_line2 ?? null}
-        pending_address_town={dp.pending_address_town ?? null}
-        pending_address_county={dp.pending_address_county ?? null}
-        pending_address_postcode={dp.pending_address_postcode ?? null}
-        pending_address_submitted_at={dp.pending_address_submitted_at ?? null}
+        previousAddress={
+          prevAddr
+            ? {
+                line1: prevAddr.address_line1,
+                line2: prevAddr.address_line2 ?? null,
+                town: prevAddr.address_town,
+                county: prevAddr.address_county ?? null,
+                postcode: prevAddr.address_postcode,
+                effectiveTo: prevAddr.effective_to ?? null,
+              }
+            : null
+        }
       />
     </div>
   );

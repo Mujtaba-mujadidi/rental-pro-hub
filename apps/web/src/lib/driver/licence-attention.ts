@@ -1,12 +1,13 @@
 import { parseUkDate } from "@/lib/validation/driver-signup";
-import type { DriverOnboardingRow } from "./licence-check";
+import { phvLicenceNeedsAddressCatchUp, type DriverOnboardingRow } from "./licence-check";
 
 export type LicenceReviewReasonCode =
   | "driving_expired"
   | "driving_expiring"
   | "phv_expired"
   | "phv_expiring"
-  | "address_changed";
+  | "address_changed"
+  | "phv_after_address_update";
 
 export type LicenceReviewReason = {
   code: LicenceReviewReasonCode;
@@ -17,6 +18,9 @@ export type LicenceReviewReason = {
 function utcStartOfDay(d: Date): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
+
+/** Upper bound (inclusive) for days-until-expiry when we treat a licence as expiring soon. */
+export const LICENCE_EXPIRING_SOON_MAX_DAYS = 30;
 
 /** Whole calendar days from today (UTC) to expiry date; negative if expired. */
 export function daysFromTodayToExpiry(isoDate: string | null | undefined): number | null {
@@ -39,7 +43,7 @@ function pushExpiryReasons(
     reasons.push({ code: prefix === "driving" ? "driving_expired" : "phv_expired" });
     return;
   }
-  if (days <= 30) {
+  if (days <= LICENCE_EXPIRING_SOON_MAX_DAYS) {
     reasons.push({
       code: prefix === "driving" ? "driving_expiring" : "phv_expiring",
       daysUntilExpiry: days,
@@ -60,6 +64,10 @@ export function driverLicenceReviewReasons(row: NonNullable<DriverOnboardingRow>
   if (row.licence_revalidation_due_at) {
     reasons.push({ code: "address_changed" });
   }
+  // Driving already confirmed for new address; PHV must still be saved/confirmed.
+  if (phvLicenceNeedsAddressCatchUp(row) && !row.licence_revalidation_due_at) {
+    reasons.push({ code: "phv_after_address_update" });
+  }
   return reasons;
 }
 
@@ -75,6 +83,8 @@ export function licenceReviewReasonMessage(r: LicenceReviewReason): string {
       return `Your PHV / taxi licence expires in ${r.daysUntilExpiry === 0 ? "less than a day" : `${r.daysUntilExpiry} day${r.daysUntilExpiry === 1 ? "" : "s"}`} — please update before it lapses.`;
     case "address_changed":
       return "Your home address was updated — confirm your licence details and documents match.";
+    case "phv_after_address_update":
+      return "Your driving licence is updated for your new address — please update and confirm your PHV / taxi licence (details and photo) to match.";
   }
 }
 
@@ -87,5 +97,5 @@ export function driverLicenceReviewSummaryLines(row: DriverOnboardingRow): strin
 export function addressOnlyLicenceReview(row: DriverOnboardingRow): boolean {
   if (!row) return false;
   const reasons = driverLicenceReviewReasons(row);
-  return reasons.length > 0 && reasons.every((r) => r.code === "address_changed");
+  return reasons.length > 0 && reasons.every((r) => r.code === "address_changed" || r.code === "phv_after_address_update");
 }

@@ -76,11 +76,13 @@ async function uploadSlot(
       : slot === "back"
         ? "driving-licence-back"
         : "phv-licence-card";
-  const objectPath = `${userId}/${base}.${ext}`;
+  // Versioned object paths so we can keep historical documents.
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const objectPath = `${userId}/${base}/${stamp}.${ext}`;
   const buf = Buffer.from(await file.arrayBuffer());
   const { error } = await supabase.storage
     .from(BUCKET)
-    .upload(objectPath, buf, { contentType: file.type, upsert: true });
+    .upload(objectPath, buf, { contentType: file.type });
   if (error) {
     return { path: null, error: error.message };
   }
@@ -123,7 +125,7 @@ export async function saveDriverOnboardingDrivingStep(
   const { data: existing, error: fetchErr } = await supabase
     .from("driver_profiles")
     .select(
-      "user_id, driving_licence_number, driving_licence_expiry, driving_licence_front_path, driving_licence_back_path, licence_revalidation_due_at",
+      "user_id, address_line1, address_line2, address_town, address_county, address_postcode, address_verified_at, driving_licence_number, driving_licence_expiry, driving_licence_front_path, driving_licence_back_path, pending_address_line1, pending_address_line2, pending_address_town, pending_address_county, pending_address_postcode, pending_address_submitted_at, driving_address_confirmed_at, phv_address_confirmed_at, licence_revalidation_due_at",
     )
     .eq("user_id", user.id)
     .maybeSingle();
@@ -173,26 +175,28 @@ export async function saveDriverOnboardingDrivingStep(
     return { error: "Front and back driving licence photos are required." };
   }
 
-  const hadRevalidation = Boolean(existing.licence_revalidation_due_at);
-  if (hadRevalidation) {
-    const w = formData.get("confirm_wizard_driving_matches_address");
-    if (w !== "on") {
-      return {
-        error:
-          "Tick the box to confirm your driving licence number, expiry, and front/back photos match your current address before saving.",
-      };
-    }
-  }
-
   const now = new Date().toISOString();
   const uploadedFront = Boolean(fileFront);
   const uploadedBack = Boolean(fileBack);
+  const hadRevalidation = Boolean(existing.licence_revalidation_due_at);
+  const hasPendingAddress = Boolean(existing.pending_address_submitted_at);
   const clearAddressRevalidation =
     hadRevalidation &&
     (uploadedFront ||
       uploadedBack ||
       strNorm(existing.driving_licence_number) !== strNorm(dvlaNumber) ||
       isoDay(existing.driving_licence_expiry) !== isoDay(dvlaExpiry));
+
+  const requireDrivingAddressAttestation = hasPendingAddress || hadRevalidation;
+  if (requireDrivingAddressAttestation) {
+    const w = formData.get("confirm_wizard_driving_matches_address");
+    if (w !== "on") {
+      return {
+        error:
+          "Tick the box to confirm your driving licence details and photos match the address on file before saving.",
+      };
+    }
+  }
 
   const drivingPatch: Record<string, unknown> = {
     driving_licence_number: dvlaNumber,
@@ -201,8 +205,84 @@ export async function saveDriverOnboardingDrivingStep(
     driving_licence_back_path: backPath,
     updated_at: now,
   };
-  if (clearAddressRevalidation) {
+  if (requireDrivingAddressAttestation) {
+    drivingPatch.driving_address_confirmed_at = now;
+  }
+  // Auto-promote pending address to current once new driving licence images are saved.
+  if (hasPendingAddress) {
+    // Archive old active address (kept for historical rentals/PCNs).
+    const { error: histErr } = await supabase.from("driver_address_history").insert({
+      user_id: user.id,
+      address_line1: existing.address_line1,
+      address_line2: existing.address_line2 ?? null,
+      address_town: existing.address_town,
+      address_county: existing.address_county ?? null,
+      address_postcode: existing.address_postcode,
+      effective_from: existing.address_verified_at ?? now,
+      effective_to: now,
+    });
+    if (histErr) return { error: histErr.message };
+
+    drivingPatch.address_line1 = existing.pending_address_line1;
+    drivingPatch.address_line2 = existing.pending_address_line2;
+    drivingPatch.address_town = existing.pending_address_town;
+    drivingPatch.address_county = existing.pending_address_county;
+    drivingPatch.address_postcode = existing.pending_address_postcode;
+    drivingPatch.address_verified_at = now;
+    drivingPatch.pending_address_line1 = null;
+    drivingPatch.pending_address_line2 = null;
+    drivingPatch.pending_address_town = null;
+    drivingPatch.pending_address_county = null;
+    drivingPatch.pending_address_postcode = null;
+    drivingPatch.pending_address_submitted_at = null;
+    // Banner cleared once the new driving licence images are saved.
     drivingPatch.licence_revalidation_due_at = null;
+    drivingPatch.phv_address_confirmed_at = null;
+  } else if (clearAddressRevalidation) {
+    drivingPatch.licence_revalidation_due_at = null;
+  }
+
+  // Archive licence document versions (keep old paths for disputes/PCNs).
+  const versionRows: Array<Record<string, unknown>> = [];
+  if (uploadedFront) {
+    if (existing.driving_licence_front_path) {
+      versionRows.push({
+        user_id: user.id,
+        slot: "driving_front",
+        object_path: existing.driving_licence_front_path,
+        uploaded_at: now,
+        superseded_at: now,
+      });
+    }
+    versionRows.push({
+      user_id: user.id,
+      slot: "driving_front",
+      object_path: frontPath,
+      uploaded_at: now,
+      superseded_at: null,
+    });
+  }
+  if (uploadedBack) {
+    if (existing.driving_licence_back_path) {
+      versionRows.push({
+        user_id: user.id,
+        slot: "driving_back",
+        object_path: existing.driving_licence_back_path,
+        uploaded_at: now,
+        superseded_at: now,
+      });
+    }
+    versionRows.push({
+      user_id: user.id,
+      slot: "driving_back",
+      object_path: backPath,
+      uploaded_at: now,
+      superseded_at: null,
+    });
+  }
+  if (versionRows.length > 0) {
+    const { error: verErr } = await supabase.from("driver_licence_document_versions").insert(versionRows);
+    if (verErr) return { error: verErr.message };
   }
 
   const { error: upErr } = await supabase
@@ -249,7 +329,7 @@ export async function saveDriverOnboardingPhvStep(
   const { data: existing, error: fetchErr } = await supabase
     .from("driver_profiles")
     .select(
-      "user_id, driving_licence_front_path, driving_licence_back_path, phv_licence_card_path, driving_licence_number, driving_licence_expiry, phv_licence_number, phv_licensing_authority, phv_licence_expiry, onboarding_completed_at, licence_revalidation_due_at",
+      "user_id, driving_licence_front_path, driving_licence_back_path, phv_licence_card_path, driving_licence_number, driving_licence_expiry, phv_licence_number, phv_licensing_authority, phv_licence_expiry, onboarding_completed_at, driving_address_confirmed_at, phv_address_confirmed_at, licence_revalidation_due_at, pending_address_submitted_at",
     )
     .eq("user_id", user.id)
     .maybeSingle();
@@ -273,6 +353,14 @@ export async function saveDriverOnboardingPhvStep(
     phv_licensing_authority: null,
     phv_licence_expiry: null,
     phv_licence_card_path: null,
+    driving_address_confirmed_at: null,
+    phv_address_confirmed_at: null,
+    pending_address_line1: null,
+    pending_address_line2: null,
+    pending_address_town: null,
+    pending_address_county: null,
+    pending_address_postcode: null,
+    pending_address_submitted_at: null,
     licence_revalidation_due_at: null,
   };
 
@@ -305,17 +393,22 @@ export async function saveDriverOnboardingPhvStep(
   const completedAt = existing.onboarding_completed_at ?? now;
 
   const hadRevalidation = Boolean(existing.licence_revalidation_due_at);
-  if (hadRevalidation) {
+  const hasPendingAddress = Boolean(existing.pending_address_submitted_at);
+  const drivingConfirmedAt = existing.driving_address_confirmed_at;
+  const phvConfirmedAt = existing.phv_address_confirmed_at;
+  const phvMustCatchUpDriving =
+    Boolean(drivingConfirmedAt) &&
+    (!phvConfirmedAt || String(phvConfirmedAt).localeCompare(String(drivingConfirmedAt)) < 0);
+  const requirePhvAddressAttestation = hadRevalidation || hasPendingAddress || phvMustCatchUpDriving;
+  if (requirePhvAddressAttestation) {
     const p = formData.get("confirm_wizard_phv_matches_address");
     if (p !== "on") {
       return {
         error:
-          "Tick the box to confirm your PHV / taxi licence matches your current address before saving.",
+          "Tick the box to confirm your PHV / taxi licence details and photo match the address on file before saving.",
       };
     }
   }
-
-  const clearAddressRevalidation = hadRevalidation;
 
   const phvPatch: Record<string, unknown> = {
     phv_licence_number: phvNumber,
@@ -325,7 +418,11 @@ export async function saveDriverOnboardingPhvStep(
     onboarding_completed_at: completedAt,
     updated_at: now,
   };
-  if (clearAddressRevalidation) {
+  if (requirePhvAddressAttestation) {
+    phvPatch.phv_address_confirmed_at = now;
+  }
+  const drivingConfirmed = Boolean(existing.driving_address_confirmed_at);
+  if (hadRevalidation && drivingConfirmed) {
     phvPatch.licence_revalidation_due_at = null;
   }
 
@@ -354,56 +451,5 @@ export async function confirmLicencesMatchAddressAction(
   formData: FormData,
 ): Promise<ConfirmAddressLicenceResult> {
   await requireDriverArea();
-
-  const step1 = String(formData.get("confirm_driving_attested") ?? "");
-  const phvBox = formData.get("confirm_phv_matches_address");
-  if (step1 !== "yes") {
-    return { error: "Invalid form submission. Go back to step 1." };
-  }
-  if (phvBox !== "on") {
-    return { error: "Tick the box to confirm your PHV / taxi licence matches your current address." };
-  }
-
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return { error: "Not signed in." };
-  }
-
-  const { data: row, error: fetchErr } = await supabase
-    .from("driver_profiles")
-    .select(DRIVER_ONBOARDING_COLUMNS)
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (fetchErr) {
-    return { error: fetchErr.message };
-  }
-  if (!row?.licence_revalidation_due_at) {
-    return { error: "No pending address confirmation is required." };
-  }
-
-  const reasons = driverLicenceReviewReasons(row);
-  if (reasons.length === 0 || !reasons.every((r) => r.code === "address_changed")) {
-    return {
-      error:
-        "This confirmation is only available when the only outstanding issue is your address change. Use Update licences to fix expiry or upload new documents.",
-    };
-  }
-
-  const now = new Date().toISOString();
-  const { error: upErr } = await supabase
-    .from("driver_profiles")
-    .update({ licence_revalidation_due_at: null, updated_at: now })
-    .eq("user_id", user.id);
-
-  if (upErr) {
-    return { error: upErr.message };
-  }
-
-  revalidatePath("/driver", "layout");
-  revalidatePath("/driver/onboarding", "layout");
-  redirect("/driver");
+  return { error: "This confirmation flow is currently disabled." };
 }
