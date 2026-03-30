@@ -483,6 +483,7 @@ export function DriverLicencesPage({
   licenceAttentionLines = [],
   addressOnlyAttention = false,
   licenceRevalidationDue = false,
+  pendingAddress,
 }: {
   onboardingComplete: boolean;
   initialStep: 1 | 2;
@@ -494,6 +495,14 @@ export function DriverLicencesPage({
   addressOnlyAttention?: boolean;
   /** `licence_revalidation_due_at` set — wizard saves must include address attestations. */
   licenceRevalidationDue?: boolean;
+  pendingAddress?: {
+    line1: string | null;
+    line2: string | null;
+    town: string | null;
+    county: string | null;
+    postcode: string | null;
+    submittedAt: string | null;
+  };
 }) {
   const mustUpdateLicences = licenceAttentionLines.length > 0;
 
@@ -605,6 +614,44 @@ export function DriverLicencesPage({
 
   return (
     <div className="space-y-6">
+      {pendingAddress?.submittedAt ? (
+        <div className="rounded-xl border border-amber-300/90 bg-amber-50 px-4 py-3 dark:border-amber-800/80 dark:bg-amber-950/40 sm:px-5">
+          <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">
+            Pending address awaiting verification
+          </p>
+          <p className="mt-2 text-sm text-amber-950/85 dark:text-amber-100/85">
+            Your current verified address remains active. When your updated licences arrive, upload the new
+            licence images below to verify your pending address.
+          </p>
+          <dl className="mt-3 space-y-1 text-sm text-amber-950/90 dark:text-amber-100/90">
+            <div className="flex flex-wrap gap-x-2">
+              <dt className="font-medium">Line 1</dt>
+              <dd>{pendingAddress.line1 ?? "—"}</dd>
+            </div>
+            {pendingAddress.line2 ? (
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="font-medium">Line 2</dt>
+                <dd>{pendingAddress.line2}</dd>
+              </div>
+            ) : null}
+            <div className="flex flex-wrap gap-x-2">
+              <dt className="font-medium">Town</dt>
+              <dd>{pendingAddress.town ?? "—"}</dd>
+            </div>
+            {pendingAddress.county ? (
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="font-medium">County</dt>
+                <dd>{pendingAddress.county}</dd>
+              </div>
+            ) : null}
+            <div className="flex flex-wrap gap-x-2">
+              <dt className="font-medium">Postcode</dt>
+              <dd>{pendingAddress.postcode ?? "—"}</dd>
+            </div>
+          </dl>
+        </div>
+      ) : null}
+
       {mustUpdateLicences ? (
         <div
           className="rounded-xl border border-amber-300/90 bg-amber-50 px-4 py-3 dark:border-amber-800/80 dark:bg-amber-950/40 sm:px-5"

@@ -16,7 +16,7 @@ export type DriverOnboardingRow = {
 
 /** Address fields for dashboard updates (separate select fragment). */
 export const DRIVER_ADDRESS_COLUMNS =
-  "address_line1, address_line2, address_town, address_county, address_postcode" as const;
+  "address_line1, address_line2, address_town, address_county, address_postcode, pending_address_line1, pending_address_line2, pending_address_town, pending_address_county, pending_address_postcode, pending_address_submitted_at" as const;
 
 /** Driving licence step: number, expiry, and both photos. */
 export function driverDrivingLicenceStepComplete(row: NonNullable<DriverOnboardingRow>): boolean {

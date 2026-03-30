@@ -8,6 +8,7 @@ import {
 } from "@/lib/driver/licence-attention";
 import {
   DRIVER_ONBOARDING_COLUMNS,
+  DRIVER_ADDRESS_COLUMNS,
   driverDrivingLicenceStepComplete,
   driverOnboardingComplete,
 } from "@/lib/driver/licence-check";
@@ -31,7 +32,7 @@ export default async function DriverOnboardingPage() {
   const supabase = await createClient();
   const { data: row, error } = await supabase
     .from("driver_profiles")
-    .select(`updated_at, ${DRIVER_ONBOARDING_COLUMNS}`)
+    .select(`updated_at, ${DRIVER_ONBOARDING_COLUMNS}, ${DRIVER_ADDRESS_COLUMNS}`)
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -102,6 +103,14 @@ export default async function DriverOnboardingPage() {
         addressOnlyAttention={addressOnlyAttention}
         licenceAttentionLines={licenceAttentionLines}
         licenceRevalidationDue={Boolean(row.licence_revalidation_due_at)}
+        pendingAddress={{
+          line1: row.pending_address_line1 ?? null,
+          line2: row.pending_address_line2 ?? null,
+          town: row.pending_address_town ?? null,
+          county: row.pending_address_county ?? null,
+          postcode: row.pending_address_postcode ?? null,
+          submittedAt: row.pending_address_submitted_at ?? null,
+        }}
         onboardingComplete={complete}
         initialStep={initialStep}
         imageUrls={{ front: imageFront, back: imageBack, phv: imagePhv }}

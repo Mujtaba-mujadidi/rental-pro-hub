@@ -36,10 +36,11 @@ export default async function MainShellLayout({
       .maybeSingle();
     const complete = driverOnboardingComplete(data);
     const review = complete && data && driverLicenceReviewRequired(data);
-    driverNavMode = complete && !review ? "full" : "onboarding";
+    // Onboarding completion is the only gating condition. Licence review is a reminder, not a lockout.
+    driverNavMode = complete ? "full" : "onboarding";
     if (complete && data && review) {
       driverLicenceBanner = {
-        title: "Action required: update your licences",
+        title: "Reminder: update your licences",
         bullets: driverLicenceReviewSummaryLines(data),
       };
     }

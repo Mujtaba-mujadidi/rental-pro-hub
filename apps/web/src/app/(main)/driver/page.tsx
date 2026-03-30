@@ -5,7 +5,6 @@ import {
   DRIVER_ONBOARDING_COLUMNS,
   driverOnboardingComplete,
 } from "@/lib/driver/licence-check";
-import { driverLicenceReviewRequired } from "@/lib/driver/licence-attention";
 import { redirect } from "next/navigation";
 import { DriverAddressSection } from "./driver-address-section";
 
@@ -20,10 +19,6 @@ export default async function DriverHomePage() {
     .maybeSingle();
 
   if (!driverOnboardingComplete(dp)) {
-    redirect("/driver/onboarding");
-  }
-
-  if (driverLicenceReviewRequired(dp)) {
     redirect("/driver/onboarding");
   }
 
@@ -47,6 +42,12 @@ export default async function DriverHomePage() {
         address_town={dp.address_town}
         address_county={dp.address_county}
         address_postcode={dp.address_postcode}
+        pending_address_line1={dp.pending_address_line1 ?? null}
+        pending_address_line2={dp.pending_address_line2 ?? null}
+        pending_address_town={dp.pending_address_town ?? null}
+        pending_address_county={dp.pending_address_county ?? null}
+        pending_address_postcode={dp.pending_address_postcode ?? null}
+        pending_address_submitted_at={dp.pending_address_submitted_at ?? null}
       />
     </div>
   );

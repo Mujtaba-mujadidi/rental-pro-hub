@@ -51,7 +51,9 @@ export async function updateDriverAddressAction(
 
   const { data: existing, error: fetchErr } = await supabase
     .from("driver_profiles")
-    .select("address_line1, address_line2, address_town, address_county, address_postcode")
+    .select(
+      "address_line1, address_line2, address_town, address_county, address_postcode, pending_address_line1, pending_address_line2, pending_address_town, pending_address_county, pending_address_postcode",
+    )
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -73,15 +75,33 @@ export async function updateDriverAddressAction(
   const addressChanged = before !== after;
 
   const now = new Date().toISOString();
+  if (!addressChanged) {
+    const { error: clearErr } = await supabase
+      .from("driver_profiles")
+      .update({
+        pending_address_line1: null,
+        pending_address_line2: null,
+        pending_address_town: null,
+        pending_address_county: null,
+        pending_address_postcode: null,
+        pending_address_submitted_at: null,
+        updated_at: now,
+      })
+      .eq("user_id", user.id);
+    if (clearErr) return { error: clearErr.message };
+    revalidatePath("/driver", "layout");
+    revalidatePath("/driver/onboarding", "layout");
+    return { ok: true };
+  }
   const { error: upErr } = await supabase
     .from("driver_profiles")
     .update({
-      address_line1: line1,
-      address_line2: line2 || null,
-      address_town: town,
-      address_county: county || null,
-      address_postcode: postcode,
-      ...(addressChanged ? { licence_revalidation_due_at: now } : {}),
+      pending_address_line1: line1,
+      pending_address_line2: line2 || null,
+      pending_address_town: town,
+      pending_address_county: county || null,
+      pending_address_postcode: postcode,
+      pending_address_submitted_at: now,
       updated_at: now,
     })
     .eq("user_id", user.id);
