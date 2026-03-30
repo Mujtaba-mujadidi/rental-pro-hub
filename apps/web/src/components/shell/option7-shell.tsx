@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import { APP_NAME } from "@rph/shared";
-import { SignOutForm } from "@/components/sign-out-form";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { UserAccountMenu } from "@/components/shell/user-account-menu";
 
 const SIDEBAR_COLLAPSED_KEY = "rph-sidebar-collapsed-opt7";
 
@@ -23,6 +23,13 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
     if (pathname === "/super-admin") {
       return [{ label: "Home", href: "/super-admin" }, { label: "Super admin" }];
     }
+    if (pathname === "/super-admin/drivers" || pathname.startsWith("/super-admin/drivers/")) {
+      const crumbs: Crumb[] = [{ label: "Home", href: "/super-admin" }, { label: "Drivers", href: "/super-admin/drivers" }];
+      if (pathname.includes("/preview")) {
+        crumbs.push({ label: "Preview" });
+      }
+      return crumbs;
+    }
     return [{ label: "Home", href: "/super-admin" }, { label: "Page" }];
   }
   if (pathname.startsWith("/driver/onboarding")) {
@@ -30,6 +37,9 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
   }
   if (pathname === "/driver") {
     return [{ label: "Home", href: "/driver" }, { label: "Dashboard" }];
+  }
+  if (pathname === "/driver/profile" || pathname.startsWith("/driver/profile/")) {
+    return [{ label: "Home", href: "/driver" }, { label: "Profile" }];
   }
   return [{ label: "Home", href: "/driver" }, { label: "Driver" }];
 }
@@ -168,13 +178,22 @@ export function Option7Shell({
 
   const nav =
     variant === "super_admin" ? (
-      <NavLink
-        href="/super-admin"
-        active={pathname === "/super-admin"}
-        onNavigate={closeMobileNav}
-      >
-        Dashboard
-      </NavLink>
+      <>
+        <NavLink
+          href="/super-admin"
+          active={pathname === "/super-admin"}
+          onNavigate={closeMobileNav}
+        >
+          Dashboard
+        </NavLink>
+        <NavLink
+          href="/super-admin/drivers"
+          active={pathname === "/super-admin/drivers" || pathname.startsWith("/super-admin/drivers/")}
+          onNavigate={closeMobileNav}
+        >
+          Drivers
+        </NavLink>
+      </>
     ) : driverNavMode !== "full" ? (
       <NavLink
         href="/driver/onboarding"
@@ -195,10 +214,22 @@ export function Option7Shell({
         >
           Licences
         </NavLink>
+        <NavLink
+          href="/driver/profile"
+          active={pathname === "/driver/profile" || pathname.startsWith("/driver/profile/")}
+          onNavigate={closeMobileNav}
+        >
+          Profile
+        </NavLink>
       </>
     );
 
   const year = new Date().getFullYear();
+
+  const accountProfile =
+    variant === "driver"
+      ? { href: "/driver/profile" as const, label: "Profile" as const }
+      : { href: "/super-admin" as const, label: "Dashboard" as const };
 
   return (
     <div className="flex min-h-dvh w-full min-w-0">
@@ -222,9 +253,10 @@ export function Option7Shell({
         ].join(" ")}
       >
         <div className="flex items-center gap-2.5 px-4 py-4">
-          <span className="text-lg leading-none text-red-500" aria-hidden>
-            ■
-          </span>
+          <span
+            className="size-2.5 shrink-0 rounded-[3px] bg-rph-rail-softer ring-1 ring-white/10"
+            aria-hidden
+          />
           <div className="min-w-0">
             <div className="truncate text-[13px] font-bold uppercase tracking-[0.14em] text-white">
               {APP_NAME}
@@ -298,13 +330,11 @@ export function Option7Shell({
                 </span>
               </button>
               <ThemeToggle />
-              <div className="flex min-w-0 items-center gap-2 border-l border-slate-200 pl-2 dark:border-slate-700 sm:pl-3">
-                <span className="hidden h-8 w-8 shrink-0 rounded-full bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-600 dark:to-slate-700 sm:block" />
-                <span className="max-w-[88px] truncate text-sm font-medium text-slate-800 dark:text-slate-100 sm:max-w-[140px]">
-                  {displayName ?? "User"}
-                </span>
-              </div>
-              <SignOutForm />
+              <UserAccountMenu
+                displayName={displayName}
+                profileHref={accountProfile.href}
+                profileLabel={accountProfile.label}
+              />
             </div>
           </div>
 

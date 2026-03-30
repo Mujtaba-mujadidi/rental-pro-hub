@@ -5,6 +5,7 @@ import {
   DRIVER_ONBOARDING_COLUMNS,
   driverOnboardingComplete,
 } from "@/lib/driver/licence-check";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { DriverAddressSection } from "./driver-address-section";
 
@@ -38,7 +39,11 @@ export default async function DriverHomePage() {
     <div className="space-y-4">
       <h1 className="rph-h1">Dashboard</h1>
       <p className="rph-lead">
-        Signed in as <span className="rph-strong">{profile.display_name ?? "Driver"}</span>.
+        Signed in as <span className="rph-strong">{profile.display_name ?? "Driver"}</span>
+        {" · "}
+        <Link href="/driver/profile" className="rph-link-inline text-base font-normal">
+          View profile
+        </Link>
       </p>
       <p className="rph-muted max-w-xl text-sm">
         Your licence details and document photos are on file. To update them, open{" "}

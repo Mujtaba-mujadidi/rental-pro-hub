@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireSuperAdmin } from "@/lib/auth/profile";
 
 export default async function SuperAdminHomePage() {
@@ -9,7 +10,15 @@ export default async function SuperAdminHomePage() {
       <p className="rph-lead">
         Signed in as <span className="rph-strong">{profile.display_name ?? "Admin"}</span>.
       </p>
-      <p className="rph-muted text-sm">Hello super admin — more tools can be added here.</p>
+      <p className="rph-muted text-sm">
+        Browse everyone who completed driver registration and open their account in a new tab.
+      </p>
+      <Link
+        href="/super-admin/drivers"
+        className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+      >
+        View registered drivers
+      </Link>
     </div>
   );
 }

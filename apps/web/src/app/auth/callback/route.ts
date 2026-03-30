@@ -10,6 +10,20 @@ function safeNextPath(raw: string | null): string {
   return nextPath;
 }
 
+function redirectWithOptionalRecoveryCookie(origin: string, destinationPath: string): NextResponse {
+  const res = NextResponse.redirect(`${origin}${destinationPath}`);
+  if (destinationPath === "/auth/set-password") {
+    res.cookies.set("rph_pw_recovery", "1", {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 600,
+      secure: process.env.NODE_ENV === "production",
+    });
+  }
+  return res;
+}
+
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const requestedNext = safeNextPath(searchParams.get("next"));
@@ -59,18 +73,20 @@ export async function GET(request: Request) {
       );
     }
     const dest =
-      requestedNext !== "/driver" && requestedNext !== "/super-admin"
-        ? requestedNext
-        : await resolveDriverHomePath(supabase, u.id, u.email);
-    return NextResponse.redirect(`${origin}${dest}`);
+      requestedNext === "/auth/set-password"
+        ? "/auth/set-password"
+        : requestedNext !== "/driver" && requestedNext !== "/super-admin"
+          ? requestedNext
+          : await resolveDriverHomePath(supabase, u.id, u.email);
+    return redirectWithOptionalRecoveryCookie(origin, dest);
   }
 
-  const tokenHash = searchParams.get("token_hash");
-  const type = searchParams.get("type");
-  if (tokenHash && type) {
+  const tokenHash = searchParams.get("token_hash") ?? searchParams.get("token");
+  const otpType = searchParams.get("type");
+  if (tokenHash && otpType) {
     const { data, error } = await supabase.auth.verifyOtp({
+      type: otpType as "signup" | "invite" | "magiclink" | "recovery" | "email_change" | "email",
       token_hash: tokenHash,
-      type: type as "signup" | "invite" | "magiclink" | "recovery" | "email_change" | "email",
     });
     if (error) {
       return NextResponse.redirect(
@@ -83,8 +99,13 @@ export async function GET(request: Request) {
         `${origin}/login?error=${encodeURIComponent("No user after sign-in.")}`,
       );
     }
-    const dest = await resolveDriverHomePath(supabase, u.id, u.email);
-    return NextResponse.redirect(`${origin}${dest}`);
+    const dest =
+      otpType === "recovery"
+        ? "/auth/set-password"
+        : requestedNext !== "/driver" && requestedNext !== "/super-admin"
+          ? requestedNext
+          : await resolveDriverHomePath(supabase, u.id, u.email);
+    return redirectWithOptionalRecoveryCookie(origin, dest);
   }
 
   return NextResponse.redirect(

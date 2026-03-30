@@ -739,6 +739,7 @@ export function DriverLicencesPage({
   imageUrls,
   licenceAttentionLines = [],
   licenceRevalidationDue = false,
+  adminPreview = false,
 }: {
   onboardingComplete: boolean;
   initialStep: 1 | 2;
@@ -748,9 +749,14 @@ export function DriverLicencesPage({
   licenceAttentionLines?: string[];
   /** `licence_revalidation_due_at` set — wizard saves must include address attestations. */
   licenceRevalidationDue?: boolean;
+  /** Super-admin read-only: no forms; full summary + signed image URLs only. */
+  adminPreview?: boolean;
 }) {
+  const isAdminPreview = Boolean(adminPreview);
   const mustUpdateLicences = licenceAttentionLines.length > 0;
-  const [editing, setEditing] = useState(() => !onboardingComplete || (onboardingComplete && mustUpdateLicences));
+  const [editing, setEditing] = useState(
+    () => !isAdminPreview && (!onboardingComplete || (onboardingComplete && mustUpdateLicences)),
+  );
 
   const [galleryOpen, setGalleryOpen] = useState(false);
 
@@ -767,11 +773,9 @@ export function DriverLicencesPage({
     galleryItems.push({ label: "PHV / taxi licence", url: imageUrls.phv });
   }
 
-  const showReadOnlySummary =
-    onboardingComplete && !editing;
+  const showReadOnlySummary = isAdminPreview || (onboardingComplete && !editing);
 
-  const showForm =
-    !onboardingComplete || editing;
+  const showForm = !isAdminPreview && (!onboardingComplete || editing);
 
   const summaryBlock = (
     <div className="space-y-4">
@@ -801,26 +805,54 @@ export function DriverLicencesPage({
           <SummaryRow label="Photo" value={initialRow.phv_licence_card_path ? "On file" : "—"} />
         </SummaryCard>
       </div>
-      {true ? (
-        <>
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-stretch">
-            <button
-              type="button"
-              className="rph-btn-primary-wide mt-0 sm:w-auto sm:min-w-[10rem]"
-              disabled={!hasAnyImage}
-              title={!hasAnyImage ? "No images stored yet" : undefined}
-              onClick={() => setGalleryOpen(true)}
-            >
-              View images
-            </button>
-            <button type="button" className={`${btnOutline} sm:mt-0`} onClick={() => setEditing(true)}>
-              Update licences
-            </button>
-          </div>
-          {!hasAnyImage ? (
-            <p className="rph-muted text-sm">Image links are unavailable. Use Update licences to add photos.</p>
-          ) : null}
-        </>
+      {isAdminPreview ? (
+        <SummaryCard title="Address on profile & confirmations">
+          <SummaryRow
+            label="Registered address"
+            value={formatAddressForDisplay({
+              line1: initialRow.address_line1,
+              line2: initialRow.address_line2,
+              town: initialRow.address_town,
+              county: initialRow.address_county,
+              postcode: initialRow.address_postcode,
+            })}
+          />
+          <SummaryRow
+            label="Driving licence — address confirmed"
+            value={formatLicenceDate(initialRow.driving_address_confirmed_at)}
+          />
+          <SummaryRow
+            label="PHV — address confirmed"
+            value={formatLicenceDate(initialRow.phv_address_confirmed_at)}
+          />
+          <SummaryRow
+            label="Revalidation due"
+            value={initialRow.licence_revalidation_due_at ? formatLicenceDate(initialRow.licence_revalidation_due_at) : "—"}
+          />
+        </SummaryCard>
+      ) : null}
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-stretch">
+        <button
+          type="button"
+          className="rph-btn-primary-wide mt-0 sm:w-auto sm:min-w-[10rem]"
+          disabled={!hasAnyImage}
+          title={!hasAnyImage ? "No images stored yet" : undefined}
+          onClick={() => setGalleryOpen(true)}
+        >
+          View images
+        </button>
+        {!isAdminPreview ? (
+          <button type="button" className={`${btnOutline} sm:mt-0`} onClick={() => setEditing(true)}>
+            Update licences
+          </button>
+        ) : null}
+      </div>
+      {!hasAnyImage ? (
+        <p className="rph-muted text-sm">
+          {isAdminPreview
+            ? "No signed image URLs — missing files or storage access."
+            : "Image links are unavailable. Use Update licences to add photos."}
+        </p>
       ) : null}
     </div>
   );
@@ -892,7 +924,9 @@ export function DriverLicencesPage({
             )
           ) : null}
           <p className="mt-2 text-sm text-amber-950/85 dark:text-amber-100/85">
-            Use the tabs below to update your details and images.
+            {isAdminPreview
+              ? "Review status, confirmations, and images below."
+              : "Use the tabs below to update your details and images."}
           </p>
         </div>
       ) : null}

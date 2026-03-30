@@ -94,6 +94,7 @@ export async function updateDriverAddressAction(
     if (clearErr) return { error: clearErr.message };
     revalidatePath("/driver", "layout");
     revalidatePath("/driver/onboarding", "layout");
+    revalidatePath("/driver/profile");
     return { ok: true };
   }
   // Archive prior address then promote new address immediately.
@@ -132,5 +133,6 @@ export async function updateDriverAddressAction(
 
   revalidatePath("/driver", "layout");
   revalidatePath("/driver/onboarding", "layout");
+  revalidatePath("/driver/profile");
   return { ok: true };
 }
