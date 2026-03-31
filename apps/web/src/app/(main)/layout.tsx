@@ -23,7 +23,11 @@ export default async function MainShellLayout({
   const profile = await getAppProfile();
   if (!profile) redirect("/login");
 
-  const variant = isSuperAdmin(user.email, profile) ? "super_admin" : "driver";
+  const variant = isSuperAdmin(user.email, profile)
+    ? "super_admin"
+    : profile.role === "rental_company"
+      ? "rental_company"
+      : "driver";
 
   let driverNavMode: "onboarding" | "full" = "full";
   let driverLicenceBanner: { title: string; bullets: string[] } | null = null;

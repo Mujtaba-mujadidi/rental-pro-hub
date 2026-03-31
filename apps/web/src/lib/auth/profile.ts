@@ -5,8 +5,9 @@ import { isSuperAdmin, isSuperAdminEmail } from "@/lib/auth/roles";
 
 export type AppProfile = {
   id: string;
-  role: "driver" | "super_admin";
+  role: "driver" | "super_admin" | "rental_company";
   display_name: string | null;
+  company_id: string | null;
 };
 
 export async function getSessionUser() {
@@ -43,12 +44,21 @@ async function ensureProfileRow(user: User): Promise<boolean> {
         ? `${meta.first_name} ${meta.last_name}`.trim()
         : null;
   const displayName = fromMeta?.trim() || user.email?.split("@")[0] || "User";
-  const role = isSuperAdminEmail(user.email) ? "super_admin" : "driver";
+  const appRole = typeof meta?.app_role === "string" ? meta.app_role.toLowerCase() : "";
+  const companyIdMeta = typeof meta?.company_id === "string" ? meta.company_id.trim() : "";
+  const uuidOk = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(companyIdMeta);
+
+  const role: AppProfile["role"] = isSuperAdminEmail(user.email)
+    ? "super_admin"
+    : appRole === "rental_company" && uuidOk
+      ? "rental_company"
+      : "driver";
 
   const { error } = await supabase.from("profiles").insert({
     id: user.id,
     display_name: displayName,
     role,
+    ...(role === "rental_company" ? { company_id: companyIdMeta } : {}),
   });
 
   if (error) {
@@ -65,7 +75,7 @@ export async function getAppProfile(): Promise<AppProfile | null> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, role, display_name")
+    .select("id, role, display_name, company_id")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -79,21 +89,31 @@ export async function getAppProfile(): Promise<AppProfile | null> {
     if (!created) return null;
     const { data: again, error: err2 } = await supabase
       .from("profiles")
-      .select("id, role, display_name")
+      .select("id, role, display_name, company_id")
       .eq("id", user.id)
       .maybeSingle();
     if (err2 || !again) return null;
-    return {
-      id: again.id,
-      role: again.role === "super_admin" ? "super_admin" : "driver",
-      display_name: again.display_name,
-    };
+    return normalizeAppProfileRow(again);
   }
 
+  return normalizeAppProfileRow(data);
+}
+
+function normalizeAppProfileRow(row: {
+  id: string;
+  role: string;
+  display_name: string | null;
+  company_id: string | null;
+}): AppProfile {
+  let role: AppProfile["role"] = "driver";
+  if (row.role === "super_admin") role = "super_admin";
+  else if (row.role === "rental_company") role = "rental_company";
+
   return {
-    id: data.id,
-    role: data.role === "super_admin" ? "super_admin" : "driver",
-    display_name: data.display_name,
+    id: row.id,
+    role,
+    display_name: row.display_name,
+    company_id: row.company_id ?? null,
   };
 }
 
@@ -113,6 +133,7 @@ export async function requireAuthProfile() {
 export async function requireSuperAdmin() {
   const { user, profile } = await requireAuthProfile();
   if (!isSuperAdmin(user.email, profile)) {
+    if (profile.role === "rental_company") redirect("/rental");
     redirect("/driver");
   }
   return { user, profile };
@@ -122,6 +143,20 @@ export async function requireDriverArea() {
   const { user, profile } = await requireAuthProfile();
   if (isSuperAdmin(user.email, profile)) {
     redirect("/super-admin");
+  }
+  if (profile.role === "rental_company") {
+    redirect("/rental");
+  }
+  return { user, profile };
+}
+
+export async function requireRentalCompanyArea() {
+  const { user, profile } = await requireAuthProfile();
+  if (isSuperAdmin(user.email, profile)) {
+    redirect("/super-admin");
+  }
+  if (profile.role !== "rental_company") {
+    redirect("/driver");
   }
   return { user, profile };
 }

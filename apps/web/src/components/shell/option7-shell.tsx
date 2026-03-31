@@ -12,16 +12,28 @@ const SIDEBAR_COLLAPSED_KEY = "rph-sidebar-collapsed-opt7";
 /** Option 7 rail border (sidebar fill uses Tailwind `bg-rph-rail` = same token as globals). */
 const SIDEBAR_BORDER = "rgba(148, 163, 184, 0.12)";
 
-export type ShellVariant = "super_admin" | "driver";
+export type ShellVariant = "super_admin" | "driver" | "rental_company";
 
 export type DriverNavMode = "onboarding" | "full";
 
 type Crumb = { label: string; href?: string };
 
 function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
+  if (variant === "rental_company") {
+    if (pathname === "/rental") {
+      return [{ label: "Home", href: "/rental" }, { label: "Dashboard" }];
+    }
+    return [{ label: "Home", href: "/rental" }, { label: "Page" }];
+  }
   if (variant === "super_admin") {
     if (pathname === "/super-admin") {
       return [{ label: "Home", href: "/super-admin" }, { label: "Super admin" }];
+    }
+    if (pathname === "/super-admin/companies" || pathname.startsWith("/super-admin/companies/")) {
+      return [
+        { label: "Home", href: "/super-admin" },
+        { label: "Companies", href: "/super-admin/companies" },
+      ];
     }
     if (pathname === "/super-admin/drivers" || pathname.startsWith("/super-admin/drivers/")) {
       const crumbs: Crumb[] = [{ label: "Home", href: "/super-admin" }, { label: "Drivers", href: "/super-admin/drivers" }];
@@ -187,6 +199,13 @@ export function Option7Shell({
           Dashboard
         </NavLink>
         <NavLink
+          href="/super-admin/companies"
+          active={pathname === "/super-admin/companies" || pathname.startsWith("/super-admin/companies/")}
+          onNavigate={closeMobileNav}
+        >
+          Companies
+        </NavLink>
+        <NavLink
           href="/super-admin/drivers"
           active={pathname === "/super-admin/drivers" || pathname.startsWith("/super-admin/drivers/")}
           onNavigate={closeMobileNav}
@@ -194,6 +213,10 @@ export function Option7Shell({
           Drivers
         </NavLink>
       </>
+    ) : variant === "rental_company" ? (
+      <NavLink href="/rental" active={pathname === "/rental"} onNavigate={closeMobileNav}>
+        Dashboard
+      </NavLink>
     ) : driverNavMode !== "full" ? (
       <NavLink
         href="/driver/onboarding"
@@ -229,7 +252,9 @@ export function Option7Shell({
   const accountProfile =
     variant === "driver"
       ? { href: "/driver/profile" as const, label: "Profile" as const }
-      : { href: "/super-admin" as const, label: "Dashboard" as const };
+      : variant === "rental_company"
+        ? { href: "/rental" as const, label: "Dashboard" as const }
+        : { href: "/super-admin" as const, label: "Dashboard" as const };
 
   return (
     <div className="flex min-h-dvh w-full min-w-0">
@@ -264,6 +289,10 @@ export function Option7Shell({
             {variant === "super_admin" ? (
               <div className="mt-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
                 Console
+              </div>
+            ) : variant === "rental_company" ? (
+              <div className="mt-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                Rental company
               </div>
             ) : (
               <div className="mt-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
@@ -345,7 +374,7 @@ export function Option7Shell({
 
         <div className="flex min-h-0 flex-1 flex-col">
           <main className="min-h-0 flex-1 overflow-auto p-4 md:p-6">
-            {driverLicenceBanner && driverLicenceBanner.bullets.length > 0 ? (
+            {variant === "driver" && driverLicenceBanner && driverLicenceBanner.bullets.length > 0 ? (
               <div
                 className="mx-auto mb-4 max-w-7xl rounded-xl border border-amber-300/90 bg-amber-50 px-4 py-3 dark:border-amber-800/80 dark:bg-amber-950/50 md:px-5"
                 role="status"

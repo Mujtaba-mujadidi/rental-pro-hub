@@ -6,15 +6,24 @@ import {
   type DriverOnboardingRow,
 } from "@/lib/driver/licence-check";
 
-export type DriverHomePath = "/super-admin" | "/driver" | "/driver/onboarding";
+export type AppHomePath = "/super-admin" | "/driver" | "/driver/onboarding" | "/rental";
 
-export async function resolveDriverHomePath(
+/** @deprecated Use resolveAppHomePath */
+export type DriverHomePath = AppHomePath;
+
+export async function resolveAppHomePath(
   supabase: SupabaseClient,
   userId: string,
   email: string | undefined,
-): Promise<DriverHomePath> {
+): Promise<AppHomePath> {
   if (isSuperAdminEmail(email)) {
     return "/super-admin";
+  }
+
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", userId).maybeSingle();
+
+  if (profile?.role === "rental_company") {
+    return "/rental";
   }
 
   const { data } = await supabase
@@ -27,4 +36,13 @@ export async function resolveDriverHomePath(
     return "/driver";
   }
   return "/driver/onboarding";
+}
+
+/** @deprecated Use resolveAppHomePath */
+export async function resolveDriverHomePath(
+  supabase: SupabaseClient,
+  userId: string,
+  email: string | undefined,
+): Promise<AppHomePath> {
+  return resolveAppHomePath(supabase, userId, email);
 }

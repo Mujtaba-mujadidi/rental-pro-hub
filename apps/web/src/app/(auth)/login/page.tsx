@@ -23,13 +23,13 @@ export default async function LoginPage({
         serverError={sp.error && sp.error !== "config" ? sp.error : undefined}
       />
       <p className="text-center text-sm text-slate-500">
-        No account?{" "}
         <Link
           href="/signup"
           className="font-medium text-rph-rail underline decoration-rph-rail/35 hover:text-rph-rail-hover"
         >
-          Driver sign up
-        </Link>
+          Click here
+        </Link>{" "}
+        to create your driver account
       </p>
     </div>
   );

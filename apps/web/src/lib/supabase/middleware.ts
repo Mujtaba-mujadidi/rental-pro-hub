@@ -1,9 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 import { resolveSupabasePublishableEnv } from "@/lib/supabase/env";
-import { resolveDriverHomePath } from "@/lib/auth/driver-redirect";
+import { resolveAppHomePath } from "@/lib/auth/driver-redirect";
 
-const protectedPrefixes = ["/super-admin", "/driver"];
+const protectedPrefixes = ["/super-admin", "/driver", "/rental"];
 
 function isProtectedPath(pathname: string) {
   return protectedPrefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`));
@@ -50,16 +50,26 @@ export async function updateSession(request: NextRequest) {
 
   if (user && (path === "/login" || path === "/signup")) {
     const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = await resolveDriverHomePath(supabase, user.id, user.email);
+    redirectUrl.pathname = await resolveAppHomePath(supabase, user.id, user.email);
     redirectUrl.search = "";
     return NextResponse.redirect(redirectUrl);
   }
 
   if (user && path === "/driver") {
-    const home = await resolveDriverHomePath(supabase, user.id, user.email);
+    const home = await resolveAppHomePath(supabase, user.id, user.email);
     if (home !== "/driver") {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = home;
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
+  }
+
+  if (user && path.startsWith("/driver/")) {
+    const home = await resolveAppHomePath(supabase, user.id, user.email);
+    if (home === "/rental") {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/rental";
       redirectUrl.search = "";
       return NextResponse.redirect(redirectUrl);
     }

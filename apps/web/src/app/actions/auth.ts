@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { resolveDriverHomePath } from "@/lib/auth/driver-redirect";
+import { resolveAppHomePath } from "@/lib/auth/driver-redirect";
 import {
   MIN_DRIVER_AGE_YEARS,
   normalizeUkPostcode,
@@ -43,7 +43,7 @@ export async function signInAction(
     redirect(next);
   }
 
-  const home = await resolveDriverHomePath(supabase, signedInUser.id, signedInUser.email);
+  const home = await resolveAppHomePath(supabase, signedInUser.id, signedInUser.email);
   redirect(home);
 }
 

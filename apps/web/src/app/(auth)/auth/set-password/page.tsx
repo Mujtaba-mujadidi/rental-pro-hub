@@ -28,7 +28,8 @@ export default async function SetPasswordAfterRecoveryPage() {
       <div>
         <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Set a new password</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Choose a password at least 8 characters. You will be signed in after saving.
+          Use this page after a password reset or invitation email. Choose at least 8 characters — you will stay
+          signed in after saving.
         </p>
       </div>
       <SetPasswordForm />

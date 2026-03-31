@@ -3,7 +3,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { resolveDriverHomePath } from "@/lib/auth/driver-redirect";
+import { resolveAppHomePath } from "@/lib/auth/driver-redirect";
 
 export type SetPasswordRecoveryResult = { error?: string; ok?: boolean };
 
@@ -44,6 +44,6 @@ export async function setPasswordAfterRecoveryAction(
 
   cookieStore.delete("rph_pw_recovery");
 
-  const home = await resolveDriverHomePath(supabase, user.id, user.email);
+  const home = await resolveAppHomePath(supabase, user.id, user.email);
   redirect(home);
 }
