@@ -8,6 +8,7 @@ export type AppProfile = {
   role: "driver" | "super_admin" | "rental_company";
   display_name: string | null;
   company_id: string | null;
+  company_role: "admin" | "staff" | null;
 };
 
 export async function getSessionUser() {
@@ -45,6 +46,9 @@ async function ensureProfileRow(user: User): Promise<boolean> {
         : null;
   const displayName = fromMeta?.trim() || user.email?.split("@")[0] || "User";
   const appRole = typeof meta?.app_role === "string" ? meta.app_role.toLowerCase() : "";
+  const companyRoleMetaRaw = typeof meta?.company_role === "string" ? meta.company_role.toLowerCase() : "";
+  const companyRoleMeta: AppProfile["company_role"] =
+    companyRoleMetaRaw === "staff" ? "staff" : companyRoleMetaRaw === "admin" ? "admin" : "admin";
   const companyIdMeta = typeof meta?.company_id === "string" ? meta.company_id.trim() : "";
   const uuidOk = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(companyIdMeta);
 
@@ -58,7 +62,7 @@ async function ensureProfileRow(user: User): Promise<boolean> {
     id: user.id,
     display_name: displayName,
     role,
-    ...(role === "rental_company" ? { company_id: companyIdMeta } : {}),
+    ...(role === "rental_company" ? { company_id: companyIdMeta, company_role: companyRoleMeta } : {}),
   });
 
   if (error) {
@@ -75,7 +79,7 @@ export async function getAppProfile(): Promise<AppProfile | null> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, role, display_name, company_id")
+    .select("id, role, display_name, company_id, company_role")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -89,7 +93,7 @@ export async function getAppProfile(): Promise<AppProfile | null> {
     if (!created) return null;
     const { data: again, error: err2 } = await supabase
       .from("profiles")
-      .select("id, role, display_name, company_id")
+      .select("id, role, display_name, company_id, company_role")
       .eq("id", user.id)
       .maybeSingle();
     if (err2 || !again) return null;
@@ -104,6 +108,7 @@ function normalizeAppProfileRow(row: {
   role: string;
   display_name: string | null;
   company_id: string | null;
+  company_role: string | null;
 }): AppProfile {
   let role: AppProfile["role"] = "driver";
   if (row.role === "super_admin") role = "super_admin";
@@ -114,6 +119,8 @@ function normalizeAppProfileRow(row: {
     role,
     display_name: row.display_name,
     company_id: row.company_id ?? null,
+    company_role:
+      row.company_role === "admin" || row.company_role === "staff" ? row.company_role : role === "rental_company" ? "admin" : null,
   };
 }
 

@@ -60,6 +60,7 @@ async function sendCompanyPrimaryInviteForCompany(
       redirectTo: callbackBase,
       data: {
         app_role: "rental_company",
+        company_role: "admin",
         company_id: companyId,
         first_name: row.primary_contact_first_name ?? "",
         last_name: row.primary_contact_last_name ?? "",
