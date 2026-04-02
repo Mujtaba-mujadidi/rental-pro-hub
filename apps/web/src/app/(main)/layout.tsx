@@ -28,6 +28,7 @@ export default async function MainShellLayout({
     : profile.role === "rental_company"
       ? "rental_company"
       : "driver";
+  let accountDisplayName = profile.display_name;
 
   let driverNavMode: "onboarding" | "full" = "full";
   let driverLicenceBanner: { title: string; bullets: string[] } | null = null;
@@ -50,10 +51,22 @@ export default async function MainShellLayout({
     }
   }
 
+  if (variant === "rental_company" && profile.company_id) {
+    const supabase = await createClient();
+    const { data: company } = await supabase
+      .from("companies")
+      .select("name")
+      .eq("id", profile.company_id)
+      .maybeSingle();
+    const personal =
+      profile.display_name?.trim() || user.email?.split("@")[0]?.trim() || "User";
+    accountDisplayName = company?.name?.trim() ? `${personal} · ${company.name.trim()}` : personal;
+  }
+
   return (
     <Option7Shell
       variant={variant}
-      displayName={profile.display_name}
+      displayName={accountDisplayName}
       driverNavMode={variant === "driver" ? driverNavMode : undefined}
       driverLicenceBanner={variant === "driver" ? driverLicenceBanner : null}
     >

@@ -10,7 +10,11 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { deleteCompanyAction, sendCompanyPrimaryInviteAction } from "@/app/actions/admin-companies";
+import {
+  applyLatestCompanyContractChangeAction,
+  deleteCompanyAction,
+  sendCompanyPrimaryInviteAction,
+} from "@/app/actions/admin-companies";
 import { getAdminCompaniesPageAction } from "@/app/actions/admin-companies-list";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import type { AdminCompanyListRow } from "@/lib/admin/company-list-shared";
@@ -146,6 +150,7 @@ export function AdminCompaniesTable({
   const [loading, setLoading] = useState(true);
   const [inviteBusyId, setInviteBusyId] = useState<string | null>(null);
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
+  const [contractBusyId, setContractBusyId] = useState<string | null>(null);
   const [inviteFeedback, setInviteFeedback] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<CompanyDeleteConfirmState>(null);
 
@@ -345,6 +350,27 @@ export function AdminCompaniesTable({
         cell: (info) => statusBadge(String(info.getValue() ?? "")),
       },
       {
+        id: "contract_status",
+        accessorKey: "contractStatus",
+        header: "Contract",
+        enableSorting: false,
+        cell: (info) => {
+          const v = String(info.getValue() ?? "active").toLowerCase();
+          if (v === "pending_renewal") {
+            return (
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-950 dark:border-amber-900/45 dark:bg-amber-950/35 dark:text-amber-100">
+                Pending renewal
+              </span>
+            );
+          }
+          return (
+            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-900 dark:border-emerald-900/45 dark:bg-emerald-950/35 dark:text-emerald-100">
+              Active
+            </span>
+          );
+        },
+      },
+      {
         id: "created_at",
         accessorKey: "createdAt",
         header: ({ column }) => (
@@ -367,7 +393,8 @@ export function AdminCompaniesTable({
           const r = info.row.original;
           const inviteBusy = inviteBusyId === r.id;
           const deleteBusy = deleteBusyId === r.id;
-          const busy = inviteBusy || deleteBusy;
+          const contractBusy = contractBusyId === r.id;
+          const busy = inviteBusy || deleteBusy || contractBusy;
           return (
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
@@ -387,6 +414,28 @@ export function AdminCompaniesTable({
                   <DropdownMenu.Item className={rowActionItemClass} disabled>
                     Last invite: {formatInviteSent(r.inviteLastSentAt)}
                   </DropdownMenu.Item>
+                  {r.contractStatus === "pending_renewal" ? (
+                    <DropdownMenu.Item
+                      className={rowActionItemClass}
+                      disabled={busy}
+                      onSelect={() => {
+                        setInviteFeedback(null);
+                        setContractBusyId(r.id);
+                        void (async () => {
+                          const res = await applyLatestCompanyContractChangeAction(r.id);
+                          setContractBusyId(null);
+                          if (!res.ok) {
+                            setInviteFeedback(res.error);
+                            return;
+                          }
+                          setInviteFeedback(`Contract change applied for ${r.name || "company"}.`);
+                          onListChange?.();
+                        })();
+                      }}
+                    >
+                      {contractBusy ? "Applying…" : "Mark contract signed"}
+                    </DropdownMenu.Item>
+                  ) : null}
                   <DropdownMenu.Item
                     className={rowActionItemClass}
                     disabled={busy || !r.email}
@@ -428,7 +477,7 @@ export function AdminCompaniesTable({
         },
       },
     ],
-    [inviteBusyId, deleteBusyId, onListChange],
+    [inviteBusyId, deleteBusyId, contractBusyId, onListChange],
   );
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));

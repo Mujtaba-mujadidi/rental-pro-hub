@@ -11,22 +11,13 @@ function nullIfEmpty(v: FormDataEntryValue | null): string | null {
   return s === "" ? null : s;
 }
 
-const LOGO_MAX_BYTES = 2 * 1024 * 1024;
-const LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
-
-function extForMime(mime: string): string {
-  if (mime === "image/png") return "png";
-  if (mime === "image/jpeg") return "jpg";
-  if (mime === "image/webp") return "webp";
-  return "bin";
-}
-
 export type RegisterCompanyResult =
   | { ok: true; id: string; inviteWarning?: string }
   | { ok: false; error: string };
 
 export type SendCompanyInviteResult = { ok: true } | { ok: false; error: string };
 export type DeleteCompanyResult = { ok: true } | { ok: false; error: string };
+export type ApplyContractChangeResult = { ok: true } | { ok: false; error: string };
 
 function isNextRedirectError(e: unknown): boolean {
   if (typeof e !== "object" || e === null || !("digest" in e)) return false;
@@ -139,6 +130,44 @@ export async function sendCompanyPrimaryInviteAction(companyId: string): Promise
   }
 }
 
+async function createInitialCompanyContract(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  companyId: string,
+  snapshot: Record<string, unknown>,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data: contractRow, error: cErr } = await admin
+    .from("company_contracts")
+    .insert({ parent_company_id: companyId, status: "active" })
+    .select("id")
+    .single();
+  if (cErr || !contractRow?.id) {
+    return { ok: false, error: cErr?.message ?? "Could not create company contract." };
+  }
+
+  const { data: verRow, error: vErr } = await admin
+    .from("company_contract_versions")
+    .insert({
+      contract_id: contractRow.id,
+      version_number: 1,
+      snapshot,
+      signed_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+  if (vErr || !verRow?.id) {
+    return { ok: false, error: vErr?.message ?? "Could not create contract version." };
+  }
+
+  const { error: linkErr } = await admin
+    .from("company_contracts")
+    .update({ current_version_id: verRow.id })
+    .eq("id", contractRow.id);
+  if (linkErr) {
+    return { ok: false, error: linkErr.message };
+  }
+  return { ok: true };
+}
+
 export async function registerCompanyAction(formData: FormData): Promise<RegisterCompanyResult> {
   await requireSuperAdmin();
 
@@ -170,21 +199,6 @@ export async function registerCompanyAction(formData: FormData): Promise<Registe
 
   const sendInvite = formData.get("send_invite") !== "false";
 
-  const wantsLogo = nullIfEmpty(formData.get("has_logo")) === "true";
-  const logo = formData.get("logo");
-
-  if (wantsLogo) {
-    if (!(logo instanceof File) || logo.size === 0) {
-      return { ok: false, error: "Upload a logo image or uncheck “Company has a logo”." };
-    }
-    if (!LOGO_TYPES.has(logo.type)) {
-      return { ok: false, error: "Logo must be PNG, JPEG, or WebP." };
-    }
-    if (logo.size > LOGO_MAX_BYTES) {
-      return { ok: false, error: "Logo must be 2MB or smaller." };
-    }
-  }
-
   let admin: ReturnType<typeof createSupabaseAdminClient>;
   try {
     admin = createSupabaseAdminClient();
@@ -199,25 +213,34 @@ export async function registerCompanyAction(formData: FormData): Promise<Registe
   const postcodeRaw = nullIfEmpty(formData.get("registered_postcode"));
   const registeredPostcode = postcodeRaw ? postcodeRaw.trim().toUpperCase().replace(/\s+/g, "") : null;
 
+  const legalName = nullIfEmpty(formData.get("legal_name"));
+  const companyNumber = nullIfEmpty(formData.get("company_number"));
+  const reg1 = nullIfEmpty(formData.get("registered_address_line1"));
+  const reg2 = nullIfEmpty(formData.get("registered_address_line2"));
+  const regTown = nullIfEmpty(formData.get("registered_town"));
+  const regCounty = nullIfEmpty(formData.get("registered_county"));
+  const country = nullIfEmpty(formData.get("country")) ?? "GB";
+  const notes = nullIfEmpty(formData.get("notes"));
+
   const { data, error } = await admin
     .from("companies")
     .insert({
       name,
-      legal_name: nullIfEmpty(formData.get("legal_name")),
-      company_number: nullIfEmpty(formData.get("company_number")),
-      registered_address_line1: nullIfEmpty(formData.get("registered_address_line1")),
-      registered_address_line2: nullIfEmpty(formData.get("registered_address_line2")),
-      registered_town: nullIfEmpty(formData.get("registered_town")),
-      registered_county: nullIfEmpty(formData.get("registered_county")),
+      legal_name: legalName,
+      company_number: companyNumber,
+      registered_address_line1: reg1,
+      registered_address_line2: reg2,
+      registered_town: regTown,
+      registered_county: regCounty,
       registered_postcode: registeredPostcode,
-      country: nullIfEmpty(formData.get("country")) ?? "GB",
+      country,
       primary_contact_first_name: firstName,
       primary_contact_last_name: lastName,
       primary_contact_dob: dob,
       primary_contact_phone: contactPhone,
       primary_contact_email: contactEmail,
       status,
-      notes: nullIfEmpty(formData.get("notes")),
+      notes,
     })
     .select("id")
     .single();
@@ -232,22 +255,52 @@ export async function registerCompanyAction(formData: FormData): Promise<Registe
 
   const companyId = data.id;
 
-  if (wantsLogo && logo instanceof File && logo.size > 0) {
-    const ext = extForMime(logo.type);
-    const path = `${companyId}/logo.${ext}`;
-    const buf = Buffer.from(await logo.arrayBuffer());
-    const { error: upErr } = await admin.storage.from("company-logos").upload(path, buf, {
-      contentType: logo.type,
-      upsert: true,
-    });
-    if (upErr) {
-      await admin.from("companies").delete().eq("id", companyId);
-      return { ok: false, error: upErr.message };
-    }
-    const { error: logoDbErr } = await admin.from("companies").update({ logo_storage_path: path }).eq("id", companyId);
-    if (logoDbErr) {
-      return { ok: false, error: logoDbErr.message };
-    }
+  const contractSnap = {
+    name,
+    legal_name: legalName,
+    company_number: companyNumber,
+    registered_address_line1: reg1,
+    registered_address_line2: reg2,
+    registered_town: regTown,
+    registered_county: regCounty,
+    registered_postcode: registeredPostcode,
+    country,
+    primary_contact_first_name: firstName,
+    primary_contact_last_name: lastName,
+    primary_contact_dob: dob,
+    primary_contact_phone: contactPhone,
+    primary_contact_email: contactEmail,
+    notes,
+  };
+  const contractRes = await createInitialCompanyContract(admin, companyId, contractSnap);
+  if (!contractRes.ok) {
+    await admin.from("companies").delete().eq("id", companyId);
+    return { ok: false, error: contractRes.error };
+  }
+
+  const { error: subcompanyErr } = await admin.from("subcompanies").insert({
+    parent_company_id: companyId,
+    is_primary: true,
+    name,
+    legal_name: legalName,
+    company_number: companyNumber,
+    registered_address_line1: reg1,
+    registered_address_line2: reg2,
+    registered_town: regTown,
+    registered_county: regCounty,
+    registered_postcode: registeredPostcode,
+    country,
+    primary_contact_first_name: firstName,
+    primary_contact_last_name: lastName,
+    primary_contact_dob: dob,
+    primary_contact_phone: contactPhone,
+    primary_contact_email: contactEmail,
+    status,
+    notes,
+  });
+  if (subcompanyErr) {
+    await admin.from("companies").delete().eq("id", companyId);
+    return { ok: false, error: `Could not create default subcompany: ${subcompanyErr.message}` };
   }
 
   let inviteWarning: string | undefined;
@@ -324,5 +377,46 @@ export async function deleteCompanyAction(companyId: string): Promise<DeleteComp
       ok: false,
       error: e instanceof Error ? e.message : "Unexpected error deleting company.",
     };
+  }
+}
+
+export async function applyLatestCompanyContractChangeAction(
+  companyId: string,
+): Promise<ApplyContractChangeResult> {
+  try {
+    const { user } = await requireSuperAdmin();
+    const trimmed = companyId?.trim();
+    if (!trimmed) return { ok: false, error: "Missing company." };
+
+    let admin: ReturnType<typeof createSupabaseAdminClient>;
+    try {
+      admin = createSupabaseAdminClient();
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Server configuration error." };
+    }
+
+    const { data: pending, error: pendingErr } = await admin
+      .from("company_contract_change_requests")
+      .select("id")
+      .eq("parent_company_id", trimmed)
+      .eq("status", "pending_signature")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (pendingErr) return { ok: false, error: pendingErr.message };
+    if (!pending?.id) return { ok: false, error: "No pending contract change found for this company." };
+
+    const { error: rpcErr } = await admin.rpc("apply_company_contract_change", {
+      p_change_id: pending.id,
+      p_signed_by: user.id,
+    });
+    if (rpcErr) return { ok: false, error: rpcErr.message };
+
+    revalidatePath("/super-admin/companies");
+    revalidatePath("/rental");
+    return { ok: true };
+  } catch (e) {
+    if (isNextRedirectError(e)) throw e;
+    return { ok: false, error: e instanceof Error ? e.message : "Unexpected error applying contract change." };
   }
 }

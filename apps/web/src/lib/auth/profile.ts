@@ -3,12 +3,17 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { isSuperAdmin, isSuperAdminEmail } from "@/lib/auth/roles";
 
+export type CompanyMembershipRole = "owner" | "admin" | "operations" | "finance" | "viewer";
+
 export type AppProfile = {
   id: string;
   role: "driver" | "super_admin" | "rental_company";
   display_name: string | null;
+  /** Active parent company (from membership, aligned with profiles.company_id when possible). */
   company_id: string | null;
   company_role: "admin" | "staff" | null;
+  membership_role: CompanyMembershipRole | null;
+  subcompany_scope: "all" | "explicit" | null;
 };
 
 export async function getSessionUser() {
@@ -97,10 +102,10 @@ export async function getAppProfile(): Promise<AppProfile | null> {
       .eq("id", user.id)
       .maybeSingle();
     if (err2 || !again) return null;
-    return normalizeAppProfileRow(again);
+    return resolveRentalMemberships(supabase, user.id, user.email, again);
   }
 
-  return normalizeAppProfileRow(data);
+  return resolveRentalMemberships(supabase, user.id, user.email, data);
 }
 
 function normalizeAppProfileRow(row: {
@@ -121,6 +126,76 @@ function normalizeAppProfileRow(row: {
     company_id: row.company_id ?? null,
     company_role:
       row.company_role === "admin" || row.company_role === "staff" ? row.company_role : role === "rental_company" ? "admin" : null,
+    membership_role: null,
+    subcompany_scope: null,
+  };
+}
+
+async function resolveRentalMemberships(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  email: string | undefined,
+  row: {
+    id: string;
+    role: string;
+    display_name: string | null;
+    company_id: string | null;
+    company_role: string | null;
+  },
+): Promise<AppProfile> {
+  const base = normalizeAppProfileRow(row);
+
+  // Super admin is never merged with rental memberships (avoids wrong tenant if DB/metadata is inconsistent).
+  if (isSuperAdminEmail(email) || base.role === "super_admin") {
+    return {
+      id: row.id,
+      role: "super_admin",
+      display_name: row.display_name,
+      company_id: null,
+      company_role: null,
+      membership_role: null,
+      subcompany_scope: null,
+    };
+  }
+
+  if (base.role !== "rental_company") return base;
+
+  const { data: memberships, error: mErr } = await supabase
+    .from("user_company_memberships")
+    .select("parent_company_id, role, subcompany_scope")
+    .eq("user_id", userId)
+    .eq("status", "active");
+
+  if (mErr) {
+    console.error("user_company_memberships load failed", mErr.message);
+    return base;
+  }
+
+  const list = memberships ?? [];
+  if (list.length === 0) {
+    return base;
+  }
+
+  const preferred = row.company_id?.trim() ?? null;
+  const pick =
+    preferred && list.some((m) => m.parent_company_id === preferred)
+      ? list.find((m) => m.parent_company_id === preferred)!
+      : list[0]!;
+
+  const mr = pick.role as string;
+  const membershipRole: CompanyMembershipRole | null =
+    mr === "owner" || mr === "admin" || mr === "operations" || mr === "finance" || mr === "viewer" ? mr : null;
+
+  const scopeRaw = pick.subcompany_scope as string;
+  const subcompanyScope: "all" | "explicit" | null =
+    scopeRaw === "all" || scopeRaw === "explicit" ? scopeRaw : null;
+
+  return {
+    ...base,
+    company_id: pick.parent_company_id,
+    membership_role: membershipRole,
+    subcompany_scope: subcompanyScope,
+    company_role: membershipRole === "owner" || membershipRole === "admin" ? "admin" : "staff",
   };
 }
 

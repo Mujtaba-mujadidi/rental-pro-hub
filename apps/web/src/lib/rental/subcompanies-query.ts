@@ -1,19 +1,20 @@
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import type { AdminCompanyListRow } from "@/lib/admin/company-list-shared";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { RentalSubcompanyListRow } from "@/lib/rental/subcompany-list-shared";
 
-export type CompanyListStatusFilter = "all" | "active" | "inactive" | "pending";
+export type RentalSubcompanyStatusFilter = "all" | "active" | "inactive" | "pending";
 
-export type FetchCompaniesPageParams = {
+export type FetchRentalSubcompaniesPageParams = {
+  parentCompanyId: string;
   page: number;
   pageSize: number;
   search: string;
   sortBy: string;
   sortDir: "asc" | "desc";
-  status: CompanyListStatusFilter;
+  status: RentalSubcompanyStatusFilter;
 };
 
-export type FetchCompaniesPageResult =
-  | { ok: true; rows: AdminCompanyListRow[]; total: number }
+export type FetchRentalSubcompaniesPageResult =
+  | { ok: true; rows: RentalSubcompanyListRow[]; total: number }
   | { ok: false; error: string };
 
 const SORT_COLUMNS: Record<string, string> = {
@@ -37,6 +38,7 @@ function quoteOrFilterValue(value: string): string {
 
 function mapRow(r: {
   id: string;
+  is_primary: boolean | null;
   name: string;
   legal_name: string | null;
   company_number: string | null;
@@ -46,14 +48,12 @@ function mapRow(r: {
   primary_contact_phone: string | null;
   registered_town: string | null;
   registered_postcode: string | null;
-  logo_storage_path: string | null;
   status: string;
-  contract_status: string | null;
   created_at: string | null;
-  invite_last_sent_at: string | null;
-}): AdminCompanyListRow {
+}): RentalSubcompanyListRow {
   return {
     id: r.id,
+    isPrimary: !!r.is_primary,
     name: r.name ?? "",
     legalName: r.legal_name,
     companyNumber: r.company_number,
@@ -64,36 +64,34 @@ function mapRow(r: {
     town: r.registered_town,
     postcode: r.registered_postcode,
     status: r.status ?? "active",
-    contractStatus: r.contract_status,
     createdAt: r.created_at ?? "",
-    hasLogo: r.logo_storage_path != null && r.logo_storage_path.length > 0,
-    inviteLastSentAt: r.invite_last_sent_at,
   };
 }
 
-export async function fetchCompaniesPage(params: FetchCompaniesPageParams): Promise<FetchCompaniesPageResult> {
+/**
+ * Uses the caller’s Supabase client (user session) so RLS applies — users with explicit subcompany scope only see rows
+ * they are allowed to select.
+ */
+export async function fetchRentalSubcompaniesPage(
+  supabase: SupabaseClient,
+  params: FetchRentalSubcompaniesPageParams,
+): Promise<FetchRentalSubcompaniesPageResult> {
   const page = Math.max(1, Math.floor(params.page));
   const pageSize = Math.min(100, Math.max(1, Math.floor(params.pageSize)));
   const search = params.search.trim().slice(0, MAX_SEARCH_LEN);
   const sortCol = SORT_COLUMNS[params.sortBy] ?? "created_at";
   const ascending = params.sortDir !== "desc";
 
-  let admin: ReturnType<typeof createSupabaseAdminClient>;
-  try {
-    admin = createSupabaseAdminClient();
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Server configuration error." };
-  }
-
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
-  let q = admin
-    .from("companies")
+  let q = supabase
+    .from("subcompanies")
     .select(
-      "id, name, legal_name, company_number, primary_contact_first_name, primary_contact_last_name, primary_contact_email, primary_contact_phone, registered_town, registered_postcode, logo_storage_path, status, contract_status, created_at, invite_last_sent_at",
+      "id, is_primary, name, legal_name, company_number, primary_contact_first_name, primary_contact_last_name, primary_contact_email, primary_contact_phone, registered_town, registered_postcode, status, created_at",
       { count: "exact" },
-    );
+    )
+    .eq("parent_company_id", params.parentCompanyId);
 
   if (params.status !== "all") {
     q = q.eq("status", params.status);
@@ -107,23 +105,19 @@ export async function fetchCompaniesPage(params: FetchCompaniesPageParams): Prom
   }
 
   q = q.order(sortCol, { ascending, nullsFirst: false });
-
   if (sortCol === "name") {
     q = q.order("created_at", { ascending: false, nullsFirst: false });
   }
-
   q = q.range(from, to);
 
   const { data, error, count } = await q;
-
-  if (error) {
-    return { ok: false, error: error.message };
-  }
+  if (error) return { ok: false, error: error.message };
 
   const rows = (data ?? []).map((row) =>
     mapRow(
       row as {
         id: string;
+        is_primary: boolean | null;
         name: string;
         legal_name: string | null;
         company_number: string | null;
@@ -133,11 +127,8 @@ export async function fetchCompaniesPage(params: FetchCompaniesPageParams): Prom
         primary_contact_phone: string | null;
         registered_town: string | null;
         registered_postcode: string | null;
-        logo_storage_path: string | null;
         status: string;
-        contract_status: string | null;
         created_at: string | null;
-        invite_last_sent_at: string | null;
       },
     ),
   );

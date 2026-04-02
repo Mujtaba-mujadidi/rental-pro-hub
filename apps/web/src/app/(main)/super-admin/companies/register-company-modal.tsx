@@ -1,9 +1,10 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { registerCompanyAction } from "@/app/actions/admin-companies";
+import { CompanyStepProgress } from "@/components/forms/company-step-progress";
 
-const STEP_LABELS = ["Company", "Registered office", "Primary contact", "Review"] as const;
+const STEP_LABELS = ["Company details", "Registered office", "Primary contact", "Review"] as const;
 
 const btnContinue =
   "flex h-11 min-w-[7rem] items-center justify-center rounded-lg bg-rph-rail px-4 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50";
@@ -19,80 +20,6 @@ function inputClass(invalid?: boolean) {
   ].join(" ");
 }
 
-function CompanyRegisterStepProgress({ step, labels }: { step: number; labels: readonly string[] }) {
-  const displayStep = step + 1;
-
-  return (
-    <nav className="mb-2" aria-label="Register company steps">
-      <p className="mb-4 text-center text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-        Step {displayStep} of {labels.length}
-      </p>
-      <ol className="flex w-full items-center px-0.5 sm:px-2">
-        {labels.map((label, i) => {
-          const n = i + 1;
-          const done = n < displayStep;
-          const active = n === displayStep;
-          const segmentBeforeOrange = i > 0 && displayStep > i;
-
-          return (
-            <Fragment key={label}>
-              {i > 0 ? (
-                <li className="mx-1 h-1 min-w-[8px] flex-1 list-none sm:mx-2" aria-hidden>
-                  <div
-                    className={[
-                      "h-full w-full rounded-full transition-colors duration-300",
-                      segmentBeforeOrange ? "bg-orange-500" : "bg-zinc-200 dark:bg-zinc-700",
-                    ].join(" ")}
-                  />
-                </li>
-              ) : null}
-              <li className="flex list-none flex-col items-center">
-                <div
-                  className={[
-                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 text-sm font-bold transition-all",
-                    done && "border-orange-500 bg-orange-500 text-white shadow-md shadow-orange-500/25",
-                    active &&
-                      "border-orange-500 bg-white text-orange-600 shadow-md ring-4 ring-orange-100 dark:bg-zinc-950 dark:text-orange-500 dark:ring-orange-950/40",
-                    !done &&
-                      !active &&
-                      "border-zinc-200 bg-white text-zinc-400 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-500",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  title={`${n}. ${label}`}
-                >
-                  {done ? (
-                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-                      <path
-                        fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  ) : (
-                    n
-                  )}
-                </div>
-                <span
-                  className={[
-                    "mt-2 hidden max-w-[5.5rem] text-center text-[11px] font-semibold leading-tight sm:block",
-                    active ? "text-orange-700 dark:text-orange-400" : done ? "text-zinc-600 dark:text-zinc-400" : "text-zinc-400",
-                  ].join(" ")}
-                >
-                  {label}
-                </span>
-              </li>
-            </Fragment>
-          );
-        })}
-      </ol>
-      <p className="mt-4 text-center text-sm font-semibold text-orange-700 dark:text-orange-400 sm:hidden">
-        {labels[step]}
-      </p>
-    </nav>
-  );
-}
-
 const initialDraft = {
   name: "",
   company_number: "",
@@ -101,7 +28,6 @@ const initialDraft = {
   registered_town: "",
   registered_county: "",
   registered_postcode: "",
-  has_logo: false,
   primary_contact_first_name: "",
   primary_contact_last_name: "",
   primary_contact_dob: "",
@@ -122,7 +48,6 @@ export type RegisterCompanyModalProps = {
 export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: RegisterCompanyModalProps) {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState(initialDraft);
-  const [logoFile, setLogoFile] = useState<File | null>(null);
   const [sendInvite, setSendInvite] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -133,7 +58,6 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
     setError(null);
     setSendInvite(true);
     setDraft({ ...initialDraft });
-    setLogoFile(null);
   }, [open]);
 
   useEffect(() => {
@@ -155,9 +79,7 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
 
   const canGoNext = useCallback(() => {
     if (step === 0) {
-      if (!draft.name.trim()) return false;
-      if (draft.has_logo && (!logoFile || logoFile.size === 0)) return false;
-      return true;
+      return draft.name.trim().length > 0;
     }
     if (step === 1) return true;
     if (step === 2) {
@@ -170,7 +92,7 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
       );
     }
     return true;
-  }, [step, draft, logoFile]);
+  }, [step, draft]);
 
   const goNext = useCallback(() => {
     setError(null);
@@ -178,16 +100,12 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
       setError("Company name is required.");
       return;
     }
-    if (step === 0 && draft.has_logo && (!logoFile || logoFile.size === 0)) {
-      setError("Choose a logo file or uncheck “Company has a logo”.");
-      return;
-    }
     if (step === 2 && !canGoNext()) {
       setError("Fill in all primary contact fields.");
       return;
     }
     setStep((s) => Math.min(s + 1, STEP_LABELS.length - 1));
-  }, [step, draft, logoFile, canGoNext]);
+  }, [step, draft, canGoNext]);
 
   const goBack = useCallback(() => {
     setError(null);
@@ -198,11 +116,6 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
     setError(null);
     if (!draft.name.trim()) {
       setError("Company name is required.");
-      setStep(0);
-      return;
-    }
-    if (draft.has_logo && (!logoFile || logoFile.size === 0)) {
-      setError("Choose a logo file or uncheck “Company has a logo”.");
       setStep(0);
       return;
     }
@@ -227,7 +140,6 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
     fd.set("registered_county", draft.registered_county.trim());
     fd.set("registered_postcode", draft.registered_postcode.trim());
     fd.set("country", draft.country.trim() || "GB");
-    fd.set("has_logo", draft.has_logo ? "true" : "false");
     fd.set("primary_contact_first_name", draft.primary_contact_first_name.trim());
     fd.set("primary_contact_last_name", draft.primary_contact_last_name.trim());
     fd.set("primary_contact_dob", draft.primary_contact_dob.trim());
@@ -236,10 +148,6 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
     fd.set("status", draft.status);
     fd.set("notes", draft.notes.trim());
     fd.set("send_invite", sendInvite ? "true" : "false");
-
-    if (draft.has_logo && logoFile) {
-      fd.set("logo", logoFile);
-    }
 
     startTransition(() => {
       void (async () => {
@@ -252,15 +160,9 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
         onOpenChange(false);
       })();
     });
-  }, [draft, logoFile, sendInvite, onOpenChange, onRegistered]);
+  }, [draft, sendInvite, onOpenChange, onRegistered]);
 
   if (!open) return null;
-
-  const fileInputClass = [
-    inputClass(),
-    "py-2",
-    "file:mr-3 file:rounded-lg file:border-0 file:bg-rph-rail file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-rph-rail-hover dark:file:bg-rph-rail-soft",
-  ].join(" ");
 
   return (
     <div className="fixed inset-0 z-[310] flex items-center justify-center p-4 sm:p-6">
@@ -283,9 +185,10 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
             Register company
           </h2>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            Company and branding, registered office, primary contact, then review.
+            Parent company (contract holder), registered office, primary contact, then review. Branding is added in rental
+            onboarding.
           </p>
-          <CompanyRegisterStepProgress step={step} labels={STEP_LABELS} />
+          <CompanyStepProgress step={step} labels={STEP_LABELS} />
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 sm:px-10">
@@ -298,9 +201,10 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
           {step === 0 ? (
             <div className="space-y-4 pt-1">
               <div>
-                <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Company and logo</h3>
+                <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Parent company</h3>
                 <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                  Registered name, Companies House number (optional), and an optional brand mark.
+                  Legal name for the contract. Optional Companies House number. The rental admin can upload a logo later
+                  during onboarding.
                 </p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -330,36 +234,6 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
                   />
                 </div>
               </div>
-
-              <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-600">
-                <input
-                  type="checkbox"
-                  checked={draft.has_logo}
-                  onChange={(e) => {
-                    patch("has_logo", e.target.checked);
-                    if (!e.target.checked) setLogoFile(null);
-                  }}
-                  className="mt-1 size-4 rounded border-zinc-300 text-orange-600 focus:ring-orange-500/25 dark:border-zinc-600"
-                />
-                <span className="text-sm text-zinc-800 dark:text-zinc-200">
-                  <span className="font-semibold">Company has a logo</span>
-                  <span className="mt-1 block font-normal text-zinc-500 dark:text-zinc-400">
-                    PNG, JPEG, or WebP up to 2&nbsp;MB.
-                  </span>
-                </span>
-              </label>
-
-              {draft.has_logo ? (
-                <div className="space-y-1">
-                  <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Logo file</span>
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    className={fileInputClass}
-                    onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
-                  />
-                </div>
-              ) : null}
             </div>
           ) : null}
 
@@ -579,10 +453,6 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
                         .filter(Boolean)
                         .join("\n") || "—"}
                     </dd>
-                  </div>
-                  <div>
-                    <dt className="font-medium text-zinc-700 dark:text-zinc-300">Logo</dt>
-                    <dd>{draft.has_logo ? (logoFile ? logoFile.name : "—") : "No"}</dd>
                   </div>
                   <div>
                     <dt className="font-medium text-zinc-700 dark:text-zinc-300">Primary contact</dt>

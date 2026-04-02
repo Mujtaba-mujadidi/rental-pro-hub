@@ -1,7 +1,6 @@
-/** Client-safe row type for the super-admin company list. */
-
-export type AdminCompanyListRow = {
+export type RentalSubcompanyListRow = {
   id: string;
+  isPrimary: boolean;
   name: string;
   legalName: string | null;
   companyNumber: string | null;
@@ -12,8 +11,5 @@ export type AdminCompanyListRow = {
   town: string | null;
   postcode: string | null;
   status: string;
-  contractStatus: string | null;
   createdAt: string;
-  hasLogo: boolean;
-  inviteLastSentAt: string | null;
 };

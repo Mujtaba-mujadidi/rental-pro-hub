@@ -23,6 +23,15 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
     if (pathname === "/rental") {
       return [{ label: "Home", href: "/rental" }, { label: "Dashboard" }];
     }
+    if (pathname === "/rental/subcompany" || pathname.startsWith("/rental/subcompany/")) {
+      return [{ label: "Home", href: "/rental" }, { label: "Subcompany", href: "/rental/subcompany" }];
+    }
+    if (pathname === "/rental/onboarding" || pathname.startsWith("/rental/onboarding/")) {
+      return [{ label: "Home", href: "/rental" }, { label: "Onboarding", href: "/rental/onboarding" }];
+    }
+    if (pathname === "/rental/staff" || pathname.startsWith("/rental/staff/")) {
+      return [{ label: "Home", href: "/rental" }, { label: "Staff", href: "/rental/staff" }];
+    }
     return [{ label: "Home", href: "/rental" }, { label: "Page" }];
   }
   if (variant === "super_admin") {
@@ -214,9 +223,25 @@ export function Option7Shell({
         </NavLink>
       </>
     ) : variant === "rental_company" ? (
-      <NavLink href="/rental" active={pathname === "/rental"} onNavigate={closeMobileNav}>
-        Dashboard
-      </NavLink>
+      <>
+        <NavLink href="/rental" active={pathname === "/rental"} onNavigate={closeMobileNav}>
+          Dashboard
+        </NavLink>
+        <NavLink
+          href="/rental/subcompany"
+          active={pathname === "/rental/subcompany" || pathname.startsWith("/rental/subcompany/")}
+          onNavigate={closeMobileNav}
+        >
+          Subcompany
+        </NavLink>
+        <NavLink
+          href="/rental/staff"
+          active={pathname === "/rental/staff" || pathname.startsWith("/rental/staff/")}
+          onNavigate={closeMobileNav}
+        >
+          Staff
+        </NavLink>
+      </>
     ) : driverNavMode !== "full" ? (
       <NavLink
         href="/driver/onboarding"
