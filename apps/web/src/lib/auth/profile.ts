@@ -1,7 +1,72 @@
 import type { User } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { isSuperAdmin, isSuperAdminEmail } from "@/lib/auth/roles";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+const PROFILE_SELECT_FULL = "id, role, display_name, company_id, company_role" as const;
+const PROFILE_SELECT_MIN = "id, role, display_name" as const;
+
+type ProfileRow = {
+  id: string;
+  role: string;
+  display_name: string | null;
+  company_id: string | null;
+  company_role: string | null;
+};
+
+function isMissingCompanyColumnsError(message: string): boolean {
+  return /\bcompany_id\b.*does not exist|does not exist.*\bcompany_id\b/i.test(message);
+}
+
+function isRlsViolation(message: string): boolean {
+  return /\brow-level security\b|violates row-level security policy/i.test(message);
+}
+
+/** Load profile; fall back if DB predates `profiles.company_id` / `company_role` migrations. */
+async function fetchProfileRow(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<{ data: ProfileRow | null; error: Error | null }> {
+  const full = await supabase
+    .from("profiles")
+    .select(PROFILE_SELECT_FULL)
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (!full.error && full.data) {
+    return { data: full.data as ProfileRow, error: null };
+  }
+
+  const errMsg = full.error && "message" in full.error ? String(full.error.message) : "";
+  if (full.error && isMissingCompanyColumnsError(errMsg)) {
+    console.warn(
+      "[auth] profiles.company_id / company_role missing on database; using legacy select. Run migrations or supabase/manual/ensure_profiles_company_columns.sql",
+    );
+    const min = await supabase
+      .from("profiles")
+      .select(PROFILE_SELECT_MIN)
+      .eq("id", userId)
+      .maybeSingle();
+    if (min.error) {
+      return { data: null, error: new Error(min.error.message) };
+    }
+    if (!min.data) {
+      return { data: null, error: null };
+    }
+    const r = min.data as { id: string; role: string; display_name: string | null };
+    return {
+      data: { ...r, company_id: null, company_role: null },
+      error: null,
+    };
+  }
+
+  return {
+    data: null,
+    error: full.error ? new Error(errMsg || "profiles load failed") : null,
+  };
+}
 
 export type CompanyMembershipRole = "owner" | "admin" | "operations" | "finance" | "viewer";
 
@@ -63,15 +128,38 @@ async function ensureProfileRow(user: User): Promise<boolean> {
       ? "rental_company"
       : "driver";
 
-  const { error } = await supabase.from("profiles").insert({
-    id: user.id,
-    display_name: displayName,
-    role,
-    ...(role === "rental_company" ? { company_id: companyIdMeta, company_role: companyRoleMeta } : {}),
-  });
+  const withTenant =
+    role === "rental_company" ? { company_id: companyIdMeta, company_role: companyRoleMeta } : {};
+  const basePayload = { id: user.id, display_name: displayName, role };
+  const fullPayload = { ...basePayload, ...withTenant };
 
-  if (error) {
-    console.error("profiles insert failed", error.message);
+  async function tryProfileInsert(client: SupabaseClient): Promise<string | null> {
+    let { error } = await client.from("profiles").insert(fullPayload);
+    if (error && role === "rental_company" && isMissingCompanyColumnsError(error.message)) {
+      ({ error } = await client.from("profiles").insert(basePayload));
+    }
+    return error?.message ?? null;
+  }
+
+  let failMsg = await tryProfileInsert(supabase);
+
+  if (failMsg && isRlsViolation(failMsg)) {
+    try {
+      const admin = createSupabaseAdminClient();
+      failMsg = await tryProfileInsert(admin);
+      if (!failMsg) {
+        console.warn(
+          "[auth] profiles row created with service role (user INSERT blocked by RLS). Add policy profiles_insert_own — see supabase/manual/profiles_insert_own_policy.sql",
+        );
+        return true;
+      }
+    } catch {
+      /* SUPABASE_SERVICE_ROLE_KEY missing */
+    }
+  }
+
+  if (failMsg) {
+    console.error("profiles insert failed", failMsg);
     return false;
   }
   return true;
@@ -82,11 +170,7 @@ export async function getAppProfile(): Promise<AppProfile | null> {
   if (!user) return null;
 
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("id, role, display_name, company_id, company_role")
-    .eq("id", user.id)
-    .maybeSingle();
+  const { data, error } = await fetchProfileRow(supabase, user.id);
 
   if (error) {
     console.error("profiles load failed", error.message);
@@ -96,11 +180,7 @@ export async function getAppProfile(): Promise<AppProfile | null> {
   if (!data) {
     const created = await ensureProfileRow(user);
     if (!created) return null;
-    const { data: again, error: err2 } = await supabase
-      .from("profiles")
-      .select("id, role, display_name, company_id, company_role")
-      .eq("id", user.id)
-      .maybeSingle();
+    const { data: again, error: err2 } = await fetchProfileRow(supabase, user.id);
     if (err2 || !again) return null;
     return resolveRentalMemberships(supabase, user.id, user.email, again);
   }

@@ -32,6 +32,12 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
     if (pathname === "/rental/staff" || pathname.startsWith("/rental/staff/")) {
       return [{ label: "Home", href: "/rental" }, { label: "Staff", href: "/rental/staff" }];
     }
+    if (pathname === "/rental/billing" || pathname.startsWith("/rental/billing/")) {
+      return [{ label: "Home", href: "/rental" }, { label: "Billing", href: "/rental/billing" }];
+    }
+    if (pathname === "/rental/notifications" || pathname.startsWith("/rental/notifications/")) {
+      return [{ label: "Home", href: "/rental" }, { label: "Notifications", href: "/rental/notifications" }];
+    }
     return [{ label: "Home", href: "/rental" }, { label: "Page" }];
   }
   if (variant === "super_admin") {
@@ -50,6 +56,24 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
         crumbs.push({ label: "Preview" });
       }
       return crumbs;
+    }
+    if (pathname === "/super-admin/billing" || pathname.startsWith("/super-admin/billing/")) {
+      return [{ label: "Home", href: "/super-admin" }, { label: "Billing", href: "/super-admin/billing" }];
+    }
+    if (pathname === "/super-admin/contract-changes" || pathname.startsWith("/super-admin/contract-changes/")) {
+      return [{ label: "Home", href: "/super-admin" }, { label: "Contract changes", href: "/super-admin/contract-changes" }];
+    }
+    if (pathname === "/super-admin/settings/contract-terms") {
+      return [
+        { label: "Home", href: "/super-admin" },
+        { label: "Contract terms", href: "/super-admin/settings/contract-terms" },
+      ];
+    }
+    if (pathname === "/super-admin/settings/contract-presets" || pathname.startsWith("/super-admin/settings/")) {
+      return [
+        { label: "Home", href: "/super-admin" },
+        { label: "Contract presets", href: "/super-admin/settings/contract-presets" },
+      ];
     }
     return [{ label: "Home", href: "/super-admin" }, { label: "Page" }];
   }
@@ -221,6 +245,34 @@ export function Option7Shell({
         >
           Drivers
         </NavLink>
+        <NavLink
+          href="/super-admin/billing"
+          active={pathname === "/super-admin/billing" || pathname.startsWith("/super-admin/billing/")}
+          onNavigate={closeMobileNav}
+        >
+          Billing
+        </NavLink>
+        <NavLink
+          href="/super-admin/contract-changes"
+          active={pathname === "/super-admin/contract-changes" || pathname.startsWith("/super-admin/contract-changes/")}
+          onNavigate={closeMobileNav}
+        >
+          Contract changes
+        </NavLink>
+        <NavLink
+          href="/super-admin/settings/contract-terms"
+          active={pathname === "/super-admin/settings/contract-terms"}
+          onNavigate={closeMobileNav}
+        >
+          Contract terms
+        </NavLink>
+        <NavLink
+          href="/super-admin/settings/contract-presets"
+          active={pathname === "/super-admin/settings/contract-presets"}
+          onNavigate={closeMobileNav}
+        >
+          Contract presets
+        </NavLink>
       </>
     ) : variant === "rental_company" ? (
       <>
@@ -240,6 +292,20 @@ export function Option7Shell({
           onNavigate={closeMobileNav}
         >
           Staff
+        </NavLink>
+        <NavLink
+          href="/rental/billing"
+          active={pathname === "/rental/billing" || pathname.startsWith("/rental/billing/")}
+          onNavigate={closeMobileNav}
+        >
+          Billing
+        </NavLink>
+        <NavLink
+          href="/rental/notifications"
+          active={pathname === "/rental/notifications" || pathname.startsWith("/rental/notifications/")}
+          onNavigate={closeMobileNav}
+        >
+          Notifications
         </NavLink>
       </>
     ) : driverNavMode !== "full" ? (

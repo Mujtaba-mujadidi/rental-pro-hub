@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireRentalCompanyArea, requireSuperAdmin } from "@/lib/auth/profile";
+import { notifyCompanyFinanceRoles, notifySuperAdmins } from "@/lib/platform-notifications";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export type RequestContractChangeResult = { ok: true } | { ok: false; error: string };
@@ -60,10 +61,16 @@ export async function requestRentalCompanyContractChangeAction(
     .select("id")
     .eq("parent_company_id", parentCompanyId)
     .eq("status", "pending_signature")
+    .neq("review_status", "rejected")
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (pending?.id) {
-    return { ok: false, error: "A contract change is already pending signature." };
+    return { ok: false, error: "A contract change is already in progress." };
   }
+
+  const transitionRaw = nullIfEmpty(formData.get("transition_type")) ?? "detail_change";
+  const transition_type = transitionRaw === "new_legal_entity" ? "new_legal_entity" : "detail_change";
 
   const postcodeRaw = nullIfEmpty(formData.get("registered_postcode"));
   const registeredPostcode = postcodeRaw ? postcodeRaw.trim().toUpperCase().replace(/\s+/g, "") : null;
@@ -72,6 +79,8 @@ export async function requestRentalCompanyContractChangeAction(
     parent_company_id: parentCompanyId,
     requested_by: profile.id,
     status: "pending_signature",
+    review_status: "pending_review",
+    transition_type,
     proposed_name: name,
     proposed_legal_name: nullIfEmpty(formData.get("legal_name")),
     proposed_company_number: nullIfEmpty(formData.get("company_number")),
@@ -87,8 +96,17 @@ export async function requestRentalCompanyContractChangeAction(
     proposed_primary_contact_phone: contactPhone,
     proposed_primary_contact_email: contactEmail,
     proposed_notes: nullIfEmpty(formData.get("notes")),
+    signatory_name: nullIfEmpty(formData.get("signatory_name")),
+    signatory_email: nullIfEmpty(formData.get("signatory_email")),
+    signatory_title: nullIfEmpty(formData.get("signatory_title")),
   });
   if (insertErr) return { ok: false, error: insertErr.message };
+
+  await notifySuperAdmins(admin, "contract_change_requested", {
+    parent_company_id: parentCompanyId,
+    transition_type,
+    requested_by: profile.id,
+  });
 
   const { error: upErr } = await admin
     .from("companies")
@@ -115,11 +133,23 @@ export async function applySignedCompanyContractChangeAction(
     return { ok: false, error: e instanceof Error ? e.message : "Server configuration error." };
   }
 
+  const { data: chRow } = await admin
+    .from("company_contract_change_requests")
+    .select("parent_company_id")
+    .eq("id", trimmed)
+    .maybeSingle();
+
   const { error } = await admin.rpc("apply_company_contract_change", {
     p_change_id: trimmed,
     p_signed_by: user.id,
   });
   if (error) return { ok: false, error: error.message };
+
+  if (chRow?.parent_company_id) {
+    await notifyCompanyFinanceRoles(admin, chRow.parent_company_id as string, "legal_change_applied", {
+      change_id: trimmed,
+    });
+  }
 
   revalidatePath("/rental");
   revalidatePath("/super-admin/companies");

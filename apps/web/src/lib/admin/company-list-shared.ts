@@ -13,7 +13,16 @@ export type AdminCompanyListRow = {
   postcode: string | null;
   status: string;
   contractStatus: string | null;
+  /** company_contracts.status when linked (draft, active, …). */
+  agreementContractStatus: string | null;
   createdAt: string;
   hasLogo: boolean;
   inviteLastSentAt: string | null;
+};
+
+/** Full-row payloads for the super-admin company detail modal (server-fetched). */
+export type AdminCompanyDetailPayload = {
+  company: Record<string, unknown>;
+  subcompanies: Record<string, unknown>[];
+  companyContract: Record<string, unknown> | null;
 };

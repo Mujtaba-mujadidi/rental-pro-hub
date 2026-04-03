@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
-import { registerCompanyAction } from "@/app/actions/admin-companies";
+import { registerCompanyAction, getRegisterCompanyInviteDefaultsAction } from "@/app/actions/admin-companies";
+import { listPricingPresetsForRegisterAction } from "@/app/actions/contract-presets";
+import { listPublishedTermsForRegisterAction } from "@/app/actions/contract-terms";
 import { CompanyStepProgress } from "@/components/forms/company-step-progress";
 
-const STEP_LABELS = ["Company details", "Registered office", "Primary contact", "Review"] as const;
+const STEP_LABELS = ["Company details", "Registered office", "Primary contact", "Commercial terms", "Review"] as const;
 
 const btnContinue =
   "flex h-11 min-w-[7rem] items-center justify-center rounded-lg bg-rph-rail px-4 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50";
@@ -22,6 +24,7 @@ function inputClass(invalid?: boolean) {
 
 const initialDraft = {
   name: "",
+  legal_name: "",
   company_number: "",
   registered_address_line1: "",
   registered_address_line2: "",
@@ -33,6 +36,20 @@ const initialDraft = {
   primary_contact_dob: "",
   primary_contact_phone: "",
   primary_contact_email: "",
+  billing_email: "",
+  contract_type: "rental_agreement",
+  pricing_model: "fixed_monthly",
+  billing_frequency: "monthly",
+  contract_start_date: "",
+  currency: "GBP",
+  payment_terms_days: "30",
+  billing_anchor_day: "",
+  recurring_amount: "",
+  signatory_name: "",
+  signatory_title: "",
+  signatory_email: "",
+  pricing_preset_id: "",
+  terms_catalog_version_id: "",
   status: "active",
   notes: "",
   country: "GB",
@@ -48,6 +65,8 @@ export type RegisterCompanyModalProps = {
 export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: RegisterCompanyModalProps) {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState(initialDraft);
+  const [presets, setPresets] = useState<{ id: string; name: string }[]>([]);
+  const [publishedTerms, setPublishedTerms] = useState<{ id: string; version_label: string; title: string }[]>([]);
   const [sendInvite, setSendInvite] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -56,8 +75,18 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
     if (!open) return;
     setStep(0);
     setError(null);
-    setSendInvite(true);
     setDraft({ ...initialDraft });
+    void Promise.all([
+      listPricingPresetsForRegisterAction().then((r) => {
+        if (r.ok) setPresets(r.presets);
+      }),
+      listPublishedTermsForRegisterAction().then((r) => {
+        if (r.ok) setPublishedTerms(r.versions);
+      }),
+      getRegisterCompanyInviteDefaultsAction().then((d) => {
+        if (d.ok) setSendInvite(d.defaultSendInvite);
+      }),
+    ]);
   }, [open]);
 
   useEffect(() => {
@@ -91,8 +120,12 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
         draft.primary_contact_dob.trim().length > 0
       );
     }
+    if (step === 3) {
+      if (publishedTerms.length > 0 && !draft.terms_catalog_version_id.trim()) return false;
+      return true;
+    }
     return true;
-  }, [step, draft]);
+  }, [step, draft, publishedTerms.length]);
 
   const goNext = useCallback(() => {
     setError(null);
@@ -104,8 +137,12 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
       setError("Fill in all primary contact fields.");
       return;
     }
+    if (step === 3 && publishedTerms.length > 0 && !draft.terms_catalog_version_id.trim()) {
+      setError("Select the terms & conditions version for this contract.");
+      return;
+    }
     setStep((s) => Math.min(s + 1, STEP_LABELS.length - 1));
-  }, [step, draft, canGoNext]);
+  }, [step, draft, canGoNext, publishedTerms.length]);
 
   const goBack = useCallback(() => {
     setError(null);
@@ -130,9 +167,16 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
       setStep(2);
       return;
     }
+    if (publishedTerms.length > 0 && !draft.terms_catalog_version_id.trim()) {
+      setError("Select the terms & conditions version for this contract.");
+      setStep(3);
+      return;
+    }
 
     const fd = new FormData();
     fd.set("name", draft.name.trim());
+    fd.set("legal_name", draft.legal_name.trim());
+    fd.set("billing_email", draft.billing_email.trim());
     fd.set("company_number", draft.company_number.trim());
     fd.set("registered_address_line1", draft.registered_address_line1.trim());
     fd.set("registered_address_line2", draft.registered_address_line2.trim());
@@ -145,6 +189,20 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
     fd.set("primary_contact_dob", draft.primary_contact_dob.trim());
     fd.set("primary_contact_phone", draft.primary_contact_phone.trim());
     fd.set("primary_contact_email", draft.primary_contact_email.trim());
+    fd.set("billing_email", draft.billing_email.trim());
+    fd.set("contract_type", draft.contract_type.trim());
+    fd.set("pricing_model", draft.pricing_model.trim());
+    fd.set("billing_frequency", draft.billing_frequency.trim());
+    fd.set("contract_start_date", draft.contract_start_date.trim());
+    fd.set("currency", draft.currency.trim());
+    fd.set("payment_terms_days", draft.payment_terms_days.trim());
+    fd.set("billing_anchor_day", draft.billing_anchor_day.trim());
+    fd.set("recurring_amount", draft.recurring_amount.trim());
+    fd.set("signatory_name", draft.signatory_name.trim());
+    fd.set("signatory_title", draft.signatory_title.trim());
+    fd.set("signatory_email", draft.signatory_email.trim());
+    fd.set("pricing_preset_id", draft.pricing_preset_id.trim());
+    fd.set("terms_catalog_version_id", draft.terms_catalog_version_id.trim());
     fd.set("status", draft.status);
     fd.set("notes", draft.notes.trim());
     fd.set("send_invite", sendInvite ? "true" : "false");
@@ -160,7 +218,7 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
         onOpenChange(false);
       })();
     });
-  }, [draft, sendInvite, onOpenChange, onRegistered]);
+  }, [draft, sendInvite, publishedTerms.length, onOpenChange, onRegistered]);
 
   if (!open) return null;
 
@@ -185,7 +243,7 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
             Register company
           </h2>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            Parent company (contract holder), registered office, primary contact, then review. Branding is added in rental
+            Parent company, registered office, primary contact, commercial terms, then review. Branding is added in rental
             onboarding.
           </p>
           <CompanyStepProgress step={step} labels={STEP_LABELS} />
@@ -219,6 +277,18 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
                     autoComplete="organization"
                     className={inputClass()}
                     placeholder="Registered name"
+                  />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <label htmlFor="co-legal" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                    Legal name
+                  </label>
+                  <input
+                    id="co-legal"
+                    value={draft.legal_name}
+                    onChange={(e) => patch("legal_name", e.target.value)}
+                    className={inputClass()}
+                    placeholder="As on Companies House"
                   />
                 </div>
                 <div className="space-y-1 sm:col-span-2">
@@ -384,6 +454,169 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
           {step === 3 ? (
             <div className="space-y-4 pt-1">
               <div>
+                <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Commercial terms & signatory</h3>
+                <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                  Stored on the parent contract. Optional pricing preset seeds amounts. E-sign is sent separately from the
+                  company list when DocuSeal is configured.
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Pricing preset</label>
+                  <select
+                    value={draft.pricing_preset_id}
+                    onChange={(e) => patch("pricing_preset_id", e.target.value)}
+                    className={inputClass()}
+                  >
+                    <option value="">None</option>
+                    {presets.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {publishedTerms.length > 0 ? (
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                      Terms &amp; conditions (published) *
+                    </label>
+                    <select
+                      value={draft.terms_catalog_version_id}
+                      onChange={(e) => patch("terms_catalog_version_id", e.target.value)}
+                      className={inputClass(!draft.terms_catalog_version_id.trim())}
+                    >
+                      <option value="">Select version…</option>
+                      {publishedTerms.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.version_label} — {t.title}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      A full copy is frozen on the contract for audits; later catalog changes do not alter signed agreements.
+                    </p>
+                  </div>
+                ) : null}
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Billing / main email</label>
+                  <input
+                    type="email"
+                    value={draft.billing_email}
+                    onChange={(e) => patch("billing_email", e.target.value)}
+                    className={inputClass()}
+                    placeholder="Accounts mailbox (optional)"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Contract type</label>
+                  <input
+                    value={draft.contract_type}
+                    onChange={(e) => patch("contract_type", e.target.value)}
+                    className={inputClass()}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Pricing model</label>
+                  <input
+                    value={draft.pricing_model}
+                    onChange={(e) => patch("pricing_model", e.target.value)}
+                    className={inputClass()}
+                    placeholder="e.g. fixed_monthly"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Billing frequency</label>
+                  <select
+                    value={draft.billing_frequency}
+                    onChange={(e) => patch("billing_frequency", e.target.value)}
+                    className={inputClass()}
+                  >
+                    <option value="monthly">Monthly</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="quarterly">Quarterly</option>
+                    <option value="annual">Annual</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Start date</label>
+                  <input
+                    type="date"
+                    value={draft.contract_start_date}
+                    onChange={(e) => patch("contract_start_date", e.target.value)}
+                    className={inputClass()}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Currency</label>
+                  <input
+                    value={draft.currency}
+                    onChange={(e) => patch("currency", e.target.value)}
+                    className={inputClass()}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Payment terms (days)</label>
+                  <input
+                    value={draft.payment_terms_days}
+                    onChange={(e) => patch("payment_terms_days", e.target.value)}
+                    className={inputClass()}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Billing anchor day (1–28)</label>
+                  <input
+                    value={draft.billing_anchor_day}
+                    onChange={(e) => patch("billing_anchor_day", e.target.value)}
+                    className={inputClass()}
+                    placeholder="Optional"
+                  />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Recurring amount</label>
+                  <input
+                    value={draft.recurring_amount}
+                    onChange={(e) => patch("recurring_amount", e.target.value)}
+                    className={inputClass()}
+                    placeholder="e.g. 500 (before tax)"
+                  />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Signatory (optional)</p>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">Defaults to primary contact for e-sign if blank.</p>
+                </div>
+                <div className="space-y-1">
+                  <input
+                    value={draft.signatory_name}
+                    onChange={(e) => patch("signatory_name", e.target.value)}
+                    className={inputClass()}
+                    placeholder="Signatory name"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <input
+                    value={draft.signatory_title}
+                    onChange={(e) => patch("signatory_title", e.target.value)}
+                    className={inputClass()}
+                    placeholder="Title"
+                  />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <input
+                    type="email"
+                    value={draft.signatory_email}
+                    onChange={(e) => patch("signatory_email", e.target.value)}
+                    className={inputClass()}
+                    placeholder="Signatory email"
+                  />
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {step === 4 ? (
+            <div className="space-y-4 pt-1">
+              <div>
                 <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Review and status</h3>
                 <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Confirm details before saving the company record.</p>
               </div>
@@ -424,10 +657,11 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
                   className="mt-1 size-4 rounded border-zinc-300 text-orange-600 focus:ring-orange-500/25 dark:border-zinc-600"
                 />
                 <span className="text-sm text-zinc-800 dark:text-zinc-200">
-                  <span className="font-semibold">Send invite email to primary contact</span>
+                  <span className="font-semibold">Send invite email to primary contact now</span>
                   <span className="mt-1 block font-normal text-zinc-500 dark:text-zinc-400">
-                    They get a link to set a password and access the rental company area. Uncheck to save the record only
-                    and invite later from the company list.
+                    When DocuSeal e-sign is enabled, this defaults off so the primary contact is invited after the contract
+                    is signed (or you can check this to invite immediately). With legacy signing, the default is on. You can
+                    always send an invite later from the company list.
                   </span>
                 </span>
               </label>

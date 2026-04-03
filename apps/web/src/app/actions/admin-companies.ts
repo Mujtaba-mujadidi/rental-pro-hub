@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { requireSuperAdmin } from "@/lib/auth/profile";
+import { useLegacyBootstrapContractSigning } from "@/lib/docuseal/config";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { collectTenantAuthUserIds, insertCompanyDeletionArchive } from "@/lib/companies/deletion-archive";
 import { getPublicSiteUrl } from "@/lib/supabase/site-url";
 
 function nullIfEmpty(v: FormDataEntryValue | null): string | null {
@@ -85,6 +87,7 @@ async function sendCompanyPrimaryInviteForCompany(
       .update({
         ...(uid ? { primary_contact_user_id: uid } : {}),
         invite_last_sent_at: now,
+        pending_primary_invite_after_contract_signed: false,
       })
       .eq("id", companyId);
 
@@ -130,42 +133,137 @@ export async function sendCompanyPrimaryInviteAction(companyId: string): Promise
   }
 }
 
-async function createInitialCompanyContract(
+export type InitialContractCommercial = {
+  contract_type?: string | null;
+  pricing_model?: string | null;
+  billing_frequency?: string | null;
+  start_date?: string | null;
+  currency?: string | null;
+  payment_terms_days?: number | null;
+  billing_anchor_day?: number | null;
+  recurring_amount?: number | null;
+  signatory_name?: string | null;
+  signatory_title?: string | null;
+  signatory_email?: string | null;
+  preset_id?: string | null;
+};
+
+export type InitialContractTermsBinding = {
+  catalogVersionId: string | null;
+  snapshot: Record<string, unknown>;
+};
+
+export async function createInitialCompanyContract(
   admin: ReturnType<typeof createSupabaseAdminClient>,
   companyId: string,
-  snapshot: Record<string, unknown>,
+  legalSnapshot: Record<string, unknown>,
+  commercial: InitialContractCommercial,
+  options?: { forceLegacyBootstrap?: boolean; terms?: InitialContractTermsBinding | null },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  const legacy = options?.forceLegacyBootstrap === true || useLegacyBootstrapContractSigning();
+  const now = new Date().toISOString();
+  const commercialSnapshot: Record<string, unknown> = {
+    ...commercial,
+    recurring_amount: commercial.recurring_amount ?? null,
+  };
+
+  const contractInsert: Record<string, unknown> = {
+    parent_company_id: companyId,
+    status: legacy ? "active" : "draft",
+    legacy_bootstrap_signed: legacy,
+    contract_type: commercial.contract_type ?? null,
+    pricing_model: commercial.pricing_model ?? null,
+    billing_frequency: commercial.billing_frequency ?? "monthly",
+    start_date: commercial.start_date ?? null,
+    currency: commercial.currency ?? "GBP",
+    payment_terms_days: commercial.payment_terms_days ?? 30,
+    billing_anchor_day: commercial.billing_anchor_day ?? null,
+  };
+
   const { data: contractRow, error: cErr } = await admin
     .from("company_contracts")
-    .insert({ parent_company_id: companyId, status: "active" })
+    .insert(contractInsert)
     .select("id")
     .single();
   if (cErr || !contractRow?.id) {
     return { ok: false, error: cErr?.message ?? "Could not create company contract." };
   }
 
+  const termsBinding = options?.terms;
+  const termsSnapshot = termsBinding?.snapshot && Object.keys(termsBinding.snapshot).length > 0 ? termsBinding.snapshot : {};
+  const termsCatalogId = termsBinding?.catalogVersionId?.trim() || null;
+
+  const versionInsert: Record<string, unknown> = {
+    contract_id: contractRow.id,
+    version_number: 1,
+    snapshot: legalSnapshot,
+    legal_snapshot: legalSnapshot,
+    commercial_snapshot: commercialSnapshot,
+    pricing_snapshot: { amount: commercial.recurring_amount ?? 0, currency: commercial.currency ?? "GBP" },
+    version_status: legacy ? "legacy_import" : "draft",
+    signed_at: legacy ? now : null,
+    terms_snapshot: termsSnapshot,
+    terms_catalog_version_id: termsCatalogId,
+  };
+
   const { data: verRow, error: vErr } = await admin
     .from("company_contract_versions")
-    .insert({
-      contract_id: contractRow.id,
-      version_number: 1,
-      snapshot,
-      signed_at: new Date().toISOString(),
-    })
+    .insert(versionInsert)
     .select("id")
     .single();
   if (vErr || !verRow?.id) {
     return { ok: false, error: vErr?.message ?? "Could not create contract version." };
   }
 
-  const { error: linkErr } = await admin
-    .from("company_contracts")
-    .update({ current_version_id: verRow.id })
-    .eq("id", contractRow.id);
-  if (linkErr) {
-    return { ok: false, error: linkErr.message };
+  if (legacy) {
+    await admin
+      .from("company_contracts")
+      .update({ current_version_id: verRow.id, contract_signed_at: now })
+      .eq("id", contractRow.id);
+  } else {
+    await admin.from("company_contracts").update({ current_version_id: verRow.id }).eq("id", contractRow.id);
   }
+
+  const { error: snapErr } = await admin.from("contract_pricing_snapshots").insert({
+    contract_id: contractRow.id,
+    version_id: verRow.id,
+    snapshot: versionInsert.pricing_snapshot as Record<string, unknown>,
+    preset_id: commercial.preset_id ?? null,
+  });
+  if (snapErr) {
+    return { ok: false, error: snapErr.message };
+  }
+
   return { ok: true };
+}
+
+/** After DocuSeal marks the contract active: send queued primary invite if the company opted into invite-after-sign. */
+export async function trySendPendingPrimaryInviteAfterContractSigned(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  companyId: string,
+): Promise<void> {
+  const { data: co, error } = await admin
+    .from("companies")
+    .select("pending_primary_invite_after_contract_signed")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (error || !co?.pending_primary_invite_after_contract_signed) return;
+  const inv = await sendCompanyPrimaryInviteForCompany(admin, companyId);
+  if (!inv.ok) {
+    console.error("[invite-after-sign] Pending primary invite failed", companyId, inv.error);
+  }
+}
+
+export async function getRegisterCompanyInviteDefaultsAction(): Promise<
+  { ok: true; defaultSendInvite: boolean } | { ok: false; error: string }
+> {
+  try {
+    await requireSuperAdmin();
+    return { ok: true, defaultSendInvite: useLegacyBootstrapContractSigning() };
+  } catch (e) {
+    if (isNextRedirectError(e)) throw e;
+    return { ok: false, error: e instanceof Error ? e.message : "Unexpected error." };
+  }
 }
 
 export async function registerCompanyAction(formData: FormData): Promise<RegisterCompanyResult> {
@@ -214,6 +312,7 @@ export async function registerCompanyAction(formData: FormData): Promise<Registe
   const registeredPostcode = postcodeRaw ? postcodeRaw.trim().toUpperCase().replace(/\s+/g, "") : null;
 
   const legalName = nullIfEmpty(formData.get("legal_name"));
+  const billingEmail = nullIfEmpty(formData.get("billing_email"));
   const companyNumber = nullIfEmpty(formData.get("company_number"));
   const reg1 = nullIfEmpty(formData.get("registered_address_line1"));
   const reg2 = nullIfEmpty(formData.get("registered_address_line2"));
@@ -221,6 +320,48 @@ export async function registerCompanyAction(formData: FormData): Promise<Registe
   const regCounty = nullIfEmpty(formData.get("registered_county"));
   const country = nullIfEmpty(formData.get("country")) ?? "GB";
   const notes = nullIfEmpty(formData.get("notes"));
+
+  const termsCatalogVersionIdEarly = nullIfEmpty(formData.get("terms_catalog_version_id"));
+  const { count: publishedTermsCount, error: termsCountErr } = await admin
+    .from("contract_terms_versions")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "published")
+    .eq("family", "rental_master");
+  if (termsCountErr) {
+    return { ok: false, error: termsCountErr.message };
+  }
+  const hasPublishedTerms = (publishedTermsCount ?? 0) > 0;
+  if (hasPublishedTerms && !termsCatalogVersionIdEarly) {
+    return {
+      ok: false,
+      error: "Select the terms & conditions version that applies to this contract (Super admin → Contract terms).",
+    };
+  }
+
+  let termsBinding: InitialContractTermsBinding | null = null;
+  if (termsCatalogVersionIdEarly) {
+    const { data: trow, error: terr } = await admin
+      .from("contract_terms_versions")
+      .select("id, family, version_label, title, body, body_hash, status")
+      .eq("id", termsCatalogVersionIdEarly)
+      .eq("status", "published")
+      .maybeSingle();
+    if (terr || !trow?.id) {
+      return { ok: false, error: "Terms version not found or not published." };
+    }
+    termsBinding = {
+      catalogVersionId: trow.id as string,
+      snapshot: {
+        terms_version_id: trow.id,
+        family: trow.family,
+        version_label: trow.version_label,
+        title: trow.title,
+        body_hash: trow.body_hash,
+        body: trow.body,
+        accepted_via: "registration",
+      },
+    };
+  }
 
   const { data, error } = await admin
     .from("companies")
@@ -239,6 +380,7 @@ export async function registerCompanyAction(formData: FormData): Promise<Registe
       primary_contact_dob: dob,
       primary_contact_phone: contactPhone,
       primary_contact_email: contactEmail,
+      billing_email: billingEmail,
       status,
       notes,
     })
@@ -270,9 +412,63 @@ export async function registerCompanyAction(formData: FormData): Promise<Registe
     primary_contact_dob: dob,
     primary_contact_phone: contactPhone,
     primary_contact_email: contactEmail,
+    billing_email: billingEmail,
     notes,
   };
-  const contractRes = await createInitialCompanyContract(admin, companyId, contractSnap);
+
+  const parseOptInt = (v: FormDataEntryValue | null): number | null => {
+    const s = nullIfEmpty(v);
+    if (s == null) return null;
+    const n = Number.parseInt(s, 10);
+    return Number.isFinite(n) ? n : null;
+  };
+  const parseOptAmount = (v: FormDataEntryValue | null): number | null => {
+    const s = nullIfEmpty(v);
+    if (s == null) return null;
+    const n = Number.parseFloat(s);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const commercial: InitialContractCommercial = {
+    contract_type: nullIfEmpty(formData.get("contract_type")),
+    pricing_model: nullIfEmpty(formData.get("pricing_model")),
+    billing_frequency: nullIfEmpty(formData.get("billing_frequency")) ?? "monthly",
+    start_date: nullIfEmpty(formData.get("contract_start_date")),
+    currency: nullIfEmpty(formData.get("currency")) ?? "GBP",
+    payment_terms_days: parseOptInt(formData.get("payment_terms_days")),
+    billing_anchor_day: parseOptInt(formData.get("billing_anchor_day")),
+    recurring_amount: parseOptAmount(formData.get("recurring_amount")),
+    signatory_name: nullIfEmpty(formData.get("signatory_name")),
+    signatory_title: nullIfEmpty(formData.get("signatory_title")),
+    signatory_email: nullIfEmpty(formData.get("signatory_email")),
+    preset_id: nullIfEmpty(formData.get("pricing_preset_id")),
+  };
+
+  const presetId = commercial.preset_id?.trim();
+  if (presetId) {
+    const { data: pr } = await admin
+      .from("contract_pricing_presets")
+      .select("id, pricing_model_type, parameters, billing_frequency, currency")
+      .eq("id", presetId)
+      .maybeSingle();
+    if (pr) {
+      commercial.preset_id = pr.id as string;
+      commercial.pricing_model = (pr.pricing_model_type as string) ?? commercial.pricing_model;
+      commercial.currency = (pr.currency as string) ?? commercial.currency;
+      if (pr.billing_frequency) commercial.billing_frequency = pr.billing_frequency as string;
+      const params = (pr.parameters ?? {}) as Record<string, unknown>;
+      const amt = params.monthly_amount ?? params.amount ?? params.recurring_amount;
+      if (typeof amt === "number" && Number.isFinite(amt)) commercial.recurring_amount = amt;
+      else if (typeof amt === "string") {
+        const n = Number.parseFloat(amt);
+        if (Number.isFinite(n)) commercial.recurring_amount = n;
+      }
+    }
+  }
+
+  const contractRes = await createInitialCompanyContract(admin, companyId, contractSnap, commercial, {
+    terms: termsBinding,
+  });
   if (!contractRes.ok) {
     await admin.from("companies").delete().eq("id", companyId);
     return { ok: false, error: contractRes.error };
@@ -303,6 +499,16 @@ export async function registerCompanyAction(formData: FormData): Promise<Registe
     return { ok: false, error: `Could not create default subcompany: ${subcompanyErr.message}` };
   }
 
+  const usesEsignPath = !useLegacyBootstrapContractSigning();
+  const pendingAfterSign = usesEsignPath && !sendInvite;
+  const { error: pendingErr } = await admin
+    .from("companies")
+    .update({ pending_primary_invite_after_contract_signed: pendingAfterSign })
+    .eq("id", companyId);
+  if (pendingErr) {
+    return { ok: false, error: pendingErr.message };
+  }
+
   let inviteWarning: string | undefined;
   if (sendInvite) {
     const invRes = await sendCompanyPrimaryInviteForCompany(admin, companyId);
@@ -320,7 +526,7 @@ export async function registerCompanyAction(formData: FormData): Promise<Registe
 
 export async function deleteCompanyAction(companyId: string): Promise<DeleteCompanyResult> {
   try {
-    await requireSuperAdmin();
+    const { user } = await requireSuperAdmin();
     const trimmed = companyId?.trim();
     if (!trimmed) return { ok: false, error: "Missing company." };
 
@@ -339,22 +545,32 @@ export async function deleteCompanyAction(companyId: string): Promise<DeleteComp
     if (getErr) return { ok: false, error: getErr.message };
     if (!company?.id) return { ok: false, error: "Company not found." };
 
-    // Delete linked rental_company auth users so the removed tenant does not leave active company accounts behind.
-    const { data: linkedProfiles, error: linkedProfilesErr } = await admin
-      .from("profiles")
-      .select("id, role")
-      .eq("company_id", trimmed);
-    if (linkedProfilesErr) return { ok: false, error: linkedProfilesErr.message };
+    // Legal / finance retention: snapshot before CASCADE deletes contracts, invoices, etc.
+    // See lib/companies/deletion-archive.ts for FK map to public.companies.
+    const archived = await insertCompanyDeletionArchive(admin, trimmed, user.id);
+    if (!archived.ok) {
+      return {
+        ok: false,
+        error: `Could not archive company data before delete: ${archived.error}`,
+      };
+    }
 
-    for (const p of linkedProfiles ?? []) {
-      if (p?.id && p.role === "rental_company") {
-        const { error: authDelErr } = await admin.auth.admin.deleteUser(p.id);
-        if (authDelErr) {
-          return {
-            ok: false,
-            error: `Could not delete linked rental company user (${p.id}): ${authDelErr.message}`,
-          };
-        }
+    // Remove all tenant Auth users: anyone with membership OR rental_company profile for this parent.
+    // Never delete super_admin or driver accounts from this path.
+    const tenantUserIds = await collectTenantAuthUserIds(admin, trimmed);
+    for (const uid of tenantUserIds) {
+      const { data: prof, error: profErr } = await admin.from("profiles").select("id, role").eq("id", uid).maybeSingle();
+      if (profErr || !prof?.id) continue;
+      const r = prof.role as string;
+      if (r === "super_admin" || r === "driver") continue;
+      if (r !== "rental_company") continue;
+
+      const { error: authDelErr } = await admin.auth.admin.deleteUser(uid);
+      if (authDelErr) {
+        return {
+          ok: false,
+          error: `Could not delete tenant user (${uid}): ${authDelErr.message}`,
+        };
       }
     }
 
@@ -397,14 +613,27 @@ export async function applyLatestCompanyContractChangeAction(
 
     const { data: pending, error: pendingErr } = await admin
       .from("company_contract_change_requests")
-      .select("id")
+      .select("id, transition_type, review_status")
       .eq("parent_company_id", trimmed)
       .eq("status", "pending_signature")
+      .in("review_status", ["awaiting_signature", "approved"])
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (pendingErr) return { ok: false, error: pendingErr.message };
-    if (!pending?.id) return { ok: false, error: "No pending contract change found for this company." };
+    if (!pending?.id) {
+      return {
+        ok: false,
+        error:
+          "No reviewed contract change ready to apply. Approve the request on Contract changes first, or wait for e-sign completion.",
+      };
+    }
+    if (pending.transition_type === "new_legal_entity") {
+      return {
+        ok: false,
+        error: "This request is a new legal entity transition. Complete it from Contract changes, not Apply here.",
+      };
+    }
 
     const { error: rpcErr } = await admin.rpc("apply_company_contract_change", {
       p_change_id: pending.id,

@@ -1,6 +1,7 @@
 "use server";
 
 import { requireSuperAdmin } from "@/lib/auth/profile";
+import { fetchAdminCompanyDetail, type FetchAdminCompanyDetailResult } from "@/lib/admin/company-detail";
 import {
   fetchCompaniesPage,
   type CompanyListStatusFilter,
@@ -26,4 +27,9 @@ export async function getAdminCompaniesPageAction(input: AdminCompaniesListInput
     sortDir: input.sortDir,
     status: input.status,
   });
+}
+
+export async function getAdminCompanyDetailAction(companyId: string): Promise<FetchAdminCompanyDetailResult> {
+  await requireSuperAdmin();
+  return fetchAdminCompanyDetail(companyId);
 }

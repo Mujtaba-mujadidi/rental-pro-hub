@@ -1,7 +1,7 @@
 "use client";
 
-import { useFormState, useFormStatus } from "react-dom";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useFormStatus } from "react-dom";
+import { useActionState, useEffect, useRef, useState, type FormEvent } from "react";
 import { signInAction, type ActionResult } from "@/app/actions/auth";
 import { userMessageForSupabaseAuthEmailError } from "@/lib/auth/supabase-auth-user-message";
 import { createClient } from "@/lib/supabase/client";
@@ -153,7 +153,7 @@ export function LoginForm({
   configError?: boolean;
   serverError?: string;
 }) {
-  const [state, formAction] = useFormState(signInAction, initial);
+  const [state, formAction] = useActionState(signInAction, initial);
   const [showForgot, setShowForgot] = useState(false);
 
   if (showForgot) {

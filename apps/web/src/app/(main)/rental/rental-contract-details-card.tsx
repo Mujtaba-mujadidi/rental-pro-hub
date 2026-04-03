@@ -1,7 +1,9 @@
 "use client";
 
+import DOMPurify from "dompurify";
 import { useMemo, useState, useTransition } from "react";
 import { requestRentalCompanyContractChangeAction } from "@/app/actions/rental-company-contract";
+import { rentalContractCopy } from "@/lib/rental-contract-copy";
 
 function inputClass() {
   return "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none focus:border-rph-rail focus:ring-2 focus:ring-rph-rail/20 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100";
@@ -28,12 +30,21 @@ type CompanyDetails = {
   contract_version: number;
 };
 
+type TermsSnap = {
+  version_label?: unknown;
+  title?: unknown;
+  body?: unknown;
+};
+
 export function RentalContractDetailsCard({
   company,
+  termsSnapshot,
   hasPendingChange,
   canRequestContractChange,
 }: {
   company: CompanyDetails;
+  /** Frozen terms from the signed contract version (not the live catalog). */
+  termsSnapshot: Record<string, unknown> | null;
   hasPendingChange: boolean;
   /** Matches RLS: only owner/admin may insert contract change requests. */
   canRequestContractChange: boolean;
@@ -43,6 +54,7 @@ export function RentalContractDetailsCard({
   const [ok, setOk] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [draft, setDraft] = useState({
+    transition_type: "detail_change" as "detail_change" | "new_legal_entity",
     name: company.name ?? "",
     legal_name: company.legal_name ?? "",
     company_number: company.company_number ?? "",
@@ -58,10 +70,18 @@ export function RentalContractDetailsCard({
     primary_contact_phone: company.primary_contact_phone ?? "",
     primary_contact_email: company.primary_contact_email ?? "",
     notes: company.notes ?? "",
+    signatory_name: "",
+    signatory_title: "",
+    signatory_email: "",
   });
 
   const contractStatusLabel = useMemo(
-    () => (hasPendingChange ? "Pending renewal signature" : company.contract_status === "active" ? "Active" : company.contract_status),
+    () =>
+      hasPendingChange
+        ? "Change in progress (review / signature)"
+        : company.contract_status === "active"
+          ? "Active"
+          : company.contract_status,
     [hasPendingChange, company.contract_status],
   );
 
@@ -81,9 +101,7 @@ export function RentalContractDetailsCard({
           setError(res.error);
           return;
         }
-        setOk(
-          "Amendment request submitted. Parent company legal fields update only after signature; your primary operational unit is updated only for trading name and contact fields that mirror the contract.",
-        );
+        setOk(rentalContractCopy.legalChangeAfterSignature);
         setOpen(false);
       })();
     });
@@ -98,6 +116,7 @@ export function RentalContractDetailsCard({
             Legal entity on the agreement — version {company.contract_version} · Status:{" "}
             <span className="font-semibold">{contractStatusLabel}</span>
           </p>
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400 max-w-xl">{rentalContractCopy.parentVsPrimaryShort}</p>
         </div>
         {canRequestContractChange ? (
           <button
@@ -116,9 +135,49 @@ export function RentalContractDetailsCard({
       </div>
       {hasPendingChange ? (
         <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
-          A contract change is already pending signature. New changes are locked until completion.
+          A contract change is already in progress. New changes are locked until completion.
         </p>
       ) : null}
+
+      {(() => {
+        const snap = termsSnapshot as TermsSnap | null;
+        const label =
+          typeof snap?.version_label === "string" && snap.version_label.trim() ? snap.version_label.trim() : null;
+        const title = typeof snap?.title === "string" && snap.title.trim() ? snap.title.trim() : null;
+        const body = typeof snap?.body === "string" && snap.body.trim() ? snap.body.trim() : null;
+        if (!label && !body) return null;
+        const bodyIsHtml = body ? /<[a-z][\s\S]*>/i.test(body) : false;
+        const safeHtml =
+          body && bodyIsHtml
+            ? DOMPurify.sanitize(body, {
+                ALLOWED_TAGS: ["p", "br", "b", "i", "u", "strong", "em", "ul", "ol", "li", "a", "span", "div"],
+                ALLOWED_ATTR: ["href", "target", "rel"],
+              })
+            : "";
+        return (
+          <details className="mt-4 rounded-lg border border-slate-200 bg-slate-50/80 p-3 text-sm dark:border-slate-600 dark:bg-slate-900/40">
+            <summary className="cursor-pointer font-semibold text-slate-900 dark:text-slate-100">
+              Terms you agreed to
+              {label ? <span className="ml-1 font-normal text-slate-600 dark:text-slate-400">(version {label})</span> : null}
+            </summary>
+            {title ? <p className="mt-2 text-xs font-medium text-slate-700 dark:text-slate-300">{title}</p> : null}
+            {body && bodyIsHtml && safeHtml ? (
+              <div
+                className="mt-2 max-h-64 overflow-auto text-xs leading-relaxed text-slate-700 dark:text-slate-300 [&_a]:text-rph-rail [&_a]:underline [&_li]:my-0.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
+                dangerouslySetInnerHTML={{ __html: safeHtml }}
+              />
+            ) : null}
+            {body && !bodyIsHtml ? (
+              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-slate-700 dark:text-slate-300">
+                {body}
+              </pre>
+            ) : null}
+            {!body ? (
+              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Full text was not stored for this contract.</p>
+            ) : null}
+          </details>
+        );
+      })()}
       {error ? <p className="mt-3 rph-alert-error">{error}</p> : null}
       {ok ? (
         <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/35 dark:text-emerald-100">
@@ -137,8 +196,29 @@ export function RentalContractDetailsCard({
           >
             <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Request contract change</h3>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              Changes to your main/default subcompany and parent company will apply only after new contract signature.
+              {rentalContractCopy.legalChangeAfterSignature}
             </p>
+            <div className="mt-4 space-y-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-600">
+              <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Type of change</p>
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                <input
+                  type="radio"
+                  name="transition_type"
+                  checked={draft.transition_type === "detail_change"}
+                  onChange={() => patch("transition_type", "detail_change")}
+                />
+                Update legal details (same legal entity)
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                <input
+                  type="radio"
+                  name="transition_type"
+                  checked={draft.transition_type === "new_legal_entity"}
+                  onChange={() => patch("transition_type", "new_legal_entity")}
+                />
+                New legal entity replaces the current parent company
+              </label>
+            </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <input value={draft.name} onChange={(e) => patch("name", e.target.value)} className={inputClass()} placeholder="Company name *" />
               <input value={draft.legal_name} onChange={(e) => patch("legal_name", e.target.value)} className={inputClass()} placeholder="Legal name" />
@@ -154,13 +234,16 @@ export function RentalContractDetailsCard({
               <input value={draft.primary_contact_phone} onChange={(e) => patch("primary_contact_phone", e.target.value)} className={inputClass()} placeholder="Primary phone *" />
               <input type="email" value={draft.primary_contact_email} onChange={(e) => patch("primary_contact_email", e.target.value)} className={`${inputClass()} sm:col-span-2`} placeholder="Primary email *" />
               <textarea value={draft.notes} onChange={(e) => patch("notes", e.target.value)} rows={2} className={`${inputClass()} sm:col-span-2`} placeholder="Notes" />
+              <input value={draft.signatory_name} onChange={(e) => patch("signatory_name", e.target.value)} className={inputClass()} placeholder="Signatory name (optional)" />
+              <input value={draft.signatory_title} onChange={(e) => patch("signatory_title", e.target.value)} className={inputClass()} placeholder="Signatory title (optional)" />
+              <input type="email" value={draft.signatory_email} onChange={(e) => patch("signatory_email", e.target.value)} className={`${inputClass()} sm:col-span-2`} placeholder="Signatory email (optional)" />
             </div>
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium dark:border-zinc-600" onClick={() => setOpen(false)}>
                 Cancel
               </button>
               <button type="button" className="rounded-lg bg-rph-rail px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={pending} onClick={submitRequest}>
-                {pending ? "Submitting…" : "Submit for signature"}
+                {pending ? "Submitting…" : "Submit change request"}
               </button>
             </div>
           </div>

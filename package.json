@@ -9,7 +9,15 @@
     "web": "npm run dev --workspace=@rph/web",
     "mobile": "npm run start --workspace=@rph/mobile",
     "lint": "npm run lint --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
+    "db:status": "supabase status",
+    "db:reset": "supabase db reset",
+    "db:push": "supabase db push",
+    "db:diff": "supabase db diff",
+    "db:lint": "supabase db lint",
+    "migration:new": "supabase migration new"
   },
   "engines": {
     "node": ">=20"

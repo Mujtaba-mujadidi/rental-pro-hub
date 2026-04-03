@@ -18,12 +18,33 @@ export default async function RentalCompanyHomePage() {
     .maybeSingle();
   const { data: pendingChange } = await supabase
     .from("company_contract_change_requests")
-    .select("id, created_at")
+    .select("id, created_at, review_status, transition_type")
     .eq("parent_company_id", profile.company_id ?? "")
     .eq("status", "pending_signature")
+    .neq("review_status", "rejected")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+
+  const { data: contractRow } = await supabase
+    .from("company_contracts")
+    .select("current_version_id")
+    .eq("parent_company_id", profile.company_id ?? "")
+    .maybeSingle();
+
+  let termsSnapshot: Record<string, unknown> | null = null;
+  const cvId = contractRow?.current_version_id;
+  if (cvId) {
+    const { data: verRow } = await supabase
+      .from("company_contract_versions")
+      .select("terms_snapshot")
+      .eq("id", cvId)
+      .maybeSingle();
+    const raw = verRow?.terms_snapshot;
+    if (raw && typeof raw === "object" && !Array.isArray(raw) && Object.keys(raw as object).length > 0) {
+      termsSnapshot = raw as Record<string, unknown>;
+    }
+  }
 
   const personalLabel =
     profile.display_name?.trim() || user?.email?.split("@")[0]?.trim() || "User";
@@ -47,6 +68,7 @@ export default async function RentalCompanyHomePage() {
       {company ? (
         <RentalContractDetailsCard
           company={company}
+          termsSnapshot={termsSnapshot}
           hasPendingChange={!!pendingChange?.id || company.contract_status === "pending_renewal"}
           canRequestContractChange={
             profile.membership_role === "owner" || profile.membership_role === "admin"

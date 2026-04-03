@@ -1,7 +1,7 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
-import { useFormState, useFormStatus } from "react-dom";
+import { Fragment, useActionState, useCallback, useEffect, useState } from "react";
+import { useFormStatus } from "react-dom";
 import { signUpDriverAction, type ActionResult } from "@/app/actions/auth";
 import {
   MIN_DRIVER_AGE_YEARS,
@@ -240,7 +240,7 @@ export function SignUpForm() {
   const [step, setStep] = useState(1);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [state, formAction] = useFormState(signUpDriverAction, initial);
+  const [state, formAction] = useActionState(signUpDriverAction, initial);
 
   const setStepClearErrors = useCallback((n: number) => {
     setFieldErrors({});

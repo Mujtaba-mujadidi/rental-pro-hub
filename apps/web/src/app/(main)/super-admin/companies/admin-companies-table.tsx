@@ -15,7 +15,10 @@ import {
   deleteCompanyAction,
   sendCompanyPrimaryInviteAction,
 } from "@/app/actions/admin-companies";
-import { getAdminCompaniesPageAction } from "@/app/actions/admin-companies-list";
+import { sendCompanyContractForSignatureAction } from "@/app/actions/contract-signature";
+import { getAdminCompaniesPageAction, getAdminCompanyDetailAction } from "@/app/actions/admin-companies-list";
+import { AdminCompanyDetailDialog } from "@/app/(main)/super-admin/companies/admin-company-detail-dialog";
+import type { AdminCompanyDetailPayload } from "@/lib/admin/company-list-shared";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import type { AdminCompanyListRow } from "@/lib/admin/company-list-shared";
 import type { CompanyListStatusFilter } from "@/lib/admin/companies-query";
@@ -151,8 +154,14 @@ export function AdminCompaniesTable({
   const [inviteBusyId, setInviteBusyId] = useState<string | null>(null);
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
   const [contractBusyId, setContractBusyId] = useState<string | null>(null);
+  const [eSignBusyId, setESignBusyId] = useState<string | null>(null);
   const [inviteFeedback, setInviteFeedback] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<CompanyDeleteConfirmState>(null);
+  const [detailCompanyId, setDetailCompanyId] = useState<string | null>(null);
+  const [detailTitle, setDetailTitle] = useState("");
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailPayload, setDetailPayload] = useState<AdminCompanyDetailPayload | null>(null);
 
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState(25);
@@ -306,27 +315,6 @@ export function AdminCompaniesTable({
         cell: (info) => String(info.getValue() || "—"),
       },
       {
-        id: "registered_town",
-        accessorKey: "town",
-        header: ({ column }) => (
-          <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
-            Reg. office town
-            <SortGlyph state={column.getIsSorted()} />
-          </button>
-        ),
-      },
-      {
-        id: "registered_postcode",
-        accessorKey: "postcode",
-        header: ({ column }) => (
-          <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
-            Postcode
-            <SortGlyph state={column.getIsSorted()} />
-          </button>
-        ),
-        cell: (info) => <span className="whitespace-nowrap">{String(info.getValue() || "—")}</span>,
-      },
-      {
         id: "logo",
         accessorKey: "hasLogo",
         header: "Logo",
@@ -355,18 +343,24 @@ export function AdminCompaniesTable({
         header: "Contract",
         enableSorting: false,
         cell: (info) => {
-          const v = String(info.getValue() ?? "active").toLowerCase();
-          if (v === "pending_renewal") {
-            return (
-              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-950 dark:border-amber-900/45 dark:bg-amber-950/35 dark:text-amber-100">
-                Pending renewal
-              </span>
-            );
-          }
+          const r = info.row.original;
+          const v = String(r.contractStatus ?? "active").toLowerCase();
+          const ag = r.agreementContractStatus;
           return (
-            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-900 dark:border-emerald-900/45 dark:bg-emerald-950/35 dark:text-emerald-100">
-              Active
-            </span>
+            <div className="flex flex-col gap-1">
+              {v === "pending_renewal" ? (
+                <span className="w-fit rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-950 dark:border-amber-900/45 dark:bg-amber-950/35 dark:text-amber-100">
+                  Pending renewal
+                </span>
+              ) : (
+                <span className="w-fit rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-900 dark:border-emerald-900/45 dark:bg-emerald-950/35 dark:text-emerald-100">
+                  Account OK
+                </span>
+              )}
+              {ag ? (
+                <span className="text-[11px] capitalize text-slate-500 dark:text-slate-400">Agreement: {ag}</span>
+              ) : null}
+            </div>
           );
         },
       },
@@ -394,7 +388,8 @@ export function AdminCompaniesTable({
           const inviteBusy = inviteBusyId === r.id;
           const deleteBusy = deleteBusyId === r.id;
           const contractBusy = contractBusyId === r.id;
-          const busy = inviteBusy || deleteBusy || contractBusy;
+          const eSignBusy = eSignBusyId === r.id;
+          const busy = inviteBusy || deleteBusy || contractBusy || eSignBusy;
           return (
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
@@ -411,9 +406,53 @@ export function AdminCompaniesTable({
                   collisionPadding={12}
                   className={rowActionContentClass}
                 >
+                  <DropdownMenu.Item
+                    className={rowActionItemClass}
+                    disabled={busy}
+                    onSelect={() => {
+                      setDetailCompanyId(r.id);
+                      setDetailTitle(r.name?.trim() || "Company");
+                      setDetailLoading(true);
+                      setDetailError(null);
+                      setDetailPayload(null);
+                      void (async () => {
+                        const res = await getAdminCompanyDetailAction(r.id);
+                        setDetailLoading(false);
+                        if (!res.ok) {
+                          setDetailError(res.error);
+                          return;
+                        }
+                        setDetailPayload(res.payload);
+                      })();
+                    }}
+                  >
+                    View company details
+                  </DropdownMenu.Item>
                   <DropdownMenu.Item className={rowActionItemClass} disabled>
                     Last invite: {formatInviteSent(r.inviteLastSentAt)}
                   </DropdownMenu.Item>
+                  {r.agreementContractStatus === "draft" ? (
+                    <DropdownMenu.Item
+                      className={rowActionItemClass}
+                      disabled={busy}
+                      onSelect={() => {
+                        setInviteFeedback(null);
+                        setESignBusyId(r.id);
+                        void (async () => {
+                          const res = await sendCompanyContractForSignatureAction(r.id);
+                          setESignBusyId(null);
+                          if (!res.ok) {
+                            setInviteFeedback(res.error);
+                            return;
+                          }
+                          setInviteFeedback(`E-sign request sent for ${r.name || "company"}.`);
+                          onListChange?.();
+                        })();
+                      }}
+                    >
+                      {eSignBusy ? "Sending…" : "Send contract for e-sign (DocuSeal)"}
+                    </DropdownMenu.Item>
+                  ) : null}
                   {r.contractStatus === "pending_renewal" ? (
                     <DropdownMenu.Item
                       className={rowActionItemClass}
@@ -477,7 +516,7 @@ export function AdminCompaniesTable({
         },
       },
     ],
-    [inviteBusyId, deleteBusyId, contractBusyId, onListChange],
+    [inviteBusyId, deleteBusyId, contractBusyId, eSignBusyId, onListChange],
   );
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -627,7 +666,7 @@ export function AdminCompaniesTable({
         <div
           className={`overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 ${loading ? "opacity-60" : ""}`}
         >
-          <table className="w-full min-w-[1180px] border-collapse text-left text-sm">
+          <table className="w-full min-w-[980px] border-collapse text-left text-sm">
             <thead>
               {table.getHeaderGroups().map((hg) => (
                 <tr
@@ -696,6 +735,20 @@ export function AdminCompaniesTable({
           setConfirmDelete(null);
         }}
         onConfirm={onConfirmDelete}
+      />
+      <AdminCompanyDetailDialog
+        open={detailCompanyId !== null}
+        title={detailTitle ? `${detailTitle} — details` : "Company details"}
+        loading={detailLoading}
+        error={detailError}
+        payload={detailPayload}
+        onClose={() => {
+          setDetailCompanyId(null);
+          setDetailTitle("");
+          setDetailLoading(false);
+          setDetailError(null);
+          setDetailPayload(null);
+        }}
       />
     </div>
   );

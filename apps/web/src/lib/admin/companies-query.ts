@@ -20,8 +20,6 @@ const SORT_COLUMNS: Record<string, string> = {
   created_at: "created_at",
   name: "name",
   primary_contact_email: "primary_contact_email",
-  registered_town: "registered_town",
-  registered_postcode: "registered_postcode",
   status: "status",
 };
 
@@ -51,7 +49,10 @@ function mapRow(r: {
   contract_status: string | null;
   created_at: string | null;
   invite_last_sent_at: string | null;
+  company_contracts: { status: string } | { status: string }[] | null;
 }): AdminCompanyListRow {
+  const ccRaw = r.company_contracts;
+  const cc = Array.isArray(ccRaw) ? ccRaw[0] : ccRaw;
   return {
     id: r.id,
     name: r.name ?? "",
@@ -65,6 +66,7 @@ function mapRow(r: {
     postcode: r.registered_postcode,
     status: r.status ?? "active",
     contractStatus: r.contract_status,
+    agreementContractStatus: cc?.status ?? null,
     createdAt: r.created_at ?? "",
     hasLogo: r.logo_storage_path != null && r.logo_storage_path.length > 0,
     inviteLastSentAt: r.invite_last_sent_at,
@@ -91,7 +93,7 @@ export async function fetchCompaniesPage(params: FetchCompaniesPageParams): Prom
   let q = admin
     .from("companies")
     .select(
-      "id, name, legal_name, company_number, primary_contact_first_name, primary_contact_last_name, primary_contact_email, primary_contact_phone, registered_town, registered_postcode, logo_storage_path, status, contract_status, created_at, invite_last_sent_at",
+      "id, name, legal_name, company_number, primary_contact_first_name, primary_contact_last_name, primary_contact_email, primary_contact_phone, registered_town, registered_postcode, logo_storage_path, status, contract_status, created_at, invite_last_sent_at, company_contracts(status)",
       { count: "exact" },
     );
 
@@ -138,6 +140,7 @@ export async function fetchCompaniesPage(params: FetchCompaniesPageParams): Prom
         contract_status: string | null;
         created_at: string | null;
         invite_last_sent_at: string | null;
+        company_contracts: { status: string } | { status: string }[] | null;
       },
     ),
   );
