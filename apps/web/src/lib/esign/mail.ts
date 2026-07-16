@@ -1,4 +1,5 @@
-import dns from "node:dns";
+import dns from "node:dns/promises";
+import net from "node:net";
 import nodemailer from "nodemailer";
 
 export type SendMailInput = {
@@ -11,22 +12,6 @@ export type SendMailInput = {
 const SMTP_CONNECT_MS = 15_000;
 const SMTP_SOCKET_MS = 20_000;
 const SMTP_SEND_MS = 25_000;
-
-// Prefer A records process-wide (Railway often has no IPv6 egress to the public internet).
-try {
-  dns.setDefaultResultOrder("ipv4first");
-} catch {
-  /* older Node */
-}
-
-/** Force IPv4 only — Railway cannot reach Gmail over IPv6 (ENETUNREACH). */
-function ipv4Lookup(
-  hostname: string,
-  _options: unknown,
-  callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void,
-) {
-  dns.lookup(hostname, { family: 4 }, callback);
-}
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -44,6 +29,22 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
       },
     );
   });
+}
+
+/**
+ * Nodemailer 9 resolves A+AAAA and may pick IPv6. On Railway, public IPv6 egress
+ * often fails (ENETUNREACH … Local :::0). Bypass that by connecting to an A record.
+ */
+async function resolveSmtpIpv4(host: string): Promise<string> {
+  if (net.isIPv4(host)) return host;
+  if (net.isIPv6(host)) {
+    throw new Error(`SMTP host is IPv6-only (${host}); Railway needs an IPv4 SMTP endpoint.`);
+  }
+  const addresses = await dns.resolve4(host);
+  if (!addresses.length) {
+    throw new Error(`No IPv4 (A) records for SMTP host ${host}.`);
+  }
+  return addresses[0]!;
 }
 
 /**
@@ -69,17 +70,21 @@ export async function sendEsignMail(input: SendMailInput): Promise<{ ok: true } 
   }
 
   try {
-    // Cast: nodemailer types omit `lookup` / `family` on some versions; runtime SMTP transport supports both.
+    const ipv4 = await withTimeout(resolveSmtpIpv4(host), 10_000, "SMTP DNS (IPv4)");
+
     const transporter = nodemailer.createTransport({
-      host,
+      // Literal IPv4 skips nodemailer's dual-stack resolver (which can pick AAAA).
+      host: ipv4,
       port,
       secure: port === 465,
       requireTLS: port === 587,
       auth: { user, pass },
-      lookup: ipv4Lookup,
       connectionTimeout: SMTP_CONNECT_MS,
       greetingTimeout: SMTP_CONNECT_MS,
       socketTimeout: SMTP_SOCKET_MS,
+      // Keep TLS/SNI + cert validation tied to the real hostname, not the IP.
+      servername: host,
+      name: host,
       tls: {
         servername: host,
         minVersion: "TLSv1.2",
