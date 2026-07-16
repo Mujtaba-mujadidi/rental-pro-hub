@@ -63,7 +63,7 @@ export async function sendEsignMail(input: SendMailInput): Promise<{ ok: true } 
       connectionTimeout: SMTP_CONNECT_MS,
       greetingTimeout: SMTP_CONNECT_MS,
       socketTimeout: SMTP_SOCKET_MS,
-    });
+    } as nodemailer.TransportOptions);
 
     await withTimeout(
       transporter.sendMail({

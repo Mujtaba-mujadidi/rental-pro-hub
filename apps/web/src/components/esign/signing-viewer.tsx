@@ -7,6 +7,7 @@ import {
   verifyEsignOtpAction,
 } from "@/app/actions/esign";
 import { SignatureFieldInput } from "@/components/esign/signature-field-input";
+import { usePdfPages } from "@/components/esign/use-pdf-pages";
 import type { EsignFieldLayoutItem, EsignFieldType } from "@/lib/esign/types";
 import type { FieldValueMap } from "@/lib/esign/pdf-stamp";
 
@@ -97,9 +98,7 @@ export function GuidedSigningViewer({
   reviewHint?: string;
 }) {
   const ordered = sortFields(fields);
-  const [pageCount, setPageCount] = useState(0);
   const [pdfError, setPdfError] = useState<string | null>(null);
-  const [pdfReady, setPdfReady] = useState(false);
   const [started, setStarted] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [values, setValues] = useState<FieldValueMap>({});
@@ -108,43 +107,13 @@ export function GuidedSigningViewer({
   const scrollRef = useRef<HTMLDivElement>(null);
   const fieldEls = useRef<Record<string, HTMLDivElement | null>>({});
 
+  const { pageCount, ready: pdfReady } = usePdfPages(pdfUrl, "sign-page-", {
+    scale: 1.15,
+    onError: (message) => setPdfError(message),
+  });
+
   const current = started ? ordered[stepIndex] ?? null : null;
   const allFilled = ordered.length > 0 && ordered.every((f) => isFilled(f, values));
-
-  useEffect(() => {
-    let cancelled = false;
-    setPdfError(null);
-    (async () => {
-      try {
-        const pdfjs = await import("pdfjs-dist");
-        pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-          "pdfjs-dist/build/pdf.worker.min.mjs",
-          import.meta.url,
-        ).toString();
-        const doc = await pdfjs.getDocument({ url: pdfUrl }).promise;
-        if (cancelled) return;
-        setPageCount(doc.numPages);
-        for (let i = 1; i <= doc.numPages; i++) {
-          const page = await doc.getPage(i);
-          const viewport = page.getViewport({ scale: 1.35 });
-          const canvas = document.getElementById(`sign-page-${i}`) as HTMLCanvasElement | null;
-          if (!canvas) continue;
-          const ctx = canvas.getContext("2d");
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          if (ctx) {
-            await page.render({ canvasContext: ctx, viewport, canvas }).promise;
-          }
-        }
-        if (!cancelled) setPdfReady(true);
-      } catch (e) {
-        if (!cancelled) setPdfError(e instanceof Error ? e.message : "Could not load PDF.");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [pdfUrl]);
 
   const scrollToField = useCallback((fieldId: string) => {
     const el = fieldEls.current[fieldId];

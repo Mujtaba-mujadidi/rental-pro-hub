@@ -126,8 +126,8 @@ export function EsignDesignerClient({
         setRequiresOwner(res.requiresOwner);
         setFields(res.fields);
         setConfigured(true);
-        // Force PDF reload after regenerate (cache-bust)
-        setPdfCacheKey(Date.now());
+        // Only cache-bust when the PDF bytes actually changed
+        if (res.pdfRegenerated) setPdfCacheKey(Date.now());
         if (res.hasSavedOwnerSignature) {
           const saved = await getOwnerSavedSignatureAction();
           if (saved.ok) setSavedSig(saved.dataUrl);

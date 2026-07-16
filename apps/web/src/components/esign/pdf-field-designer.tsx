@@ -4,8 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { EsignFieldLayoutItem, EsignFieldType } from "@/lib/esign/types";
 import { ESIGN_OWNER_ROLE, ESIGN_RECIPIENT_ROLE } from "@/lib/esign/types";
 import { normalizeFieldRole } from "@/lib/esign/roles";
-
-type PageSize = { width: number; height: number };
+import { usePdfPages } from "@/components/esign/use-pdf-pages";
 
 type DragState =
   | {
@@ -93,9 +92,6 @@ export function PdfFieldDesigner({
   onLoadingChange?: (loading: boolean) => void;
 }) {
   const [fields, setFields] = useState<EsignFieldLayoutItem[]>(initialFields);
-  const [pageSizes, setPageSizes] = useState<PageSize[]>([]);
-  const [pageCount, setPageCount] = useState(0);
-  const [pdfLoading, setPdfLoading] = useState(true);
   const [tool, setTool] = useState<EsignFieldType | null>("signature");
   const [fieldParty, setFieldParty] = useState<typeof ESIGN_OWNER_ROLE | typeof ESIGN_RECIPIENT_ROLE>(
     ESIGN_RECIPIENT_ROLE,
@@ -109,6 +105,16 @@ export function PdfFieldDesigner({
   const dragRef = useRef<DragState | null>(null);
   const suppressClickRef = useRef(false);
 
+  const { pageCount, pageSizes, loading: pdfLoading } = usePdfPages(pdfUrl, "esign-page-", {
+    scale: 1.15,
+    onError: (message) => setError(message),
+  });
+
+  useEffect(() => {
+    onLoadingChange?.(pdfLoading);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- parent callback may be unstable
+  }, [pdfLoading]);
+
   useEffect(() => {
     setFields(initialFields);
   }, [initialFields]);
@@ -118,55 +124,6 @@ export function PdfFieldDesigner({
       setFieldParty(ESIGN_RECIPIENT_ROLE);
     }
   }, [allowOwnerFields, fieldParty]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setPdfLoading(true);
-    onLoadingChange?.(true);
-    (async () => {
-      try {
-        const pdfjs = await import("pdfjs-dist");
-        pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-          "pdfjs-dist/build/pdf.worker.min.mjs",
-          import.meta.url,
-        ).toString();
-        const doc = await pdfjs.getDocument({ url: pdfUrl }).promise;
-        if (cancelled) return;
-        setPageCount(doc.numPages);
-        const sizes: PageSize[] = [];
-        for (let i = 1; i <= doc.numPages; i++) {
-          const page = await doc.getPage(i);
-          const viewport = page.getViewport({ scale: 1.25 });
-          sizes.push({ width: viewport.width, height: viewport.height });
-          const canvas = document.getElementById(`esign-page-${i}`) as HTMLCanvasElement | null;
-          if (canvas) {
-            const ctx = canvas.getContext("2d");
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
-            if (ctx) {
-              await page.render({ canvasContext: ctx, viewport, canvas }).promise;
-            }
-          }
-        }
-        if (!cancelled) {
-          setPageSizes(sizes);
-          setPdfLoading(false);
-          onLoadingChange?.(false);
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Could not load PDF.");
-          setPdfLoading(false);
-          onLoadingChange?.(false);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // onLoadingChange intentionally omitted — parent may pass unstable callback
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pdfUrl]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -375,12 +332,6 @@ export function PdfFieldDesigner({
 
   return (
     <div className="relative flex h-[calc(100dvh-7.5rem)] min-h-[32rem] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
-      {pdfLoading ? (
-        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-white/90 dark:bg-slate-950/90">
-          <span className="h-9 w-9 animate-spin rounded-full border-[3px] border-slate-300 border-t-rph-rail" />
-          <p className="text-sm font-medium text-slate-600 dark:text-slate-300">Loading contract PDF…</p>
-        </div>
-      ) : null}
       {sendPhase === "sending" || sendPhase === "success" || sendPhase === "error" ? (
         <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-4 bg-white/95 px-6 dark:bg-slate-950/95">
           {sendPhase === "sending" ? (
@@ -460,14 +411,20 @@ export function PdfFieldDesigner({
           {ok && sendPhase === "idle" ? (
             <span className="max-w-xs truncate text-xs text-emerald-700 dark:text-emerald-300">{ok}</span>
           ) : null}
-          <button
-            type="button"
-            disabled={!canEdit}
-            onClick={() => void handleSave()}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
-          >
-            Save layout
-          </button>
+          {disabled ? (
+            <span className="text-xs text-slate-500" title="Field positions are locked after the owner signs">
+              Layout locked
+            </span>
+          ) : (
+            <button
+              type="button"
+              disabled={!canEdit}
+              onClick={() => void handleSave()}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+            >
+              {busy && sendPhase === "idle" ? "Saving…" : "Save layout"}
+            </button>
+          )}
           <button
             type="button"
             disabled={!canClickSend}
@@ -482,7 +439,13 @@ export function PdfFieldDesigner({
 
       <div className="flex min-h-0 flex-1">
         {/* Document canvas */}
-        <div className="min-w-0 flex-1 overflow-auto bg-slate-300/80 dark:bg-slate-800">
+        <div className="relative min-w-0 flex-1 overflow-auto bg-slate-300/80 dark:bg-slate-800">
+          {pdfLoading ? (
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-slate-300/90 dark:bg-slate-800/90">
+              <span className="h-9 w-9 animate-spin rounded-full border-[3px] border-slate-300 border-t-rph-rail" />
+              <p className="text-sm font-medium text-slate-600 dark:text-slate-300">Loading contract PDF…</p>
+            </div>
+          ) : null}
           <div className="mx-auto flex w-full max-w-4xl flex-col items-center gap-8 px-4 py-8 sm:px-8">
             {Array.from({ length: Math.max(pageCount, 1) }, (_, i) => i + 1).map((page) => (
               <div key={page} className="w-full max-w-[720px]">

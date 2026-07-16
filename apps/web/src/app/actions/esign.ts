@@ -17,7 +17,7 @@ import {
   sendEnvelope,
   verifyRecipientOtp,
 } from "@/lib/esign/envelope";
-import { fieldsForRole } from "@/lib/esign/roles";
+import { fieldsForRole, normalizeFieldRole } from "@/lib/esign/roles";
 import {
   getSavedSignatureForEmail,
   getSavedSignatureForUser,
@@ -141,6 +141,7 @@ export async function configureEsignSignatureModeAction(
       requiresOwner: boolean;
       hasSavedOwnerSignature: boolean;
       fields: EsignFieldLayoutItem[];
+      pdfRegenerated: boolean;
     }
   | { ok: false; error: string }
 > {
@@ -151,7 +152,7 @@ export async function configureEsignSignatureModeAction(
 
   const { data: env, error } = await admin
     .from("esign_envelopes")
-    .select("id, status, owner_signed_at")
+    .select("id, status, owner_signed_at, suggested_field_layout")
     .eq("id", id)
     .maybeSingle();
   if (error || !env?.id) return { ok: false, error: error?.message ?? "Envelope not found." };
@@ -159,11 +160,25 @@ export async function configureEsignSignatureModeAction(
     return { ok: false, error: "Signature mode can no longer be changed." };
   }
 
-  const regenerated = await regenerateEnvelopePdfForSignatureMode(admin, id, mode);
-  if (!regenerated.ok) return regenerated;
-
   const requiresOwner = mode === "owner_and_recipient";
-  const fields = regenerated.suggestedFields;
+  const existingSuggested = Array.isArray(env.suggested_field_layout)
+    ? (env.suggested_field_layout as EsignFieldLayoutItem[])
+    : [];
+  const suggestedHasOwner = existingSuggested.some(
+    (f) => normalizeFieldRole(f.role) === ESIGN_OWNER_ROLE && f.type === "signature",
+  );
+
+  // Prepare already builds owner+recipient PDF — skip a second full regenerate when it matches.
+  let fields: EsignFieldLayoutItem[];
+  let pdfRegenerated = false;
+  if (existingSuggested.length > 0 && suggestedHasOwner === requiresOwner) {
+    fields = existingSuggested;
+  } else {
+    const regenerated = await regenerateEnvelopePdfForSignatureMode(admin, id, mode);
+    if (!regenerated.ok) return regenerated;
+    fields = regenerated.suggestedFields;
+    pdfRegenerated = true;
+  }
 
   if (!fields.length) {
     return { ok: false, error: "No signature placeholders available on this contract PDF." };
@@ -186,6 +201,7 @@ export async function configureEsignSignatureModeAction(
     requiresOwner,
     hasSavedOwnerSignature: saved.ok,
     fields,
+    pdfRegenerated,
   };
 }
 
