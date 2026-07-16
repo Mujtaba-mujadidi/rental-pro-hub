@@ -1,7 +1,8 @@
 /** Shared env for browser, server, and middleware. */
 export function resolveSupabasePublishableEnv(): { url: string; anonKey: string } {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  // Dynamic access avoids some hosts inlining empty values from build time.
+  const url = process.env["NEXT_PUBLIC_SUPABASE_URL"]?.trim();
+  const anonKey = process.env["NEXT_PUBLIC_SUPABASE_ANON_KEY"]?.trim();
   if (!url || !anonKey) {
     throw new Error(
       "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY",
