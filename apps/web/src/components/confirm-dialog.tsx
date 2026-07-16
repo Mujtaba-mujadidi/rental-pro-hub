@@ -80,7 +80,17 @@ export function ConfirmDialog({
             {cancelLabel}
           </button>
           <button type="button" className={confirmClass} disabled={pending} onClick={() => void onConfirm()}>
-            {pending ? "…" : confirmLabel}
+            {pending ? (
+              <span className="inline-flex items-center gap-2">
+                <span
+                  className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                  aria-hidden
+                />
+                Please wait…
+              </span>
+            ) : (
+              confirmLabel
+            )}
           </button>
         </div>
       </div>

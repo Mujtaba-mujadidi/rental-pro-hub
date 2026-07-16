@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 import { resolveSupabasePublishableEnv } from "@/lib/supabase/env";
 import { resolveAppHomePath } from "@/lib/auth/driver-redirect";
+import { getRentalSessionLifecycle, rentalPathRequiresRedirect } from "@/lib/auth/rental-lifecycle";
 
 const protectedPrefixes = ["/super-admin", "/driver", "/rental"];
 
@@ -67,9 +68,20 @@ export async function updateSession(request: NextRequest) {
 
   if (user && path.startsWith("/driver/")) {
     const home = await resolveAppHomePath(supabase, user.id, user.email);
-    if (home === "/rental") {
+    if (home.startsWith("/rental")) {
       const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = "/rental";
+      redirectUrl.pathname = home;
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
+  }
+
+  if (user && path.startsWith("/rental")) {
+    const life = await getRentalSessionLifecycle(supabase, user.id, user.email);
+    const target = rentalPathRequiresRedirect(path, life);
+    if (target) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = target;
       redirectUrl.search = "";
       return NextResponse.redirect(redirectUrl);
     }

@@ -10,15 +10,20 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   applyLatestCompanyContractChangeAction,
-  deleteCompanyAction,
+  reactivateCompanyAction,
   sendCompanyPrimaryInviteAction,
+  sendPrimaryContactPasswordResetAction,
+  startCompanyOffboardingAction,
 } from "@/app/actions/admin-companies";
-import { sendCompanyContractForSignatureAction } from "@/app/actions/contract-signature";
+import { prepareCompanyContractForEsignAction } from "@/app/actions/contract-signature";
+import { getCompanySignedEsignEnvelopeAction } from "@/app/actions/esign";
 import { getAdminCompaniesPageAction, getAdminCompanyDetailAction } from "@/app/actions/admin-companies-list";
 import { AdminCompanyDetailDialog } from "@/app/(main)/super-admin/companies/admin-company-detail-dialog";
 import type { AdminCompanyDetailPayload } from "@/lib/admin/company-list-shared";
+import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import type { AdminCompanyListRow } from "@/lib/admin/company-list-shared";
 import type { CompanyListStatusFilter } from "@/lib/admin/companies-query";
@@ -42,7 +47,75 @@ const rowActionItemClass =
 
 const rowActionDeleteClass = `${rowActionItemClass} text-red-700 dark:text-red-300`;
 
+/** Strong red row action (force delete during offboarding). */
+const rowActionForceDeleteClass =
+  "flex cursor-default select-none items-center px-3 py-2 text-sm font-semibold text-red-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-red-100 data-[highlighted]:text-red-900 dark:text-red-300 dark:data-[highlighted]:bg-red-950/55 dark:data-[highlighted]:text-red-50";
+
 const PAGE_SIZES = [10, 25, 50, 100] as const;
+
+async function streamCompanyPermanentDelete(
+  companyId: string,
+  variant: "offboarding_force" | "access_blocked",
+  onStep: (message: string) => void,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await fetch("/api/super-admin/company-permanent-delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ companyId, variant }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText);
+    return { ok: false, error: errText.trim() || `Request failed (${res.status})` };
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) {
+    return { ok: false, error: "No response stream." };
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let streamError: string | null = null;
+  let sawDone = false;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t) continue;
+      let msg: { step?: string; error?: string; done?: boolean };
+      try {
+        msg = JSON.parse(t) as { step?: string; error?: string; done?: boolean };
+      } catch {
+        continue;
+      }
+      if (typeof msg.error === "string") streamError = msg.error;
+      if (typeof msg.step === "string") onStep(msg.step);
+      if (msg.done === true) sawDone = true;
+    }
+  }
+
+  const tail = buffer.trim();
+  if (tail) {
+    try {
+      const msg = JSON.parse(tail) as { step?: string; error?: string; done?: boolean };
+      if (typeof msg.error === "string") streamError = msg.error;
+      if (typeof msg.step === "string") onStep(msg.step);
+      if (msg.done === true) sawDone = true;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (streamError) return { ok: false, error: streamError };
+  if (sawDone) return { ok: true };
+  return { ok: false, error: "Delete did not complete. Check the network response and server logs." };
+}
 
 const selectTriggerClass =
   "flex h-10 w-full min-w-[8.5rem] cursor-pointer items-center justify-between gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-900 shadow-sm outline-none transition-colors hover:border-slate-400 hover:bg-slate-50/80 focus:border-rph-rail focus:ring-2 focus:ring-rph-rail/20 data-[state=open]:border-rph-rail/70 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800/80 dark:focus:border-rph-rail-softer dark:focus:ring-rph-rail-soft/30 dark:data-[state=open]:border-rph-rail-softer";
@@ -91,7 +164,12 @@ const STATUS_LABELS: Record<CompanyListStatusFilter, string> = {
 const toolbarFieldLabel =
   "mb-1.5 block text-sm font-semibold tracking-tight text-slate-800 dark:text-slate-200";
 
-type CompanyDeleteConfirmState = { companyId: string; label: string } | null;
+type LifecycleConfirm =
+  | { mode: "offboarding"; companyId: string; label: string }
+  | { mode: "reactivate"; companyId: string; label: string }
+  | { mode: "force_delete"; companyId: string; label: string }
+  | { mode: "purge"; companyId: string; label: string }
+  | null;
 
 function formatInviteSent(iso: string | null): string {
   if (!iso) return "—";
@@ -109,6 +187,28 @@ function formatRegisteredAt(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function deletionPhaseBadge(phase: AdminCompanyListRow["deletionPhase"]) {
+  if (phase === "offboarding") {
+    return (
+      <span className="w-fit rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-950 dark:border-amber-900/45 dark:bg-amber-950/35 dark:text-amber-100">
+        Offboarding
+      </span>
+    );
+  }
+  if (phase === "access_blocked") {
+    return (
+      <span className="w-fit rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-950 dark:border-red-900/45 dark:bg-red-950/35 dark:text-red-100">
+        Access blocked
+      </span>
+    );
+  }
+  return (
+    <span className="w-fit rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300">
+      Active
+    </span>
+  );
 }
 
 function statusBadge(status: string) {
@@ -147,16 +247,30 @@ export function AdminCompaniesTable({
   listVersion?: number;
   onListChange?: () => void;
 }) {
+  const router = useRouter();
   const [rows, setRows] = useState<AdminCompanyListRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [inviteBusyId, setInviteBusyId] = useState<string | null>(null);
-  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
+  const [lifecycleBusyId, setLifecycleBusyId] = useState<string | null>(null);
   const [contractBusyId, setContractBusyId] = useState<string | null>(null);
   const [eSignBusyId, setESignBusyId] = useState<string | null>(null);
+  const [eSignOverlay, setESignOverlay] = useState<{ title: string; detail: string } | null>(null);
+  const [actionOverlay, setActionOverlay] = useState<ActionStatusOverlayState | null>(null);
   const [inviteFeedback, setInviteFeedback] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<CompanyDeleteConfirmState>(null);
+  const [earlyInviteConfirm, setEarlyInviteConfirm] = useState<{
+    companyId: string;
+    label: string;
+    emailLabel: string;
+  } | null>(null);
+  const [lifecycleConfirm, setLifecycleConfirm] = useState<LifecycleConfirm>(null);
+  const [purgeOverlay, setPurgeOverlay] = useState<{
+    title: string;
+    lines: string[];
+    error: string | null;
+    pending: boolean;
+  } | null>(null);
   const [detailCompanyId, setDetailCompanyId] = useState<string | null>(null);
   const [detailTitle, setDetailTitle] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
@@ -221,25 +335,136 @@ export function AdminCompaniesTable({
     };
   }, [load, listVersion]);
 
-  const onConfirmDelete = useCallback(async () => {
-    const ctx = confirmDelete;
-    if (!ctx) return;
-    setInviteFeedback(null);
-    setDeleteBusyId(ctx.companyId);
-    try {
-      const res = await deleteCompanyAction(ctx.companyId);
+  const finishActionOverlay = useCallback((next: ActionStatusOverlayState, refresh?: boolean) => {
+    setActionOverlay(next);
+    if (next.phase === "success") {
+      if (refresh) onListChange?.();
+      window.setTimeout(() => setActionOverlay(null), 2200);
+    }
+  }, [onListChange]);
+
+  const doPrimaryInvite = useCallback(
+    async (companyId: string, emailLabel: string) => {
+      setInviteFeedback(null);
+      setInviteBusyId(companyId);
+      setActionOverlay({
+        phase: "pending",
+        title: "Sending invite…",
+        detail: `Emailing ${emailLabel}. Please wait.`,
+      });
+      const res = await sendCompanyPrimaryInviteAction(companyId);
+      setInviteBusyId(null);
       if (!res.ok) {
-        setInviteFeedback(res.error);
+        finishActionOverlay({
+          phase: "error",
+          title: "Invite failed",
+          detail: res.error,
+        });
         return;
       }
-      const displayLabel = ctx.label === "this company" ? ctx.label : `"${ctx.label}"`;
-      setInviteFeedback(`Deleted ${displayLabel}.`);
-      onListChange?.();
+      finishActionOverlay(
+        {
+          phase: "success",
+          title: "Invite sent",
+          detail: `An invite email was sent to ${emailLabel}.`,
+        },
+        true,
+      );
+    },
+    [finishActionOverlay],
+  );
+
+  const doPasswordReset = useCallback(
+    async (companyId: string, emailLabel: string) => {
+      setInviteFeedback(null);
+      setInviteBusyId(companyId);
+      setActionOverlay({
+        phase: "pending",
+        title: "Sending password reset…",
+        detail: `Emailing a reset link to ${emailLabel}. Please wait.`,
+      });
+      const res = await sendPrimaryContactPasswordResetAction(companyId);
+      setInviteBusyId(null);
+      if (!res.ok) {
+        finishActionOverlay({
+          phase: "error",
+          title: "Password reset failed",
+          detail: res.error,
+        });
+        return;
+      }
+      finishActionOverlay(
+        {
+          phase: "success",
+          title: "Password reset email sent",
+          detail: `A reset link was sent to ${emailLabel}.`,
+        },
+        true,
+      );
+    },
+    [finishActionOverlay],
+  );
+
+  const onConfirmLifecycle = useCallback(async () => {
+    const ctx = lifecycleConfirm;
+    if (!ctx) return;
+    setInviteFeedback(null);
+    setLifecycleBusyId(ctx.companyId);
+    try {
+      if (ctx.mode === "offboarding") {
+        const res = await startCompanyOffboardingAction(ctx.companyId);
+        if (!res.ok) {
+          setInviteFeedback(res.error);
+          return;
+        }
+        const displayLabel = ctx.label === "this company" ? ctx.label : `"${ctx.label}"`;
+        setInviteFeedback(`Offboarding started for ${displayLabel}.`);
+        onListChange?.();
+        return;
+      }
+      if (ctx.mode === "reactivate") {
+        const res = await reactivateCompanyAction(ctx.companyId);
+        if (!res.ok) {
+          setInviteFeedback(res.error);
+          return;
+        }
+        const displayLabel = ctx.label === "this company" ? ctx.label : `"${ctx.label}"`;
+        setInviteFeedback(`Reactivated ${displayLabel}.`);
+        onListChange?.();
+        return;
+      }
+      if (ctx.mode === "force_delete" || ctx.mode === "purge") {
+        const variant = ctx.mode === "force_delete" ? "offboarding_force" : "access_blocked";
+        const displayLabel = ctx.label === "this company" ? ctx.label : `"${ctx.label}"`;
+        const title =
+          ctx.mode === "force_delete" ? `Force deleting ${displayLabel}` : `Permanently deleting ${displayLabel}`;
+        setLifecycleConfirm(null);
+        setPurgeOverlay({ title, lines: [], error: null, pending: true });
+        const lines: string[] = [];
+        const res = await streamCompanyPermanentDelete(ctx.companyId, variant, (step) => {
+          lines.push(step);
+          setPurgeOverlay((prev) => (prev ? { ...prev, lines: [...lines] } : null));
+        });
+        if (!res.ok) {
+          setPurgeOverlay({ title, lines, error: res.error, pending: false });
+          setInviteFeedback(res.error);
+          return;
+        }
+        setPurgeOverlay({ title, lines, error: null, pending: false });
+        setInviteFeedback(
+          ctx.mode === "force_delete"
+            ? `Force deleted ${displayLabel} (retention skipped).`
+            : `Permanently deleted ${displayLabel}.`,
+        );
+        onListChange?.();
+        window.setTimeout(() => setPurgeOverlay(null), 900);
+        return;
+      }
     } finally {
-      setDeleteBusyId(null);
-      setConfirmDelete(null);
+      setLifecycleBusyId(null);
+      setLifecycleConfirm(null);
     }
-  }, [confirmDelete, onListChange]);
+  }, [lifecycleConfirm, onListChange]);
 
   const columns = useMemo<ColumnDef<AdminCompanyListRow>[]>(
     () => [
@@ -344,21 +569,57 @@ export function AdminCompaniesTable({
         enableSorting: false,
         cell: (info) => {
           const r = info.row.original;
-          const v = String(r.contractStatus ?? "active").toLowerCase();
-          const ag = r.agreementContractStatus;
+          const account = String(r.contractStatus ?? "").toLowerCase();
+          const ag = (r.agreementContractStatus ?? "").toLowerCase();
+
+          let agreementLabel = "No agreement";
+          let agreementClass =
+            "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300";
+          if (ag === "active") {
+            agreementLabel = "Contract signed";
+            agreementClass =
+              "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/45 dark:bg-emerald-950/35 dark:text-emerald-100";
+          } else if (ag === "sent_for_signature") {
+            agreementLabel = "Awaiting signature";
+            agreementClass =
+              "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/45 dark:bg-amber-950/35 dark:text-amber-100";
+          } else if (ag === "draft") {
+            agreementLabel = "Pending e-sign";
+            agreementClass =
+              "border-sky-200 bg-sky-50 text-sky-950 dark:border-sky-900/45 dark:bg-sky-950/35 dark:text-sky-100";
+          } else if (ag) {
+            agreementLabel = ag.replaceAll("_", " ");
+            agreementClass =
+              "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300";
+          }
+
           return (
             <div className="flex flex-col gap-1">
-              {v === "pending_renewal" ? (
-                <span className="w-fit rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-950 dark:border-amber-900/45 dark:bg-amber-950/35 dark:text-amber-100">
-                  Pending renewal
+              <span className={`w-fit rounded-full border px-2 py-0.5 text-xs font-medium capitalize ${agreementClass}`}>
+                {agreementLabel}
+              </span>
+              {account === "pending_renewal" ? (
+                <span className="w-fit rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-950 dark:border-amber-900/45 dark:bg-amber-950/35 dark:text-amber-100">
+                  Renewal pending
                 </span>
-              ) : (
-                <span className="w-fit rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-900 dark:border-emerald-900/45 dark:bg-emerald-950/35 dark:text-emerald-100">
-                  Account OK
+              ) : null}
+            </div>
+          );
+        },
+      },
+      {
+        id: "lifecycle",
+        header: "Lifecycle",
+        enableSorting: false,
+        cell: (info) => {
+          const r = info.row.original;
+          return (
+            <div className="flex flex-col gap-1">
+              {deletionPhaseBadge(r.deletionPhase)}
+              {r.deletionPhase === "offboarding" && r.offboardingEndsAt ? (
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Until {formatRegisteredAt(r.offboardingEndsAt)}
                 </span>
-              )}
-              {ag ? (
-                <span className="text-[11px] capitalize text-slate-500 dark:text-slate-400">Agreement: {ag}</span>
               ) : null}
             </div>
           );
@@ -386,10 +647,11 @@ export function AdminCompaniesTable({
         cell: (info) => {
           const r = info.row.original;
           const inviteBusy = inviteBusyId === r.id;
-          const deleteBusy = deleteBusyId === r.id;
+          const lifecycleBusy = lifecycleBusyId === r.id;
           const contractBusy = contractBusyId === r.id;
           const eSignBusy = eSignBusyId === r.id;
-          const busy = inviteBusy || deleteBusy || contractBusy || eSignBusy;
+          const busy = inviteBusy || lifecycleBusy || contractBusy || eSignBusy;
+          const lifecycleActive = r.deletionPhase === "active";
           return (
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
@@ -431,84 +693,211 @@ export function AdminCompaniesTable({
                   <DropdownMenu.Item className={rowActionItemClass} disabled>
                     Last invite: {formatInviteSent(r.inviteLastSentAt)}
                   </DropdownMenu.Item>
-                  {r.agreementContractStatus === "draft" ? (
+                  {r.agreementContractStatus === "draft" && lifecycleActive ? (
                     <DropdownMenu.Item
                       className={rowActionItemClass}
                       disabled={busy}
                       onSelect={() => {
                         setInviteFeedback(null);
                         setESignBusyId(r.id);
+                        setESignOverlay({
+                          title: "Preparing e-signature",
+                          detail: "Generating the contract PDF and opening the designer…",
+                        });
                         void (async () => {
-                          const res = await sendCompanyContractForSignatureAction(r.id);
-                          setESignBusyId(null);
+                          const res = await prepareCompanyContractForEsignAction(r.id);
                           if (!res.ok) {
+                            setESignBusyId(null);
+                            setESignOverlay(null);
                             setInviteFeedback(res.error);
                             return;
                           }
-                          setInviteFeedback(`E-sign request sent for ${r.name || "company"}.`);
-                          onListChange?.();
+                          router.push(`/super-admin/esign/${res.envelopeId}`);
+                          // Keep overlay until navigation; clear shortly after push
+                          window.setTimeout(() => {
+                            setESignBusyId(null);
+                            setESignOverlay(null);
+                          }, 800);
                         })();
                       }}
                     >
-                      {eSignBusy ? "Sending…" : "Send contract for e-sign (DocuSeal)"}
+                      {eSignBusy ? "Preparing…" : "Prepare contract for e-sign"}
                     </DropdownMenu.Item>
                   ) : null}
-                  {r.contractStatus === "pending_renewal" ? (
+                  {r.agreementContractStatus === "active" ? (
+                    <DropdownMenu.Item
+                      className={rowActionItemClass}
+                      disabled={busy}
+                      onSelect={() => {
+                        setInviteFeedback(null);
+                        setESignBusyId(r.id);
+                        setESignOverlay({
+                          title: "Opening signed contract",
+                          detail: "Loading the signed PDF…",
+                        });
+                        void (async () => {
+                          const res = await getCompanySignedEsignEnvelopeAction(r.id);
+                          if (!res.ok) {
+                            setESignBusyId(null);
+                            setESignOverlay(null);
+                            setInviteFeedback(res.error);
+                            return;
+                          }
+                          router.push(`/super-admin/esign/${res.envelopeId}`);
+                          window.setTimeout(() => {
+                            setESignBusyId(null);
+                            setESignOverlay(null);
+                          }, 800);
+                        })();
+                      }}
+                    >
+                      {eSignBusy ? "Opening…" : "View signed contract"}
+                    </DropdownMenu.Item>
+                  ) : null}
+                  {r.contractStatus === "pending_renewal" && lifecycleActive ? (
                     <DropdownMenu.Item
                       className={rowActionItemClass}
                       disabled={busy}
                       onSelect={() => {
                         setInviteFeedback(null);
                         setContractBusyId(r.id);
+                        setActionOverlay({
+                          phase: "pending",
+                          title: "Applying contract change…",
+                          detail: "Updating the company agreement. Please wait.",
+                        });
                         void (async () => {
                           const res = await applyLatestCompanyContractChangeAction(r.id);
                           setContractBusyId(null);
                           if (!res.ok) {
-                            setInviteFeedback(res.error);
+                            finishActionOverlay({
+                              phase: "error",
+                              title: "Could not apply contract change",
+                              detail: res.error,
+                            });
                             return;
                           }
-                          setInviteFeedback(`Contract change applied for ${r.name || "company"}.`);
-                          onListChange?.();
+                          finishActionOverlay(
+                            {
+                              phase: "success",
+                              title: "Contract updated",
+                              detail: `Contract change applied for ${r.name || "company"}.`,
+                            },
+                            true,
+                          );
                         })();
                       }}
                     >
                       {contractBusy ? "Applying…" : "Mark contract signed"}
                     </DropdownMenu.Item>
                   ) : null}
-                  <DropdownMenu.Item
-                    className={rowActionItemClass}
-                    disabled={busy || !r.email}
-                    title={!r.email ? "No email on file" : undefined}
-                    onSelect={() => {
-                      setInviteFeedback(null);
-                      setInviteBusyId(r.id);
-                      void (async () => {
-                        const res = await sendCompanyPrimaryInviteAction(r.id);
-                        setInviteBusyId(null);
-                        if (!res.ok) {
-                          setInviteFeedback(res.error);
+                  {r.primaryContactHasSignedIn ? (
+                    <DropdownMenu.Item
+                      className={rowActionItemClass}
+                      disabled={busy || !r.email || !lifecycleActive}
+                      title={
+                        !lifecycleActive
+                          ? "Not available during offboarding"
+                          : !r.email
+                            ? "No email on file"
+                            : undefined
+                      }
+                      onSelect={() => {
+                        void doPasswordReset(r.id, r.email ?? "primary contact");
+                      }}
+                    >
+                      {inviteBusy ? "Sending…" : "Reset password"}
+                    </DropdownMenu.Item>
+                  ) : (
+                    <DropdownMenu.Item
+                      className={rowActionItemClass}
+                      disabled={busy || !r.email || !lifecycleActive}
+                      title={
+                        !lifecycleActive
+                          ? "Not available during offboarding"
+                          : !r.email
+                            ? "No email on file"
+                            : r.agreementContractStatus !== "active"
+                              ? "Standard: invite after contract is active; confirms if used early"
+                              : undefined
+                      }
+                      onSelect={() => {
+                        const emailLabel = r.email ?? "primary contact";
+                        if (lifecycleActive && r.email && r.agreementContractStatus !== "active") {
+                          setEarlyInviteConfirm({
+                            companyId: r.id,
+                            label: r.name?.trim() || "this company",
+                            emailLabel,
+                          });
                           return;
                         }
-                        setInviteFeedback(`Invite sent to ${r.email ?? "primary contact"}.`);
-                        onListChange?.();
-                      })();
-                    }}
-                  >
-                    {inviteBusy ? "Sending…" : r.inviteLastSentAt ? "Resend invite" : "Send invite"}
-                  </DropdownMenu.Item>
+                        void doPrimaryInvite(r.id, emailLabel);
+                      }}
+                    >
+                      {inviteBusy ? "Sending…" : r.inviteLastSentAt ? "Resend invite" : "Send invite"}
+                    </DropdownMenu.Item>
+                  )}
                   <DropdownMenu.Separator className="my-1 h-px bg-slate-200 dark:bg-slate-700" />
-                  <DropdownMenu.Item
-                    className={rowActionDeleteClass}
-                    disabled={busy}
-                    onSelect={() => {
-                      setConfirmDelete({
-                        companyId: r.id,
-                        label: r.name?.trim() || "this company",
-                      });
-                    }}
-                  >
-                    {deleteBusy ? "Deleting…" : "Delete company"}
-                  </DropdownMenu.Item>
+                  {lifecycleActive ? (
+                    <DropdownMenu.Item
+                      className={rowActionDeleteClass}
+                      disabled={busy}
+                      onSelect={() => {
+                        setLifecycleConfirm({
+                          mode: "offboarding",
+                          companyId: r.id,
+                          label: r.name?.trim() || "this company",
+                        });
+                      }}
+                    >
+                      Start offboarding (6-month window)
+                    </DropdownMenu.Item>
+                  ) : null}
+                  {r.deletionPhase === "offboarding" || r.deletionPhase === "access_blocked" ? (
+                    <DropdownMenu.Item
+                      className={rowActionItemClass}
+                      disabled={busy}
+                      onSelect={() => {
+                        setLifecycleConfirm({
+                          mode: "reactivate",
+                          companyId: r.id,
+                          label: r.name?.trim() || "this company",
+                        });
+                      }}
+                    >
+                      Reactivate company
+                    </DropdownMenu.Item>
+                  ) : null}
+                  {r.deletionPhase === "offboarding" ? (
+                    <DropdownMenu.Item
+                      className={rowActionForceDeleteClass}
+                      disabled={busy}
+                      onSelect={() => {
+                        setLifecycleConfirm({
+                          mode: "force_delete",
+                          companyId: r.id,
+                          label: r.name?.trim() || "this company",
+                        });
+                      }}
+                    >
+                      Force delete now (skip retention wait)
+                    </DropdownMenu.Item>
+                  ) : null}
+                  {r.deletionPhase === "access_blocked" ? (
+                    <DropdownMenu.Item
+                      className={rowActionDeleteClass}
+                      disabled={busy}
+                      onSelect={() => {
+                        setLifecycleConfirm({
+                          mode: "purge",
+                          companyId: r.id,
+                          label: r.name?.trim() || "this company",
+                        });
+                      }}
+                    >
+                      Permanently delete company
+                    </DropdownMenu.Item>
+                  ) : null}
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>
             </DropdownMenu.Root>
@@ -516,7 +905,7 @@ export function AdminCompaniesTable({
         },
       },
     ],
-    [inviteBusyId, deleteBusyId, contractBusyId, eSignBusyId, onListChange],
+    [inviteBusyId, lifecycleBusyId, contractBusyId, eSignBusyId, onListChange, doPrimaryInvite, doPasswordReset, finishActionOverlay],
   );
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -542,17 +931,120 @@ export function AdminCompaniesTable({
 
   const fromRow = total === 0 ? 0 : pageIndex * pageSize + 1;
   const toRow = Math.min((pageIndex + 1) * pageSize, total);
-  const confirmDeleteLabel = confirmDelete
-    ? confirmDelete.label === "this company"
-      ? confirmDelete.label
-      : `"${confirmDelete.label}"`
-    : "this company";
+  const lc = lifecycleConfirm;
+  const lcDisplayLabel = lc ? (lc.label === "this company" ? lc.label : `"${lc.label}"`) : "this company";
+
+  const lifecycleConfirmTitle =
+    lc?.mode === "offboarding"
+      ? "Start company offboarding?"
+      : lc?.mode === "reactivate"
+        ? "Reactivate company?"
+        : lc?.mode === "force_delete"
+          ? "Force delete tenant now?"
+          : lc?.mode === "purge"
+            ? "Permanently delete company?"
+            : "";
+
+  const lifecycleConfirmDescription =
+    lc?.mode === "offboarding"
+      ? `Start offboarding for ${lcDisplayLabel}? A full data snapshot is archived, the contract is terminated, and rental users get a 6-month window with export-only access. After that, access is blocked until you purge or reactivate.`
+      : lc?.mode === "reactivate"
+        ? `Reactivate ${lcDisplayLabel}? Offboarding state is cleared, onboarding is reset, and the agreement returns to draft for a new contract flow.`
+        : lc?.mode === "force_delete"
+          ? `Force delete ${lcDisplayLabel} now without waiting for the retention window? Tenant Auth users are removed and the company row is deleted (related data cascades). The archive from offboarding start is kept. This cannot be undone.`
+          : lc?.mode === "purge"
+            ? `Permanently delete ${lcDisplayLabel}? Tenant users are removed from Auth and the company row is deleted. This cannot be undone. A prior archive from offboarding is retained.`
+            : "";
+
+  const lifecycleConfirmButtonLabel =
+    lc?.mode === "offboarding"
+      ? "Start offboarding"
+      : lc?.mode === "reactivate"
+        ? "Reactivate"
+        : lc?.mode === "force_delete"
+          ? "Force delete now"
+          : lc?.mode === "purge"
+            ? "Delete permanently"
+            : "Confirm";
 
   const hasFilters = debouncedSearch.length > 0 || statusFilter !== "all";
 
   return (
     <div className="space-y-3">
       {loadError ? <p className="rph-alert-error">{loadError}</p> : null}
+      {eSignOverlay ? (
+        <div
+          className="fixed inset-0 z-[400] flex items-center justify-center bg-black/50 p-4 backdrop-blur-[1px]"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+          aria-label={eSignOverlay.title}
+        >
+          <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl border border-slate-200 bg-white px-8 py-10 text-center shadow-2xl dark:border-slate-600 dark:bg-slate-900">
+            <span
+              className="h-10 w-10 animate-spin rounded-full border-[3px] border-slate-200 border-t-rph-rail dark:border-slate-600 dark:border-t-sky-400"
+              aria-hidden
+            />
+            <div className="space-y-1">
+              <p className="text-base font-semibold text-slate-900 dark:text-slate-50">{eSignOverlay.title}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{eSignOverlay.detail}</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      <ActionStatusOverlay
+        state={actionOverlay}
+        onDismiss={() => setActionOverlay(null)}
+      />
+      {purgeOverlay ? (
+        <div
+          className="fixed inset-0 z-[400] flex items-center justify-center bg-black/55 p-4 backdrop-blur-[1px]"
+          role="alertdialog"
+          aria-busy={purgeOverlay.pending}
+          aria-label={purgeOverlay.title}
+        >
+          <div className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-600 dark:bg-slate-900">
+            <h2 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">{purgeOverlay.title}</h2>
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+              {purgeOverlay.pending
+                ? "Keep this page open until the process finishes."
+                : purgeOverlay.error
+                  ? "The delete did not complete."
+                  : "Done."}
+            </p>
+            <ul className="mt-4 max-h-[45vh] space-y-2 overflow-y-auto font-mono text-xs leading-relaxed text-slate-700 dark:text-slate-300">
+              {purgeOverlay.lines.map((line, i) => (
+                <li
+                  key={`${i}-${line.slice(0, 24)}`}
+                  className="border-b border-slate-100 pb-2 last:border-0 dark:border-slate-800"
+                >
+                  {line}
+                </li>
+              ))}
+            </ul>
+            {purgeOverlay.error ? (
+              <p className="mt-4 text-sm font-medium text-red-700 dark:text-red-300">{purgeOverlay.error}</p>
+            ) : null}
+            {purgeOverlay.pending ? (
+              <div className="mt-5 flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+                <span
+                  className="inline-block h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-rph-rail dark:border-slate-600"
+                  aria-hidden
+                />
+                In progress…
+              </div>
+            ) : purgeOverlay.error ? (
+              <button
+                type="button"
+                className="mt-6 w-full rounded-xl border border-slate-300 py-2.5 text-sm font-medium text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                onClick={() => setPurgeOverlay(null)}
+              >
+                Close
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       {inviteFeedback ? (
         <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-200">
           {inviteFeedback}
@@ -666,7 +1158,7 @@ export function AdminCompaniesTable({
         <div
           className={`overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 ${loading ? "opacity-60" : ""}`}
         >
-          <table className="w-full min-w-[980px] border-collapse text-left text-sm">
+          <table className="w-full min-w-[1080px] border-collapse text-left text-sm">
             <thead>
               {table.getHeaderGroups().map((hg) => (
                 <tr
@@ -723,18 +1215,45 @@ export function AdminCompaniesTable({
         </div>
       ) : null}
       <ConfirmDialog
-        open={confirmDelete !== null}
-        title="Delete company?"
-        description={`Delete ${confirmDeleteLabel}? This removes the company record and cannot be undone.`}
-        confirmLabel="Delete company"
+        open={lc !== null}
+        title={lifecycleConfirmTitle}
+        description={lifecycleConfirmDescription}
+        confirmLabel={lifecycleConfirmButtonLabel}
         cancelLabel="Cancel"
-        variant="danger"
-        pending={confirmDelete !== null && deleteBusyId === confirmDelete.companyId}
+        variant={lc?.mode === "reactivate" || lc?.mode === "offboarding" ? "default" : "danger"}
+        pending={lc !== null && lifecycleBusyId === lc.companyId}
         onCancel={() => {
-          if (deleteBusyId) return;
-          setConfirmDelete(null);
+          if (lifecycleBusyId) return;
+          setLifecycleConfirm(null);
         }}
-        onConfirm={onConfirmDelete}
+        onConfirm={onConfirmLifecycle}
+      />
+      <ConfirmDialog
+        open={earlyInviteConfirm !== null}
+        title="Invite before the agreement is active?"
+        description={
+          earlyInviteConfirm
+            ? `The agreement for ${
+                earlyInviteConfirm.label === "this company"
+                  ? earlyInviteConfirm.label
+                  : `"${earlyInviteConfirm.label}"`
+              } is not active yet. Normally the primary contact is invited after signing. If e-sign is blocked, you can still send an invite—they will see a holding screen until the contract becomes active, then onboarding.`
+            : ""
+        }
+        confirmLabel="Send invite anyway"
+        cancelLabel="Cancel"
+        variant="default"
+        pending={earlyInviteConfirm !== null && inviteBusyId === earlyInviteConfirm.companyId}
+        onCancel={() => {
+          if (inviteBusyId) return;
+          setEarlyInviteConfirm(null);
+        }}
+        onConfirm={async () => {
+          const ctx = earlyInviteConfirm;
+          if (!ctx) return;
+          setEarlyInviteConfirm(null);
+          await doPrimaryInvite(ctx.companyId, ctx.emailLabel);
+        }}
       />
       <AdminCompanyDetailDialog
         open={detailCompanyId !== null}

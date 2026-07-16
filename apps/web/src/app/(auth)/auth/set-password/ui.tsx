@@ -15,9 +15,16 @@ function Submit({ label }: { label: string }) {
     <button
       type="submit"
       disabled={pending}
-      className="mt-4 flex h-11 w-full items-center justify-center rounded-lg bg-rph-rail text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer"
+      className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-rph-rail text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer"
     >
-      {pending ? "Saving…" : label}
+      {pending ? (
+        <>
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+          Saving…
+        </>
+      ) : (
+        label
+      )}
     </button>
   );
 }
@@ -27,7 +34,12 @@ export function SetPasswordForm() {
 
   return (
     <form action={action} className="space-y-4">
-      {state.error ? <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-100">{state.error}</p> : null}
+      {state.error ? (
+        <div className="space-y-1 rounded-lg border border-red-200 bg-red-50 px-3 py-3 dark:border-red-900/50 dark:bg-red-950/40">
+          <p className="text-sm font-semibold text-red-900 dark:text-red-100">Couldn’t save password</p>
+          <p className="text-sm text-red-800 dark:text-red-200">{state.error}</p>
+        </div>
+      ) : null}
       <div className="space-y-1">
         <label htmlFor="recovery_pw" className="block text-sm font-medium text-slate-800 dark:text-slate-200">
           New password

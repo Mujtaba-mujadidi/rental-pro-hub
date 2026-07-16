@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
+import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
 
 export type RegisterSubcompanyResult = { ok: true; id: string } | { ok: false; error: string };
 
@@ -14,6 +15,8 @@ function nullIfEmpty(v: FormDataEntryValue | null): string | null {
 
 export async function registerSubcompanyAction(formData: FormData): Promise<RegisterSubcompanyResult> {
   const { profile } = await requireRentalCompanyArea();
+  const frozen = await assertRentalCompanyWritable(profile);
+  if (!frozen.ok) return { ok: false, error: frozen.error };
   const parentCompanyId = profile.company_id?.trim();
   if (!parentCompanyId) return { ok: false, error: "Missing rental company context." };
 

@@ -14,6 +14,7 @@ import {
   adminSetDriverBlockedAction,
 } from "@/app/actions/admin-driver-auth";
 import { getAdminDriversPageAction } from "@/app/actions/admin-drivers-list";
+import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { driverIsBlocked, type AdminDriverListRow } from "@/lib/admin/driver-list-shared";
 import type { DriverListStatusFilter } from "@/lib/admin/drivers-query";
@@ -97,6 +98,8 @@ export function AdminDriversTable() {
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [resetLink, setResetLink] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<DriversConfirmState>(null);
+  const [confirmPending, setConfirmPending] = useState(false);
+  const [actionOverlay, setActionOverlay] = useState<ActionStatusOverlayState | null>(null);
 
   const [rows, setRows] = useState<AdminDriverListRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -179,18 +182,33 @@ export function AdminDriversTable() {
 
   const handleConfirmDialog = useCallback(async () => {
     const ctx = confirmDialog;
-    if (!ctx) return;
-    setConfirmDialog(null);
+    if (!ctx || confirmPending) return;
+
+    setBannerError(null);
+    setBannerOk(null);
+    setConfirmPending(true);
 
     if (ctx.kind === "reset_password") {
       setPendingKey(`${ctx.userId}-reset`);
+      setActionOverlay({
+        phase: "pending",
+        title: "Generating reset link…",
+        detail: "Creating a one-time password reset link. Please wait.",
+      });
       const res = await adminGenerateDriverPasswordResetLinkAction(ctx.userId);
       setPendingKey(null);
+      setConfirmPending(false);
+      setConfirmDialog(null);
       if (res.error) {
-        setBannerError(res.error);
+        setActionOverlay({
+          phase: "error",
+          title: "Password reset failed",
+          detail: res.error,
+        });
         return;
       }
       if (res.passwordResetLink) {
+        setActionOverlay(null);
         setResetLink(res.passwordResetLink);
         setBannerOk("Reset link generated. Copy it from the dialog below.");
       }
@@ -198,15 +216,33 @@ export function AdminDriversTable() {
     }
 
     setPendingKey(`${ctx.userId}-${ctx.blocked ? "block" : "active"}`);
+    setActionOverlay({
+      phase: "pending",
+      title: ctx.blocked ? "Blocking driver…" : "Activating driver…",
+      detail: "Updating account access. Please wait.",
+    });
     const res = await adminSetDriverBlockedAction(ctx.userId, ctx.blocked);
     setPendingKey(null);
+    setConfirmPending(false);
+    setConfirmDialog(null);
     if (res.error) {
-      setBannerError(res.error);
+      setActionOverlay({
+        phase: "error",
+        title: "Update failed",
+        detail: res.error,
+      });
       return;
     }
-    setBannerOk(ctx.blocked ? "Driver blocked." : "Driver set active.");
+    setActionOverlay({
+      phase: "success",
+      title: ctx.blocked ? "Driver blocked" : "Driver set active",
+      detail: ctx.blocked
+        ? "They will not be able to sign in until you set them active again."
+        : "They can sign in again with their existing password.",
+    });
+    window.setTimeout(() => setActionOverlay(null), 2000);
     refetch();
-  }, [confirmDialog, refetch]);
+  }, [confirmDialog, confirmPending, refetch]);
 
   async function copyResetLink() {
     if (!resetLink) return;
@@ -418,9 +454,14 @@ export function AdminDriversTable() {
         confirmLabel={confirmTitles.confirmLabel}
         cancelLabel="Cancel"
         variant={confirmTitles.variant}
-        onCancel={() => setConfirmDialog(null)}
+        pending={confirmPending}
+        onCancel={() => {
+          if (confirmPending) return;
+          setConfirmDialog(null);
+        }}
         onConfirm={handleConfirmDialog}
       />
+      <ActionStatusOverlay state={actionOverlay} onDismiss={() => setActionOverlay(null)} />
 
       {loadError ? <p className="rph-alert-error">{loadError}</p> : null}
       {bannerError ? <p className="rph-alert-error">{bannerError}</p> : null}

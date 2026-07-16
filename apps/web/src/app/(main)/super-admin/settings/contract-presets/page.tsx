@@ -15,8 +15,9 @@ export default async function ContractPresetsSettingsPage() {
       <div>
         <h1 className="rph-h1">Contract pricing presets</h1>
         <p className="rph-muted mt-2 max-w-3xl text-sm">
-          Presets seed commercial fields when registering a company. DocuSeal template ID and API keys are configured via
-          environment variables (see <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">.env.example</code>).
+          Presets seed commercial fields when registering a company. Contract e-sign is native RMS (see{" "}
+          <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docs/esign.md</code>
+          ).
         </p>
       </div>
 

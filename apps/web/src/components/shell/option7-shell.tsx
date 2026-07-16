@@ -29,6 +29,12 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
     if (pathname === "/rental/onboarding" || pathname.startsWith("/rental/onboarding/")) {
       return [{ label: "Home", href: "/rental" }, { label: "Onboarding", href: "/rental/onboarding" }];
     }
+    if (pathname === "/rental/offboarding" || pathname.startsWith("/rental/offboarding/")) {
+      return [{ label: "Account", href: "/rental/offboarding" }, { label: "Offboarding" }];
+    }
+    if (pathname === "/rental/account-closed" || pathname.startsWith("/rental/account-closed/")) {
+      return [{ label: "Account", href: "/rental/account-closed" }, { label: "Closed" }];
+    }
     if (pathname === "/rental/staff" || pathname.startsWith("/rental/staff/")) {
       return [{ label: "Home", href: "/rental" }, { label: "Staff", href: "/rental/staff" }];
     }

@@ -1,4 +1,5 @@
 -- Fix: "column profiles.company_id does not exist"
+-- Progress: ../../docs/PROGRESS.md
 -- Run in Supabase SQL Editor when your DB predates rental-company profile migrations.
 -- Requires public.companies to exist (from companies migration).
 

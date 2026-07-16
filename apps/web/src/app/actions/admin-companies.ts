@@ -2,9 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { requireSuperAdmin } from "@/lib/auth/profile";
-import { useLegacyBootstrapContractSigning } from "@/lib/docuseal/config";
+import { useLegacyBootstrapContractSigning } from "@/lib/esign/legacy-bootstrap";
+import { preparePlatformCompanyContractEnvelope } from "@/lib/esign/adapters/platform-company-contract";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { collectTenantAuthUserIds, insertCompanyDeletionArchive } from "@/lib/companies/deletion-archive";
+import { insertCompanyDeletionArchive } from "@/lib/companies/deletion-archive";
+import { runPermanentCompanyPurgeWithProgress } from "@/lib/companies/permanent-company-purge";
+import { createClient as createSupabasePublicClient } from "@supabase/supabase-js";
+import { resolveSupabasePublishableEnv } from "@/lib/supabase/env";
 import { getPublicSiteUrl } from "@/lib/supabase/site-url";
 
 function nullIfEmpty(v: FormDataEntryValue | null): string | null {
@@ -14,7 +18,7 @@ function nullIfEmpty(v: FormDataEntryValue | null): string | null {
 }
 
 export type RegisterCompanyResult =
-  | { ok: true; id: string; inviteWarning?: string }
+  | { ok: true; id: string; inviteWarning?: string; eSignWarning?: string; esignEnvelopeId?: string }
   | { ok: false; error: string };
 
 export type SendCompanyInviteResult = { ok: true } | { ok: false; error: string };
@@ -133,6 +137,69 @@ export async function sendCompanyPrimaryInviteAction(companyId: string): Promise
   }
 }
 
+/** Sends the standard Supabase password-recovery email to the primary contact (after they have signed in at least once). */
+export async function sendPrimaryContactPasswordResetAction(companyId: string): Promise<SendCompanyInviteResult> {
+  try {
+    await requireSuperAdmin();
+    const trimmed = companyId?.trim();
+    if (!trimmed) return { ok: false, error: "Missing company." };
+
+    let admin: ReturnType<typeof createSupabaseAdminClient>;
+    try {
+      admin = createSupabaseAdminClient();
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Server configuration error." };
+    }
+
+    const { data: row, error: rowErr } = await admin
+      .from("companies")
+      .select("id, primary_contact_email, primary_contact_user_id")
+      .eq("id", trimmed)
+      .maybeSingle();
+    if (rowErr) return { ok: false, error: rowErr.message };
+    if (!row?.id) return { ok: false, error: "Company not found." };
+
+    const email = row.primary_contact_email?.trim();
+    const uid = row.primary_contact_user_id?.trim();
+    if (!email) {
+      return { ok: false, error: "Primary contact email is missing for this company." };
+    }
+    if (!uid) {
+      return { ok: false, error: "Send an invite first to create the primary contact account." };
+    }
+
+    const { data: auth, error: authErr } = await admin.auth.admin.getUserById(uid);
+    if (authErr || !auth?.user) {
+      return { ok: false, error: authErr?.message ?? "Could not load the primary contact account." };
+    }
+    if (!auth.user.last_sign_in_at) {
+      return {
+        ok: false,
+        error: "The primary contact has not signed in yet. Use Resend invite until they finish signup.",
+      };
+    }
+
+    const { url, anonKey } = resolveSupabasePublishableEnv();
+    const pub = createSupabasePublicClient(url, anonKey);
+    const redirectTo = `${getPublicSiteUrl()}/auth/callback`;
+    const { error: resetErr } = await pub.auth.resetPasswordForEmail(email, { redirectTo });
+    if (resetErr) {
+      return { ok: false, error: resetErr.message };
+    }
+
+    try {
+      revalidatePath("/super-admin/companies");
+    } catch (revalErr) {
+      console.error("revalidatePath /super-admin/companies", revalErr);
+    }
+    return { ok: true };
+  } catch (e) {
+    if (isNextRedirectError(e)) throw e;
+    console.error("sendPrimaryContactPasswordResetAction", e);
+    return { ok: false, error: e instanceof Error ? e.message : "Unexpected error." };
+  }
+}
+
 export type InitialContractCommercial = {
   contract_type?: string | null;
   pricing_model?: string | null;
@@ -237,7 +304,7 @@ export async function createInitialCompanyContract(
   return { ok: true };
 }
 
-/** After DocuSeal marks the contract active: send queued primary invite if the company opted into invite-after-sign. */
+/** After company contract is marked active: send queued primary invite if opted into invite-after-sign. */
 export async function trySendPendingPrimaryInviteAfterContractSigned(
   admin: ReturnType<typeof createSupabaseAdminClient>,
   companyId: string,
@@ -267,7 +334,7 @@ export async function getRegisterCompanyInviteDefaultsAction(): Promise<
 }
 
 export async function registerCompanyAction(formData: FormData): Promise<RegisterCompanyResult> {
-  await requireSuperAdmin();
+  const { user } = await requireSuperAdmin();
 
   const name = nullIfEmpty(formData.get("name"));
   if (!name) {
@@ -509,6 +576,17 @@ export async function registerCompanyAction(formData: FormData): Promise<Registe
     return { ok: false, error: pendingErr.message };
   }
 
+  let eSignWarning: string | undefined;
+  let esignEnvelopeId: string | undefined;
+  if (usesEsignPath) {
+    const esign = await preparePlatformCompanyContractEnvelope(admin, companyId, user.id);
+    if (!esign.ok) {
+      eSignWarning = `Contract PDF was not prepared for e-sign: ${esign.error}. Use “Prepare contract for e-sign” on the company row when ready.`;
+    } else {
+      esignEnvelopeId = esign.envelopeId;
+    }
+  }
+
   let inviteWarning: string | undefined;
   if (sendInvite) {
     const invRes = await sendCompanyPrimaryInviteForCompany(admin, companyId);
@@ -518,13 +596,17 @@ export async function registerCompanyAction(formData: FormData): Promise<Registe
   }
 
   revalidatePath("/super-admin/companies");
-  if (inviteWarning) {
-    return { ok: true, id: companyId, inviteWarning };
+  revalidatePath("/rental");
+  if (inviteWarning || eSignWarning || esignEnvelopeId) {
+    return { ok: true, id: companyId, inviteWarning, eSignWarning, esignEnvelopeId };
   }
   return { ok: true, id: companyId };
 }
 
-export async function deleteCompanyAction(companyId: string): Promise<DeleteCompanyResult> {
+export type CompanyLifecycleResult = { ok: true } | { ok: false; error: string };
+
+/** Begin 6-month offboarding: archive snapshot, mark company + terminate contract; tenants get limited app access. */
+export async function startCompanyOffboardingAction(companyId: string): Promise<CompanyLifecycleResult> {
   try {
     const { user } = await requireSuperAdmin();
     const trimmed = companyId?.trim();
@@ -537,55 +619,167 @@ export async function deleteCompanyAction(companyId: string): Promise<DeleteComp
       return { ok: false, error: e instanceof Error ? e.message : "Server configuration error." };
     }
 
+    const { data: row, error: getErr } = await admin
+      .from("companies")
+      .select("id, deletion_phase")
+      .eq("id", trimmed)
+      .maybeSingle();
+    if (getErr) return { ok: false, error: getErr.message };
+    if (!row?.id) return { ok: false, error: "Company not found." };
+
+    const phase = (row.deletion_phase as string) ?? "active";
+    if (phase !== "active") {
+      return { ok: false, error: "Offboarding can only start for a company in the active lifecycle phase." };
+    }
+
+    const archived = await insertCompanyDeletionArchive(admin, trimmed, user.id, {
+      reason: "offboarding_start",
+      linkCompanyRow: true,
+    });
+    if (!archived.ok) {
+      return { ok: false, error: `Could not archive company data: ${archived.error}` };
+    }
+
+    const ends = new Date();
+    ends.setMonth(ends.getMonth() + 6);
+
+    const { error: upCo } = await admin
+      .from("companies")
+      .update({
+        deletion_phase: "offboarding",
+        offboarding_started_at: new Date().toISOString(),
+        offboarding_ends_at: ends.toISOString(),
+        access_blocked_at: null,
+        deletion_requested_by: user.id,
+      })
+      .eq("id", trimmed);
+    if (upCo) return { ok: false, error: upCo.message };
+
+    const { error: termErr } = await admin
+      .from("company_contracts")
+      .update({
+        status: "terminated",
+        terminated_at: new Date().toISOString(),
+        termination_reason: "Company offboarding (archived; contract closed pending purge or reactivation).",
+      })
+      .eq("parent_company_id", trimmed);
+    if (termErr) console.warn("[startCompanyOffboardingAction] terminate contract", termErr.message);
+
+    revalidatePath("/super-admin/companies");
+    return { ok: true };
+  } catch (e) {
+    if (isNextRedirectError(e)) throw e;
+    return { ok: false, error: e instanceof Error ? e.message : "Unexpected error." };
+  }
+}
+
+/** Restore operations and start a new contract / onboarding path (before permanent purge). */
+export async function reactivateCompanyAction(companyId: string): Promise<CompanyLifecycleResult> {
+  try {
+    await requireSuperAdmin();
+    const trimmed = companyId?.trim();
+    if (!trimmed) return { ok: false, error: "Missing company." };
+
+    let admin: ReturnType<typeof createSupabaseAdminClient>;
+    try {
+      admin = createSupabaseAdminClient();
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Server configuration error." };
+    }
+
+    const { data: row, error: getErr } = await admin
+      .from("companies")
+      .select("id, deletion_phase")
+      .eq("id", trimmed)
+      .maybeSingle();
+    if (getErr) return { ok: false, error: getErr.message };
+    if (!row?.id) return { ok: false, error: "Company not found." };
+
+    const phase = (row.deletion_phase as string) ?? "active";
+    if (phase !== "offboarding" && phase !== "access_blocked") {
+      return { ok: false, error: "Only offboarding or access-blocked companies can be reactivated." };
+    }
+
+    const { error: upCo } = await admin
+      .from("companies")
+      .update({
+        deletion_phase: "active",
+        offboarding_started_at: null,
+        offboarding_ends_at: null,
+        access_blocked_at: null,
+        deletion_requested_by: null,
+        rental_onboarding_completed_at: null,
+        rental_onboarding_step: 0,
+      })
+      .eq("id", trimmed);
+    if (upCo) return { ok: false, error: upCo.message };
+
+    const { error: ctrErr } = await admin
+      .from("company_contracts")
+      .update({
+        status: "draft",
+        terminated_at: null,
+        termination_reason: null,
+      })
+      .eq("parent_company_id", trimmed);
+    if (ctrErr) console.warn("[reactivateCompanyAction] contract reset", ctrErr.message);
+
+    revalidatePath("/super-admin/companies");
+    revalidatePath("/rental");
+    return { ok: true };
+  } catch (e) {
+    if (isNextRedirectError(e)) throw e;
+    return { ok: false, error: e instanceof Error ? e.message : "Unexpected error." };
+  }
+}
+
+/** Shared purge: tenant auth users + company row + logo. No new archive (snapshot at offboarding start). */
+async function executePermanentCompanyPurge(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  companyId: string,
+  logoStoragePath: string | null,
+): Promise<DeleteCompanyResult> {
+  const result = await runPermanentCompanyPurgeWithProgress(admin, companyId, logoStoragePath, () => {});
+  if (!result.ok) return result;
+  revalidatePath("/super-admin/companies");
+  return { ok: true };
+}
+
+/**
+ * Permanent delete after the retention window: only when `access_blocked`.
+ * Does not insert a new archive row (snapshot was taken at offboarding start).
+ */
+export async function deleteCompanyAction(companyId: string): Promise<DeleteCompanyResult> {
+  try {
+    await requireSuperAdmin();
+    const trimmed = companyId?.trim();
+    if (!trimmed) return { ok: false, error: "Missing company." };
+
+    let admin: ReturnType<typeof createSupabaseAdminClient>;
+    try {
+      admin = createSupabaseAdminClient();
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Server configuration error." };
+    }
+
     const { data: company, error: getErr } = await admin
       .from("companies")
-      .select("id, logo_storage_path")
+      .select("id, logo_storage_path, deletion_phase")
       .eq("id", trimmed)
       .maybeSingle();
     if (getErr) return { ok: false, error: getErr.message };
     if (!company?.id) return { ok: false, error: "Company not found." };
 
-    // Legal / finance retention: snapshot before CASCADE deletes contracts, invoices, etc.
-    // See lib/companies/deletion-archive.ts for FK map to public.companies.
-    const archived = await insertCompanyDeletionArchive(admin, trimmed, user.id);
-    if (!archived.ok) {
+    const phase = (company.deletion_phase as string) ?? "active";
+    if (phase !== "access_blocked") {
       return {
         ok: false,
-        error: `Could not archive company data before delete: ${archived.error}`,
+        error:
+          "Permanent delete is only allowed when the company is in the access-blocked phase (after the offboarding period). Use Force delete now during offboarding if you need to remove the tenant immediately.",
       };
     }
 
-    // Remove all tenant Auth users: anyone with membership OR rental_company profile for this parent.
-    // Never delete super_admin or driver accounts from this path.
-    const tenantUserIds = await collectTenantAuthUserIds(admin, trimmed);
-    for (const uid of tenantUserIds) {
-      const { data: prof, error: profErr } = await admin.from("profiles").select("id, role").eq("id", uid).maybeSingle();
-      if (profErr || !prof?.id) continue;
-      const r = prof.role as string;
-      if (r === "super_admin" || r === "driver") continue;
-      if (r !== "rental_company") continue;
-
-      const { error: authDelErr } = await admin.auth.admin.deleteUser(uid);
-      if (authDelErr) {
-        return {
-          ok: false,
-          error: `Could not delete tenant user (${uid}): ${authDelErr.message}`,
-        };
-      }
-    }
-
-    const { error: delErr } = await admin.from("companies").delete().eq("id", trimmed);
-    if (delErr) return { ok: false, error: delErr.message };
-
-    if (company.logo_storage_path) {
-      const { error: rmLogoErr } = await admin.storage.from("company-logos").remove([company.logo_storage_path]);
-      if (rmLogoErr) {
-        console.error("deleteCompanyAction remove logo", rmLogoErr);
-      }
-    }
-
-    revalidatePath("/super-admin/companies");
-    return { ok: true };
+    return executePermanentCompanyPurge(admin, trimmed, company.logo_storage_path);
   } catch (e) {
     if (isNextRedirectError(e)) throw e;
     console.error("deleteCompanyAction", e);
@@ -595,6 +789,55 @@ export async function deleteCompanyAction(companyId: string): Promise<DeleteComp
     };
   }
 }
+
+/**
+ * Super-admin only: hard-delete during offboarding without waiting for access_blocked.
+ * Prefer the streamed API route for UI progress; this remains for scripts/tests.
+ * Archive already exists from when offboarding started.
+ */
+export async function forceDeleteOffboardedCompanyAction(companyId: string): Promise<DeleteCompanyResult> {
+  try {
+    await requireSuperAdmin();
+    const trimmed = companyId?.trim();
+    if (!trimmed) return { ok: false, error: "Missing company." };
+
+    let admin: ReturnType<typeof createSupabaseAdminClient>;
+    try {
+      admin = createSupabaseAdminClient();
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Server configuration error." };
+    }
+
+    const { data: company, error: getErr } = await admin
+      .from("companies")
+      .select("id, logo_storage_path, deletion_phase")
+      .eq("id", trimmed)
+      .maybeSingle();
+    if (getErr) return { ok: false, error: getErr.message };
+    if (!company?.id) return { ok: false, error: "Company not found." };
+
+    const phase = (company.deletion_phase as string) ?? "active";
+    if (phase !== "offboarding") {
+      return {
+        ok: false,
+        error:
+          "Force delete now is only available while the company is in offboarding. Otherwise use permanent delete after access is blocked, or reactivate.",
+      };
+    }
+
+    return executePermanentCompanyPurge(admin, trimmed, company.logo_storage_path);
+  } catch (e) {
+    if (isNextRedirectError(e)) throw e;
+    console.error("forceDeleteOffboardedCompanyAction", e);
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Unexpected error deleting company.",
+    };
+  }
+}
+
+/** @deprecated Use forceDeleteOffboardedCompanyAction */
+export const purgeOffboardedCompanyNowAction = forceDeleteOffboardedCompanyAction;
 
 export async function applyLatestCompanyContractChangeAction(
   companyId: string,

@@ -23,18 +23,18 @@ function nullIfEmpty(v: FormDataEntryValue | null): string | null {
 }
 
 export async function listPricingPresetsForRegisterAction(): Promise<
-  { ok: true; presets: { id: string; name: string }[] } | { ok: false; error: string }
+  { ok: true; presets: { id: string; name: string; pricing_model_type: string }[] } | { ok: false; error: string }
 > {
   try {
     await requireSuperAdmin();
     const admin = createSupabaseAdminClient();
     const { data, error } = await admin
       .from("contract_pricing_presets")
-      .select("id, name")
+      .select("id, name, pricing_model_type")
       .eq("is_active", true)
       .order("name", { ascending: true });
     if (error) return { ok: false, error: error.message };
-    return { ok: true, presets: (data ?? []) as { id: string; name: string }[] };
+    return { ok: true, presets: (data ?? []) as { id: string; name: string; pricing_model_type: string }[] };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed to load presets." };
   }

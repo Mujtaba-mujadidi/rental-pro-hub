@@ -18,6 +18,11 @@ export type AdminCompanyListRow = {
   createdAt: string;
   hasLogo: boolean;
   inviteLastSentAt: string | null;
+  /** True once the invited primary contact has signed in at least once (password / session established). */
+  primaryContactHasSignedIn: boolean;
+  /** Company deletion lifecycle (offboarding / access block before purge). */
+  deletionPhase: "active" | "offboarding" | "access_blocked";
+  offboardingEndsAt: string | null;
 };
 
 /** Full-row payloads for the super-admin company detail modal (server-fetched). */

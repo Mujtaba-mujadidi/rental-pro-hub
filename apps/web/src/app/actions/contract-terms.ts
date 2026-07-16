@@ -42,6 +42,37 @@ export async function listPublishedTermsForRegisterAction(): Promise<
   }
 }
 
+/** Full body for super-admin review when picking T&amp;C on register company (published + rental_master only). */
+export async function getPublishedTermsVersionBodyForReviewAction(
+  versionId: string,
+): Promise<
+  { ok: true; version_label: string; title: string; body: string } | { ok: false; error: string }
+> {
+  const id = versionId?.trim();
+  if (!id) return { ok: false, error: "Missing terms version." };
+  try {
+    await requireSuperAdmin();
+    const admin = createSupabaseAdminClient();
+    const { data, error } = await admin
+      .from("contract_terms_versions")
+      .select("version_label, title, body")
+      .eq("id", id)
+      .eq("status", "published")
+      .eq("family", "rental_master")
+      .maybeSingle();
+    if (error) return { ok: false, error: error.message };
+    if (!data) return { ok: false, error: "Terms not found or not published." };
+    return {
+      ok: true,
+      version_label: data.version_label as string,
+      title: data.title as string,
+      body: typeof data.body === "string" ? data.body : "",
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Unexpected error." };
+  }
+}
+
 export async function listContractTermsAdminAction(): Promise<
   { ok: true; rows: ContractTermsVersionRow[] } | { ok: false; error: string }
 > {

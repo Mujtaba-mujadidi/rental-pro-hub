@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createHash, randomBytes } from "crypto";
 import type { CompanyMembershipRole } from "@/lib/auth/profile";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
+import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getPublicSiteUrl } from "@/lib/supabase/site-url";
@@ -28,6 +29,8 @@ export async function inviteRentalStaffAction(
   access?: InviteStaffAccess,
 ): Promise<StaffActionResult> {
   const { profile } = await requireRentalCompanyArea();
+  const frozen = await assertRentalCompanyWritable(profile);
+  if (!frozen.ok) return { ok: false, error: frozen.error };
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
   if (!isRentalAdmin(profile)) {
@@ -131,6 +134,8 @@ export async function updateMembershipRoleAction(
   opts?: { confirmDemoteLastOwner?: boolean },
 ): Promise<StaffActionResult> {
   const { profile } = await requireRentalCompanyArea();
+  const frozen = await assertRentalCompanyWritable(profile);
+  if (!frozen.ok) return { ok: false, error: frozen.error };
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
   if (!isRentalAdmin(profile)) {
@@ -196,6 +201,8 @@ export async function updateMembershipStatusAction(
   nextStatus: "active" | "invited" | "suspended",
 ): Promise<StaffActionResult> {
   const { profile } = await requireRentalCompanyArea();
+  const frozen = await assertRentalCompanyWritable(profile);
+  if (!frozen.ok) return { ok: false, error: frozen.error };
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
   if (!isRentalAdmin(profile)) {
@@ -257,6 +264,8 @@ export async function setMembershipSubcompanyScopeAction(
   subcompanyIds: string[],
 ): Promise<StaffActionResult> {
   const { profile } = await requireRentalCompanyArea();
+  const frozen = await assertRentalCompanyWritable(profile);
+  if (!frozen.ok) return { ok: false, error: frozen.error };
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
   if (!isRentalAdmin(profile)) {

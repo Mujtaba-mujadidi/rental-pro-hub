@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireRentalCompanyArea, requireSuperAdmin } from "@/lib/auth/profile";
+import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
 import { notifyCompanyFinanceRoles, notifySuperAdmins } from "@/lib/platform-notifications";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -18,6 +19,8 @@ export async function requestRentalCompanyContractChangeAction(
   formData: FormData,
 ): Promise<RequestContractChangeResult> {
   const { profile } = await requireRentalCompanyArea();
+  const frozen = await assertRentalCompanyWritable(profile);
+  if (!frozen.ok) return { ok: false, error: frozen.error };
   const parentCompanyId = profile.company_id?.trim();
   if (!parentCompanyId) return { ok: false, error: "Missing rental company context." };
 

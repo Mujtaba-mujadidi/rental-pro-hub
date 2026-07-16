@@ -33,26 +33,34 @@ function quoteOrFilterValue(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-function mapRow(r: {
-  id: string;
-  name: string;
-  legal_name: string | null;
-  company_number: string | null;
-  primary_contact_first_name: string | null;
-  primary_contact_last_name: string | null;
-  primary_contact_email: string | null;
-  primary_contact_phone: string | null;
-  registered_town: string | null;
-  registered_postcode: string | null;
-  logo_storage_path: string | null;
-  status: string;
-  contract_status: string | null;
-  created_at: string | null;
-  invite_last_sent_at: string | null;
-  company_contracts: { status: string } | { status: string }[] | null;
-}): AdminCompanyListRow {
+function mapRow(
+  r: {
+    id: string;
+    name: string;
+    legal_name: string | null;
+    company_number: string | null;
+    primary_contact_first_name: string | null;
+    primary_contact_last_name: string | null;
+    primary_contact_email: string | null;
+    primary_contact_phone: string | null;
+    primary_contact_user_id?: string | null;
+    registered_town: string | null;
+    registered_postcode: string | null;
+    logo_storage_path: string | null;
+    status: string;
+    contract_status: string | null;
+    created_at: string | null;
+    invite_last_sent_at: string | null;
+    deletion_phase?: string | null;
+    offboarding_ends_at?: string | null;
+    company_contracts: { status: string } | { status: string }[] | null;
+  },
+  signedInByUserId: Map<string, boolean>,
+): AdminCompanyListRow {
   const ccRaw = r.company_contracts;
   const cc = Array.isArray(ccRaw) ? ccRaw[0] : ccRaw;
+  const uid = r.primary_contact_user_id?.trim() ?? null;
+  const primaryContactHasSignedIn = uid ? (signedInByUserId.get(uid) ?? false) : false;
   return {
     id: r.id,
     name: r.name ?? "",
@@ -70,7 +78,34 @@ function mapRow(r: {
     createdAt: r.created_at ?? "",
     hasLogo: r.logo_storage_path != null && r.logo_storage_path.length > 0,
     inviteLastSentAt: r.invite_last_sent_at,
+    primaryContactHasSignedIn,
+    deletionPhase: normalizeDeletionPhase(r.deletion_phase),
+    offboardingEndsAt: r.offboarding_ends_at ?? null,
   };
+}
+
+function normalizeDeletionPhase(v: string | null | undefined): "active" | "offboarding" | "access_blocked" {
+  if (v === "offboarding" || v === "access_blocked") return v;
+  return "active";
+}
+
+async function batchPrimaryContactHasSignedIn(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  userIds: (string | null | undefined)[],
+): Promise<Map<string, boolean>> {
+  const out = new Map<string, boolean>();
+  const unique = [...new Set(userIds.map((id) => id?.trim()).filter((id): id is string => !!id))];
+  await Promise.all(
+    unique.map(async (id) => {
+      const { data, error } = await admin.auth.admin.getUserById(id);
+      if (error || !data?.user) {
+        out.set(id, false);
+        return;
+      }
+      out.set(id, !!data.user.last_sign_in_at);
+    }),
+  );
+  return out;
 }
 
 export async function fetchCompaniesPage(params: FetchCompaniesPageParams): Promise<FetchCompaniesPageResult> {
@@ -93,7 +128,7 @@ export async function fetchCompaniesPage(params: FetchCompaniesPageParams): Prom
   let q = admin
     .from("companies")
     .select(
-      "id, name, legal_name, company_number, primary_contact_first_name, primary_contact_last_name, primary_contact_email, primary_contact_phone, registered_town, registered_postcode, logo_storage_path, status, contract_status, created_at, invite_last_sent_at, company_contracts(status)",
+      "id, name, legal_name, company_number, primary_contact_first_name, primary_contact_last_name, primary_contact_email, primary_contact_phone, primary_contact_user_id, registered_town, registered_postcode, logo_storage_path, status, contract_status, created_at, invite_last_sent_at, deletion_phase, offboarding_ends_at, company_contracts(status)",
       { count: "exact" },
     );
 
@@ -122,7 +157,13 @@ export async function fetchCompaniesPage(params: FetchCompaniesPageParams): Prom
     return { ok: false, error: error.message };
   }
 
-  const rows = (data ?? []).map((row) =>
+  const raw = data ?? [];
+  const signedInByUserId = await batchPrimaryContactHasSignedIn(
+    admin,
+    raw.map((row) => (row as { primary_contact_user_id?: string | null }).primary_contact_user_id),
+  );
+
+  const rows = raw.map((row) =>
     mapRow(
       row as {
         id: string;
@@ -133,6 +174,7 @@ export async function fetchCompaniesPage(params: FetchCompaniesPageParams): Prom
         primary_contact_last_name: string | null;
         primary_contact_email: string | null;
         primary_contact_phone: string | null;
+        primary_contact_user_id?: string | null;
         registered_town: string | null;
         registered_postcode: string | null;
         logo_storage_path: string | null;
@@ -140,8 +182,11 @@ export async function fetchCompaniesPage(params: FetchCompaniesPageParams): Prom
         contract_status: string | null;
         created_at: string | null;
         invite_last_sent_at: string | null;
+        deletion_phase?: string | null;
+        offboarding_ends_at?: string | null;
         company_contracts: { status: string } | { status: string }[] | null;
       },
+      signedInByUserId,
     ),
   );
 

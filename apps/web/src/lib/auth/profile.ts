@@ -2,6 +2,7 @@ import type { User } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { redirectIfRentalContractNotActive } from "@/lib/auth/rental-contract-gate";
 import { isSuperAdmin, isSuperAdminEmail } from "@/lib/auth/roles";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -22,6 +23,11 @@ function isMissingCompanyColumnsError(message: string): boolean {
 
 function isRlsViolation(message: string): boolean {
   return /\brow-level security\b|violates row-level security policy/i.test(message);
+}
+
+/** Trigger or concurrent request may have inserted the row first (e.g. handle_new_user). */
+function isDuplicateProfileKeyError(message: string): boolean {
+  return /duplicate key|unique constraint.*profiles_pkey|23505/i.test(message);
 }
 
 /** Load profile; fall back if DB predates `profiles.company_id` / `company_role` migrations. */
@@ -133,24 +139,38 @@ async function ensureProfileRow(user: User): Promise<boolean> {
   const basePayload = { id: user.id, display_name: displayName, role };
   const fullPayload = { ...basePayload, ...withTenant };
 
-  async function tryProfileInsert(client: SupabaseClient): Promise<string | null> {
-    let { error } = await client.from("profiles").insert(fullPayload);
+  /** Idempotent: auth trigger may already have inserted this row; races also cause duplicate PK. */
+  async function tryProfileEnsure(client: SupabaseClient): Promise<string | null> {
+    let { error } = await client.from("profiles").upsert(fullPayload, {
+      onConflict: "id",
+      ignoreDuplicates: true,
+    });
     if (error && role === "rental_company" && isMissingCompanyColumnsError(error.message)) {
-      ({ error } = await client.from("profiles").insert(basePayload));
+      ({ error } = await client.from("profiles").upsert(basePayload, {
+        onConflict: "id",
+        ignoreDuplicates: true,
+      }));
     }
     return error?.message ?? null;
   }
 
-  let failMsg = await tryProfileInsert(supabase);
+  let failMsg = await tryProfileEnsure(supabase);
+
+  if (failMsg && isDuplicateProfileKeyError(failMsg)) {
+    return true;
+  }
 
   if (failMsg && isRlsViolation(failMsg)) {
     try {
       const admin = createSupabaseAdminClient();
-      failMsg = await tryProfileInsert(admin);
+      failMsg = await tryProfileEnsure(admin);
       if (!failMsg) {
         console.warn(
           "[auth] profiles row created with service role (user INSERT blocked by RLS). Add policy profiles_insert_own — see supabase/manual/profiles_insert_own_policy.sql",
         );
+        return true;
+      }
+      if (isDuplicateProfileKeyError(failMsg)) {
         return true;
       }
     } catch {
@@ -312,13 +332,20 @@ export async function requireDriverArea() {
   return { user, profile };
 }
 
-export async function requireRentalCompanyArea() {
+/**
+ * Rental tenant area. By default requires an active parent contract (signed / legacy bootstrap).
+ * Set `skipActiveContractRequirement` for `/rental/awaiting-contract`, offboarding, and account-closed pages.
+ */
+export async function requireRentalCompanyArea(options?: { skipActiveContractRequirement?: boolean }) {
   const { user, profile } = await requireAuthProfile();
   if (isSuperAdmin(user.email, profile)) {
     redirect("/super-admin");
   }
   if (profile.role !== "rental_company") {
     redirect("/driver");
+  }
+  if (!options?.skipActiveContractRequirement) {
+    await redirectIfRentalContractNotActive(profile.company_id);
   }
   return { user, profile };
 }

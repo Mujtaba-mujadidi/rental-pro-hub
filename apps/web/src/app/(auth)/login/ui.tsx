@@ -14,9 +14,16 @@ function Submit({ label }: { label: string }) {
     <button
       type="submit"
       disabled={pending}
-      className="flex h-11 w-full items-center justify-center rounded-lg bg-rph-rail text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50"
+      className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-rph-rail text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50"
     >
-      {pending ? "Please wait…" : label}
+      {pending ? (
+        <>
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+          Please wait…
+        </>
+      ) : (
+        label
+      )}
     </button>
   );
 }
@@ -82,7 +89,18 @@ function ForgotPasswordForm({ onBack }: { onBack: () => void }) {
   }
 
   return (
-    <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+    <div className="relative space-y-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+      {pending ? (
+        <div
+          className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-xl bg-white/85 dark:bg-slate-950/85"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-slate-300 border-t-rph-rail" />
+          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Sending reset link…</p>
+        </div>
+      ) : null}
       <div>
         <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Forgot your password?</h2>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
@@ -92,15 +110,19 @@ function ForgotPasswordForm({ onBack }: { onBack: () => void }) {
         </p>
       </div>
       {ok ? (
-        <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-100">
-          If an account exists for that email, you&apos;ll receive a message shortly. Open the link, then set a new
-          password on the next page.
-        </p>
+        <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 dark:border-emerald-900/50 dark:bg-emerald-950/50">
+          <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">Reset email sent</p>
+          <p className="text-sm text-emerald-900/90 dark:text-emerald-100/90">
+            If an account exists for <span className="font-medium">{email.trim()}</span>, you&apos;ll receive a
+            message shortly. Open the link, then set a new password on the next page.
+          </p>
+        </div>
       ) : null}
       {error ? (
-        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950/40 dark:text-red-200">
-          {error}
-        </p>
+        <div className="space-y-1 rounded-lg border border-red-200 bg-red-50 px-3 py-3 dark:border-red-900/50 dark:bg-red-950/40">
+          <p className="text-sm font-semibold text-red-900 dark:text-red-100">Couldn’t send reset link</p>
+          <p className="text-sm text-red-800 dark:text-red-200">{error}</p>
+        </div>
       ) : null}
       {!ok ? (
         <form onSubmit={handleResetSubmit} className="space-y-3">
@@ -114,25 +136,36 @@ function ForgotPasswordForm({ onBack }: { onBack: () => void }) {
               type="email"
               autoComplete="email"
               required
+              disabled={pending}
               value={email}
               onChange={(ev) => setEmail(ev.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-rph-rail focus:ring-2 focus:ring-rph-rail/20 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-rph-rail focus:ring-2 focus:ring-rph-rail/20 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
               placeholder="you@example.com"
             />
           </div>
           <button
             type="submit"
             disabled={pending || cooldownSec > 0}
-            className="flex h-11 w-full items-center justify-center rounded-lg bg-rph-rail text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50"
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-rph-rail text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50"
           >
-            {pending ? "Sending…" : cooldownSec > 0 ? `Try again in ${cooldownSec}s` : "Send reset link"}
+            {pending ? (
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                Sending…
+              </>
+            ) : cooldownSec > 0 ? (
+              `Try again in ${cooldownSec}s`
+            ) : (
+              "Send reset link"
+            )}
           </button>
         </form>
       ) : null}
       <div className="flex justify-start">
         <button
           type="button"
-          className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-800 shadow-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+          disabled={pending}
+          className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
           onClick={onBack}
         >
           Back to log in

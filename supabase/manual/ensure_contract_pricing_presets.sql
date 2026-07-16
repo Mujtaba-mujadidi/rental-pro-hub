@@ -1,4 +1,5 @@
 -- Fix: "Could not find the table 'public.contract_pricing_presets' in the schema cache"
+-- Progress: ../../docs/PROGRESS.md
 -- Run this in the Supabase SQL Editor for the same project as your app (.env.local).
 -- Safe to re-run (idempotent).
 

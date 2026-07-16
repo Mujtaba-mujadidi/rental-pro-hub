@@ -1,9 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { registerCompanyAction, getRegisterCompanyInviteDefaultsAction } from "@/app/actions/admin-companies";
 import { listPricingPresetsForRegisterAction } from "@/app/actions/contract-presets";
-import { listPublishedTermsForRegisterAction } from "@/app/actions/contract-terms";
+import {
+  getPublishedTermsVersionBodyForReviewAction,
+  listPublishedTermsForRegisterAction,
+} from "@/app/actions/contract-terms";
+import { TermsRichViewer } from "@/app/(main)/super-admin/settings/contract-terms/terms-rich-editor";
 import { CompanyStepProgress } from "@/components/forms/company-step-progress";
 
 const STEP_LABELS = ["Company details", "Registered office", "Primary contact", "Commercial terms", "Review"] as const;
@@ -20,6 +25,48 @@ function inputClass(invalid?: boolean) {
       ? "border-red-500 focus:border-red-500 focus:ring-red-500/25"
       : "border-zinc-300 focus:border-rph-rail focus:ring-rph-rail/20",
   ].join(" ");
+}
+
+/** Native `<select>`: strip OS chevron and show a centered icon (matches text inputs). */
+function selectClass(invalid?: boolean) {
+  return [
+    "w-full appearance-none rounded-lg border bg-white py-2.5 pl-3 pr-10 text-sm text-zinc-900 outline-none focus:ring-2 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100",
+    invalid
+      ? "border-red-500 focus:border-red-500 focus:ring-red-500/25"
+      : "border-zinc-300 focus:border-rph-rail focus:ring-rph-rail/20",
+  ].join(" ");
+}
+
+function SelectChevron() {
+  return (
+    <svg
+      className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500 dark:text-zinc-400"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
+/** Matches `contract_pricing_presets.pricing_model_type` check constraint. */
+const PRICING_MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: "fixed_monthly", label: "Fixed monthly — one recurring amount" },
+  { value: "per_vehicle", label: "Per vehicle — scales with fleet size" },
+  { value: "tiered_vehicles", label: "Tiered by vehicle count — bands or steps" },
+  { value: "base_plus_per_vehicle", label: "Base + per vehicle" },
+  { value: "custom", label: "Custom — advanced parameters in preset JSON" },
+];
+
+function pricingModelOptionLabel(value: string | undefined | null): string {
+  const v = typeof value === "string" ? value.trim() : "";
+  if (!v) return "—";
+  return PRICING_MODEL_OPTIONS.find((o) => o.value === v)?.label ?? v.replace(/_/g, " ");
 }
 
 const initialDraft = {
@@ -58,23 +105,31 @@ const initialDraft = {
 export type RegisterCompanyModalProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Called after the company row is saved. Passes optional message if invite was skipped or failed. */
-  onRegistered?: (inviteNotice?: string) => void;
+  /** Called after the company row is saved. Optional notice if invite or e-sign send failed or was skipped. */
+  onRegistered?: (notice?: string) => void;
 };
 
 export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: RegisterCompanyModalProps) {
+  const router = useRouter();
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState(initialDraft);
-  const [presets, setPresets] = useState<{ id: string; name: string }[]>([]);
+  const [presets, setPresets] = useState<{ id: string; name: string; pricing_model_type: string }[]>([]);
   const [publishedTerms, setPublishedTerms] = useState<{ id: string; version_label: string; title: string }[]>([]);
   const [sendInvite, setSendInvite] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [tcReviewOpen, setTcReviewOpen] = useState(false);
+  const [tcReview, setTcReview] = useState<{ version_label: string; title: string; body: string } | null>(null);
+  const [tcReviewErr, setTcReviewErr] = useState<string | null>(null);
+  const [tcReviewPending, startTcReviewTransition] = useTransition();
 
   useEffect(() => {
     if (!open) return;
     setStep(0);
     setError(null);
+    setTcReviewOpen(false);
+    setTcReview(null);
+    setTcReviewErr(null);
     setDraft({ ...initialDraft });
     void Promise.all([
       listPricingPresetsForRegisterAction().then((r) => {
@@ -92,11 +147,34 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !pending) onOpenChange(false);
+      if (e.key !== "Escape" || pending) return;
+      if (tcReviewOpen) {
+        setTcReviewOpen(false);
+        return;
+      }
+      onOpenChange(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, pending, onOpenChange]);
+  }, [open, pending, onOpenChange, tcReviewOpen]);
+
+  const openTermsReview = useCallback(() => {
+    const id = draft.terms_catalog_version_id.trim();
+    if (!id) return;
+    setTcReviewOpen(true);
+    setTcReview(null);
+    setTcReviewErr(null);
+    startTcReviewTransition(() => {
+      void (async () => {
+        const r = await getPublishedTermsVersionBodyForReviewAction(id);
+        if (!r.ok) {
+          setTcReviewErr(r.error);
+          return;
+        }
+        setTcReview({ version_label: r.version_label, title: r.title, body: r.body });
+      })();
+    });
+  }, [draft.terms_catalog_version_id]);
 
   const close = useCallback(() => {
     if (!pending) onOpenChange(false);
@@ -214,16 +292,21 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
           setError(res.error);
           return;
         }
-        onRegistered?.(res.inviteWarning);
+        const notices = [res.inviteWarning, res.eSignWarning].filter(Boolean);
+        onRegistered?.(notices.length ? notices.join(" ") : undefined);
         onOpenChange(false);
+        if (res.esignEnvelopeId) {
+          router.push(`/super-admin/esign/${res.esignEnvelopeId}`);
+        }
       })();
     });
-  }, [draft, sendInvite, publishedTerms.length, onOpenChange, onRegistered]);
+  }, [draft, sendInvite, publishedTerms.length, onOpenChange, onRegistered, router]);
 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[310] flex items-center justify-center p-4 sm:p-6">
+    <>
+      <div className="fixed inset-0 z-[310] flex items-center justify-center p-4 sm:p-6">
       <button
         type="button"
         className="absolute inset-0 bg-black/50 backdrop-blur-[1px]"
@@ -457,44 +540,84 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
                 <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Commercial terms & signatory</h3>
                 <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
                   Stored on the parent contract. Optional pricing preset seeds amounts. E-sign is sent separately from the
-                  company list when DocuSeal is configured.
+                  company list when e-sign SMTP is configured.
                 </p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1 sm:col-span-2">
                   <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Pricing preset</label>
-                  <select
-                    value={draft.pricing_preset_id}
-                    onChange={(e) => patch("pricing_preset_id", e.target.value)}
-                    className={inputClass()}
-                  >
-                    <option value="">None</option>
-                    {presets.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {publishedTerms.length > 0 ? (
-                  <div className="space-y-1 sm:col-span-2">
-                    <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                      Terms &amp; conditions (published) *
-                    </label>
+                  <div className="relative">
                     <select
-                      value={draft.terms_catalog_version_id}
-                      onChange={(e) => patch("terms_catalog_version_id", e.target.value)}
-                      className={inputClass(!draft.terms_catalog_version_id.trim())}
+                      value={draft.pricing_preset_id}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        const pr = presets.find((p) => p.id === v);
+                        setDraft((d) => ({
+                          ...d,
+                          pricing_preset_id: v,
+                          ...(pr?.pricing_model_type
+                            ? { pricing_model: String(pr.pricing_model_type).trim() }
+                            : {}),
+                        }));
+                      }}
+                      className={selectClass()}
                     >
-                      <option value="">Select version…</option>
-                      {publishedTerms.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.version_label} — {t.title}
+                      <option value="">None — set pricing model and amounts yourself</option>
+                      {presets.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
                         </option>
                       ))}
                     </select>
+                    <SelectChevron />
+                  </div>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Optional saved template (amounts, currency, billing rhythm) from Super admin → Contract pricing presets.
+                    If you use one, you do not pick pricing model separately—it is defined by that preset.
+                  </p>
+                </div>
+                {publishedTerms.length > 0 ? (
+                  <div className="space-y-1 sm:col-span-2">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-3">
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <label htmlFor="reg-terms-version" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                          Terms &amp; conditions (published) *
+                        </label>
+                        <div className="relative">
+                          <select
+                            id="reg-terms-version"
+                            value={draft.terms_catalog_version_id}
+                            onChange={(e) => {
+                              patch("terms_catalog_version_id", e.target.value);
+                              setTcReviewOpen(false);
+                              setTcReview(null);
+                              setTcReviewErr(null);
+                            }}
+                            className={selectClass(!draft.terms_catalog_version_id.trim())}
+                          >
+                            <option value="">Select version…</option>
+                            {publishedTerms.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.version_label} — {t.title}
+                              </option>
+                            ))}
+                          </select>
+                          <SelectChevron />
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className={`${btnGhost} h-11 shrink-0`}
+                        disabled={!draft.terms_catalog_version_id.trim() || pending}
+                        onClick={openTermsReview}
+                      >
+                        Review
+                      </button>
+                    </div>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                      A full copy is frozen on the contract for audits; later catalog changes do not alter signed agreements.
+                      Open <span className="font-medium text-zinc-600 dark:text-zinc-300">Review</span> to read the full
+                      text. A full copy is frozen on the contract for audits; later catalog changes do not alter signed
+                      agreements.
                     </p>
                   </div>
                 ) : null}
@@ -507,36 +630,91 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
                     className={inputClass()}
                     placeholder="Accounts mailbox (optional)"
                   />
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Optional field on the company record. We do not send invoice emails to this address yet; in-app billing
+                    alerts go to users with owner, admin, or finance access. Account invite and contract e-sign use the
+                    primary contact email above—not this field.
+                  </p>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Contract type</label>
+                  <label htmlFor="reg-contract-type" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                    Contract type
+                  </label>
                   <input
+                    id="reg-contract-type"
                     value={draft.contract_type}
                     onChange={(e) => patch("contract_type", e.target.value)}
-                    className={inputClass()}
+                    className={`${inputClass()} font-mono`}
+                    placeholder="rental_agreement"
+                    autoComplete="off"
                   />
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Short code stored on the contract for reporting and templates (free text in the database). Default{" "}
+                    <span className="font-mono">rental_agreement</span> is the standard B2B fleet rental. Change only if
+                    legal uses another agreement category.
+                  </p>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Pricing model</label>
-                  <input
-                    value={draft.pricing_model}
-                    onChange={(e) => patch("pricing_model", e.target.value)}
-                    className={inputClass()}
-                    placeholder="e.g. fixed_monthly"
-                  />
+                  <label htmlFor="reg-pricing-model" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                    Pricing model
+                  </label>
+                  {draft.pricing_preset_id.trim() ? (
+                    <>
+                      <input
+                        id="reg-pricing-model"
+                        readOnly
+                        tabIndex={-1}
+                        value={pricingModelOptionLabel(draft.pricing_model)}
+                        className={`${inputClass()} cursor-default bg-zinc-50 text-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-200`}
+                      />
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                        Taken from the selected preset. Set pricing preset to &quot;None&quot; if you need to choose a
+                        different model for this company.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="relative">
+                        <select
+                          id="reg-pricing-model"
+                          value={draft.pricing_model}
+                          onChange={(e) => patch("pricing_model", e.target.value)}
+                          className={selectClass()}
+                        >
+                          {!PRICING_MODEL_OPTIONS.some((o) => o.value === draft.pricing_model) && draft.pricing_model ? (
+                            <option value={draft.pricing_model}>{draft.pricing_model} (current value)</option>
+                          ) : null}
+                          {PRICING_MODEL_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                        <SelectChevron />
+                      </div>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                        Only when no preset is selected: how recurring charges are structured on the contract. Default is a
+                        single flat fee per billing period (
+                        <span className="font-mono">fixed_monthly</span>).
+                      </p>
+                    </>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Billing frequency</label>
-                  <select
-                    value={draft.billing_frequency}
-                    onChange={(e) => patch("billing_frequency", e.target.value)}
-                    className={inputClass()}
-                  >
-                    <option value="monthly">Monthly</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="quarterly">Quarterly</option>
-                    <option value="annual">Annual</option>
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={draft.billing_frequency}
+                      onChange={(e) => patch("billing_frequency", e.target.value)}
+                      className={selectClass()}
+                    >
+                      <option value="monthly">Monthly</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="quarterly">Quarterly</option>
+                      <option value="annual">Annual</option>
+                    </select>
+                    <SelectChevron />
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Start date</label>
@@ -624,16 +802,19 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
                 <label htmlFor="co-status" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                   Account status
                 </label>
-                <select
-                  id="co-status"
-                  value={draft.status}
-                  onChange={(e) => patch("status", e.target.value)}
-                  className={inputClass()}
-                >
-                  <option value="active">Active</option>
-                  <option value="pending">Pending</option>
-                  <option value="inactive">Inactive</option>
-                </select>
+                <div className="relative">
+                  <select
+                    id="co-status"
+                    value={draft.status}
+                    onChange={(e) => patch("status", e.target.value)}
+                    className={selectClass()}
+                  >
+                    <option value="active">Active</option>
+                    <option value="pending">Pending</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                  <SelectChevron />
+                </div>
               </div>
               <div className="space-y-1">
                 <label htmlFor="co-notes" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
@@ -657,11 +838,13 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
                   className="mt-1 size-4 rounded border-zinc-300 text-orange-600 focus:ring-orange-500/25 dark:border-zinc-600"
                 />
                 <span className="text-sm text-zinc-800 dark:text-zinc-200">
-                  <span className="font-semibold">Send invite email to primary contact now</span>
+                  <span className="font-semibold">Invite primary contact before the agreement is active (override)</span>
                   <span className="mt-1 block font-normal text-zinc-500 dark:text-zinc-400">
-                    When DocuSeal e-sign is enabled, this defaults off so the primary contact is invited after the contract
-                    is signed (or you can check this to invite immediately). With legacy signing, the default is on. You can
-                    always send an invite later from the company list.
+                    Standard flow: the primary contact is invited <span className="font-medium text-zinc-600 dark:text-zinc-300">after</span>{" "}
+                    the contract is signed (native e-sign). Check this only if e-sign is failing and you need them to have
+                    an Auth account early—they will see “Agreement not active yet” until the contract becomes active, then
+                    onboarding. With legacy bootstrap signing, the default is to invite immediately. You can always send or
+                    resend invites from the company list.
                   </span>
                 </span>
               </label>
@@ -726,5 +909,59 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
         </div>
       </div>
     </div>
+
+      {tcReviewOpen ? (
+        <div className="fixed inset-0 z-[320] flex items-center justify-center p-4 sm:p-6">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/60 backdrop-blur-[1px]"
+            aria-label="Close terms preview"
+            onMouseDown={() => setTcReviewOpen(false)}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tc-review-title"
+            className="relative z-[1] flex max-h-[min(85vh,40rem)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-950"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-zinc-700 sm:px-5">
+              <div className="min-w-0">
+                <h3 id="tc-review-title" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+                  Terms &amp; conditions preview
+                </h3>
+                {tcReview ? (
+                  <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
+                    <span className="font-medium text-zinc-700 dark:text-zinc-300">{tcReview.version_label}</span>
+                    {" — "}
+                    {tcReview.title}
+                  </p>
+                ) : tcReviewErr ? null : (
+                  <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>
+                )}
+              </div>
+              <button
+                type="button"
+                className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                onClick={() => setTcReviewOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-5">
+              {tcReviewErr ? (
+                <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+                  {tcReviewErr}
+                </p>
+              ) : null}
+              {tcReviewPending && !tcReview && !tcReviewErr ? (
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">Loading terms…</p>
+              ) : null}
+              {tcReview ? <TermsRichViewer html={tcReview.body} /> : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

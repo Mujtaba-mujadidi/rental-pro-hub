@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { AdminCompaniesTable } from "./admin-companies-table";
 import { RegisterCompanyModal } from "./register-company-modal";
@@ -11,13 +12,15 @@ const btnRegister =
   "inline-flex shrink-0 items-center justify-center rounded-lg bg-rph-rail px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer";
 
 export function CompaniesView() {
+  const router = useRouter();
   const [registerOpen, setRegisterOpen] = useState(false);
   const [listVersion, setListVersion] = useState(0);
   const [listNotice, setListNotice] = useState<string | null>(null);
 
   const bumpList = useCallback(() => {
     setListVersion((v) => v + 1);
-  }, []);
+    router.refresh();
+  }, [router]);
 
   return (
     <div className="space-y-6">

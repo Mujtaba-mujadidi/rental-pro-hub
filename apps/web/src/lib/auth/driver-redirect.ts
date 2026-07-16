@@ -1,12 +1,21 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isSuperAdminEmail } from "@/lib/auth/roles";
+import { getRentalSessionLifecycle } from "@/lib/auth/rental-lifecycle";
 import {
   DRIVER_ONBOARDING_COLUMNS,
   driverOnboardingComplete,
   type DriverOnboardingRow,
 } from "@/lib/driver/licence-check";
 
-export type AppHomePath = "/super-admin" | "/driver" | "/driver/onboarding" | "/rental" | "/rental/onboarding";
+export type AppHomePath =
+  | "/super-admin"
+  | "/driver"
+  | "/driver/onboarding"
+  | "/rental"
+  | "/rental/awaiting-contract"
+  | "/rental/onboarding"
+  | "/rental/offboarding"
+  | "/rental/account-closed";
 
 /** @deprecated Use resolveAppHomePath */
 export type DriverHomePath = AppHomePath;
@@ -24,30 +33,22 @@ export async function resolveAppHomePath(
   }
 
   if (profile?.role === "rental_company") {
-    const { data: memberships } = await supabase
-      .from("user_company_memberships")
-      .select("parent_company_id")
-      .eq("user_id", userId)
-      .eq("status", "active");
-
-    const rows = memberships ?? [];
-    const preferred = profile.company_id?.trim() ?? null;
-    const activeParent =
-      preferred && rows.some((m) => m.parent_company_id === preferred)
-        ? preferred
-        : rows[0]?.parent_company_id ?? preferred;
-
-    if (activeParent) {
-      const { data: co } = await supabase
-        .from("companies")
-        .select("rental_onboarding_completed_at")
-        .eq("id", activeParent)
-        .maybeSingle();
-      if (!co?.rental_onboarding_completed_at) {
-        return "/rental/onboarding";
-      }
+    const life = await getRentalSessionLifecycle(supabase, userId, email);
+    if (life.kind !== "rental") {
+      return "/rental";
     }
-
+    if (life.deletionPhase === "access_blocked") {
+      return "/rental/account-closed";
+    }
+    if (life.deletionPhase === "offboarding") {
+      return "/rental/offboarding";
+    }
+    if (!life.contractActive) {
+      return "/rental/awaiting-contract";
+    }
+    if (!life.onboardingComplete) {
+      return "/rental/onboarding";
+    }
     return "/rental";
   }
 

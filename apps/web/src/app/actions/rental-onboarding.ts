@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
+import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -26,6 +27,8 @@ function canManageOnboarding(profile: {
 
 export async function saveRentalOnboardingStepAction(stepIndex: number): Promise<OnboardingActionResult> {
   const { profile } = await requireRentalCompanyArea();
+  const frozen = await assertRentalCompanyWritable(profile);
+  if (!frozen.ok) return { ok: false, error: frozen.error };
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
   if (!canManageOnboarding(profile)) {
@@ -48,6 +51,8 @@ export async function saveRentalOnboardingStepAction(stepIndex: number): Promise
 
 export async function completeRentalOnboardingAction(): Promise<OnboardingActionResult> {
   const { profile } = await requireRentalCompanyArea();
+  const frozen = await assertRentalCompanyWritable(profile);
+  if (!frozen.ok) return { ok: false, error: frozen.error };
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
   if (!canManageOnboarding(profile)) {
@@ -74,6 +79,8 @@ export async function completeRentalOnboardingAction(): Promise<OnboardingAction
 
 export async function uploadParentCompanyLogoAction(formData: FormData): Promise<OnboardingActionResult> {
   const { profile } = await requireRentalCompanyArea();
+  const frozen = await assertRentalCompanyWritable(profile);
+  if (!frozen.ok) return { ok: false, error: frozen.error };
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
   if (!canManageOnboarding(profile)) {
@@ -116,6 +123,8 @@ export async function uploadParentCompanyLogoAction(formData: FormData): Promise
 
 export async function updatePrimarySubcompanyOnboardingAction(formData: FormData): Promise<OnboardingActionResult> {
   const { profile } = await requireRentalCompanyArea();
+  const frozen = await assertRentalCompanyWritable(profile);
+  if (!frozen.ok) return { ok: false, error: frozen.error };
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
   if (!canManageOnboarding(profile)) {
@@ -153,6 +162,8 @@ export async function updatePrimarySubcompanyOnboardingAction(formData: FormData
 
 export async function updateParentCompanyProfileFieldsAction(formData: FormData): Promise<OnboardingActionResult> {
   const { profile } = await requireRentalCompanyArea();
+  const frozen = await assertRentalCompanyWritable(profile);
+  if (!frozen.ok) return { ok: false, error: frozen.error };
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
   if (!canManageOnboarding(profile)) {

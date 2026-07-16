@@ -47,6 +47,9 @@ npm run mobile
 | `apps/mobile` | Role-based mobile app (Expo) |
 | `packages/shared` | Shared constants/types |
 | `supabase/migrations` | SQL migrations (Phase 1+) |
+| [`docs/`](docs/README.md) | **Plan & progress** — start at [`docs/PROGRESS.md`](docs/PROGRESS.md); e-sign at [`docs/esign.md`](docs/esign.md) |
+
+**Current work:** Native e-sign (DocuSeal removed). Apply `ensure_esign_envelopes.sql`, configure SMTP, smoke-test designer + OTP signing.
 
 ## Scripts
 
