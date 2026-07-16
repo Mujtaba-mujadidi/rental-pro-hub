@@ -9,7 +9,7 @@ import {
   type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   applyLatestCompanyContractChangeAction,
@@ -20,7 +20,7 @@ import {
 } from "@/app/actions/admin-companies";
 import { prepareCompanyContractForEsignAction } from "@/app/actions/contract-signature";
 import { getCompanySignedEsignEnvelopeAction } from "@/app/actions/esign";
-import { getAdminCompaniesPageAction, getAdminCompanyDetailAction } from "@/app/actions/admin-companies-list";
+import { getAdminCompaniesPageAction, getAdminCompanyDetailAction, getPrimaryContactSignedInAction } from "@/app/actions/admin-companies-list";
 import { AdminCompanyDetailDialog } from "@/app/(main)/super-admin/companies/admin-company-detail-dialog";
 import type { AdminCompanyDetailPayload } from "@/lib/admin/company-list-shared";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
@@ -276,6 +276,12 @@ export function AdminCompaniesTable({
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailPayload, setDetailPayload] = useState<AdminCompanyDetailPayload | null>(null);
+  /** Cache Auth last-sign-in checks by user id (filled when a row menu opens). */
+  const [signedInByUserId, setSignedInByUserId] = useState<Record<string, boolean>>({});
+  const [signedInLoadingUserId, setSignedInLoadingUserId] = useState<string | null>(null);
+  const signedInByUserIdRef = useRef(signedInByUserId);
+  const signedInInflightRef = useRef(new Set<string>());
+  signedInByUserIdRef.current = signedInByUserId;
 
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState(25);
@@ -403,6 +409,38 @@ export function AdminCompaniesTable({
       );
     },
     [finishActionOverlay],
+  );
+
+  const ensurePrimarySignedInStatus = useCallback(async (userId: string | null) => {
+    const uid = userId?.trim();
+    if (!uid) return;
+    if (Object.prototype.hasOwnProperty.call(signedInByUserIdRef.current, uid)) return;
+    if (signedInInflightRef.current.has(uid)) return;
+
+    signedInInflightRef.current.add(uid);
+    setSignedInLoadingUserId(uid);
+    try {
+      const res = await getPrimaryContactSignedInAction(uid);
+      setSignedInByUserId((prev) => ({
+        ...prev,
+        [uid]: res.ok ? res.hasSignedIn : false,
+      }));
+    } finally {
+      signedInInflightRef.current.delete(uid);
+      setSignedInLoadingUserId((cur) => (cur === uid ? null : cur));
+    }
+  }, []);
+
+  const resolvePrimarySignedIn = useCallback(
+    (r: AdminCompanyListRow): boolean | null => {
+      const uid = r.primaryContactUserId?.trim();
+      if (!uid) return false;
+      if (Object.prototype.hasOwnProperty.call(signedInByUserId, uid)) {
+        return signedInByUserId[uid] ?? false;
+      }
+      return null;
+    },
+    [signedInByUserId],
   );
 
   const onConfirmLifecycle = useCallback(async () => {
@@ -652,8 +690,13 @@ export function AdminCompaniesTable({
           const eSignBusy = eSignBusyId === r.id;
           const busy = inviteBusy || lifecycleBusy || contractBusy || eSignBusy;
           const lifecycleActive = r.deletionPhase === "active";
+          const primarySignedIn = resolvePrimarySignedIn(r);
           return (
-            <DropdownMenu.Root>
+            <DropdownMenu.Root
+              onOpenChange={(open) => {
+                if (open) void ensurePrimarySignedInStatus(r.primaryContactUserId);
+              }}
+            >
               <DropdownMenu.Trigger asChild>
                 <button type="button" className={rowActionTriggerClass} disabled={busy} aria-label="Row actions" title="Actions">
                   <IconKebabVertical />
@@ -791,7 +834,11 @@ export function AdminCompaniesTable({
                       {contractBusy ? "Applying…" : "Mark contract signed"}
                     </DropdownMenu.Item>
                   ) : null}
-                  {r.primaryContactHasSignedIn ? (
+                  {primarySignedIn === null && r.primaryContactUserId ? (
+                    <DropdownMenu.Item className={rowActionItemClass} disabled>
+                      Checking account…
+                    </DropdownMenu.Item>
+                  ) : primarySignedIn ? (
                     <DropdownMenu.Item
                       className={rowActionItemClass}
                       disabled={busy || !r.email || !lifecycleActive}
@@ -905,7 +952,7 @@ export function AdminCompaniesTable({
         },
       },
     ],
-    [inviteBusyId, lifecycleBusyId, contractBusyId, eSignBusyId, onListChange, doPrimaryInvite, doPasswordReset, finishActionOverlay],
+    [inviteBusyId, lifecycleBusyId, contractBusyId, eSignBusyId, onListChange, doPrimaryInvite, doPasswordReset, finishActionOverlay, ensurePrimarySignedInStatus, resolvePrimarySignedIn, signedInLoadingUserId],
   );
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));

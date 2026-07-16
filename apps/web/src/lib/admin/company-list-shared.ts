@@ -18,8 +18,13 @@ export type AdminCompanyListRow = {
   createdAt: string;
   hasLogo: boolean;
   inviteLastSentAt: string | null;
-  /** True once the invited primary contact has signed in at least once (password / session established). */
-  primaryContactHasSignedIn: boolean;
+  /** Auth user id for the primary contact when linked. */
+  primaryContactUserId: string | null;
+  /**
+   * True once the invited primary contact has signed in at least once.
+   * `null` until resolved lazily (row menu open) so list load stays fast.
+   */
+  primaryContactHasSignedIn: boolean | null;
   /** Company deletion lifecycle (offboarding / access block before purge). */
   deletionPhase: "active" | "offboarding" | "access_blocked";
   offboardingEndsAt: string | null;

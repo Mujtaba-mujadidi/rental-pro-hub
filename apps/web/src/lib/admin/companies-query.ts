@@ -33,6 +33,35 @@ function quoteOrFilterValue(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
+function normalizeDeletionPhase(v: string | null | undefined): "active" | "offboarding" | "access_blocked" {
+  if (v === "offboarding" || v === "access_blocked") return v;
+  return "active";
+}
+
+/** Latest agreement status per parent company (one cheap query for the page). */
+async function agreementStatusByCompanyId(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  companyIds: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!companyIds.length) return out;
+
+  const { data, error } = await admin
+    .from("company_contracts")
+    .select("parent_company_id, status, updated_at")
+    .in("parent_company_id", companyIds)
+    .order("updated_at", { ascending: false });
+
+  if (error || !data) return out;
+
+  for (const row of data) {
+    const id = row.parent_company_id as string | null;
+    if (!id || out.has(id)) continue;
+    out.set(id, String(row.status ?? ""));
+  }
+  return out;
+}
+
 function mapRow(
   r: {
     id: string;
@@ -53,14 +82,10 @@ function mapRow(
     invite_last_sent_at: string | null;
     deletion_phase?: string | null;
     offboarding_ends_at?: string | null;
-    company_contracts: { status: string } | { status: string }[] | null;
   },
-  signedInByUserId: Map<string, boolean>,
+  agreementById: Map<string, string>,
 ): AdminCompanyListRow {
-  const ccRaw = r.company_contracts;
-  const cc = Array.isArray(ccRaw) ? ccRaw[0] : ccRaw;
-  const uid = r.primary_contact_user_id?.trim() ?? null;
-  const primaryContactHasSignedIn = uid ? (signedInByUserId.get(uid) ?? false) : false;
+  const uid = r.primary_contact_user_id?.trim() || null;
   return {
     id: r.id,
     name: r.name ?? "",
@@ -74,38 +99,16 @@ function mapRow(
     postcode: r.registered_postcode,
     status: r.status ?? "active",
     contractStatus: r.contract_status,
-    agreementContractStatus: cc?.status ?? null,
+    agreementContractStatus: agreementById.get(r.id) || null,
     createdAt: r.created_at ?? "",
     hasLogo: r.logo_storage_path != null && r.logo_storage_path.length > 0,
     inviteLastSentAt: r.invite_last_sent_at,
-    primaryContactHasSignedIn,
+    primaryContactUserId: uid,
+    /** Resolved lazily when the row menu opens (avoids N Auth Admin calls on list load). */
+    primaryContactHasSignedIn: null,
     deletionPhase: normalizeDeletionPhase(r.deletion_phase),
     offboardingEndsAt: r.offboarding_ends_at ?? null,
   };
-}
-
-function normalizeDeletionPhase(v: string | null | undefined): "active" | "offboarding" | "access_blocked" {
-  if (v === "offboarding" || v === "access_blocked") return v;
-  return "active";
-}
-
-async function batchPrimaryContactHasSignedIn(
-  admin: ReturnType<typeof createSupabaseAdminClient>,
-  userIds: (string | null | undefined)[],
-): Promise<Map<string, boolean>> {
-  const out = new Map<string, boolean>();
-  const unique = [...new Set(userIds.map((id) => id?.trim()).filter((id): id is string => !!id))];
-  await Promise.all(
-    unique.map(async (id) => {
-      const { data, error } = await admin.auth.admin.getUserById(id);
-      if (error || !data?.user) {
-        out.set(id, false);
-        return;
-      }
-      out.set(id, !!data.user.last_sign_in_at);
-    }),
-  );
-  return out;
 }
 
 export async function fetchCompaniesPage(params: FetchCompaniesPageParams): Promise<FetchCompaniesPageResult> {
@@ -128,7 +131,7 @@ export async function fetchCompaniesPage(params: FetchCompaniesPageParams): Prom
   let q = admin
     .from("companies")
     .select(
-      "id, name, legal_name, company_number, primary_contact_first_name, primary_contact_last_name, primary_contact_email, primary_contact_phone, primary_contact_user_id, registered_town, registered_postcode, logo_storage_path, status, contract_status, created_at, invite_last_sent_at, deletion_phase, offboarding_ends_at, company_contracts(status)",
+      "id, name, legal_name, company_number, primary_contact_first_name, primary_contact_last_name, primary_contact_email, primary_contact_phone, primary_contact_user_id, registered_town, registered_postcode, logo_storage_path, status, contract_status, created_at, invite_last_sent_at, deletion_phase, offboarding_ends_at",
       { count: "exact" },
     );
 
@@ -157,38 +160,52 @@ export async function fetchCompaniesPage(params: FetchCompaniesPageParams): Prom
     return { ok: false, error: error.message };
   }
 
-  const raw = data ?? [];
-  const signedInByUserId = await batchPrimaryContactHasSignedIn(
+  const raw = (data ?? []) as {
+    id: string;
+    name: string;
+    legal_name: string | null;
+    company_number: string | null;
+    primary_contact_first_name: string | null;
+    primary_contact_last_name: string | null;
+    primary_contact_email: string | null;
+    primary_contact_phone: string | null;
+    primary_contact_user_id?: string | null;
+    registered_town: string | null;
+    registered_postcode: string | null;
+    logo_storage_path: string | null;
+    status: string;
+    contract_status: string | null;
+    created_at: string | null;
+    invite_last_sent_at: string | null;
+    deletion_phase?: string | null;
+    offboarding_ends_at?: string | null;
+  }[];
+
+  const agreementById = await agreementStatusByCompanyId(
     admin,
-    raw.map((row) => (row as { primary_contact_user_id?: string | null }).primary_contact_user_id),
+    raw.map((row) => row.id),
   );
 
-  const rows = raw.map((row) =>
-    mapRow(
-      row as {
-        id: string;
-        name: string;
-        legal_name: string | null;
-        company_number: string | null;
-        primary_contact_first_name: string | null;
-        primary_contact_last_name: string | null;
-        primary_contact_email: string | null;
-        primary_contact_phone: string | null;
-        primary_contact_user_id?: string | null;
-        registered_town: string | null;
-        registered_postcode: string | null;
-        logo_storage_path: string | null;
-        status: string;
-        contract_status: string | null;
-        created_at: string | null;
-        invite_last_sent_at: string | null;
-        deletion_phase?: string | null;
-        offboarding_ends_at?: string | null;
-        company_contracts: { status: string } | { status: string }[] | null;
-      },
-      signedInByUserId,
-    ),
-  );
+  const rows = raw.map((row) => mapRow(row, agreementById));
 
   return { ok: true, rows, total: count ?? 0 };
+}
+
+/** Single Auth Admin lookup — used when a row menu opens, not on list load. */
+export async function fetchPrimaryContactHasSignedIn(
+  userId: string,
+): Promise<{ ok: true; hasSignedIn: boolean } | { ok: false; error: string }> {
+  const id = userId?.trim();
+  if (!id) return { ok: true, hasSignedIn: false };
+
+  let admin: ReturnType<typeof createSupabaseAdminClient>;
+  try {
+    admin = createSupabaseAdminClient();
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Server configuration error." };
+  }
+
+  const { data, error } = await admin.auth.admin.getUserById(id);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, hasSignedIn: Boolean(data?.user?.last_sign_in_at) };
 }
