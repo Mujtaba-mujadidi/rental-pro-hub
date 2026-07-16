@@ -518,10 +518,20 @@ export function AdminCompaniesTable({
         cell: (info) => {
           const r = info.row.original;
           return (
-            <div>
+            <div className="min-w-[10rem] max-w-[16rem]">
               <div className="font-medium text-slate-900 dark:text-slate-100">{r.name || "—"}</div>
               {r.legalName ? (
                 <div className="text-xs text-slate-500 dark:text-slate-400">{r.legalName}</div>
+              ) : null}
+              {r.deletionPhase === "offboarding" || r.deletionPhase === "access_blocked" ? (
+                <div className="mt-1 flex flex-col gap-0.5">
+                  {deletionPhaseBadge(r.deletionPhase)}
+                  {r.deletionPhase === "offboarding" && r.offboardingEndsAt ? (
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Until {formatRegisteredAt(r.offboardingEndsAt)}
+                    </span>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           );
@@ -639,24 +649,6 @@ export function AdminCompaniesTable({
               {account === "pending_renewal" ? (
                 <span className="w-fit rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-950 dark:border-amber-900/45 dark:bg-amber-950/35 dark:text-amber-100">
                   Renewal pending
-                </span>
-              ) : null}
-            </div>
-          );
-        },
-      },
-      {
-        id: "lifecycle",
-        header: "Lifecycle",
-        enableSorting: false,
-        cell: (info) => {
-          const r = info.row.original;
-          return (
-            <div className="flex flex-col gap-1">
-              {deletionPhaseBadge(r.deletionPhase)}
-              {r.deletionPhase === "offboarding" && r.offboardingEndsAt ? (
-                <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Until {formatRegisteredAt(r.offboardingEndsAt)}
                 </span>
               ) : null}
             </div>
@@ -1188,11 +1180,12 @@ export function AdminCompaniesTable({
       </div>
 
       <p className="text-xs text-slate-500 dark:text-slate-400">
-        {loading ? (
-          <span>Loading…</span>
+        {loading && rows.length === 0 ? (
+          <span>Loading companies…</span>
         ) : (
           <>
             Showing {fromRow}–{toRow} of {total}
+            {loading ? " · Updating…" : ""}
           </>
         )}
       </p>
@@ -1202,37 +1195,81 @@ export function AdminCompaniesTable({
           {hasFilters ? "No companies match your filters." : "No companies yet. Register one to get started."}
         </p>
       ) : (
-        <div
-          className={`overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 ${loading ? "opacity-60" : ""}`}
-        >
-          <table className="w-full min-w-[1080px] border-collapse text-left text-sm">
+        <div className="relative overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+          {loading ? (
+            <div
+              className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-white/75 dark:bg-slate-950/75"
+              role="status"
+              aria-live="polite"
+              aria-busy="true"
+            >
+              <span
+                className="h-8 w-8 animate-spin rounded-full border-[3px] border-slate-300 border-t-rph-rail dark:border-slate-600 dark:border-t-sky-400"
+                aria-hidden
+              />
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Loading companies…</p>
+            </div>
+          ) : null}
+          <table className="w-full min-w-[960px] border-collapse text-left text-sm">
             <thead>
               {table.getHeaderGroups().map((hg) => (
                 <tr
                   key={hg.id}
                   className="border-b border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/60"
                 >
-                  {hg.headers.map((h) => (
-                    <th key={h.id} scope="col" className="px-4 py-3">
-                      {h.isPlaceholder ? null : flexRender(h.column.columnDef.header, h.getContext())}
-                    </th>
-                  ))}
+                  {hg.headers.map((h) => {
+                    const sticky = h.column.id === "name";
+                    return (
+                      <th
+                        key={h.id}
+                        scope="col"
+                        className={`px-4 py-3 ${
+                          sticky
+                            ? "sticky left-0 z-10 border-r border-slate-200 bg-slate-50 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)] dark:border-slate-700 dark:bg-slate-800 dark:shadow-[2px_0_6px_-2px_rgba(0,0,0,0.35)]"
+                            : ""
+                        }`}
+                      >
+                        {h.isPlaceholder ? null : flexRender(h.column.columnDef.header, h.getContext())}
+                      </th>
+                    );
+                  })}
                 </tr>
               ))}
             </thead>
             <tbody>
-              {table.getRowModel().rows.map((row) => (
-                <tr
-                  key={row.id}
-                  className="border-b border-slate-100 last:border-0 dark:border-slate-800 odd:bg-white even:bg-slate-50/50 dark:odd:bg-slate-900/40 dark:even:bg-slate-900/20"
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-4 py-3 text-slate-700 dark:text-slate-300">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
+              {loading && rows.length === 0
+                ? Array.from({ length: 6 }, (_, i) => (
+                    <tr key={`skel-${i}`} className="border-b border-slate-100 dark:border-slate-800">
+                      <td className="sticky left-0 z-10 border-r border-slate-100 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                        <div className="h-4 w-32 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+                      </td>
+                      <td className="px-4 py-3" colSpan={8}>
+                        <div className="h-4 w-full max-w-md animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+                      </td>
+                    </tr>
+                  ))
+                : table.getRowModel().rows.map((row) => (
+                    <tr
+                      key={row.id}
+                      className="group border-b border-slate-100 last:border-0 dark:border-slate-800 odd:bg-white even:bg-slate-50/80 dark:odd:bg-slate-900 dark:even:bg-slate-900/80"
+                    >
+                      {row.getVisibleCells().map((cell) => {
+                        const sticky = cell.column.id === "name";
+                        return (
+                          <td
+                            key={cell.id}
+                            className={`px-4 py-3 text-slate-700 dark:text-slate-300 ${
+                              sticky
+                                ? "sticky left-0 z-10 border-r border-slate-200 bg-white shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)] group-odd:bg-white group-even:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:shadow-[2px_0_6px_-2px_rgba(0,0,0,0.35)] dark:group-odd:bg-slate-900 dark:group-even:bg-slate-950"
+                                : ""
+                            }`}
+                          >
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </td>
+                        );
+                      })}
+                    </tr>
                   ))}
-                </tr>
-              ))}
             </tbody>
           </table>
         </div>
