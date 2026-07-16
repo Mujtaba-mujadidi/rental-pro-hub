@@ -13,6 +13,12 @@ const SMTP_CONNECT_MS = 12_000;
 const SMTP_SOCKET_MS = 15_000;
 const SMTP_SEND_MS = 20_000;
 
+/** Dynamic env read — avoids Next build-time inlining of empty secrets. */
+function env(name: string): string | undefined {
+  const value = process.env[name];
+  return typeof value === "string" ? value.trim() || undefined : undefined;
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -31,13 +37,25 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
-function defaultFrom() {
-  return (
-    process.env.RESEND_FROM?.trim() ||
-    process.env.SMTP_FROM?.trim() ||
-    process.env.ESIGN_SMTP_FROM?.trim() ||
-    "RMS <noreply@localhost>"
-  );
+function smtpFrom(): string {
+  return env("SMTP_FROM") || env("ESIGN_SMTP_FROM") || "RMS <noreply@localhost>";
+}
+
+/**
+ * Resend must not fall back to SMTP_FROM (often a Gmail address Resend rejects).
+ * Use RESEND_FROM, or the Resend test sender.
+ */
+function resendFrom(): string {
+  const configured = env("RESEND_FROM");
+  if (configured) {
+    if (/@gmail\.com\b/i.test(configured) || /@googlemail\.com\b/i.test(configured)) {
+      throw new Error(
+        'RESEND_FROM cannot be a Gmail address. Use RESEND_FROM=RMS <onboarding@resend.dev> (testing) or a domain verified at resend.com/domains.',
+      );
+    }
+    return configured;
+  }
+  return "RMS <onboarding@resend.dev>";
 }
 
 /**
@@ -58,7 +76,7 @@ async function resolveSmtpIpv4(host: string): Promise<string> {
 
 /** HTTPS transactional email — works on Railway Hobby (SMTP ports are blocked there). */
 async function sendViaResend(input: SendMailInput, apiKey: string): Promise<void> {
-  const from = defaultFrom();
+  const from = resendFrom();
   const res = await withTimeout(
     fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -85,11 +103,11 @@ async function sendViaResend(input: SendMailInput, apiKey: string): Promise<void
 }
 
 async function sendViaSmtp(input: SendMailInput): Promise<void> {
-  const host = process.env.SMTP_ADDRESS?.trim() || process.env.ESIGN_SMTP_HOST?.trim();
-  const port = Number(process.env.SMTP_PORT || process.env.ESIGN_SMTP_PORT || "587");
-  const user = process.env.SMTP_USERNAME?.trim() || process.env.ESIGN_SMTP_USER?.trim();
-  const pass = process.env.SMTP_PASSWORD?.trim() || process.env.ESIGN_SMTP_PASSWORD?.trim();
-  const from = defaultFrom();
+  const host = env("SMTP_ADDRESS") || env("ESIGN_SMTP_HOST");
+  const port = Number(env("SMTP_PORT") || env("ESIGN_SMTP_PORT") || "587");
+  const user = env("SMTP_USERNAME") || env("ESIGN_SMTP_USER");
+  const pass = env("SMTP_PASSWORD") || env("ESIGN_SMTP_PASSWORD");
+  const from = smtpFrom();
 
   if (!host || !user || !pass) {
     throw new Error("SMTP_* incomplete");
@@ -142,11 +160,12 @@ async function sendViaSmtp(input: SendMailInput): Promise<void> {
  * SMTP_* still works locally and on Railway Pro after redeploy.
  */
 export async function sendEsignMail(input: SendMailInput): Promise<{ ok: true } | { ok: false; error: string }> {
-  const resendKey = process.env.RESEND_API_KEY?.trim();
-  const smtpHost = process.env.SMTP_ADDRESS?.trim() || process.env.ESIGN_SMTP_HOST?.trim();
-  const smtpUser = process.env.SMTP_USERNAME?.trim() || process.env.ESIGN_SMTP_USER?.trim();
-  const smtpPass = process.env.SMTP_PASSWORD?.trim() || process.env.ESIGN_SMTP_PASSWORD?.trim();
-  const hasSmtp = Boolean(smtpHost && smtpUser && smtpPass);
+  const resendKey = env("RESEND_API_KEY");
+  const hasSmtp = Boolean(
+    (env("SMTP_ADDRESS") || env("ESIGN_SMTP_HOST")) &&
+      (env("SMTP_USERNAME") || env("ESIGN_SMTP_USER")) &&
+      (env("SMTP_PASSWORD") || env("ESIGN_SMTP_PASSWORD")),
+  );
 
   if (!resendKey && !hasSmtp) {
     console.warn(
@@ -175,7 +194,7 @@ export async function sendEsignMail(input: SendMailInput): Promise<{ ok: true } 
       ok: false,
       error: looksLikeSmtpBlock
         ? `Could not email the recipient (${msg}). Railway Hobby/Free blocks outbound SMTP — set RESEND_API_KEY (https://resend.com) or upgrade to Railway Pro and redeploy.`
-        : `Could not email the recipient (${msg}). Check RESEND_API_KEY / SMTP_* on the server and try again.`,
+        : `Could not email the recipient (${msg}). Check RESEND_API_KEY / RESEND_FROM / SMTP_* on the server and try again.`,
     };
   }
 }
