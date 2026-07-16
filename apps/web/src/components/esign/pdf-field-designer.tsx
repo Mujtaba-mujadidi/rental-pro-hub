@@ -338,18 +338,33 @@ export function PdfFieldDesigner({
     setSendPhase("sending");
     setError(null);
     setOk(null);
+    let finished = false;
+    const failsafe = window.setTimeout(() => {
+      if (finished) return;
+      finished = true;
+      setSendPhase("error");
+      setError(
+        "Sending is taking too long. The email server may be unreachable — check SMTP settings on Railway and try again.",
+      );
+      setBusy(false);
+    }, 45_000);
     try {
       if (!disabled) {
         await onSave(fields);
       }
       await onSend();
+      if (finished) return;
+      finished = true;
       setSendPhase("success");
       setOk("Contract sent. The recipient will receive an email with a signing link and access code.");
       onAfterSendSuccess?.();
     } catch (e) {
+      if (finished) return;
+      finished = true;
       setSendPhase("error");
       setError(e instanceof Error ? e.message : "Send failed. Please try again.");
     } finally {
+      window.clearTimeout(failsafe);
       setBusy(false);
     }
   }
