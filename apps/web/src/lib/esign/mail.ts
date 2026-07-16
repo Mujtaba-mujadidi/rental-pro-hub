@@ -1,3 +1,4 @@
+import dns from "node:dns";
 import nodemailer from "nodemailer";
 
 export type SendMailInput = {
@@ -10,6 +11,22 @@ export type SendMailInput = {
 const SMTP_CONNECT_MS = 15_000;
 const SMTP_SOCKET_MS = 20_000;
 const SMTP_SEND_MS = 25_000;
+
+// Prefer A records process-wide (Railway often has no IPv6 egress to the public internet).
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch {
+  /* older Node */
+}
+
+/** Force IPv4 only — Railway cannot reach Gmail over IPv6 (ENETUNREACH). */
+function ipv4Lookup(
+  hostname: string,
+  _options: unknown,
+  callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void,
+) {
+  dns.lookup(hostname, { family: 4 }, callback);
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -52,18 +69,22 @@ export async function sendEsignMail(input: SendMailInput): Promise<{ ok: true } 
   }
 
   try {
+    // Cast: nodemailer types omit `lookup` / `family` on some versions; runtime SMTP transport supports both.
     const transporter = nodemailer.createTransport({
       host,
       port,
       secure: port === 465,
       requireTLS: port === 587,
       auth: { user, pass },
-      // Railway (and many hosts) have no IPv6 egress; Gmail AAAA → ENETUNREACH.
-      family: 4,
+      lookup: ipv4Lookup,
       connectionTimeout: SMTP_CONNECT_MS,
       greetingTimeout: SMTP_CONNECT_MS,
       socketTimeout: SMTP_SOCKET_MS,
-    } as nodemailer.TransportOptions);
+      tls: {
+        servername: host,
+        minVersion: "TLSv1.2",
+      },
+    } as Parameters<typeof nodemailer.createTransport>[0]);
 
     await withTimeout(
       transporter.sendMail({
