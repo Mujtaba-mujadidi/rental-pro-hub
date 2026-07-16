@@ -4,6 +4,7 @@ import { requireSuperAdmin } from "@/lib/auth/profile";
 import { fetchAdminCompanyDetail, type FetchAdminCompanyDetailResult } from "@/lib/admin/company-detail";
 import {
   fetchCompaniesPage,
+  fetchPrimaryContactHasSignedIn,
   type CompanyListStatusFilter,
   type FetchCompaniesPageResult,
 } from "@/lib/admin/companies-query";
@@ -27,6 +28,13 @@ export async function getAdminCompaniesPageAction(input: AdminCompaniesListInput
     sortDir: input.sortDir,
     status: input.status,
   });
+}
+
+export async function getPrimaryContactSignedInAction(
+  userId: string,
+): Promise<{ ok: true; hasSignedIn: boolean } | { ok: false; error: string }> {
+  await requireSuperAdmin();
+  return fetchPrimaryContactHasSignedIn(userId);
 }
 
 export async function getAdminCompanyDetailAction(companyId: string): Promise<FetchAdminCompanyDetailResult> {
