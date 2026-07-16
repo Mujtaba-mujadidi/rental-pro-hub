@@ -58,6 +58,8 @@ export async function sendEsignMail(input: SendMailInput): Promise<{ ok: true } 
       secure: port === 465,
       requireTLS: port === 587,
       auth: { user, pass },
+      // Railway (and many hosts) have no IPv6 egress; Gmail AAAA → ENETUNREACH.
+      family: 4,
       connectionTimeout: SMTP_CONNECT_MS,
       greetingTimeout: SMTP_CONNECT_MS,
       socketTimeout: SMTP_SOCKET_MS,
