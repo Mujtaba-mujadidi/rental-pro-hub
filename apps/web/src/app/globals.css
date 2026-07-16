@@ -1,8 +1,23 @@
+/* Global styles only: imported once from app/layout.tsx. Pages use Tailwind utilities + .rph-* below — no per-route CSS files. */
+
 @import "tailwindcss";
+
+/* next-themes sets class="dark" on <html>; Tailwind v4 defaults dark: to prefers-color-scheme — override so the toggle works. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* Matches Option 7 sidebar; use for primaries + accents site-wide */
+  --rph-rail: #121a28;
+  --rph-rail-hover: #1b2d44;
+  --rph-rail-soft: #2d3f5e;
+  --rph-rail-softer: #3d5375;
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
 }
 
 @theme inline {
@@ -10,17 +25,46 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-rph-rail: var(--rph-rail);
+  --color-rph-rail-hover: var(--rph-rail-hover);
+  --color-rph-rail-soft: var(--rph-rail-soft);
+  --color-rph-rail-softer: var(--rph-rail-softer);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Main app shell (Option 7) */
+.rph-h1 {
+  @apply text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100;
+}
+.rph-lead {
+  @apply text-base text-slate-700 dark:text-slate-300;
+}
+.rph-strong {
+  @apply font-semibold text-slate-900 dark:text-slate-100;
+}
+.rph-muted {
+  @apply text-slate-600 dark:text-slate-400;
+}
+.rph-meta {
+  @apply text-xs text-slate-500 dark:text-slate-500;
+}
+.rph-label-lg {
+  @apply block text-sm font-medium text-slate-800 dark:text-slate-200;
+}
+.rph-input-auth {
+  @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-rph-rail focus:ring-2 focus:ring-rph-rail/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-rph-rail-softer dark:focus:ring-rph-rail-soft/30;
+}
+.rph-btn-primary-wide {
+  @apply mt-2 flex h-11 w-full items-center justify-center rounded-lg bg-rph-rail text-sm font-medium text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer;
+}
+.rph-link-inline {
+  @apply font-medium text-rph-rail underline decoration-rph-rail/40 hover:text-rph-rail-hover hover:decoration-rph-rail-hover dark:text-rph-rail-softer dark:hover:text-slate-300;
+}
+.rph-alert-error {
+  @apply rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200;
 }

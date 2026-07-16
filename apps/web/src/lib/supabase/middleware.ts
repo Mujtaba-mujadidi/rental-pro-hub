@@ -1,13 +1,23 @@
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
+import { resolveSupabasePublishableEnv } from "@/lib/supabase/env";
+import { resolveAppHomePath } from "@/lib/auth/driver-redirect";
+import { getRentalSessionLifecycle, rentalPathRequiresRedirect } from "@/lib/auth/rental-lifecycle";
+
+const protectedPrefixes = ["/super-admin", "/driver", "/rental"];
+
+function isProtectedPath(pathname: string) {
+  return protectedPrefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !anonKey) {
+  let url: string;
+  let anonKey: string;
+  try {
+    ({ url, anonKey } = resolveSupabasePublishableEnv());
+  } catch {
     return response;
   }
 
@@ -17,9 +27,7 @@ export async function updateSession(request: NextRequest) {
         return request.cookies.getAll();
       },
       setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value }) =>
-          request.cookies.set(name, value),
-        );
+        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
         response = NextResponse.next({ request });
         cookiesToSet.forEach(({ name, value, options }) =>
           response.cookies.set(name, value, options),
@@ -28,7 +36,56 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const path = request.nextUrl.pathname;
+
+  if (!user && isProtectedPath(path)) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = "/login";
+    redirectUrl.searchParams.set("next", path);
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  if (user && (path === "/login" || path === "/signup")) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = await resolveAppHomePath(supabase, user.id, user.email);
+    redirectUrl.search = "";
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  if (user && path === "/driver") {
+    const home = await resolveAppHomePath(supabase, user.id, user.email);
+    if (home !== "/driver") {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = home;
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
+  }
+
+  if (user && path.startsWith("/driver/")) {
+    const home = await resolveAppHomePath(supabase, user.id, user.email);
+    if (home.startsWith("/rental")) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = home;
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
+  }
+
+  if (user && path.startsWith("/rental")) {
+    const life = await getRentalSessionLifecycle(supabase, user.id, user.email);
+    const target = rentalPathRequiresRedirect(path, life);
+    if (target) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = target;
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
+  }
 
   return response;
 }
