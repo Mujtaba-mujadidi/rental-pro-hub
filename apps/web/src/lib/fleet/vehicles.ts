@@ -24,6 +24,7 @@ export const VEHICLE_DOC_TYPES = [
   "logbook",
   "insurance",
   "permission_letter",
+  "photo",
   "other",
 ] as const;
 
@@ -35,8 +36,12 @@ export const VEHICLE_DOC_TYPE_LABELS: Record<VehicleDocType, string> = {
   logbook: "Logbook (V5C)",
   insurance: "Insurance",
   permission_letter: "Permission letter",
+  photo: "Vehicle photo",
   other: "Other",
 };
+
+/** Document types shown on the compliance Documents step (not photos). */
+export const VEHICLE_COMPLIANCE_DOC_TYPES = VEHICLE_DOC_TYPES.filter((t) => t !== "photo");
 
 /** Uppercase VRM with spaces/hyphens removed. */
 export function normalizeVrm(raw: string): string {

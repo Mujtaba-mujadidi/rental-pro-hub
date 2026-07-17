@@ -246,7 +246,7 @@ create table if not exists public.vehicle_documents (
   vehicle_id uuid not null references public.vehicles (id) on delete cascade,
   parent_company_id uuid not null references public.companies (id) on delete cascade,
   doc_type text not null
-    check (doc_type in ('mot', 'phv_licence', 'logbook', 'insurance', 'permission_letter', 'other')),
+    check (doc_type in ('mot', 'phv_licence', 'logbook', 'insurance', 'permission_letter', 'photo', 'other')),
   file_path text not null,
   file_name text,
   content_type text,

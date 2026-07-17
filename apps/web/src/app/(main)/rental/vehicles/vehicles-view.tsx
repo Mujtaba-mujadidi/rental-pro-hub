@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback, useMemo, useState, useTransition } from "react";
+import { Fragment, useCallback, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
-  createVehicleAction,
   deleteVehicleAction,
   deleteVehicleDocumentAction,
   loadVehicleDetailAction,
@@ -13,23 +12,30 @@ import {
 } from "@/app/actions/rental-vehicles";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
 import { useCanScanOrCaptureDocument } from "@/hooks/use-can-scan-or-capture-document";
 import {
+  VEHICLE_COMPLIANCE_DOC_TYPES,
   VEHICLE_DOC_TYPE_LABELS,
-  VEHICLE_DOC_TYPES,
   VEHICLE_STATUS_LABELS,
   VEHICLE_STATUSES,
   type VehicleDocumentRow,
+  type VehicleDocType,
   type VehicleRow,
   type VehicleStatus,
   type VehicleTransferRow,
 } from "@/lib/fleet/vehicles";
+import { AddVehicleModal } from "./add-vehicle-modal";
+
+const MANAGE_STEPS = ["Details", "Specs", "Photos", "Documents"] as const;
 
 const btnPrimary =
   "inline-flex shrink-0 items-center justify-center rounded-lg bg-rph-rail px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer";
+const btnContinue =
+  "flex h-11 min-w-[7rem] items-center justify-center rounded-lg bg-rph-rail px-4 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50";
 const btnGhost =
   "inline-flex h-9 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800";
+const btnGhostTall =
+  "flex h-11 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800";
 const btnDanger =
   "inline-flex h-9 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300";
 
@@ -61,30 +67,6 @@ type FormSnapshot = {
   notes: string;
 };
 
-function emptyForm(defaultSubId: string): FormSnapshot {
-  return {
-    subcompany_id: defaultSubId,
-    vrm: "",
-    make: "",
-    model: "",
-    colour: "",
-    first_reg_date: "",
-    first_reg_uk_date: "",
-    fuel_type: "",
-    seats: "",
-    cc: "",
-    mot_expiry: "",
-    tax_expiry: "",
-    phv_licence_no: "",
-    phv_licence_expiry: "",
-    licensing_authority_name: "",
-    status: "available",
-    vehicle_age_limit_years: "",
-    service_due_at: "",
-    notes: "",
-  };
-}
-
 function fromVehicle(v: VehicleRow): FormSnapshot {
   return {
     subcompany_id: v.subcompany_id,
@@ -109,37 +91,16 @@ function fromVehicle(v: VehicleRow): FormSnapshot {
   };
 }
 
-function snapshotToFormData(s: FormSnapshot, includeSubcompany: boolean): FormData {
+function snapshotToFormData(s: FormSnapshot): FormData {
   const fd = new FormData();
-  if (includeSubcompany) fd.set("subcompany_id", s.subcompany_id);
-  fd.set("vrm", s.vrm);
-  fd.set("make", s.make);
-  fd.set("model", s.model);
-  fd.set("colour", s.colour);
-  fd.set("first_reg_date", s.first_reg_date);
-  fd.set("first_reg_uk_date", s.first_reg_uk_date);
-  fd.set("fuel_type", s.fuel_type);
-  fd.set("seats", s.seats);
-  fd.set("cc", s.cc);
-  fd.set("mot_expiry", s.mot_expiry);
-  fd.set("tax_expiry", s.tax_expiry);
-  fd.set("phv_licence_no", s.phv_licence_no);
-  fd.set("phv_licence_expiry", s.phv_licence_expiry);
-  fd.set("licensing_authority_name", s.licensing_authority_name);
-  fd.set("status", s.status);
-  fd.set("vehicle_age_limit_years", s.vehicle_age_limit_years);
-  fd.set("service_due_at", s.service_due_at);
-  fd.set("notes", s.notes);
+  for (const [k, v] of Object.entries(s)) {
+    if (k === "subcompany_id") continue;
+    fd.set(k, v);
+  }
   return fd;
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block space-y-1.5">
       <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{label}</span>
@@ -148,175 +109,62 @@ function Field({
   );
 }
 
-function VehicleFields({
-  form,
-  setForm,
-  subcompanies,
-  lockSubcompany,
-}: {
-  form: FormSnapshot;
-  setForm: (fn: (prev: FormSnapshot) => FormSnapshot) => void;
-  subcompanies: SubOpt[];
-  lockSubcompany?: boolean;
-}) {
+function ManageStepProgress({ step }: { step: number }) {
+  const displayStep = step + 1;
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
-      {!lockSubcompany ? (
-        <Field label="Subcompany *">
-          <select
-            className={inputClass()}
-            value={form.subcompany_id}
-            onChange={(e) => setForm((p) => ({ ...p, subcompany_id: e.target.value }))}
-          >
-            {subcompanies.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name ?? "Untitled"}
-                {s.is_primary ? " (primary)" : ""}
-              </option>
-            ))}
-          </select>
-        </Field>
-      ) : null}
-      <Field label="VRM *">
-        <input
-          className={inputClass()}
-          value={form.vrm}
-          onChange={(e) => setForm((p) => ({ ...p, vrm: e.target.value.toUpperCase() }))}
-          placeholder="AB12CDE"
-          autoComplete="off"
-        />
-      </Field>
-      <Field label="Make *">
-        <input className={inputClass()} value={form.make} onChange={(e) => setForm((p) => ({ ...p, make: e.target.value }))} />
-      </Field>
-      <Field label="Model *">
-        <input className={inputClass()} value={form.model} onChange={(e) => setForm((p) => ({ ...p, model: e.target.value }))} />
-      </Field>
-      <Field label="Colour">
-        <input className={inputClass()} value={form.colour} onChange={(e) => setForm((p) => ({ ...p, colour: e.target.value }))} />
-      </Field>
-      <Field label="Status">
-        <select
-          className={inputClass()}
-          value={form.status}
-          onChange={(e) => setForm((p) => ({ ...p, status: e.target.value as VehicleStatus }))}
-        >
-          {VEHICLE_STATUSES.map((st) => (
-            <option key={st} value={st}>
-              {VEHICLE_STATUS_LABELS[st]}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="First registration">
-        <input
-          type="date"
-          className={inputClass()}
-          value={form.first_reg_date}
-          onChange={(e) => setForm((p) => ({ ...p, first_reg_date: e.target.value }))}
-        />
-      </Field>
-      <Field label="First UK registration">
-        <input
-          type="date"
-          className={inputClass()}
-          value={form.first_reg_uk_date}
-          onChange={(e) => setForm((p) => ({ ...p, first_reg_uk_date: e.target.value }))}
-        />
-      </Field>
-      <Field label="Fuel type">
-        <input
-          className={inputClass()}
-          value={form.fuel_type}
-          onChange={(e) => setForm((p) => ({ ...p, fuel_type: e.target.value }))}
-          placeholder="Petrol / Diesel / Hybrid / EV"
-        />
-      </Field>
-      <Field label="Seats">
-        <input
-          type="number"
-          min={1}
-          max={99}
-          className={inputClass()}
-          value={form.seats}
-          onChange={(e) => setForm((p) => ({ ...p, seats: e.target.value }))}
-        />
-      </Field>
-      <Field label="Engine CC">
-        <input
-          type="number"
-          min={0}
-          className={inputClass()}
-          value={form.cc}
-          onChange={(e) => setForm((p) => ({ ...p, cc: e.target.value }))}
-        />
-      </Field>
-      <Field label="MOT expiry">
-        <input
-          type="date"
-          className={inputClass()}
-          value={form.mot_expiry}
-          onChange={(e) => setForm((p) => ({ ...p, mot_expiry: e.target.value }))}
-        />
-      </Field>
-      <Field label="Tax expiry">
-        <input
-          type="date"
-          className={inputClass()}
-          value={form.tax_expiry}
-          onChange={(e) => setForm((p) => ({ ...p, tax_expiry: e.target.value }))}
-        />
-      </Field>
-      <Field label="PHV licence no.">
-        <input
-          className={inputClass()}
-          value={form.phv_licence_no}
-          onChange={(e) => setForm((p) => ({ ...p, phv_licence_no: e.target.value }))}
-        />
-      </Field>
-      <Field label="PHV licence expiry">
-        <input
-          type="date"
-          className={inputClass()}
-          value={form.phv_licence_expiry}
-          onChange={(e) => setForm((p) => ({ ...p, phv_licence_expiry: e.target.value }))}
-        />
-      </Field>
-      <Field label="Licensing authority">
-        <input
-          className={inputClass()}
-          value={form.licensing_authority_name}
-          onChange={(e) => setForm((p) => ({ ...p, licensing_authority_name: e.target.value }))}
-        />
-      </Field>
-      <Field label="Service due">
-        <input
-          type="date"
-          className={inputClass()}
-          value={form.service_due_at}
-          onChange={(e) => setForm((p) => ({ ...p, service_due_at: e.target.value }))}
-        />
-      </Field>
-      <Field label="Age limit (years)">
-        <input
-          type="number"
-          min={1}
-          className={inputClass()}
-          value={form.vehicle_age_limit_years}
-          onChange={(e) => setForm((p) => ({ ...p, vehicle_age_limit_years: e.target.value }))}
-        />
-      </Field>
-      <div className="sm:col-span-2">
-        <Field label="Notes">
-          <textarea
-            className={inputClass()}
-            rows={3}
-            value={form.notes}
-            onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
-          />
-        </Field>
-      </div>
-    </div>
+    <nav className="mb-2" aria-label="Manage vehicle steps">
+      <p className="mb-4 text-center text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        Step {displayStep} of {MANAGE_STEPS.length}
+      </p>
+      <ol className="flex w-full items-center px-0.5 sm:px-2">
+        {MANAGE_STEPS.map((label, i) => {
+          const n = i + 1;
+          const done = n < displayStep;
+          const active = n === displayStep;
+          const segmentBeforeOrange = i > 0 && displayStep > i;
+          return (
+            <Fragment key={label}>
+              {i > 0 ? (
+                <li className="mx-1 h-1 min-w-[8px] flex-1 list-none sm:mx-2" aria-hidden>
+                  <div
+                    className={[
+                      "h-full w-full rounded-full transition-colors duration-300",
+                      segmentBeforeOrange ? "bg-orange-500" : "bg-zinc-200 dark:bg-zinc-700",
+                    ].join(" ")}
+                  />
+                </li>
+              ) : null}
+              <li className="flex list-none flex-col items-center">
+                <div
+                  className={[
+                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 text-sm font-bold transition-all",
+                    done && "border-orange-500 bg-orange-500 text-white shadow-md shadow-orange-500/25",
+                    active &&
+                      "border-orange-500 bg-white text-orange-600 shadow-md ring-4 ring-orange-100 dark:bg-zinc-950 dark:text-orange-500 dark:ring-orange-950/40",
+                    !done &&
+                      !active &&
+                      "border-zinc-200 bg-white text-zinc-400 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-500",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  title={`${n}. ${label}`}
+                >
+                  {done ? "✓" : n}
+                </div>
+                <span
+                  className={[
+                    "mt-2 hidden max-w-[5.5rem] text-center text-[11px] font-semibold leading-tight sm:block",
+                    active ? "text-orange-700 dark:text-orange-400" : done ? "text-zinc-600 dark:text-zinc-400" : "text-zinc-400",
+                  ].join(" ")}
+                >
+                  {label}
+                </span>
+              </li>
+            </Fragment>
+          );
+        })}
+      </ol>
+    </nav>
   );
 }
 
@@ -332,34 +180,19 @@ export function VehiclesView({
   canDelete: boolean;
 }) {
   const router = useRouter();
+  const canScanOrCapture = useCanScanOrCaptureDocument();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const canScanOrCapture = useCanScanOrCaptureDocument();
-
-  const primarySub = subcompanies.find((s) => s.is_primary)?.id ?? subcompanies[0]?.id ?? "";
-  const baseline = useMemo(() => emptyForm(primarySub), [primarySub]);
-
   const [createOpen, setCreateOpen] = useState(false);
-  const [form, setForm] = useState<FormSnapshot>(baseline);
-
-  const applySnapshot = useCallback((v: FormSnapshot) => setForm(v), []);
-  const draft = useFormModalDraft({
-    draftKey: "rental-vehicle-create",
-    open: createOpen,
-    snapshot: form,
-    baseline,
-    pending,
-    applySnapshot,
-    onClose: () => setCreateOpen(false),
-  });
 
   const [editVehicle, setEditVehicle] = useState<VehicleRow | null>(null);
   const [editForm, setEditForm] = useState<FormSnapshot | null>(null);
+  const [manageStep, setManageStep] = useState(0);
   const [docs, setDocs] = useState<VehicleDocumentRow[]>([]);
   const [transfers, setTransfers] = useState<VehicleTransferRow[]>([]);
-  const [docType, setDocType] = useState<(typeof VEHICLE_DOC_TYPES)[number]>("mot");
+  const [docType, setDocType] = useState<VehicleDocType>("mot");
   const [docExpiry, setDocExpiry] = useState("");
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferTo, setTransferTo] = useState("");
@@ -380,55 +213,52 @@ export function VehiclesView({
     });
   }, [vehicles, filter, statusFilter]);
 
-  function openCreate() {
-    setError(null);
-    setForm(emptyForm(primarySub));
-    setCreateOpen(true);
-  }
+  const photos = docs.filter((d) => d.doc_type === "photo");
+  const complianceDocs = docs.filter((d) => d.doc_type !== "photo");
+
+  const refreshDetail = useCallback(
+    async (vehicleId: string) => {
+      const res = await loadVehicleDetailAction(vehicleId);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setEditVehicle(res.vehicle);
+      setEditForm(fromVehicle(res.vehicle));
+      setDocs(res.documents);
+      setTransfers(res.transfers);
+    },
+    [],
+  );
 
   function openEdit(v: VehicleRow) {
     setError(null);
+    setManageStep(0);
     setEditVehicle(v);
     setEditForm(fromVehicle(v));
     setDocs([]);
     setTransfers([]);
     startTransition(async () => {
-      const res = await loadVehicleDetailAction(v.id);
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      setEditForm(fromVehicle(res.vehicle));
-      setDocs(res.documents);
-      setTransfers(res.transfers);
+      await refreshDetail(v.id);
     });
   }
 
-  function submitCreate() {
-    setError(null);
-    startTransition(async () => {
-      const res = await createVehicleAction(snapshotToFormData(form, true));
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      draft.clearAfterSuccess();
-      setCreateOpen(false);
-      router.refresh();
-    });
+  function closeEdit() {
+    setEditVehicle(null);
+    setEditForm(null);
+    setManageStep(0);
   }
 
   function submitEdit() {
     if (!editVehicle || !editForm) return;
     setError(null);
     startTransition(async () => {
-      const res = await updateVehicleAction(editVehicle.id, snapshotToFormData(editForm, false));
+      const res = await updateVehicleAction(editVehicle.id, snapshotToFormData(editForm));
       if (!res.ok) {
         setError(res.error);
         return;
       }
-      setEditVehicle(null);
-      setEditForm(null);
+      closeEdit();
       router.refresh();
     });
   }
@@ -444,12 +274,7 @@ export function VehiclesView({
       }
       setTransferOpen(false);
       setTransferNotes("");
-      const detail = await loadVehicleDetailAction(editVehicle.id);
-      if (detail.ok) {
-        setEditVehicle(detail.vehicle);
-        setEditForm(fromVehicle(detail.vehicle));
-        setTransfers(detail.transfers);
-      }
+      await refreshDetail(editVehicle.id);
       router.refresh();
     });
   }
@@ -464,19 +289,19 @@ export function VehiclesView({
         return;
       }
       setDeleteConfirm(false);
-      setEditVehicle(null);
-      setEditForm(null);
+      closeEdit();
       router.refresh();
     });
   }
 
-  function submitDoc(fileList: FileList | null) {
+  function submitDoc(fileList: FileList | null, forcedType?: VehicleDocType) {
     if (!editVehicle || !fileList?.[0]) return;
     setError(null);
+    const type = forcedType ?? docType;
     const fd = new FormData();
     fd.set("vehicle_id", editVehicle.id);
-    fd.set("doc_type", docType);
-    fd.set("expiry_date", docExpiry);
+    fd.set("doc_type", type);
+    fd.set("expiry_date", forcedType === "photo" ? "" : docExpiry);
     fd.set("file", fileList[0]);
     startTransition(async () => {
       const res = await uploadVehicleDocumentAction(fd);
@@ -485,8 +310,7 @@ export function VehiclesView({
         return;
       }
       setDocExpiry("");
-      const detail = await loadVehicleDetailAction(editVehicle.id);
-      if (detail.ok) setDocs(detail.documents);
+      await refreshDetail(editVehicle.id);
     });
   }
 
@@ -499,8 +323,7 @@ export function VehiclesView({
         setError(res.error);
         return;
       }
-      const detail = await loadVehicleDetailAction(editVehicle.id);
-      if (detail.ok) setDocs(detail.documents);
+      await refreshDetail(editVehicle.id);
     });
   }
 
@@ -521,13 +344,13 @@ export function VehiclesView({
           ) : null}
         </div>
         {canManage && subcompanies.length > 0 ? (
-          <button type="button" className={btnPrimary} onClick={openCreate}>
+          <button type="button" className={btnPrimary} onClick={() => setCreateOpen(true)}>
             Add vehicle
           </button>
         ) : null}
       </div>
 
-      {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
+      {error && !editVehicle ? <p className="rph-alert-error text-sm">{error}</p> : null}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <input
@@ -590,37 +413,14 @@ export function VehiclesView({
         </div>
       )}
 
-      <FormModalShell
-        open={createOpen}
-        titleId="add-vehicle-title"
-        title="Add vehicle"
-        description="Register a fleet vehicle against an operational subcompany."
-        pending={pending}
-        isDirty={draft.isDirty}
-        hasStoredDraft={draft.hasStoredDraft}
-        saveNotice={draft.saveNotice}
-        onSaveProgress={draft.saveProgress}
-        onRequestClose={draft.requestClose}
-        onRequestStartFresh={draft.requestStartFresh}
-        discardConfirmOpen={draft.discardConfirmOpen}
-        onConfirmDiscard={draft.confirmDiscardClose}
-        onCancelDiscard={draft.cancelDiscardClose}
-        startFreshConfirmOpen={draft.startFreshConfirmOpen}
-        onConfirmStartFresh={draft.confirmStartFresh}
-        onCancelStartFresh={draft.cancelStartFresh}
-        footer={
-          <div className="flex justify-end gap-2">
-            <button type="button" className={btnGhost} onClick={draft.requestClose} disabled={pending}>
-              Cancel
-            </button>
-            <button type="button" className={btnPrimary} onClick={submitCreate} disabled={pending || !form.subcompany_id}>
-              {pending ? "Saving…" : "Save vehicle"}
-            </button>
-          </div>
-        }
-      >
-        <VehicleFields form={form} setForm={setForm} subcompanies={subcompanies} />
-      </FormModalShell>
+      {canManage ? (
+        <AddVehicleModal
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          subcompanies={subcompanies}
+          onCreated={() => router.refresh()}
+        />
+      ) : null}
 
       {editVehicle && editForm ? (
         <FormModalShell
@@ -630,29 +430,26 @@ export function VehiclesView({
           description={
             <>
               Branch: <span className="font-medium">{editVehicle.subcompany_name ?? "—"}</span>
-              {canManage ? ". Use Transfer to move between subcompanies." : null}
             </>
           }
+          headerExtra={<ManageStepProgress step={manageStep} />}
           pending={pending}
-          maxWidthClass="max-w-4xl"
+          maxWidthClass="max-w-3xl"
           isDirty={false}
           hasStoredDraft={false}
           saveNotice={null}
           onSaveProgress={() => {}}
-          onRequestClose={() => {
-            setEditVehicle(null);
-            setEditForm(null);
-          }}
+          onRequestClose={closeEdit}
           discardConfirmOpen={false}
           onConfirmDiscard={() => {}}
           onCancelDiscard={() => {}}
           footer={
-            <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex w-full flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap gap-2">
                 {canManage ? (
                   <button
                     type="button"
-                    className={btnGhost}
+                    className={btnGhostTall}
                     disabled={pending}
                     onClick={() => {
                       setTransferTo(subcompanies.find((s) => s.id !== editVehicle.subcompany_id)?.id ?? "");
@@ -668,43 +465,210 @@ export function VehiclesView({
                   </button>
                 ) : null}
               </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  className={btnGhost}
-                  disabled={pending}
-                  onClick={() => {
-                    setEditVehicle(null);
-                    setEditForm(null);
-                  }}
-                >
-                  Close
-                </button>
-                {canManage ? (
-                  <button type="button" className={btnPrimary} disabled={pending} onClick={submitEdit}>
+              <div className="flex flex-wrap gap-2">
+                {manageStep > 0 ? (
+                  <button type="button" className={btnGhostTall} disabled={pending} onClick={() => setManageStep((s) => s - 1)}>
+                    Back
+                  </button>
+                ) : (
+                  <button type="button" className={btnGhostTall} disabled={pending} onClick={closeEdit}>
+                    Close
+                  </button>
+                )}
+                {manageStep < MANAGE_STEPS.length - 1 ? (
+                  <button
+                    type="button"
+                    className={btnContinue}
+                    disabled={pending}
+                    onClick={() => setManageStep((s) => Math.min(MANAGE_STEPS.length - 1, s + 1))}
+                  >
+                    Continue
+                  </button>
+                ) : canManage ? (
+                  <button type="button" className={btnContinue} disabled={pending} onClick={submitEdit}>
                     {pending ? "Saving…" : "Save changes"}
                   </button>
-                ) : null}
+                ) : (
+                  <button type="button" className={btnContinue} disabled={pending} onClick={closeEdit}>
+                    Done
+                  </button>
+                )}
               </div>
             </div>
           }
         >
-          <div className="space-y-8">
-            <VehicleFields
-              form={editForm}
-              setForm={(fn) => setEditForm((prev) => (prev ? fn(prev) : prev))}
-              subcompanies={subcompanies}
-              lockSubcompany
-            />
+          {error ? <p className="mb-4 rph-alert-error text-sm">{error}</p> : null}
 
-            <section className="space-y-3 border-t border-slate-200 pt-6 dark:border-slate-700">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Documents</h3>
+          {manageStep === 0 ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="VRM *">
+                <input
+                  className={inputClass()}
+                  value={editForm.vrm}
+                  disabled={!canManage}
+                  onChange={(e) => setEditForm((p) => (p ? { ...p, vrm: e.target.value.toUpperCase() } : p))}
+                />
+              </Field>
+              <Field label="Status">
+                <select
+                  className={inputClass()}
+                  value={editForm.status}
+                  disabled={!canManage}
+                  onChange={(e) => setEditForm((p) => (p ? { ...p, status: e.target.value as VehicleStatus } : p))}
+                >
+                  {VEHICLE_STATUSES.map((st) => (
+                    <option key={st} value={st}>
+                      {VEHICLE_STATUS_LABELS[st]}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Make *">
+                <input
+                  className={inputClass()}
+                  value={editForm.make}
+                  disabled={!canManage}
+                  onChange={(e) => setEditForm((p) => (p ? { ...p, make: e.target.value } : p))}
+                />
+              </Field>
+              <Field label="Model *">
+                <input
+                  className={inputClass()}
+                  value={editForm.model}
+                  disabled={!canManage}
+                  onChange={(e) => setEditForm((p) => (p ? { ...p, model: e.target.value } : p))}
+                />
+              </Field>
+              <Field label="Colour">
+                <input
+                  className={inputClass()}
+                  value={editForm.colour}
+                  disabled={!canManage}
+                  onChange={(e) => setEditForm((p) => (p ? { ...p, colour: e.target.value } : p))}
+                />
+              </Field>
+              <div className="sm:col-span-2">
+                <Field label="Notes">
+                  <textarea
+                    className={inputClass()}
+                    rows={3}
+                    value={editForm.notes}
+                    disabled={!canManage}
+                    onChange={(e) => setEditForm((p) => (p ? { ...p, notes: e.target.value } : p))}
+                  />
+                </Field>
+              </div>
+              {transfers.length ? (
+                <div className="sm:col-span-2 space-y-2 border-t border-slate-200 pt-4 dark:border-slate-700">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Transfer history</h3>
+                  <ul className="space-y-1 text-sm text-slate-600 dark:text-slate-300">
+                    {transfers.map((t) => (
+                      <li key={t.id}>
+                        {t.from_name ?? "—"} → {t.to_name ?? "—"}{" "}
+                        <span className="text-xs text-slate-400">· {new Date(t.transferred_at).toLocaleString("en-GB")}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {manageStep === 1 ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {(
+                [
+                  ["first_reg_date", "First registration", "date"],
+                  ["first_reg_uk_date", "First UK registration", "date"],
+                  ["fuel_type", "Fuel type", "text"],
+                  ["seats", "Seats", "number"],
+                  ["cc", "Engine CC", "number"],
+                  ["service_due_at", "Service due", "date"],
+                  ["mot_expiry", "MOT expiry", "date"],
+                  ["tax_expiry", "Tax expiry", "date"],
+                  ["phv_licence_no", "PHV licence no.", "text"],
+                  ["phv_licence_expiry", "PHV licence expiry", "date"],
+                  ["licensing_authority_name", "Licensing authority", "text"],
+                  ["vehicle_age_limit_years", "Age limit (years)", "number"],
+                ] as const
+              ).map(([key, label, type]) => (
+                <Field key={key} label={label}>
+                  <input
+                    type={type}
+                    className={inputClass()}
+                    value={editForm[key]}
+                    disabled={!canManage}
+                    onChange={(e) => setEditForm((p) => (p ? { ...p, [key]: e.target.value } : p))}
+                  />
+                </Field>
+              ))}
+            </div>
+          ) : null}
+
+          {manageStep === 2 ? (
+            <div className="space-y-4">
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">Vehicle photos for handover and fleet records.</p>
               {canManage ? (
-                <div className="space-y-2">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                    <Field label="Type">
-                      <select className={inputClass()} value={docType} onChange={(e) => setDocType(e.target.value as typeof docType)}>
-                        {VEHICLE_DOC_TYPES.map((t) => (
+                <div className="flex flex-wrap gap-2">
+                  <label className={btnGhost + " cursor-pointer"}>
+                    Choose photos
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="image/jpeg,image/png,image/webp"
+                      disabled={pending}
+                      onChange={(e) => {
+                        submitDoc(e.target.files, "photo");
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  {canScanOrCapture ? (
+                    <label className={btnContinue + " cursor-pointer"}>
+                      Scan or take photo
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept="image/*"
+                        capture="environment"
+                        disabled={pending}
+                        onChange={(e) => {
+                          submitDoc(e.target.files, "photo");
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                  ) : null}
+                </div>
+              ) : null}
+              {!photos.length ? (
+                <p className="text-sm text-slate-500">No photos uploaded.</p>
+              ) : (
+                <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
+                  {photos.map((d) => (
+                    <li key={d.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                      <span className="truncate text-slate-800 dark:text-slate-200">{d.file_name ?? d.file_path}</span>
+                      {canManage ? (
+                        <button type="button" className={btnDanger} disabled={pending} onClick={() => removeDoc(d.id)}>
+                          Remove
+                        </button>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : null}
+
+          {manageStep === 3 ? (
+            <div className="space-y-4">
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">MOT, insurance, logbook, and related compliance files.</p>
+              {canManage ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Document type">
+                      <select className={inputClass()} value={docType} onChange={(e) => setDocType(e.target.value as VehicleDocType)}>
+                        {VEHICLE_COMPLIANCE_DOC_TYPES.map((t) => (
                           <option key={t} value={t}>
                             {VEHICLE_DOC_TYPE_LABELS[t]}
                           </option>
@@ -714,13 +678,29 @@ export function VehiclesView({
                     <Field label="Expiry (optional)">
                       <input type="date" className={inputClass()} value={docExpiry} onChange={(e) => setDocExpiry(e.target.value)} />
                     </Field>
-                    <div className="flex flex-wrap gap-2">
-                      <label className={btnGhost + " cursor-pointer"}>
-                        Choose file
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <label className={btnGhost + " cursor-pointer"}>
+                      Choose file
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept="application/pdf,image/jpeg,image/png,image/webp"
+                        disabled={pending}
+                        onChange={(e) => {
+                          submitDoc(e.target.files);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                    {canScanOrCapture ? (
+                      <label className={btnContinue + " cursor-pointer"}>
+                        Scan or take photo
                         <input
                           type="file"
                           className="hidden"
-                          accept="application/pdf,image/jpeg,image/png,image/webp"
+                          accept="image/*"
+                          capture="environment"
                           disabled={pending}
                           onChange={(e) => {
                             submitDoc(e.target.files);
@@ -728,36 +708,15 @@ export function VehiclesView({
                           }}
                         />
                       </label>
-                      {canScanOrCapture ? (
-                        <label className={btnPrimary + " cursor-pointer"}>
-                          Scan or take photo
-                          <input
-                            type="file"
-                            className="hidden"
-                            accept="image/*"
-                            capture="environment"
-                            disabled={pending}
-                            onChange={(e) => {
-                              submitDoc(e.target.files);
-                              e.target.value = "";
-                            }}
-                          />
-                        </label>
-                      ) : null}
-                    </div>
+                    ) : null}
                   </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    {canScanOrCapture
-                      ? "On supported phones, Scan or take photo opens the camera. On iPhone, Choose file → Browse can also offer Scan Documents."
-                      : "PDF or image up to 10 MB. On a phone with a camera, you’ll also see a scan / take photo option."}
-                  </p>
-                </div>
+                </>
               ) : null}
-              {!docs.length ? (
+              {!complianceDocs.length ? (
                 <p className="text-sm text-slate-500">No documents uploaded.</p>
               ) : (
                 <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
-                  {docs.map((d) => (
+                  {complianceDocs.map((d) => (
                     <li key={d.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                       <div>
                         <p className="font-medium text-slate-800 dark:text-slate-200">{VEHICLE_DOC_TYPE_LABELS[d.doc_type]}</p>
@@ -775,27 +734,8 @@ export function VehiclesView({
                   ))}
                 </ul>
               )}
-            </section>
-
-            <section className="space-y-3 border-t border-slate-200 pt-6 dark:border-slate-700">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Transfer history</h3>
-              {!transfers.length ? (
-                <p className="text-sm text-slate-500">No transfers yet.</p>
-              ) : (
-                <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
-                  {transfers.map((t) => (
-                    <li key={t.id}>
-                      {t.from_name ?? "—"} → {t.to_name ?? "—"}{" "}
-                      <span className="text-xs text-slate-400">
-                        · {new Date(t.transferred_at).toLocaleString("en-GB")}
-                      </span>
-                      {t.notes ? <span className="block text-xs text-slate-500">{t.notes}</span> : null}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          </div>
+            </div>
+          ) : null}
         </FormModalShell>
       ) : null}
 
