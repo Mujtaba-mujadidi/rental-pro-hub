@@ -94,6 +94,8 @@ create table if not exists public.vehicles (
     check (status in ('available', 'on_rent', 'reserved', 'repair', 'accident_claim')),
   vehicle_age_limit_years integer check (vehicle_age_limit_years is null or vehicle_age_limit_years > 0),
   service_due_at date,
+  current_mileage integer check (current_mileage is null or current_mileage >= 0),
+  next_service_mileage integer check (next_service_mileage is null or next_service_mileage >= 0),
   notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),

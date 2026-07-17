@@ -94,6 +94,8 @@ create table if not exists public.vehicles (
     check (status in ('available', 'on_rent', 'reserved', 'repair', 'accident_claim')),
   vehicle_age_limit_years integer check (vehicle_age_limit_years is null or vehicle_age_limit_years > 0),
   service_due_at date,
+  current_mileage integer check (current_mileage is null or current_mileage >= 0),
+  next_service_mileage integer check (next_service_mileage is null or next_service_mileage >= 0),
   notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -380,3 +382,16 @@ alter table public.vehicle_documents drop constraint if exists vehicle_documents
 alter table public.vehicle_documents
   add constraint vehicle_documents_doc_type_check
   check (doc_type in ('mot', 'phv_licence', 'logbook', 'insurance', 'permission_letter', 'photo', 'other'));
+
+-- Optional service mileage fields
+alter table public.vehicles
+  add column if not exists current_mileage integer
+    check (current_mileage is null or current_mileage >= 0);
+
+alter table public.vehicles
+  add column if not exists next_service_mileage integer
+    check (next_service_mileage is null or next_service_mileage >= 0);
+
+comment on column public.vehicles.service_due_at is 'Optional next service date. Not required when adding a vehicle.';
+comment on column public.vehicles.current_mileage is 'Optional current odometer reading (miles).';
+comment on column public.vehicles.next_service_mileage is 'Optional odometer reading when next service is due (miles).';

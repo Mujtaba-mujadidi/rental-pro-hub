@@ -66,6 +66,8 @@ type FormSnapshot = {
   status: VehicleStatus;
   vehicle_age_limit_years: string;
   service_due_at: string;
+  current_mileage: string;
+  next_service_mileage: string;
   notes: string;
 };
 
@@ -92,6 +94,8 @@ function fromVehicle(v: VehicleRow): FormSnapshot {
     status: v.status,
     vehicle_age_limit_years: v.vehicle_age_limit_years != null ? String(v.vehicle_age_limit_years) : "",
     service_due_at: v.service_due_at ?? "",
+    current_mileage: v.current_mileage != null ? String(v.current_mileage) : "",
+    next_service_mileage: v.next_service_mileage != null ? String(v.next_service_mileage) : "",
     notes: v.notes ?? "",
   };
 }
@@ -684,7 +688,6 @@ export function VehiclesView({
                   ["fuel_type", "Fuel type", "text"],
                   ["seats", "Seats", "number"],
                   ["cc", "Engine CC", "number"],
-                  ["service_due_at", "Service due", "date"],
                   ["mot_expiry", "MOT expiry", "date"],
                   ["tax_expiry", "Tax expiry", "date"],
                   ["phv_licence_no", "PHV licence no.", "text"],
@@ -703,6 +706,43 @@ export function VehiclesView({
                   />
                 </Field>
               ))}
+              <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Service (optional)</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Date and mileage for the next service. Leave blank if you are not tracking this yet.
+                </p>
+                <div className="mt-3 grid gap-4 sm:grid-cols-3">
+                  <Field label="Service due date">
+                    <input
+                      type="date"
+                      className={inputClass()}
+                      value={editForm.service_due_at}
+                      disabled={!canManage}
+                      onChange={(e) => setEditForm((p) => (p ? { ...p, service_due_at: e.target.value } : p))}
+                    />
+                  </Field>
+                  <Field label="Current mileage (miles)">
+                    <input
+                      type="number"
+                      min={0}
+                      className={inputClass()}
+                      value={editForm.current_mileage}
+                      disabled={!canManage}
+                      onChange={(e) => setEditForm((p) => (p ? { ...p, current_mileage: e.target.value } : p))}
+                    />
+                  </Field>
+                  <Field label="Next service mileage">
+                    <input
+                      type="number"
+                      min={0}
+                      className={inputClass()}
+                      value={editForm.next_service_mileage}
+                      disabled={!canManage}
+                      onChange={(e) => setEditForm((p) => (p ? { ...p, next_service_mileage: e.target.value } : p))}
+                    />
+                  </Field>
+                </div>
+              </div>
             </div>
           ) : null}
 

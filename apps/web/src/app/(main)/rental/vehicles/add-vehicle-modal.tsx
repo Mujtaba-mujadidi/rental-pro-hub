@@ -130,6 +130,8 @@ export type VehicleDraftFields = {
   status: VehicleStatus;
   vehicle_age_limit_years: string;
   service_due_at: string;
+  current_mileage: string;
+  next_service_mileage: string;
   notes: string;
 };
 
@@ -160,6 +162,8 @@ function emptyFields(defaultSubId: string): VehicleDraftFields {
     status: "available",
     vehicle_age_limit_years: "",
     service_due_at: "",
+    current_mileage: "",
+    next_service_mileage: "",
     notes: "",
   };
 }
@@ -485,9 +489,6 @@ export function AddVehicleModal({
           <Field label="Engine CC">
             <input type="number" min={0} className={inputClass()} value={fields.cc} onChange={(e) => setField("cc", e.target.value)} />
           </Field>
-          <Field label="Service due">
-            <input type="date" className={inputClass()} value={fields.service_due_at} onChange={(e) => setField("service_due_at", e.target.value)} />
-          </Field>
           <Field label="MOT expiry">
             <input type="date" className={inputClass()} value={fields.mot_expiry} onChange={(e) => setField("mot_expiry", e.target.value)} />
           </Field>
@@ -521,6 +522,42 @@ export function AddVehicleModal({
               onChange={(e) => setField("vehicle_age_limit_years", e.target.value)}
             />
           </Field>
+          <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Service (optional)</p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Skip these when adding a car if you do not track servicing yet. You can update them later from Manage.
+            </p>
+            <div className="mt-3 grid gap-4 sm:grid-cols-3">
+              <Field label="Service due date">
+                <input
+                  type="date"
+                  className={inputClass()}
+                  value={fields.service_due_at}
+                  onChange={(e) => setField("service_due_at", e.target.value)}
+                />
+              </Field>
+              <Field label="Current mileage (miles)">
+                <input
+                  type="number"
+                  min={0}
+                  className={inputClass()}
+                  value={fields.current_mileage}
+                  onChange={(e) => setField("current_mileage", e.target.value)}
+                  placeholder="e.g. 45200"
+                />
+              </Field>
+              <Field label="Next service mileage">
+                <input
+                  type="number"
+                  min={0}
+                  className={inputClass()}
+                  value={fields.next_service_mileage}
+                  onChange={(e) => setField("next_service_mileage", e.target.value)}
+                  placeholder="e.g. 50000"
+                />
+              </Field>
+            </div>
+          </div>
         </div>
       ) : null}
 

@@ -75,6 +75,8 @@ function parseVehicleFields(formData: FormData): {
     status: VehicleStatus;
     vehicle_age_limit_years: number | null;
     service_due_at: string | null;
+    current_mileage: number | null;
+    next_service_mileage: number | null;
     notes: string | null;
   };
 } | { ok: false; error: string } {
@@ -96,6 +98,10 @@ function parseVehicleFields(formData: FormData): {
   if (!cc.ok) return cc;
   const ageLimit = parseOptionalInt(nullIfEmpty(formData.get("vehicle_age_limit_years")), "Age limit");
   if (!ageLimit.ok) return ageLimit;
+  const currentMileage = parseOptionalInt(nullIfEmpty(formData.get("current_mileage")), "Current mileage");
+  if (!currentMileage.ok) return currentMileage;
+  const nextServiceMileage = parseOptionalInt(nullIfEmpty(formData.get("next_service_mileage")), "Next service mileage");
+  if (!nextServiceMileage.ok) return nextServiceMileage;
 
   return {
     ok: true,
@@ -117,6 +123,8 @@ function parseVehicleFields(formData: FormData): {
       status: statusRaw,
       vehicle_age_limit_years: ageLimit.value,
       service_due_at: nullIfEmpty(formData.get("service_due_at")),
+      current_mileage: currentMileage.value,
+      next_service_mileage: nextServiceMileage.value,
       notes: nullIfEmpty(formData.get("notes")),
     },
   };
@@ -401,7 +409,7 @@ export async function loadVehiclesPageData(): Promise<VehiclesPageData | { error
     supabase
       .from("vehicles")
       .select(
-        "id, parent_company_id, subcompany_id, vrm, make, model, colour, first_reg_date, first_reg_uk_date, fuel_type, seats, cc, mot_expiry, tax_expiry, phv_licence_no, phv_licence_expiry, licensing_authority_name, status, vehicle_age_limit_years, service_due_at, notes, created_at, updated_at, subcompanies(name)",
+        "id, parent_company_id, subcompany_id, vrm, make, model, colour, first_reg_date, first_reg_uk_date, fuel_type, seats, cc, mot_expiry, tax_expiry, phv_licence_no, phv_licence_expiry, licensing_authority_name, status, vehicle_age_limit_years, service_due_at, current_mileage, next_service_mileage, notes, created_at, updated_at, subcompanies(name)",
       )
       .eq("parent_company_id", parentCompanyId)
       .order("vrm", { ascending: true }),

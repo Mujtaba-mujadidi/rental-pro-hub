@@ -77,6 +77,8 @@ export type VehicleRow = {
   status: VehicleStatus;
   vehicle_age_limit_years: number | null;
   service_due_at: string | null;
+  current_mileage: number | null;
+  next_service_mileage: number | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
