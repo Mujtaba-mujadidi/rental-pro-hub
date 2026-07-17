@@ -143,6 +143,7 @@ export function InviteStaffModal({
     hasStoredDraft,
     isDirty,
     saveProgress,
+    saveProgressAndClose,
     requestClose,
     requestStartFresh,
     discardConfirmOpen,
@@ -242,6 +243,7 @@ export function InviteStaffModal({
       hasStoredDraft={hasStoredDraft}
       isDirty={isDirty}
       onSaveProgress={saveProgress}
+      onSaveAndClose={saveProgressAndClose}
       onRequestClose={requestClose}
       onRequestStartFresh={requestStartFresh}
       discardConfirmOpen={discardConfirmOpen}

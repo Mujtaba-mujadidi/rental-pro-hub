@@ -126,6 +126,7 @@ export function RegisterSubcompanyModal({
     hasStoredDraft,
     isDirty,
     saveProgress,
+    saveProgressAndClose,
     requestClose,
     requestStartFresh,
     discardConfirmOpen,
@@ -208,6 +209,7 @@ export function RegisterSubcompanyModal({
       hasStoredDraft={hasStoredDraft}
       isDirty={isDirty}
       onSaveProgress={saveProgress}
+      onSaveAndClose={saveProgressAndClose}
       onRequestClose={requestClose}
       onRequestStartFresh={requestStartFresh}
       discardConfirmOpen={discardConfirmOpen}

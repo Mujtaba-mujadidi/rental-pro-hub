@@ -20,8 +20,11 @@ export const VEHICLE_STATUS_LABELS: Record<VehicleStatus, string> = {
 
 export const VEHICLE_DOC_TYPES = [
   "mot",
-  "phv_licence",
   "logbook",
+  "phv_taxi_licence_paper",
+  /** @deprecated Prefer phv_taxi_licence_paper — kept for reading legacy rows. */
+  "pco_paper",
+  "phv_licence",
   "insurance",
   "permission_letter",
   "photo",
@@ -32,16 +35,37 @@ export type VehicleDocType = (typeof VEHICLE_DOC_TYPES)[number];
 
 export const VEHICLE_DOC_TYPE_LABELS: Record<VehicleDocType, string> = {
   mot: "MOT",
-  phv_licence: "PHV licence",
   logbook: "Logbook (V5C)",
+  phv_taxi_licence_paper: "PHV/Taxi licence paper",
+  pco_paper: "PHV/Taxi licence paper",
+  phv_licence: "PHV/Taxi licence",
   insurance: "Insurance",
   permission_letter: "Permission letter",
   photo: "Vehicle photo",
   other: "Other",
 };
 
-/** Document types shown on the compliance Documents step (not photos). */
-export const VEHICLE_COMPLIANCE_DOC_TYPES = VEHICLE_DOC_TYPES.filter((t) => t !== "photo");
+/** Required compliance pack for every fleet vehicle. */
+export const REQUIRED_VEHICLE_DOC_TYPES = ["mot", "logbook", "phv_taxi_licence_paper"] as const;
+export type RequiredVehicleDocType = (typeof REQUIRED_VEHICLE_DOC_TYPES)[number];
+
+/** Document types shown on the compliance Documents step. */
+export const VEHICLE_COMPLIANCE_DOC_TYPES = REQUIRED_VEHICLE_DOC_TYPES;
+
+/** Legacy rows that still count as the PHV/Taxi licence paper slot. */
+const PHV_TAXI_PAPER_ALIASES = new Set(["phv_taxi_licence_paper", "pco_paper", "phv_licence"]);
+
+export function isPhvTaxiLicencePaperDocType(docType: string): boolean {
+  return PHV_TAXI_PAPER_ALIASES.has(docType.toLowerCase());
+}
+
+export function missingRequiredDocTypes(presentTypes: Iterable<string>): RequiredVehicleDocType[] {
+  const have = new Set([...presentTypes].map((t) => t.toLowerCase()));
+  if ([...have].some((t) => isPhvTaxiLicencePaperDocType(t))) {
+    have.add("phv_taxi_licence_paper");
+  }
+  return REQUIRED_VEHICLE_DOC_TYPES.filter((t) => !have.has(t));
+}
 
 /** Uppercase VRM with spaces/hyphens removed. */
 export function normalizeVrm(raw: string): string {
@@ -83,6 +107,8 @@ export type VehicleRow = {
   created_at: string;
   updated_at: string;
   subcompany_name?: string | null;
+  /** Required doc types still missing (MOT / logbook / PHV/Taxi licence paper). */
+  missing_docs?: RequiredVehicleDocType[];
 };
 
 export type VehicleDocumentRow = {

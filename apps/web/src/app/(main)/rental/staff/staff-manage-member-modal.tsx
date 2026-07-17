@@ -300,6 +300,7 @@ export function StaffManageMemberModal({
     hasStoredDraft,
     isDirty,
     saveProgress,
+    saveProgressAndClose,
     requestClose,
     requestStartFresh,
     discardConfirmOpen,
@@ -477,6 +478,7 @@ export function StaffManageMemberModal({
         hasStoredDraft={hasStoredDraft}
         isDirty={isDirty}
         onSaveProgress={saveProgress}
+      onSaveAndClose={saveProgressAndClose}
         onRequestClose={requestClose}
         onRequestStartFresh={requestStartFresh}
         discardConfirmOpen={discardConfirmOpen}

@@ -159,6 +159,7 @@ export function ContractPresetsClient({
     hasStoredDraft,
     isDirty,
     saveProgress,
+    saveProgressAndClose,
     requestClose,
     requestStartFresh,
     discardConfirmOpen,
@@ -361,6 +362,7 @@ export function ContractPresetsClient({
         hasStoredDraft={hasStoredDraft}
         isDirty={isDirty}
         onSaveProgress={saveProgress}
+      onSaveAndClose={saveProgressAndClose}
         onRequestClose={requestClose}
         onRequestStartFresh={requestStartFresh}
         discardConfirmOpen={discardConfirmOpen}

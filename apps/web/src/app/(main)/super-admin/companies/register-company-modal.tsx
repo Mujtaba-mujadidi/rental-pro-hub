@@ -210,6 +210,7 @@ export function RegisterCompanyModal({
     hasStoredDraft,
     isDirty,
     saveProgress,
+    saveProgressAndClose,
     requestClose,
     requestStartFresh,
     discardConfirmOpen,
@@ -478,6 +479,7 @@ export function RegisterCompanyModal({
         hasStoredDraft={hasStoredDraft}
         isDirty={isDirty}
         onSaveProgress={saveProgress}
+      onSaveAndClose={saveProgressAndClose}
         onRequestClose={requestClose}
         onRequestStartFresh={requestStartFresh}
         discardConfirmOpen={discardConfirmOpen}

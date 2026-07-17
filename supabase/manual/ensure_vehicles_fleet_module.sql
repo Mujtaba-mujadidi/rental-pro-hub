@@ -248,7 +248,7 @@ create table if not exists public.vehicle_documents (
   vehicle_id uuid not null references public.vehicles (id) on delete cascade,
   parent_company_id uuid not null references public.companies (id) on delete cascade,
   doc_type text not null
-    check (doc_type in ('mot', 'phv_licence', 'logbook', 'insurance', 'permission_letter', 'photo', 'other')),
+    check (doc_type in ('mot', 'logbook', 'phv_taxi_licence_paper', 'phv_licence', 'insurance', 'permission_letter', 'photo', 'other')),
   file_path text not null,
   file_name text,
   content_type text,
@@ -381,7 +381,9 @@ create policy vehicle_documents_storage_delete
 alter table public.vehicle_documents drop constraint if exists vehicle_documents_doc_type_check;
 alter table public.vehicle_documents
   add constraint vehicle_documents_doc_type_check
-  check (doc_type in ('mot', 'phv_licence', 'logbook', 'insurance', 'permission_letter', 'photo', 'other'));
+  check (doc_type in (
+    'mot', 'logbook', 'phv_taxi_licence_paper', 'pco_paper', 'phv_licence', 'insurance', 'permission_letter', 'photo', 'other'
+  ));
 
 -- Optional service mileage fields
 alter table public.vehicles
@@ -395,3 +397,19 @@ alter table public.vehicles
 comment on column public.vehicles.service_due_at is 'Optional next service date. Not required when adding a vehicle.';
 comment on column public.vehicles.current_mileage is 'Optional current odometer reading (miles).';
 comment on column public.vehicles.next_service_mileage is 'Optional odometer reading when next service is due (miles).';
+comment on column public.vehicles.phv_licence_no is
+  'PHV/Taxi vehicle licence number (plate/licence identifier).';
+comment on column public.vehicles.phv_licence_expiry is
+  'PHV/Taxi vehicle licence expiry date.';
+
+-- PHV/Taxi licence paper doc type (replaces legacy pco_paper)
+update public.vehicle_documents
+set doc_type = 'phv_taxi_licence_paper'
+where doc_type = 'pco_paper';
+
+alter table public.vehicle_documents drop constraint if exists vehicle_documents_doc_type_check;
+alter table public.vehicle_documents
+  add constraint vehicle_documents_doc_type_check
+  check (doc_type in (
+    'mot', 'logbook', 'phv_taxi_licence_paper', 'phv_licence', 'insurance', 'permission_letter', 'photo', 'other'
+  ));

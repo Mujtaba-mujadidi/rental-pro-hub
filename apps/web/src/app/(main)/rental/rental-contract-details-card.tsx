@@ -114,6 +114,7 @@ export function RentalContractDetailsCard({
     hasStoredDraft,
     isDirty,
     saveProgress,
+    saveProgressAndClose,
     requestClose,
     requestStartFresh,
     discardConfirmOpen,
@@ -254,6 +255,7 @@ export function RentalContractDetailsCard({
         hasStoredDraft={hasStoredDraft}
         isDirty={isDirty}
         onSaveProgress={saveProgress}
+      onSaveAndClose={saveProgressAndClose}
         onRequestClose={requestClose}
         onRequestStartFresh={requestStartFresh}
         discardConfirmOpen={discardConfirmOpen}

@@ -24,7 +24,11 @@ export type FormModalShellProps = {
   saveNotice?: string | null;
   hasStoredDraft?: boolean;
   isDirty?: boolean;
-  onSaveProgress: () => void;
+  /** When false, hides Save draft / Save and close (e.g. edit forms without local drafts). Default true. */
+  showDraftActions?: boolean;
+  onSaveProgress?: () => void;
+  /** Save draft to this device and close immediately. */
+  onSaveAndClose?: () => void;
   onRequestClose: () => void;
   onRequestStartFresh?: () => void;
   discardConfirmOpen: boolean;
@@ -36,7 +40,7 @@ export type FormModalShellProps = {
 };
 
 /**
- * Shared form modal chrome: backdrop never dismisses; Save progress + Close in header;
+ * Shared form modal chrome: backdrop never dismisses; Save and close + Close in header;
  * discard / start-fresh confirms.
  */
 export function FormModalShell({
@@ -54,7 +58,9 @@ export function FormModalShell({
   saveNotice,
   hasStoredDraft = false,
   isDirty = false,
+  showDraftActions = true,
   onSaveProgress,
+  onSaveAndClose,
   onRequestClose,
   onRequestStartFresh,
   discardConfirmOpen,
@@ -91,20 +97,33 @@ export function FormModalShell({
                 ) : null}
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
-                {hasStoredDraft && onRequestStartFresh ? (
+                {showDraftActions && hasStoredDraft && onRequestStartFresh ? (
                   <button type="button" className={btnGhost} disabled={pending} onClick={onRequestStartFresh}>
                     Start fresh
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  className={btnSave}
-                  disabled={pending || !isDirty}
-                  onClick={onSaveProgress}
-                  title="Stores a draft in this browser. Does not create a record yet."
-                >
-                  Save draft
-                </button>
+                {showDraftActions && onSaveProgress ? (
+                  <button
+                    type="button"
+                    className={btnGhost}
+                    disabled={pending || !isDirty}
+                    onClick={onSaveProgress}
+                    title="Stores a draft in this browser and keeps the form open. Does not create a record yet."
+                  >
+                    Save draft
+                  </button>
+                ) : null}
+                {showDraftActions && onSaveAndClose ? (
+                  <button
+                    type="button"
+                    className={btnSave}
+                    disabled={pending}
+                    onClick={onSaveAndClose}
+                    title="Stores a draft in this browser, then closes. Does not create a record yet."
+                  >
+                    Save and close
+                  </button>
+                ) : null}
                 <button type="button" className={btnGhost} disabled={pending} onClick={onRequestClose}>
                   Close
                 </button>
@@ -114,7 +133,7 @@ export function FormModalShell({
               <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/35 dark:text-emerald-100">
                 {saveNotice}
               </p>
-            ) : hasStoredDraft ? (
+            ) : showDraftActions && hasStoredDraft ? (
               <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
                 Restored from a draft on this device. Finish all steps and submit to create the record — drafts do not
                 appear in the list.
@@ -133,9 +152,13 @@ export function FormModalShell({
 
       <ConfirmDialog
         open={discardConfirmOpen}
-        title="Discard unsaved changes?"
-        description="You have changes that are not in your draft. Closing keeps your last Save draft (if any) on this device for later, but edits since then will be lost. Drafts are not listed in tables until you fully submit."
-        confirmLabel="Discard and close"
+        title={isDirty ? "Close without saving?" : "Close this form?"}
+        description={
+          isDirty
+            ? "You have changes that are not in your draft. Closing keeps your last Save draft (if any) on this device for later, but edits since then will be lost. Drafts are not listed in tables until you fully submit."
+            : "Your last saved draft (if any) will stay on this device. Nothing is created in the system until you finish and submit."
+        }
+        confirmLabel={isDirty ? "Discard and close" : "Close"}
         cancelLabel="Keep editing"
         variant="danger"
         pending={pending}

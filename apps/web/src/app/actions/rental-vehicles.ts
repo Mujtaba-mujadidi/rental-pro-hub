@@ -4,18 +4,30 @@ import { revalidatePath } from "next/cache";
 import { requireRentalCompanyArea, type AppProfile } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
 import {
+  isPhvTaxiLicencePaperDocType,
   isVehicleDocType,
   isVehicleStatus,
+  missingRequiredDocTypes,
   normalizeVrm,
+  VEHICLE_DOC_TYPE_LABELS,
   type VehicleDocType,
   type VehicleDocumentRow,
   type VehicleRow,
   type VehicleStatus,
   type VehicleTransferRow,
 } from "@/lib/fleet/vehicles";
+import { prepareVehicleDocumentPdf } from "@/lib/fleet/vehicle-document-pdf";
 import { createClient } from "@/lib/supabase/server";
 
 export type VehicleActionResult = { ok: true; id?: string } | { ok: false; error: string };
+
+function revalidateVehiclePaths(vehicleId?: string) {
+  revalidatePath("/rental/vehicles");
+  if (vehicleId) {
+    revalidatePath(`/rental/vehicles/${vehicleId}`);
+    revalidatePath(`/rental/vehicles/${vehicleId}`, "layout");
+  }
+}
 
 function nullIfEmpty(v: FormDataEntryValue | null): string | null {
   if (v == null) return null;
@@ -166,7 +178,7 @@ export async function createVehicleAction(formData: FormData): Promise<VehicleAc
     return { ok: false, error: error.message };
   }
 
-  revalidatePath("/rental/vehicles");
+  revalidateVehiclePaths(data.id);
   return { ok: true, id: data.id };
 }
 
@@ -210,7 +222,7 @@ export async function updateVehicleAction(vehicleId: string, formData: FormData)
     return { ok: false, error: error.message };
   }
 
-  revalidatePath("/rental/vehicles");
+  revalidateVehiclePaths(id);
   return { ok: true, id };
 }
 
@@ -265,7 +277,7 @@ export async function transferVehicleAction(
     .eq("parent_company_id", parentCompanyId);
   if (uErr) return { ok: false, error: uErr.message };
 
-  revalidatePath("/rental/vehicles");
+  revalidateVehiclePaths(id);
   return { ok: true, id };
 }
 
@@ -285,7 +297,7 @@ export async function deleteVehicleAction(vehicleId: string): Promise<VehicleAct
   const { error } = await supabase.from("vehicles").delete().eq("id", id).eq("parent_company_id", parentCompanyId);
   if (error) return { ok: false, error: error.message };
 
-  revalidatePath("/rental/vehicles");
+  revalidateVehiclePaths(id);
   return { ok: true, id };
 }
 
@@ -299,16 +311,32 @@ export async function uploadVehicleDocumentAction(formData: FormData): Promise<V
   if (!parentCompanyId) return { ok: false, error: "No active company." };
 
   const vehicleId = nullIfEmpty(formData.get("vehicle_id"));
-  const docTypeRaw = nullIfEmpty(formData.get("doc_type")) ?? "other";
+  let docTypeRaw = nullIfEmpty(formData.get("doc_type")) ?? "other";
   if (!vehicleId) return { ok: false, error: "Missing vehicle." };
   if (!isVehicleDocType(docTypeRaw)) return { ok: false, error: "Invalid document type." };
+  // Normalize legacy keys to the canonical PHV/Taxi licence paper type.
+  if (docTypeRaw === "pco_paper" || docTypeRaw === "phv_licence") {
+    docTypeRaw = "phv_taxi_licence_paper";
+  }
 
-  const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose a file to upload." };
-  if (file.size > 10 * 1024 * 1024) return { ok: false, error: "File must be 10 MB or smaller." };
+  const collected: File[] = [];
+  const multi = formData.getAll("files");
+  for (const entry of multi) {
+    if (entry instanceof File && entry.size > 0) collected.push(entry);
+  }
+  const single = formData.get("file");
+  if (single instanceof File && single.size > 0) collected.push(single);
 
-  const allowed = new Set(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
-  if (!allowed.has(file.type)) return { ok: false, error: "Use PDF, JPEG, PNG, or WebP." };
+  if (!collected.length) return { ok: false, error: "Choose a PDF or one or more images." };
+
+  const MAX_INPUT = 12 * 1024 * 1024;
+  for (const file of collected) {
+    if (file.size > MAX_INPUT) {
+      return { ok: false, error: `${file.name || "A file"} is over 12 MB before compression.` };
+    }
+    const allowed = file.type === "application/pdf" || file.type.startsWith("image/");
+    if (!allowed) return { ok: false, error: "Use a PDF or images (JPEG, PNG, WebP)." };
+  }
 
   const supabase = await createClient();
   const { data: vehicle, error: gErr } = await supabase
@@ -321,20 +349,44 @@ export async function uploadVehicleDocumentAction(formData: FormData): Promise<V
     return { ok: false, error: "Vehicle not found." };
   }
 
-  const ext =
-    file.type === "application/pdf"
-      ? "pdf"
-      : file.type === "image/png"
-        ? "png"
-        : file.type === "image/webp"
-          ? "webp"
-          : "jpg";
-  const safeName = `${docTypeRaw}-${Date.now()}.${ext}`;
-  const path = `${parentCompanyId}/${vehicleId}/${safeName}`;
+  const filePayloads = await Promise.all(
+    collected.map(async (file) => ({
+      bytes: Buffer.from(await file.arrayBuffer()),
+      contentType: file.type || "application/octet-stream",
+      fileName: file.name || "upload",
+    })),
+  );
 
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const { error: upErr } = await supabase.storage.from("vehicle-documents").upload(path, buffer, {
-    contentType: file.type,
+  const prepared = await prepareVehicleDocumentPdf(
+    filePayloads,
+    VEHICLE_DOC_TYPE_LABELS[docTypeRaw as VehicleDocType] ?? docTypeRaw,
+  );
+  if (!prepared.ok) return prepared;
+
+  // One stored PDF per required doc type — replace previous uploads of this type
+  // (including legacy pco_paper / phv_licence rows for the PHV/Taxi paper slot).
+  const replaceTypes = isPhvTaxiLicencePaperDocType(docTypeRaw)
+    ? (["phv_taxi_licence_paper", "pco_paper", "phv_licence"] as const)
+    : ([docTypeRaw] as const);
+  const { data: existing } = await supabase
+    .from("vehicle_documents")
+    .select("id, file_path")
+    .eq("vehicle_id", vehicleId)
+    .in("doc_type", [...replaceTypes]);
+  if (existing?.length) {
+    await supabase
+      .from("vehicle_documents")
+      .delete()
+      .in(
+        "id",
+        existing.map((r) => r.id),
+      );
+    await supabase.storage.from("vehicle-documents").remove(existing.map((r) => r.file_path));
+  }
+
+  const path = `${parentCompanyId}/${vehicleId}/${prepared.pdf.fileName}`;
+  const { error: upErr } = await supabase.storage.from("vehicle-documents").upload(path, prepared.pdf.bytes, {
+    contentType: prepared.pdf.contentType,
     upsert: false,
   });
   if (upErr) return { ok: false, error: upErr.message };
@@ -344,11 +396,13 @@ export async function uploadVehicleDocumentAction(formData: FormData): Promise<V
     parent_company_id: parentCompanyId,
     doc_type: docTypeRaw as VehicleDocType,
     file_path: path,
-    file_name: file.name || safeName,
-    content_type: file.type,
-    expiry_date: nullIfEmpty(formData.get("expiry_date")),
+    file_name: prepared.pdf.fileName,
+    content_type: prepared.pdf.contentType,
+    expiry_date: null,
     issued_date: nullIfEmpty(formData.get("issued_date")),
-    notes: nullIfEmpty(formData.get("notes")),
+    notes:
+      nullIfEmpty(formData.get("notes")) ??
+      (prepared.pdf.pageCount > 1 ? `${prepared.pdf.pageCount} pages` : null),
     uploaded_by: user.id,
   });
   if (insErr) {
@@ -356,7 +410,7 @@ export async function uploadVehicleDocumentAction(formData: FormData): Promise<V
     return { ok: false, error: insErr.message };
   }
 
-  revalidatePath("/rental/vehicles");
+  revalidateVehiclePaths(vehicleId);
   return { ok: true, id: vehicleId };
 }
 
@@ -388,8 +442,47 @@ export async function deleteVehicleDocumentAction(documentId: string): Promise<V
 
   await supabase.storage.from("vehicle-documents").remove([doc.file_path]);
 
-  revalidatePath("/rental/vehicles");
+  revalidateVehiclePaths(doc.vehicle_id);
   return { ok: true, id: doc.vehicle_id };
+}
+
+export type VehicleDocumentUrlResult =
+  | { ok: true; url: string; fileName: string; contentType: string | null }
+  | { ok: false; error: string };
+
+/** Short-lived signed URL so company users can view or download a vehicle document. */
+export async function getVehicleDocumentUrlAction(documentId: string): Promise<VehicleDocumentUrlResult> {
+  const { profile } = await requireRentalCompanyArea();
+  const parentCompanyId = profile.company_id?.trim();
+  if (!parentCompanyId) return { ok: false, error: "No active company." };
+
+  const id = documentId.trim();
+  if (!id) return { ok: false, error: "Missing document." };
+
+  const supabase = await createClient();
+  const { data: doc, error: gErr } = await supabase
+    .from("vehicle_documents")
+    .select("id, file_path, file_name, content_type, parent_company_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (gErr) return { ok: false, error: gErr.message };
+  if (!doc || doc.parent_company_id !== parentCompanyId) {
+    return { ok: false, error: "Document not found." };
+  }
+
+  const { data, error } = await supabase.storage
+    .from("vehicle-documents")
+    .createSignedUrl(doc.file_path, 3600);
+  if (error || !data?.signedUrl) {
+    return { ok: false, error: error?.message ?? "Could not create a download link." };
+  }
+
+  return {
+    ok: true,
+    url: data.signedUrl,
+    fileName: doc.file_name?.trim() || doc.file_path.split("/").pop() || "vehicle-document.pdf",
+    contentType: doc.content_type,
+  };
 }
 
 export type VehiclesPageData = {
@@ -399,38 +492,80 @@ export type VehiclesPageData = {
   canDelete: boolean;
 };
 
+export type VehicleSwitcherOption = {
+  id: string;
+  vrm: string;
+  make: string;
+  model: string;
+  status: VehicleStatus;
+};
+
+/** Slim fleet list for the vehicle workspace switcher. */
+export async function loadVehicleSwitcherList(): Promise<VehicleSwitcherOption[] | { error: string }> {
+  const { profile } = await requireRentalCompanyArea();
+  const parentCompanyId = profile.company_id?.trim();
+  if (!parentCompanyId) return { error: "No active company." };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("vehicles")
+    .select("id, vrm, make, model, status")
+    .eq("parent_company_id", parentCompanyId)
+    .order("vrm", { ascending: true });
+  if (error) return { error: error.message };
+
+  return (data ?? []).map((v) => ({
+    id: v.id,
+    vrm: v.vrm,
+    make: v.make,
+    model: v.model,
+    status: v.status as VehicleStatus,
+  }));
+}
+
 export async function loadVehiclesPageData(): Promise<VehiclesPageData | { error: string }> {
   const { profile } = await requireRentalCompanyArea();
   const parentCompanyId = profile.company_id?.trim();
   if (!parentCompanyId) return { error: "No active company." };
 
   const supabase = await createClient();
-  const [{ data: vehicles, error: vErr }, { data: subs, error: sErr }] = await Promise.all([
-    supabase
-      .from("vehicles")
-      .select(
-        "id, parent_company_id, subcompany_id, vrm, make, model, colour, first_reg_date, first_reg_uk_date, fuel_type, seats, cc, mot_expiry, tax_expiry, phv_licence_no, phv_licence_expiry, licensing_authority_name, status, vehicle_age_limit_years, service_due_at, current_mileage, next_service_mileage, notes, created_at, updated_at, subcompanies(name)",
-      )
-      .eq("parent_company_id", parentCompanyId)
-      .order("vrm", { ascending: true }),
-    supabase
-      .from("subcompanies")
-      .select("id, name, is_primary")
-      .eq("parent_company_id", parentCompanyId)
-      .order("created_at", { ascending: true }),
-  ]);
+  const [{ data: vehicles, error: vErr }, { data: subs, error: sErr }, { data: docRows, error: dErr }] =
+    await Promise.all([
+      supabase
+        .from("vehicles")
+        .select(
+          "id, parent_company_id, subcompany_id, vrm, make, model, colour, first_reg_date, first_reg_uk_date, fuel_type, seats, cc, mot_expiry, tax_expiry, phv_licence_no, phv_licence_expiry, licensing_authority_name, status, vehicle_age_limit_years, service_due_at, current_mileage, next_service_mileage, notes, created_at, updated_at, subcompanies(name)",
+        )
+        .eq("parent_company_id", parentCompanyId)
+        .order("vrm", { ascending: true }),
+      supabase
+        .from("subcompanies")
+        .select("id, name, is_primary")
+        .eq("parent_company_id", parentCompanyId)
+        .order("created_at", { ascending: true }),
+      supabase.from("vehicle_documents").select("vehicle_id, doc_type").eq("parent_company_id", parentCompanyId),
+    ]);
 
   if (vErr) return { error: vErr.message };
   if (sErr) return { error: sErr.message };
+  if (dErr) return { error: dErr.message };
+
+  const typesByVehicle = new Map<string, string[]>();
+  for (const row of docRows ?? []) {
+    const list = typesByVehicle.get(row.vehicle_id) ?? [];
+    list.push(row.doc_type);
+    typesByVehicle.set(row.vehicle_id, list);
+  }
 
   const rows: VehicleRow[] = (vehicles ?? []).map((v) => {
     const nested = v.subcompanies as { name: string | null } | { name: string | null }[] | null;
     const subName = Array.isArray(nested) ? nested[0]?.name : nested?.name;
     const { subcompanies: _s, ...rest } = v as typeof v & { subcompanies?: unknown };
     return {
-      ...(rest as Omit<VehicleRow, "subcompany_name">),
+      ...(rest as Omit<VehicleRow, "subcompany_name" | "missing_docs">),
       status: rest.status as VehicleStatus,
       subcompany_name: subName ?? null,
+      missing_docs: missingRequiredDocTypes(typesByVehicle.get(v.id) ?? []),
     };
   });
 
@@ -452,6 +587,9 @@ export async function loadVehicleDetailAction(vehicleId: string): Promise<
       vehicle: VehicleRow;
       documents: VehicleDocumentRow[];
       transfers: VehicleTransferRow[];
+      subcompanies: { id: string; name: string | null; is_primary: boolean }[];
+      canManage: boolean;
+      canDelete: boolean;
     }
   | { ok: false; error: string }
 > {
@@ -463,9 +601,16 @@ export async function loadVehicleDetailAction(vehicleId: string): Promise<
   if (!id) return { ok: false, error: "Missing vehicle." };
 
   const supabase = await createClient();
-  const [{ data: vehicle, error: vErr }, { data: docs, error: dErr }, { data: transfers, error: tErr }] =
+  const [{ data: vehicle, error: vErr }, { data: docs, error: dErr }, { data: transfers, error: tErr }, { data: subs, error: sErr }] =
     await Promise.all([
-      supabase.from("vehicles").select("*").eq("id", id).eq("parent_company_id", parentCompanyId).maybeSingle(),
+      supabase
+        .from("vehicles")
+        .select(
+          "*, subcompanies(name)",
+        )
+        .eq("id", id)
+        .eq("parent_company_id", parentCompanyId)
+        .maybeSingle(),
       supabase
         .from("vehicle_documents")
         .select("id, vehicle_id, doc_type, file_path, file_name, content_type, expiry_date, issued_date, notes, created_at")
@@ -477,30 +622,54 @@ export async function loadVehicleDetailAction(vehicleId: string): Promise<
         .eq("vehicle_id", id)
         .order("transferred_at", { ascending: false })
         .limit(20),
+      supabase
+        .from("subcompanies")
+        .select("id, name, is_primary")
+        .eq("parent_company_id", parentCompanyId)
+        .order("created_at", { ascending: true }),
     ]);
 
   if (vErr) return { ok: false, error: vErr.message };
   if (!vehicle) return { ok: false, error: "Vehicle not found." };
   if (dErr) return { ok: false, error: dErr.message };
   if (tErr) return { ok: false, error: tErr.message };
+  if (sErr) return { ok: false, error: sErr.message };
+
+  const nested = vehicle.subcompanies as { name: string | null } | { name: string | null }[] | null;
+  const subName = Array.isArray(nested) ? nested[0]?.name : nested?.name;
+  const { subcompanies: _s, ...rest } = vehicle as typeof vehicle & { subcompanies?: unknown };
 
   const subIds = [
     ...new Set((transfers ?? []).flatMap((t) => [t.from_subcompany_id, t.to_subcompany_id])),
   ];
   const nameById = new Map<string, string | null>();
-  if (subIds.length > 0) {
-    const { data: subs } = await supabase.from("subcompanies").select("id, name").in("id", subIds);
-    for (const s of subs ?? []) nameById.set(s.id, s.name);
+  for (const s of subs ?? []) nameById.set(s.id, s.name);
+  for (const sid of subIds) {
+    if (!nameById.has(sid)) {
+      // already loaded all company subs above
+    }
   }
 
   return {
     ok: true,
-    vehicle: { ...(vehicle as VehicleRow), status: vehicle.status as VehicleStatus },
+    vehicle: {
+      ...(rest as Omit<VehicleRow, "subcompany_name" | "missing_docs">),
+      status: rest.status as VehicleStatus,
+      subcompany_name: subName ?? null,
+      missing_docs: missingRequiredDocTypes((docs ?? []).map((d) => d.doc_type)),
+    },
     documents: (docs ?? []) as VehicleDocumentRow[],
     transfers: (transfers ?? []).map((t) => ({
       ...t,
       from_name: nameById.get(t.from_subcompany_id) ?? null,
       to_name: nameById.get(t.to_subcompany_id) ?? null,
     })),
+    subcompanies: (subs ?? []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      is_primary: Boolean(s.is_primary),
+    })),
+    canManage: canManageFleet(profile),
+    canDelete: canDeleteFleet(profile),
   };
 }

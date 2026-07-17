@@ -1,0 +1,29 @@
+---
+description: Use RPH theme tokens for light/dark UI consistency
+alwaysApply: true
+---
+
+# Theme tokens (light / dark)
+
+Prefer semantic tokens and `.rph-*` utilities from `apps/web/src/app/globals.css`. Do **not** invent new ad-hoc `dark:bg-zinc-*` / `dark:bg-slate-*` stacks on new UI.
+
+## Tokens (Tailwind)
+
+- Surfaces: `bg-rph-page`, `bg-rph-raised`, `bg-rph-chrome`, `bg-rph-elevated`
+- Borders: `border-rph-border`, `border-rph-border-strong`
+- Text: `text-rph-fg`, `text-rph-fg-secondary`, `text-rph-fg-muted`
+- Links: `text-rph-link`, `hover:text-rph-link-hover`
+- Brand: `bg-rph-rail`, `text-rph-rail` (sidebar / primary actions)
+
+## Utilities
+
+- `.rph-card` / `.rph-panel` — cards
+- `.rph-chrome` — top bars / chrome strips
+- `.rph-input` — form fields
+- `.rph-btn-primary` / `.rph-btn-ghost`
+- `.rph-pill` / `.rph-pill-active` — section pills
+- `.rph-h1`, `.rph-muted`, `.rph-link`, `.rph-alert-*`
+
+## When editing older screens
+
+Migrate touched markup to tokens opportunistically; do not big-bang rewrite unrelated files.

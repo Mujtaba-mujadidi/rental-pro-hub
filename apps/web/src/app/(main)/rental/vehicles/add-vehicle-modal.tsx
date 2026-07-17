@@ -3,34 +3,31 @@
 import { Fragment, useCallback, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createVehicleAction, uploadVehicleDocumentAction } from "@/app/actions/rental-vehicles";
+import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
 import { useCanScanOrCaptureDocument } from "@/hooks/use-can-scan-or-capture-document";
 import {
-  VEHICLE_COMPLIANCE_DOC_TYPES,
+  REQUIRED_VEHICLE_DOC_TYPES,
   VEHICLE_DOC_TYPE_LABELS,
   VEHICLE_STATUS_LABELS,
   VEHICLE_STATUSES,
-  type VehicleDocType,
+  type RequiredVehicleDocType,
   type VehicleStatus,
 } from "@/lib/fleet/vehicles";
 
 const STEP_LABELS = ["Basics", "Specs", "Documents", "Review"] as const;
 
 const btnContinue =
-  "flex h-11 min-w-[7rem] items-center justify-center rounded-lg bg-rph-rail px-4 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50";
+  "flex h-11 min-w-[7rem] items-center justify-center rounded-lg bg-rph-rail px-4 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer";
 const btnGhost =
-  "flex h-11 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800";
-
-function inputClass() {
-  return "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none focus:border-rph-rail focus:ring-2 focus:ring-rph-rail/20 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100";
-}
+  "flex h-11 shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-raised px-4 text-sm font-medium text-rph-fg-secondary hover:bg-rph-chrome disabled:opacity-50";
 
 function StepProgress({ step }: { step: number }) {
   const displayStep = step + 1;
   return (
     <nav className="mb-2" aria-label="Add vehicle steps">
-      <p className="mb-4 text-center text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+      <p className="rph-meta mb-4 text-center font-medium uppercase tracking-wide">
         Step {displayStep} of {STEP_LABELS.length}
       </p>
       <ol className="flex w-full items-center px-0.5 sm:px-2">
@@ -46,7 +43,7 @@ function StepProgress({ step }: { step: number }) {
                   <div
                     className={[
                       "h-full w-full rounded-full transition-colors duration-300",
-                      segmentBeforeOrange ? "bg-orange-500" : "bg-zinc-200 dark:bg-zinc-700",
+                      segmentBeforeOrange ? "bg-orange-500" : "bg-rph-border",
                     ].join(" ")}
                   />
                 </li>
@@ -57,10 +54,10 @@ function StepProgress({ step }: { step: number }) {
                     "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 text-sm font-bold transition-all",
                     done && "border-orange-500 bg-orange-500 text-white shadow-md shadow-orange-500/25",
                     active &&
-                      "border-orange-500 bg-white text-orange-600 shadow-md ring-4 ring-orange-100 dark:bg-zinc-950 dark:text-orange-500 dark:ring-orange-950/40",
+                      "border-orange-500 bg-rph-raised text-orange-600 shadow-md ring-4 ring-orange-100 dark:text-orange-500 dark:ring-orange-950/40",
                     !done &&
                       !active &&
-                      "border-zinc-200 bg-white text-zinc-400 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-500",
+                      "border-rph-border bg-rph-raised text-rph-fg-muted",
                   ]
                     .filter(Boolean)
                     .join(" ")}
@@ -71,7 +68,7 @@ function StepProgress({ step }: { step: number }) {
                 <span
                   className={[
                     "mt-2 hidden max-w-[5.5rem] text-center text-[11px] font-semibold leading-tight sm:block",
-                    active ? "text-orange-700 dark:text-orange-400" : done ? "text-zinc-600 dark:text-zinc-400" : "text-zinc-400",
+                    active ? "text-orange-700 dark:text-orange-400" : done ? "text-rph-fg-muted" : "text-rph-fg-muted/70",
                   ].join(" ")}
                 >
                   {label}
@@ -88,7 +85,7 @@ function StepProgress({ step }: { step: number }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block space-y-1.5">
-      <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{label}</span>
+      <span className="block text-xs font-medium text-rph-fg-muted">{label}</span>
       {children}
     </label>
   );
@@ -96,13 +93,21 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 type SubOpt = { id: string; name: string | null; is_primary: boolean };
 
-type PendingDoc = {
-  id: string;
-  fileName: string;
-  docType: VehicleDocType;
-  expiry: string;
-  /** Kept in memory only — not serialized to localStorage drafts. */
-  file: File;
+type DocBundle = { files: File[] };
+type DocBundles = Record<RequiredVehicleDocType, DocBundle>;
+
+function emptyBundles(): DocBundles {
+  return {
+    mot: { files: [] },
+    logbook: { files: [] },
+    phv_taxi_licence_paper: { files: [] },
+  };
+}
+
+type VehicleSnapshot = {
+  step: number;
+  fields: VehicleDraftFields;
+  pendingMeta: { docType: RequiredVehicleDocType; fileCount: number }[];
 };
 
 const DRAFT_KEY = "add-vehicle";
@@ -133,12 +138,6 @@ export type VehicleDraftFields = {
   current_mileage: string;
   next_service_mileage: string;
   notes: string;
-};
-
-type VehicleSnapshot = {
-  step: number;
-  fields: VehicleDraftFields;
-  pendingMeta: { id: string; fileName: string; docType: VehicleDocType; expiry: string }[];
 };
 
 function emptyFields(defaultSubId: string): VehicleDraftFields {
@@ -199,11 +198,12 @@ export function AddVehicleModal({
 
   const [step, setStep] = useState(0);
   const [fields, setFields] = useState<VehicleDraftFields>(() => emptyFields(primarySub));
-  const [pendingDocs, setPendingDocs] = useState<PendingDoc[]>([]);
-  const [docType, setDocType] = useState<VehicleDocType>("mot");
-  const [docExpiry, setDocExpiry] = useState("");
+  const [bundles, setBundles] = useState<DocBundles>(() => emptyBundles());
   const [error, setError] = useState<string | null>(null);
+  const [saveOverlay, setSaveOverlay] = useState<ActionStatusOverlayState | null>(null);
   const [pending, startTransition] = useTransition();
+  const saving = saveOverlay?.phase === "pending";
+  const busy = pending || saving;
 
   const setField = useCallback(<K extends keyof VehicleDraftFields>(key: K, value: VehicleDraftFields[K]) => {
     setFields((p) => ({ ...p, [key]: value }));
@@ -213,21 +213,24 @@ export function AddVehicleModal({
     () => ({
       step,
       fields,
-      pendingMeta: pendingDocs.map(({ id, fileName, docType, expiry }) => ({ id, fileName, docType, expiry })),
+      pendingMeta: REQUIRED_VEHICLE_DOC_TYPES.filter((t) => bundles[t].files.length > 0).map((docType) => ({
+        docType,
+        fileCount: bundles[docType].files.length,
+      })),
     }),
-    [step, fields, pendingDocs],
+    [step, fields, bundles],
   );
 
   const applySnapshot = useCallback(
     (s: VehicleSnapshot) => {
       const mergedFields = { ...emptyFields(primarySub), ...(s.fields ?? {}) };
-      setStep(typeof s.step === "number" ? s.step : 0);
+      const maxStep = STEP_LABELS.length - 1;
+      setStep(Math.min(typeof s.step === "number" ? s.step : 0, maxStep));
       setFields(mergedFields);
-      // Browser drafts cannot store File blobs — remind user to re-attach photos/docs.
-      setPendingDocs([]);
+      setBundles(emptyBundles());
       setError(
         s.pendingMeta?.length
-          ? `Draft restored. Re-attach ${s.pendingMeta.length} document file(s) on the Documents step — file contents are not kept in drafts.`
+          ? "Draft restored. Re-attach MOT / logbook / PHV/Taxi licence paper on the Documents step — files are not kept in drafts."
           : null,
       );
     },
@@ -239,6 +242,7 @@ export function AddVehicleModal({
     hasStoredDraft,
     isDirty,
     saveProgress,
+    saveProgressAndClose,
     requestClose,
     requestStartFresh,
     discardConfirmOpen,
@@ -253,13 +257,11 @@ export function AddVehicleModal({
     open,
     snapshot,
     baseline,
-    pending,
+    pending: busy,
     applySnapshot,
     onClose: () => onOpenChange(false),
     onAfterClear: () => {
-      setPendingDocs([]);
-      setDocExpiry("");
-      setDocType("mot");
+      setBundles(emptyBundles());
     },
   });
 
@@ -270,48 +272,56 @@ export function AddVehicleModal({
     return true;
   }
 
-  function addFiles(fileList: FileList | null) {
+  function addFiles(docType: RequiredVehicleDocType, fileList: FileList | null) {
     if (!fileList?.length) return;
-    const next: PendingDoc[] = [];
-    for (const file of Array.from(fileList)) {
-      next.push({
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        fileName: file.name || "upload",
-        docType,
-        expiry: docExpiry,
-        file,
-      });
-    }
-    setPendingDocs((prev) => [...prev, ...next]);
-    setDocExpiry("");
+    const files = Array.from(fileList);
+    setBundles((prev) => ({
+      ...prev,
+      [docType]: { files: [...prev[docType].files, ...files] },
+    }));
   }
 
-  function removePending(id: string) {
-    setPendingDocs((prev) => prev.filter((d) => d.id !== id));
+  function clearBundle(docType: RequiredVehicleDocType) {
+    setBundles((prev) => ({ ...prev, [docType]: { files: [] } }));
   }
+
+  const attachedCount = REQUIRED_VEHICLE_DOC_TYPES.filter((t) => bundles[t].files.length > 0).length;
+  const missingOnDraft = REQUIRED_VEHICLE_DOC_TYPES.filter((t) => bundles[t].files.length === 0);
 
   function submitAll() {
     setError(null);
+    const willUpload = REQUIRED_VEHICLE_DOC_TYPES.some((t) => bundles[t].files.length > 0);
+    setSaveOverlay({
+      phase: "pending",
+      title: "Saving vehicle…",
+      detail: willUpload
+        ? "Creating the vehicle and uploading documents. Please wait."
+        : "Creating the vehicle record. Please wait.",
+    });
     startTransition(async () => {
       const created = await createVehicleAction(fieldsToFormData(fields));
       if (!created.ok || !created.id) {
-        setError(created.ok ? "Could not create vehicle." : created.error);
+        const message = created.ok ? "Could not create vehicle." : created.error;
+        setError(message);
+        setSaveOverlay({ phase: "error", title: "Could not save vehicle", detail: message });
         return;
       }
 
       const uploadErrors: string[] = [];
-      for (const doc of pendingDocs) {
+      for (const docType of REQUIRED_VEHICLE_DOC_TYPES) {
+        const bundle = bundles[docType];
+        if (!bundle.files.length) continue;
         const fd = new FormData();
         fd.set("vehicle_id", created.id);
-        fd.set("doc_type", doc.docType);
-        fd.set("expiry_date", doc.expiry);
-        fd.set("file", doc.file);
+        fd.set("doc_type", docType);
+        for (const file of bundle.files) fd.append("files", file);
         const up = await uploadVehicleDocumentAction(fd);
-        if (!up.ok) uploadErrors.push(`${doc.fileName}: ${up.error}`);
+        if (!up.ok) uploadErrors.push(`${VEHICLE_DOC_TYPE_LABELS[docType]}: ${up.error}`);
       }
 
       clearAfterSuccess();
-      setPendingDocs([]);
+      setBundles(emptyBundles());
+      setSaveOverlay(null);
       onOpenChange(false);
       onCreated?.();
       router.refresh();
@@ -323,20 +333,23 @@ export function AddVehicleModal({
   }
 
   const subName = subcompanies.find((s) => s.id === fields.subcompany_id)?.name ?? "—";
+  const anyFiles = attachedCount > 0;
 
   return (
+    <>
     <FormModalShell
       open={open}
       titleId="add-vehicle-title"
       title="Add vehicle"
       description="Register a fleet vehicle and optionally attach compliance documents."
       headerExtra={<StepProgress step={step} />}
-      pending={pending}
+      pending={busy}
       maxWidthClass="max-w-3xl"
       saveNotice={saveNotice}
       hasStoredDraft={hasStoredDraft}
-      isDirty={isDirty || pendingDocs.length > 0}
+      isDirty={isDirty || anyFiles}
       onSaveProgress={saveProgress}
+      onSaveAndClose={saveProgressAndClose}
       onRequestClose={requestClose}
       onRequestStartFresh={requestStartFresh}
       discardConfirmOpen={discardConfirmOpen}
@@ -347,12 +360,12 @@ export function AddVehicleModal({
       onCancelStartFresh={cancelStartFresh}
       footer={
         <>
-          <button type="button" className={btnGhost} disabled={pending} onClick={requestClose}>
+          <button type="button" className={btnGhost} disabled={busy} onClick={requestClose}>
             Cancel
           </button>
           <div className="flex flex-wrap gap-3">
             {step > 0 ? (
-              <button type="button" className={btnGhost} disabled={pending} onClick={() => setStep((s) => s - 1)}>
+              <button type="button" className={btnGhost} disabled={busy} onClick={() => setStep((s) => s - 1)}>
                 Back
               </button>
             ) : null}
@@ -360,14 +373,14 @@ export function AddVehicleModal({
               <button
                 type="button"
                 className={btnContinue}
-                disabled={pending || !canGoNext()}
+                disabled={busy || !canGoNext()}
                 onClick={() => setStep((s) => Math.min(STEP_LABELS.length - 1, s + 1))}
               >
                 Continue
               </button>
             ) : (
-              <button type="button" className={btnContinue} disabled={pending || !canGoNext()} onClick={submitAll}>
-                {pending ? "Saving…" : "Save vehicle"}
+              <button type="button" className={btnContinue} disabled={busy || !canGoNext()} onClick={submitAll}>
+                {busy ? "Saving…" : "Save vehicle"}
               </button>
             )}
           </div>
@@ -379,7 +392,7 @@ export function AddVehicleModal({
       {step === 0 ? (
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Subcompany *">
-            <select className={inputClass()} value={fields.subcompany_id} onChange={(e) => setField("subcompany_id", e.target.value)}>
+            <select className="rph-input" value={fields.subcompany_id} onChange={(e) => setField("subcompany_id", e.target.value)}>
               {subcompanies.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name ?? "Untitled"}
@@ -390,7 +403,7 @@ export function AddVehicleModal({
           </Field>
           <Field label="VRM *">
             <input
-              className={inputClass()}
+              className="rph-input"
               value={fields.vrm}
               onChange={(e) => setField("vrm", e.target.value.toUpperCase())}
               placeholder="AB12CDE"
@@ -398,17 +411,17 @@ export function AddVehicleModal({
             />
           </Field>
           <Field label="Make *">
-            <input className={inputClass()} value={fields.make} onChange={(e) => setField("make", e.target.value)} />
+            <input className="rph-input" value={fields.make} onChange={(e) => setField("make", e.target.value)} />
           </Field>
           <Field label="Model *">
-            <input className={inputClass()} value={fields.model} onChange={(e) => setField("model", e.target.value)} />
+            <input className="rph-input" value={fields.model} onChange={(e) => setField("model", e.target.value)} />
           </Field>
           <Field label="Colour">
-            <input className={inputClass()} value={fields.colour} onChange={(e) => setField("colour", e.target.value)} />
+            <input className="rph-input" value={fields.colour} onChange={(e) => setField("colour", e.target.value)} />
           </Field>
           <Field label="Status">
             <select
-              className={inputClass()}
+              className="rph-input"
               value={fields.status}
               onChange={(e) => setField("status", e.target.value as VehicleStatus)}
             >
@@ -421,7 +434,7 @@ export function AddVehicleModal({
           </Field>
           <div className="sm:col-span-2">
             <Field label="Notes">
-              <textarea className={inputClass()} rows={3} value={fields.notes} onChange={(e) => setField("notes", e.target.value)} />
+              <textarea className="rph-input" rows={3} value={fields.notes} onChange={(e) => setField("notes", e.target.value)} />
             </Field>
           </div>
         </div>
@@ -432,7 +445,7 @@ export function AddVehicleModal({
           <Field label="First registration">
             <input
               type="date"
-              className={inputClass()}
+              className="rph-input"
               value={fields.first_reg_date}
               onChange={(e) => {
                 const value = e.target.value;
@@ -448,16 +461,16 @@ export function AddVehicleModal({
             <Field label="First UK registration">
               <input
                 type="date"
-                className={inputClass()}
+                className="rph-input"
                 value={fields.first_reg_uk_date}
                 disabled={fields.same_uk_reg_as_first}
                 onChange={(e) => setField("first_reg_uk_date", e.target.value)}
               />
             </Field>
-            <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+            <label className="flex items-center gap-2 text-sm text-rph-fg-secondary">
               <input
                 type="checkbox"
-                className="h-4 w-4 rounded border-zinc-300 text-rph-rail focus:ring-rph-rail/30"
+                className="h-4 w-4 rounded border-rph-border text-rph-rail focus:ring-rph-rail/30"
                 checked={fields.same_uk_reg_as_first}
                 onChange={(e) => {
                   const checked = e.target.checked;
@@ -473,38 +486,38 @@ export function AddVehicleModal({
           </div>
           <Field label="Fuel type">
             <input
-              className={inputClass()}
+              className="rph-input"
               value={fields.fuel_type}
               onChange={(e) => setField("fuel_type", e.target.value)}
               placeholder="Petrol / Diesel / Hybrid / EV"
             />
           </Field>
           <Field label="Seats">
-            <input type="number" min={1} max={99} className={inputClass()} value={fields.seats} onChange={(e) => setField("seats", e.target.value)} />
+            <input type="number" min={1} max={99} className="rph-input" value={fields.seats} onChange={(e) => setField("seats", e.target.value)} />
           </Field>
           <Field label="Engine CC">
-            <input type="number" min={0} className={inputClass()} value={fields.cc} onChange={(e) => setField("cc", e.target.value)} />
+            <input type="number" min={0} className="rph-input" value={fields.cc} onChange={(e) => setField("cc", e.target.value)} />
           </Field>
           <Field label="MOT expiry">
-            <input type="date" className={inputClass()} value={fields.mot_expiry} onChange={(e) => setField("mot_expiry", e.target.value)} />
+            <input type="date" className="rph-input" value={fields.mot_expiry} onChange={(e) => setField("mot_expiry", e.target.value)} />
           </Field>
           <Field label="Tax expiry">
-            <input type="date" className={inputClass()} value={fields.tax_expiry} onChange={(e) => setField("tax_expiry", e.target.value)} />
+            <input type="date" className="rph-input" value={fields.tax_expiry} onChange={(e) => setField("tax_expiry", e.target.value)} />
           </Field>
-          <Field label="PHV licence no.">
-            <input className={inputClass()} value={fields.phv_licence_no} onChange={(e) => setField("phv_licence_no", e.target.value)} />
+          <Field label="PHV/Taxi licence no.">
+            <input className="rph-input" value={fields.phv_licence_no} onChange={(e) => setField("phv_licence_no", e.target.value)} />
           </Field>
-          <Field label="PHV licence expiry">
+          <Field label="PHV/Taxi licence expiry">
             <input
               type="date"
-              className={inputClass()}
+              className="rph-input"
               value={fields.phv_licence_expiry}
               onChange={(e) => setField("phv_licence_expiry", e.target.value)}
             />
           </Field>
           <Field label="Licensing authority">
             <input
-              className={inputClass()}
+              className="rph-input"
               value={fields.licensing_authority_name}
               onChange={(e) => setField("licensing_authority_name", e.target.value)}
             />
@@ -513,21 +526,21 @@ export function AddVehicleModal({
             <input
               type="number"
               min={1}
-              className={inputClass()}
+              className="rph-input"
               value={fields.vehicle_age_limit_years}
               onChange={(e) => setField("vehicle_age_limit_years", e.target.value)}
             />
           </Field>
-          <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900/40">
-            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Service (optional)</p>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          <div className="sm:col-span-2 rounded-lg border border-rph-border bg-rph-chrome p-4">
+            <p className="text-sm font-semibold text-rph-fg">Service (optional)</p>
+            <p className="rph-meta mt-1">
               Skip these when adding a car if you do not track servicing yet. You can update them later from Manage.
             </p>
             <div className="mt-3 grid gap-4 sm:grid-cols-3">
               <Field label="Service due date">
                 <input
                   type="date"
-                  className={inputClass()}
+                  className="rph-input"
                   value={fields.service_due_at}
                   onChange={(e) => setField("service_due_at", e.target.value)}
                 />
@@ -536,7 +549,7 @@ export function AddVehicleModal({
                 <input
                   type="number"
                   min={0}
-                  className={inputClass()}
+                  className="rph-input"
                   value={fields.current_mileage}
                   onChange={(e) => setField("current_mileage", e.target.value)}
                   placeholder="e.g. 45200"
@@ -546,7 +559,7 @@ export function AddVehicleModal({
                 <input
                   type="number"
                   min={0}
-                  className={inputClass()}
+                  className="rph-input"
                   value={fields.next_service_mileage}
                   onChange={(e) => setField("next_service_mileage", e.target.value)}
                   placeholder="e.g. 50000"
@@ -559,120 +572,139 @@ export function AddVehicleModal({
 
       {step === 2 ? (
         <div className="space-y-4">
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Attach MOT, insurance, logbook, and other compliance files (optional). Skip if you will add them later.
-            Vehicle condition photos are captured later at checkout / check-in, not here.
+          <p className="text-sm text-rph-fg-muted">
+            Required pack: <span className="font-medium">MOT</span>, <span className="font-medium">Logbook (V5C)</span>, and{" "}
+            <span className="font-medium">PHV/Taxi licence paper</span>. You can skip and save the vehicle — missing docs stay marked until
+            uploaded. For multi-page docs, upload one PDF or several images (we merge and compress into one PDF).
           </p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Document type">
-              <select className={inputClass()} value={docType} onChange={(e) => setDocType(e.target.value as VehicleDocType)}>
-                {VEHICLE_COMPLIANCE_DOC_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {VEHICLE_DOC_TYPE_LABELS[t]}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Expiry (optional)">
-              <input type="date" className={inputClass()} value={docExpiry} onChange={(e) => setDocExpiry(e.target.value)} />
-            </Field>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <label className={btnGhost + " cursor-pointer"}>
-              Choose file
-              <input
-                type="file"
-                className="hidden"
-                accept="application/pdf,image/jpeg,image/png,image/webp"
-                disabled={pending}
-                onChange={(e) => {
-                  addFiles(e.target.files);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-            {canScanOrCapture ? (
-              <label className={btnContinue + " cursor-pointer"}>
-                Scan document
-                <input
-                  type="file"
-                  className="hidden"
-                  accept="image/*"
-                  capture="environment"
-                  disabled={pending}
-                  onChange={(e) => {
-                    addFiles(e.target.files);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
-            ) : null}
-          </div>
-          {!pendingDocs.length ? (
-            <p className="text-sm text-slate-500">No documents selected yet.</p>
+          {missingOnDraft.length ? (
+            <p className="rph-alert-warn">
+              Still missing: {missingOnDraft.map((t) => VEHICLE_DOC_TYPE_LABELS[t]).join(", ")}
+            </p>
           ) : (
-            <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
-              {pendingDocs.map((d) => (
-                <li key={d.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                  <div className="min-w-0">
-                    <p className="font-medium text-slate-800 dark:text-slate-200">{VEHICLE_DOC_TYPE_LABELS[d.docType]}</p>
-                    <p className="truncate text-xs text-slate-500">
-                      {d.fileName}
-                      {d.expiry ? ` · expires ${d.expiry}` : ""}
+            <p className="rph-alert-ok">
+              All required documents selected for upload.
+            </p>
+          )}
+          {REQUIRED_VEHICLE_DOC_TYPES.map((docType) => {
+            const bundle = bundles[docType];
+            const ready = bundle.files.length > 0;
+            return (
+              <div
+                key={docType}
+                className="rph-card space-y-3 p-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="font-semibold text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[docType]}</p>
+                    <p className="rph-meta">
+                      {ready
+                        ? `${bundle.files.length} file${bundle.files.length === 1 ? "" : "s"} ready`
+                        : "Missing — upload PDF or images"}
                     </p>
                   </div>
-                  <button type="button" className={btnGhost} onClick={() => removePending(d.id)}>
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+                  <span
+                    className={
+                      ready
+                        ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+                        : "rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100"
+                    }
+                  >
+                    {ready ? "Ready" : "Missing"}
+                  </span>
+                </div>
+                {docType === "logbook" ? (
+                  <p className="rph-meta">
+                    Licence renewal age is calculated later from first registration and the vehicle age limit on Specs.
+                  </p>
+                ) : docType === "mot" ? (
+                  <p className="rph-meta">MOT expiry is set on Specs — upload the certificate file(s) here.</p>
+                ) : (
+                  <p className="rph-meta">
+                    PHV/Taxi licence expiry is set on Specs — upload the paper file(s) here.
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <label className={btnGhost + " cursor-pointer"}>
+                    Add PDF / images
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="application/pdf,image/jpeg,image/png,image/webp"
+                      multiple
+                      disabled={busy}
+                      onChange={(e) => {
+                        addFiles(docType, e.target.files);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  {canScanOrCapture ? (
+                    <label className={btnContinue + " cursor-pointer"}>
+                      Scan with camera
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept="image/*"
+                        capture="environment"
+                        disabled={busy}
+                        onChange={(e) => {
+                          addFiles(docType, e.target.files);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                  ) : null}
+                  {ready ? (
+                    <button type="button" className={btnGhost} onClick={() => clearBundle(docType)}>
+                      Clear
+                    </button>
+                  ) : null}
+                </div>
+                {ready ? (
+                  <ul className="rph-meta">
+                    {bundle.files.map((f, i) => (
+                      <li key={`${f.name}-${i}`}>{f.name}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       ) : null}
 
       {step === 3 ? (
-        <div className="space-y-4 text-sm text-zinc-700 dark:text-zinc-300">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
-            <p className="font-semibold text-slate-900 dark:text-slate-100">
+        <div className="space-y-4 text-sm text-rph-fg-secondary">
+          <div className="rounded-lg border border-rph-border bg-rph-chrome p-4">
+            <p className="font-semibold text-rph-fg">
               {fields.vrm || "—"} · {fields.make} {fields.model}
             </p>
-            <p className="mt-1 text-slate-600 dark:text-slate-400">
+            <p className="mt-1 text-rph-fg-muted">
               {subName} · {VEHICLE_STATUS_LABELS[fields.status]}
               {fields.colour ? ` · ${fields.colour}` : ""}
             </p>
-            <dl className="mt-3 grid gap-1 sm:grid-cols-2">
-              <div>
-                <dt className="text-xs text-slate-500">MOT</dt>
-                <dd>{fields.mot_expiry || "—"}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-slate-500">Tax</dt>
-                <dd>{fields.tax_expiry || "—"}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-slate-500">PHV</dt>
-                <dd>
-                  {fields.phv_licence_no || "—"}
-                  {fields.phv_licence_expiry ? ` · exp ${fields.phv_licence_expiry}` : ""}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-slate-500">Fuel / seats</dt>
-                <dd>
-                  {fields.fuel_type || "—"}
-                  {fields.seats ? ` · ${fields.seats} seats` : ""}
-                </dd>
-              </div>
-            </dl>
           </div>
-          <p>
-            <span className="font-medium">{pendingDocs.length}</span> document
-            {pendingDocs.length === 1 ? "" : "s"} ready to upload after save.
+          <div className="space-y-2">
+            <p className="font-medium text-rph-fg">Documents</p>
+            <ul className="space-y-1">
+              {REQUIRED_VEHICLE_DOC_TYPES.map((t) => (
+                <li key={t} className="flex justify-between gap-2">
+                  <span>{VEHICLE_DOC_TYPE_LABELS[t]}</span>
+                  <span className={bundles[t].files.length ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}>
+                    {bundles[t].files.length ? `Upload ${bundles[t].files.length} file(s)` : "Missing"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <p className="rph-meta">
+            Saving creates the vehicle now. Missing documents stay flagged on the fleet list until you add them from Manage.
           </p>
-          <p className="text-xs text-slate-500">Saving creates the vehicle, then uploads any selected documents.</p>
         </div>
       ) : null}
     </FormModalShell>
+    <ActionStatusOverlay state={saveOverlay} onDismiss={() => setSaveOverlay(null)} />
+    </>
   );
 }

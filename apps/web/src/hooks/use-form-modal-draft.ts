@@ -29,6 +29,8 @@ export type UseFormModalDraftResult = {
   discardConfirmOpen: boolean;
   startFreshConfirmOpen: boolean;
   saveProgress: () => void;
+  /** Persist draft to this device, then close the modal. */
+  saveProgressAndClose: () => void;
   requestClose: () => void;
   confirmDiscardClose: () => void;
   cancelDiscardClose: () => void;
@@ -108,14 +110,19 @@ export function useFormModalDraft<T>(options: UseFormModalDraftOptions<T>): UseF
     onAfterSaveRef.current?.(snapshot);
   }, [draftKey, snapshot]);
 
+  const saveProgressAndClose = useCallback(() => {
+    if (pending) return;
+    saveDraft(draftKey, snapshot);
+    setLastSavedSerialized(stableSerialize(snapshot));
+    setHasStoredDraft(true);
+    onAfterSaveRef.current?.(snapshot);
+    onClose();
+  }, [pending, draftKey, snapshot, onClose]);
+
   const requestClose = useCallback(() => {
     if (pending) return;
-    if (isDirty) {
-      setDiscardConfirmOpen(true);
-      return;
-    }
-    onClose();
-  }, [pending, isDirty, onClose]);
+    setDiscardConfirmOpen(true);
+  }, [pending]);
 
   const confirmDiscardClose = useCallback(() => {
     setDiscardConfirmOpen(false);
@@ -171,6 +178,7 @@ export function useFormModalDraft<T>(options: UseFormModalDraftOptions<T>): UseF
     discardConfirmOpen,
     startFreshConfirmOpen,
     saveProgress,
+    saveProgressAndClose,
     requestClose,
     confirmDiscardClose,
     cancelDiscardClose,

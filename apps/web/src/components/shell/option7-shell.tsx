@@ -27,6 +27,31 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
       return [{ label: "Home", href: "/rental" }, { label: "Subcompany", href: "/rental/subcompany" }];
     }
     if (pathname === "/rental/vehicles" || pathname.startsWith("/rental/vehicles/")) {
+      const parts = pathname.split("/").filter(Boolean);
+      // /rental/vehicles/:id[/section]
+      if (parts.length >= 3) {
+        const vehicleId = parts[2];
+        const base: Crumb[] = [
+          { label: "Home", href: "/rental" },
+          { label: "Vehicles", href: "/rental/vehicles" },
+          { label: "Vehicle", href: `/rental/vehicles/${vehicleId}` },
+        ];
+        if (!parts[3]) return [...base, { label: "Dashboard" }];
+        const section = parts[3];
+        const sectionLabel =
+          section === "details"
+            ? "Details"
+            : section === "rentals"
+              ? "Rentals"
+              : section === "maintenance"
+                ? "Maintenance"
+                : section === "pcn"
+                  ? "PCN"
+                  : section === "claims"
+                    ? "Claims"
+                    : section.charAt(0).toUpperCase() + section.slice(1);
+        return [...base, { label: sectionLabel }];
+      }
       return [{ label: "Home", href: "/rental" }, { label: "Vehicles", href: "/rental/vehicles" }];
     }
     if (pathname === "/rental/onboarding" || pathname.startsWith("/rental/onboarding/")) {
@@ -163,20 +188,20 @@ function IconBell({ className }: { className?: string }) {
 
 function Breadcrumbs({ items }: { items: Crumb[] }) {
   return (
-    <nav aria-label="Breadcrumb" className="text-sm text-slate-500 dark:text-slate-400">
+    <nav aria-label="Breadcrumb" className="text-sm text-rph-fg-muted">
       <ol className="flex flex-wrap items-center gap-x-1 gap-y-0.5">
         {items.map((c, i) => (
           <li key={`${c.label}-${i}`} className="flex items-center gap-1">
-            {i > 0 ? <span className="text-slate-300 dark:text-slate-600">/</span> : null}
+            {i > 0 ? <span className="text-rph-border-strong">/</span> : null}
             {c.href && i < items.length - 1 ? (
-              <Link href={c.href} className="hover:text-rph-rail dark:hover:text-rph-rail-softer">
+              <Link href={c.href} className="hover:text-rph-link">
                 {c.label}
               </Link>
             ) : (
               <span
                 className={
                   i === items.length - 1
-                    ? "font-semibold text-slate-800 dark:text-slate-100"
+                    ? "font-semibold text-rph-fg"
                     : undefined
                 }
               >
@@ -413,12 +438,12 @@ export function Option7Shell({
         <nav className="flex flex-1 flex-col gap-1 px-2 pb-4">{nav}</nav>
       </aside>
 
-      <div className="flex min-h-dvh min-w-0 flex-1 flex-col bg-slate-100 dark:bg-slate-950">
-        <header className="shrink-0 border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex min-h-dvh min-w-0 flex-1 flex-col bg-rph-page">
+        <header className="shrink-0 border-b border-rph-border bg-rph-raised">
           <div className="flex h-14 items-center gap-2 px-3 sm:px-4">
             <button
               type="button"
-              className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 md:hidden"
+              className="rounded-lg p-2 text-rph-fg-secondary hover:bg-rph-chrome md:hidden"
               aria-expanded={mobileNavOpen}
               aria-controls="app-sidebar"
               aria-label={mobileNavOpen ? "Close navigation menu" : "Open navigation menu"}
@@ -429,7 +454,7 @@ export function Option7Shell({
 
             <button
               type="button"
-              className="hidden rounded-lg p-2 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 md:inline-flex"
+              className="hidden rounded-lg p-2 text-rph-fg-secondary hover:bg-rph-chrome md:inline-flex"
               aria-expanded={!sidebarCollapsed}
               aria-controls="app-sidebar"
               aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -443,14 +468,14 @@ export function Option7Shell({
             </button>
 
             <div className="relative hidden min-w-0 max-w-md flex-1 md:block">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-rph-fg-muted">
                 ⌕
               </span>
               <input
                 type="search"
                 placeholder="Search…"
                 readOnly
-                className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500"
+                className="w-full rounded-lg border border-rph-border bg-rph-chrome py-2 pl-9 pr-3 text-sm text-rph-fg placeholder:text-rph-fg-muted"
                 aria-label="Search (coming soon)"
               />
             </div>
@@ -458,7 +483,7 @@ export function Option7Shell({
             <div className="ml-auto flex min-w-0 items-center gap-0.5 sm:gap-1">
               <button
                 type="button"
-                className="relative rounded-lg p-2 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                className="relative rounded-lg p-2 text-rph-fg-secondary hover:bg-rph-chrome"
                 aria-label="Notifications (coming soon)"
               >
                 <IconBell className="h-5 w-5" />
@@ -475,12 +500,12 @@ export function Option7Shell({
             </div>
           </div>
 
-          <div className="border-t border-slate-100 bg-slate-50/80 px-4 py-2 dark:border-slate-800 dark:bg-slate-900/80">
+          <div className="border-t border-rph-border bg-rph-chrome px-4 py-2">
             <Breadcrumbs items={crumbs} />
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col bg-rph-page">
           <main className="min-h-0 w-full min-w-0 flex-1 overflow-auto p-3">
             {variant === "driver" && driverLicenceBanner && driverLicenceBanner.bullets.length > 0 ? (
               <div
@@ -503,19 +528,19 @@ export function Option7Shell({
                 </Link>
               </div>
             ) : null}
-            <div className="w-full min-w-0 max-w-none rounded-xl border border-slate-200/90 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-4">
+            <div className="rph-panel w-full min-w-0 max-w-none p-3 sm:p-4">
               {children}
             </div>
           </main>
 
-          <footer className="shrink-0 border-t border-slate-200 bg-white px-4 py-3 text-center text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+          <footer className="shrink-0 border-t border-rph-border bg-rph-raised px-4 py-3 text-center text-xs text-rph-fg-muted">
             <span>© {year} {APP_NAME}</span>
-            <span className="mx-2 text-slate-300 dark:text-slate-600">·</span>
-            <a href="#" className="hover:text-rph-rail dark:hover:text-rph-rail-softer">
+            <span className="mx-2 text-rph-border-strong">·</span>
+            <a href="#" className="hover:text-rph-link">
               About
             </a>
-            <span className="mx-2 text-slate-300 dark:text-slate-600">·</span>
-            <a href="#" className="hover:text-rph-rail dark:hover:text-rph-rail-softer">
+            <span className="mx-2 text-rph-border-strong">·</span>
+            <a href="#" className="hover:text-rph-link">
               Contact
             </a>
           </footer>

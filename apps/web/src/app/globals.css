@@ -5,9 +5,26 @@
 /* next-themes sets class="dark" on <html>; Tailwind v4 defaults dark: to prefers-color-scheme — override so the toggle works. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/*
+  Theme tokens — use these for new UI (prefer .rph-* utilities or bg-rph-* / text-rph-* / border-rph-*).
+  Avoid ad-hoc dark:bg-zinc-* / dark:bg-slate-* on new screens.
+*/
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #0f172a;
+
+  --rph-page: #ffffff;
+  --rph-raised: #ffffff;
+  --rph-chrome: #f1f5f9;
+  --rph-elevated: #ffffff;
+  --rph-border: #e2e8f0;
+  --rph-border-strong: #cbd5e1;
+  --rph-fg: #0f172a;
+  --rph-fg-secondary: #334155;
+  --rph-fg-muted: #64748b;
+  --rph-link: #121a28;
+  --rph-link-hover: #1b2d44;
+
   /* Matches Option 7 sidebar; use for primaries + accents site-wide */
   --rph-rail: #121a28;
   --rph-rail-hover: #1b2d44;
@@ -16,8 +33,21 @@
 }
 
 .dark {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  /* Navy-tinted page (aligned with rail family, not pure black) */
+  --background: #0c1222;
+  --foreground: #e8eef7;
+
+  --rph-page: #0c1222;
+  --rph-raised: #151d2e;
+  --rph-chrome: #1a2438;
+  --rph-elevated: #243044;
+  --rph-border: #2a364c;
+  --rph-border-strong: #3d4d66;
+  --rph-fg: #f1f5f9;
+  --rph-fg-secondary: #cbd5e1;
+  --rph-fg-muted: #94a3b8;
+  --rph-link: #7dd3fc;
+  --rph-link-hover: #bae6fd;
 }
 
 @theme inline {
@@ -25,6 +55,19 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  --color-rph-page: var(--rph-page);
+  --color-rph-raised: var(--rph-raised);
+  --color-rph-chrome: var(--rph-chrome);
+  --color-rph-elevated: var(--rph-elevated);
+  --color-rph-border: var(--rph-border);
+  --color-rph-border-strong: var(--rph-border-strong);
+  --color-rph-fg: var(--rph-fg);
+  --color-rph-fg-secondary: var(--rph-fg-secondary);
+  --color-rph-fg-muted: var(--rph-fg-muted);
+  --color-rph-link: var(--rph-link);
+  --color-rph-link-hover: var(--rph-link-hover);
+
   --color-rph-rail: var(--rph-rail);
   --color-rph-rail-hover: var(--rph-rail-hover);
   --color-rph-rail-soft: var(--rph-rail-soft);
@@ -32,39 +75,81 @@
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--rph-page);
+  color: var(--rph-fg);
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
-/* Main app shell (Option 7) */
+/* ——— Surfaces ——— */
+.rph-chrome {
+  @apply border-rph-border bg-rph-chrome;
+}
+.rph-card {
+  @apply rounded-xl border border-rph-border bg-rph-raised;
+}
+.rph-elevated {
+  @apply border-rph-border bg-rph-elevated;
+}
+.rph-panel {
+  @apply rounded-xl border border-rph-border bg-rph-raised shadow-sm;
+}
+
+/* ——— Type ——— */
 .rph-h1 {
-  @apply text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100;
+  @apply text-2xl font-semibold tracking-tight text-rph-fg;
 }
 .rph-lead {
-  @apply text-base text-slate-700 dark:text-slate-300;
+  @apply text-base text-rph-fg-secondary;
 }
 .rph-strong {
-  @apply font-semibold text-slate-900 dark:text-slate-100;
+  @apply font-semibold text-rph-fg;
 }
 .rph-muted {
-  @apply text-slate-600 dark:text-slate-400;
+  @apply text-rph-fg-muted;
 }
 .rph-meta {
-  @apply text-xs text-slate-500 dark:text-slate-500;
+  @apply text-xs text-rph-fg-muted;
 }
 .rph-label-lg {
-  @apply block text-sm font-medium text-slate-800 dark:text-slate-200;
+  @apply block text-sm font-medium text-rph-fg-secondary;
+}
+
+/* ——— Controls ——— */
+.rph-input,
+.rph-input-auth {
+  @apply w-full rounded-lg border border-rph-border bg-rph-raised px-3 py-2.5 text-sm text-rph-fg outline-none focus:border-rph-rail focus:ring-2 focus:ring-rph-rail/20;
 }
 .rph-input-auth {
-  @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-rph-rail focus:ring-2 focus:ring-rph-rail/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-rph-rail-softer dark:focus:ring-rph-rail-soft/30;
+  @apply py-2;
+}
+.rph-btn-primary,
+.rph-btn-primary-wide {
+  @apply inline-flex h-11 items-center justify-center rounded-lg bg-rph-rail px-4 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer;
 }
 .rph-btn-primary-wide {
-  @apply mt-2 flex h-11 w-full items-center justify-center rounded-lg bg-rph-rail text-sm font-medium text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer;
+  @apply mt-2 w-full font-medium;
+}
+.rph-btn-ghost {
+  @apply inline-flex h-9 shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-raised px-3 text-sm font-medium text-rph-fg-secondary hover:bg-rph-chrome disabled:opacity-50;
 }
 .rph-link-inline {
-  @apply font-medium text-rph-rail underline decoration-rph-rail/40 hover:text-rph-rail-hover hover:decoration-rph-rail-hover dark:text-rph-rail-softer dark:hover:text-slate-300;
+  @apply font-medium text-rph-link underline decoration-rph-link/40 hover:text-rph-link-hover hover:decoration-rph-link-hover;
+}
+.rph-link {
+  @apply font-medium text-rph-link underline-offset-2 hover:underline hover:text-rph-link-hover;
+}
+.rph-pill {
+  @apply inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-full bg-rph-raised px-3 text-sm font-medium text-rph-fg-secondary shadow-sm ring-1 ring-rph-border hover:bg-rph-chrome;
+}
+.rph-pill-active {
+  @apply inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-full bg-rph-rail px-3 text-sm font-medium text-white shadow-sm dark:bg-rph-rail-soft;
 }
 .rph-alert-error {
   @apply rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200;
+}
+.rph-alert-warn {
+  @apply rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100;
+}
+.rph-alert-ok {
+  @apply rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-100;
 }

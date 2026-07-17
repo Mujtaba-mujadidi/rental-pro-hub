@@ -183,6 +183,7 @@ export function ContractTermsClient({ initialRows }: { initialRows: ContractTerm
     hasStoredDraft,
     isDirty,
     saveProgress,
+    saveProgressAndClose,
     requestClose,
     requestStartFresh,
     discardConfirmOpen,
@@ -507,6 +508,7 @@ export function ContractTermsClient({ initialRows }: { initialRows: ContractTerm
         hasStoredDraft={hasStoredDraft}
         isDirty={isDirty}
         onSaveProgress={saveProgress}
+      onSaveAndClose={saveProgressAndClose}
         onRequestClose={requestClose}
         onRequestStartFresh={requestStartFresh}
         discardConfirmOpen={discardConfirmOpen}
