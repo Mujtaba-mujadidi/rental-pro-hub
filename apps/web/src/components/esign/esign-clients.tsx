@@ -9,6 +9,7 @@ import {
   applyOwnerSignatureQuickAction,
   configureEsignSignatureModeAction,
   getOwnerSavedSignatureAction,
+  resendEsignEnvelopeAction,
   saveEsignFieldLayoutAction,
   sendEsignEnvelopeAction,
 } from "@/app/actions/esign";
@@ -92,6 +93,7 @@ export function EsignDesignerClient({
   const [draftSig, setDraftSig] = useState<string | null>(null);
   const [ownerFullName, setOwnerFullName] = useState(defaultOwnerName);
   const [modeError, setModeError] = useState<string | null>(null);
+  const [resendFeedback, setResendFeedback] = useState<{ ok: boolean; message: string } | null>(null);
   const [pending, startTransition] = useTransition();
   const [pdfCacheKey, setPdfCacheKey] = useState(0);
 
@@ -211,20 +213,82 @@ export function EsignDesignerClient({
   }
 
   if (status === "sent" || status === "viewed") {
+    function resendToRecipient() {
+      setResendFeedback(null);
+      startTransition(() => {
+        void (async () => {
+          const res = await resendEsignEnvelopeAction(envelopeId);
+          if (!res.ok) {
+            setResendFeedback({ ok: false, message: res.error });
+            return;
+          }
+          setResendFeedback({
+            ok: true,
+            message: "Signing email resent with a new link and access code.",
+          });
+        })();
+      });
+    }
+
     return (
       <div className="-m-4 flex min-h-0 flex-col md:-m-6">
-        <div className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-950 md:px-6">
-          <StepBackButton href="/super-admin/companies" label="Companies" />
-          <div className="min-w-0">
-            <h1 className="text-lg font-semibold">Awaiting recipient signature</h1>
-            <p className="truncate text-sm text-slate-500">{title} · Sent to recipient</p>
+        <div className="flex shrink-0 flex-wrap items-end justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-950 md:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <StepBackButton href="/super-admin/companies" label="Companies" />
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold">Awaiting recipient signature</h1>
+              <p className="truncate text-sm text-slate-500">
+                {title} · {status === "viewed" ? "Recipient opened the link" : "Sent to recipient"}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href={currentPdfUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+            >
+              Open in new tab
+            </a>
+            <a
+              href={currentPdfUrl}
+              download="contract.pdf"
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+            >
+              Download PDF
+            </a>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={resendToRecipient}
+              className="rounded-lg bg-rph-rail px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {pending ? "Sending…" : "Resend for signature"}
+            </button>
           </div>
         </div>
+        {resendFeedback ? (
+          <p
+            className={`mx-4 mt-3 rounded-lg border px-3 py-2 text-sm md:mx-6 ${
+              resendFeedback.ok
+                ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-100"
+                : "border-red-200 bg-red-50 text-red-800 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-100"
+            }`}
+          >
+            {resendFeedback.message}
+          </p>
+        ) : (
+          <p className="mx-4 mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-900/40 dark:bg-sky-950/40 dark:text-sky-100 md:mx-6">
+            The recipient can sign via the email link. If they did not receive it, use{" "}
+            <strong>Resend for signature</strong> — that sends a new link and access code (the old one stops working).
+          </p>
+        )}
         <div className="relative min-h-0 flex-1 bg-slate-200 p-3 dark:bg-slate-800 md:p-4">
           <iframe
             title="Contract PDF"
             src={currentPdfUrl}
-            className="h-[calc(100dvh-9rem)] min-h-[28rem] w-full rounded-lg border border-slate-300 bg-white shadow dark:border-slate-600"
+            className="h-[calc(100dvh-11rem)] min-h-[28rem] w-full rounded-lg border border-slate-300 bg-white shadow dark:border-slate-600"
           />
         </div>
       </div>

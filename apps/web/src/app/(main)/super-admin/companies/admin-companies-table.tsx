@@ -19,7 +19,7 @@ import {
   startCompanyOffboardingAction,
 } from "@/app/actions/admin-companies";
 import { prepareCompanyContractForEsignAction } from "@/app/actions/contract-signature";
-import { getCompanySignedEsignEnvelopeAction } from "@/app/actions/esign";
+import { getCompanyPendingEsignEnvelopeAction, getCompanySignedEsignEnvelopeAction, resendEsignEnvelopeAction } from "@/app/actions/esign";
 import { getAdminCompaniesPageAction, getAdminCompanyDetailAction, getPrimaryContactSignedInAction } from "@/app/actions/admin-companies-list";
 import { AdminCompanyDetailDialog } from "@/app/(main)/super-admin/companies/admin-company-detail-dialog";
 import type { AdminCompanyDetailPayload } from "@/lib/admin/company-list-shared";
@@ -758,6 +758,77 @@ export function AdminCompaniesTable({
                     >
                       {eSignBusy ? "Preparing…" : "Prepare contract for e-sign"}
                     </DropdownMenu.Item>
+                  ) : null}
+                  {r.agreementContractStatus === "sent_for_signature" && lifecycleActive ? (
+                    <>
+                      <DropdownMenu.Item
+                        className={rowActionItemClass}
+                        disabled={busy}
+                        onSelect={() => {
+                          setInviteFeedback(null);
+                          setESignBusyId(r.id);
+                          setESignOverlay({
+                            title: "Opening contract",
+                            detail: "Loading the contract sent for signature…",
+                          });
+                          void (async () => {
+                            const res = await getCompanyPendingEsignEnvelopeAction(r.id);
+                            if (!res.ok) {
+                              setESignBusyId(null);
+                              setESignOverlay(null);
+                              setInviteFeedback(res.error);
+                              return;
+                            }
+                            router.push(`/super-admin/esign/${res.envelopeId}`);
+                            window.setTimeout(() => {
+                              setESignBusyId(null);
+                              setESignOverlay(null);
+                            }, 800);
+                          })();
+                        }}
+                      >
+                        {eSignBusy ? "Opening…" : "View contract"}
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item
+                        className={rowActionItemClass}
+                        disabled={busy}
+                        onSelect={() => {
+                          setInviteFeedback(null);
+                          setActionOverlay({
+                            phase: "pending",
+                            title: "Resending for signature…",
+                            detail: "Sending a new signing link and access code to the recipient.",
+                          });
+                          void (async () => {
+                            const found = await getCompanyPendingEsignEnvelopeAction(r.id);
+                            if (!found.ok) {
+                              finishActionOverlay({
+                                phase: "error",
+                                title: "Could not resend",
+                                detail: found.error,
+                              });
+                              return;
+                            }
+                            const res = await resendEsignEnvelopeAction(found.envelopeId);
+                            if (!res.ok) {
+                              finishActionOverlay({
+                                phase: "error",
+                                title: "Could not resend",
+                                detail: res.error,
+                              });
+                              return;
+                            }
+                            finishActionOverlay({
+                              phase: "success",
+                              title: "Signing email resent",
+                              detail: `A new link and access code were sent for ${r.name || "this company"}.`,
+                            });
+                          })();
+                        }}
+                      >
+                        Resend for signature
+                      </DropdownMenu.Item>
+                    </>
                   ) : null}
                   {r.agreementContractStatus === "active" ? (
                     <DropdownMenu.Item

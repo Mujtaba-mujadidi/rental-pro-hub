@@ -307,51 +307,15 @@ export async function sendEnvelope(
     return { ok: false, error: rErr?.message ?? "Exactly one recipient is required." };
   }
 
-  const site = getPublicSiteUrl();
   const expires = new Date();
   expires.setDate(expires.getDate() + 14);
 
-  for (const rec of recipients) {
-    const token = generateAccessToken();
-    const otp = generateOtp();
-    const otpExpires = new Date();
-    otpExpires.setHours(otpExpires.getHours() + 24);
-
-    const { error: upRec } = await admin
-      .from("esign_recipients")
-      .update({
-        access_token_hash: hashSecret(token),
-        otp_hash: hashSecret(otp),
-        otp_expires_at: otpExpires.toISOString(),
-        otp_attempts: 0,
-        verified_at: null,
-        signed_at: null,
-      })
-      .eq("id", rec.id);
-    if (upRec) return { ok: false, error: upRec.message };
-
-    const link = `${site}/sign/${token}`;
-    const mail = await sendEsignMail({
-      to: rec.email,
-      subject: `Sign: ${env.title}`,
-      text: [
-        `You have been asked to sign: ${env.title}`,
-        "",
-        `Open this link: ${link}`,
-        `Your access code (OTP): ${otp}`,
-        "",
-        "The code expires in 24 hours. Do not share this email.",
-        "",
-        "We collect your email, signature image, IP address, and device information for contract records under UK GDPR (performance of a contract). See the privacy notice on the signing page.",
-      ].join("\n"),
-      html: `<p>You have been asked to sign: <strong>${escapeHtml(env.title)}</strong></p>
-<p><a href="${link}">Open signing page</a></p>
-<p>Your access code (OTP): <strong>${otp}</strong></p>
-<p>The code expires in 24 hours.</p>
-<p style="font-size:12px;color:#555">We collect your email, signature, IP address, and device information for contract records under UK GDPR. A privacy notice is shown before you sign.</p>`,
-    });
-    if (!mail.ok) return { ok: false, error: mail.error };
-  }
+  const notified = await issueSigningCredentialsAndNotify(
+    admin,
+    env.title as string,
+    recipients.map((r) => ({ id: r.id as string, email: r.email as string })),
+  );
+  if (!notified.ok) return notified;
 
   const { error: upEnv } = await admin
     .from("esign_envelopes")
@@ -375,6 +339,115 @@ export async function sendEnvelope(
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/** Issue a fresh signing link + OTP and email each recipient. */
+async function issueSigningCredentialsAndNotify(
+  admin: Admin,
+  title: string,
+  recipients: { id: string; email: string }[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const site = getPublicSiteUrl();
+
+  for (const rec of recipients) {
+    const token = generateAccessToken();
+    const otp = generateOtp();
+    const otpExpires = new Date();
+    otpExpires.setHours(otpExpires.getHours() + 24);
+
+    const { error: upRec } = await admin
+      .from("esign_recipients")
+      .update({
+        access_token_hash: hashSecret(token),
+        otp_hash: hashSecret(otp),
+        otp_expires_at: otpExpires.toISOString(),
+        otp_attempts: 0,
+        verified_at: null,
+        signed_at: null,
+      })
+      .eq("id", rec.id);
+    if (upRec) return { ok: false, error: upRec.message };
+
+    const link = `${site}/sign/${token}`;
+    const mail = await sendEsignMail({
+      to: rec.email,
+      subject: `Sign: ${title}`,
+      text: [
+        `You have been asked to sign: ${title}`,
+        "",
+        `Open this link: ${link}`,
+        `Your access code (OTP): ${otp}`,
+        "",
+        "The code expires in 24 hours. Do not share this email.",
+        "",
+        "We collect your email, signature image, IP address, and device information for contract records under UK GDPR (performance of a contract). See the privacy notice on the signing page.",
+      ].join("\n"),
+      html: `<p>You have been asked to sign: <strong>${escapeHtml(title)}</strong></p>
+<p><a href="${link}">Open signing page</a></p>
+<p>Your access code (OTP): <strong>${otp}</strong></p>
+<p>The code expires in 24 hours.</p>
+<p style="font-size:12px;color:#555">We collect your email, signature, IP address, and device information for contract records under UK GDPR. A privacy notice is shown before you sign.</p>`,
+    });
+    if (!mail.ok) return { ok: false, error: mail.error };
+  }
+
+  return { ok: true };
+}
+
+/** Resend signing email with a new link and OTP while awaiting the recipient. */
+export async function resendEnvelopeForSignature(
+  admin: Admin,
+  envelopeId: string,
+  opts?: { ip?: string | null; userAgent?: string | null; actor?: string | null },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data: env, error } = await admin
+    .from("esign_envelopes")
+    .select("id, status, title")
+    .eq("id", envelopeId)
+    .maybeSingle();
+  if (error || !env?.id) return { ok: false, error: error?.message ?? "Envelope not found." };
+  if (env.status !== "sent" && env.status !== "viewed") {
+    return { ok: false, error: "Only envelopes waiting on the recipient can be resent." };
+  }
+
+  const { data: recipients, error: rErr } = await admin
+    .from("esign_recipients")
+    .select("id, email, signed_at")
+    .eq("envelope_id", envelopeId);
+  if (rErr || recipients?.length !== 1) {
+    return { ok: false, error: rErr?.message ?? "Exactly one recipient is required." };
+  }
+  if (recipients[0]?.signed_at) {
+    return { ok: false, error: "Recipient has already signed." };
+  }
+
+  const notified = await issueSigningCredentialsAndNotify(
+    admin,
+    env.title as string,
+    recipients.map((r) => ({ id: r.id as string, email: r.email as string })),
+  );
+  if (!notified.ok) return notified;
+
+  const expires = new Date();
+  expires.setDate(expires.getDate() + 14);
+
+  const { error: upEnv } = await admin
+    .from("esign_envelopes")
+    .update({
+      status: "sent",
+      sent_at: new Date().toISOString(),
+      expires_at: expires.toISOString(),
+    })
+    .eq("id", envelopeId);
+  if (upEnv) return { ok: false, error: upEnv.message };
+
+  await appendEsignAudit(admin, envelopeId, "envelope_resent", {
+    actor: opts?.actor ?? null,
+    ip: opts?.ip,
+    userAgent: opts?.userAgent,
+  });
+
+  return { ok: true };
 }
 
 export async function findRecipientByAccessToken(admin: Admin, token: string) {

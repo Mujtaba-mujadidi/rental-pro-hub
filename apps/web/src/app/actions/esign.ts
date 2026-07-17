@@ -13,6 +13,7 @@ import {
   completeOwnerSigning,
   completeSigning,
   findRecipientByAccessToken,
+  resendEnvelopeForSignature,
   saveEnvelopeFieldLayout,
   sendEnvelope,
   verifyRecipientOtp,
@@ -106,6 +107,25 @@ export async function sendEsignEnvelopeAction(
       .update({ status: "sent" })
       .eq("provider_submission_id", envelopeId);
   }
+
+  revalidatePath("/super-admin/companies");
+  revalidatePath(`/super-admin/esign/${envelopeId}`);
+  return { ok: true };
+}
+
+export async function resendEsignEnvelopeAction(
+  envelopeId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { user } = await requireSuperAdmin();
+  const admin = createSupabaseAdminClient();
+  const meta = await clientMeta();
+
+  const res = await resendEnvelopeForSignature(admin, envelopeId, {
+    actor: user.id,
+    ip: meta.ip,
+    userAgent: meta.userAgent,
+  });
+  if (!res.ok) return res;
 
   revalidatePath("/super-admin/companies");
   revalidatePath(`/super-admin/esign/${envelopeId}`);
@@ -405,6 +425,62 @@ export async function getCompanySignedEsignEnvelopeAction(
 
   if (cErr || !byContext?.id) {
     return { ok: false, error: cErr?.message ?? "No signed contract PDF found for this company." };
+  }
+  return { ok: true, envelopeId: byContext.id as string };
+}
+
+/** Open envelope awaiting recipient signature (sent / viewed). */
+export async function getCompanyPendingEsignEnvelopeAction(
+  companyId: string,
+): Promise<{ ok: true; envelopeId: string } | { ok: false; error: string }> {
+  await requireSuperAdmin();
+  const id = companyId?.trim();
+  if (!id) return { ok: false, error: "Missing company." };
+
+  let admin: ReturnType<typeof createSupabaseAdminClient>;
+  try {
+    admin = createSupabaseAdminClient();
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Server configuration error." };
+  }
+
+  const pendingStatuses = ["sent", "viewed"] as const;
+
+  const { data: byParent, error: pErr } = await admin
+    .from("esign_envelopes")
+    .select("id")
+    .eq("parent_company_id", id)
+    .eq("context_type", "platform_company_contract")
+    .in("status", pendingStatuses)
+    .order("sent_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!pErr && byParent?.id) {
+    return { ok: true, envelopeId: byParent.id as string };
+  }
+
+  const { data: contract } = await admin
+    .from("company_contracts")
+    .select("id")
+    .eq("parent_company_id", id)
+    .maybeSingle();
+  if (!contract?.id) {
+    return { ok: false, error: "No contract awaiting signature for this company." };
+  }
+
+  const { data: byContext, error: cErr } = await admin
+    .from("esign_envelopes")
+    .select("id")
+    .eq("context_type", "platform_company_contract")
+    .eq("context_id", contract.id)
+    .in("status", pendingStatuses)
+    .order("sent_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (cErr || !byContext?.id) {
+    return { ok: false, error: cErr?.message ?? "No contract awaiting signature for this company." };
   }
   return { ok: true, envelopeId: byContext.id as string };
 }
