@@ -26,6 +26,9 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
     if (pathname === "/rental/subcompany" || pathname.startsWith("/rental/subcompany/")) {
       return [{ label: "Home", href: "/rental" }, { label: "Subcompany", href: "/rental/subcompany" }];
     }
+    if (pathname === "/rental/vehicles" || pathname.startsWith("/rental/vehicles/")) {
+      return [{ label: "Home", href: "/rental" }, { label: "Vehicles", href: "/rental/vehicles" }];
+    }
     if (pathname === "/rental/onboarding" || pathname.startsWith("/rental/onboarding/")) {
       return [{ label: "Home", href: "/rental" }, { label: "Onboarding", href: "/rental/onboarding" }];
     }
@@ -292,6 +295,13 @@ export function Option7Shell({
           onNavigate={closeMobileNav}
         >
           Subcompany
+        </NavLink>
+        <NavLink
+          href="/rental/vehicles"
+          active={pathname === "/rental/vehicles" || pathname.startsWith("/rental/vehicles/")}
+          onNavigate={closeMobileNav}
+        >
+          Vehicles
         </NavLink>
         <NavLink
           href="/rental/staff"

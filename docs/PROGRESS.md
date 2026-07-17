@@ -48,10 +48,11 @@
 
 ### Product next (pick one track)
 
-1. **Rental company agreements** — reuse e-sign module for parent↔subcompany or customer rental contracts  
-2. **Driver document signing** — same envelope model, new `context_type` adapter  
-3. **Billing after active contract** — invoices/payments only when agreement active (tighten UX)  
-4. **Amendments / renewals** — re-issue e-sign when commercial terms change  
+1. **Fleet / vehicles** — in progress on `feature/vehicle-fleet-module` (CRUD, transfer, docs)
+2. **Driver hire / assignment** — after vehicles
+3. **Hire agreements via e-sign** — reuse envelope module
+4. **Billing after active contract** — invoices/payments only when agreement active (tighten UX)
+5. **Amendments / renewals** — re-issue e-sign when commercial terms change
 
 ---
 
@@ -59,6 +60,7 @@
 
 | Date | What happened |
 |------|----------------|
+| 2026-07-17 | Branch `feature/vehicle-fleet-module`: vehicles schema/RLS, rental Vehicles UI (CRUD, transfer, docs) |
 | 2026-07-16 | PDF layout (terms/execution page breaks, field placement); owner name confirm; send/reset loaders; back navigation; recipient-only hides owner fields |
 | 2026-07-15 | Native e-sign module shipped; DocuSeal deleted from product path |
 | 2026-05-19 | Earlier DocuSeal local setup (superseded) |

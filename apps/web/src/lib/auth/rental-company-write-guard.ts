@@ -15,7 +15,7 @@ export function isRentalCompanyWriteFrozenPhase(phase: string | null | undefined
  * (immediately after `requireRentalCompanyArea()`).
  *
  * Currently wired in: rental-profile, rental-onboarding, rental-company-contract (request change),
- * rental-billing, rental-staff, rental-subcompanies. Add the same two lines to any new
+ * rental-billing, rental-staff, rental-subcompanies, rental-vehicles. Add the same two lines to any new
  * rental `use server` action that mutates data.
  */
 export async function assertRentalCompanyWritable(

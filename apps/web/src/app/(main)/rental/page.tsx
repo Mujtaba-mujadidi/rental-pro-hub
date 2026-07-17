@@ -61,7 +61,11 @@ export default async function RentalCompanyHomePage() {
       </p>
       <RentalDisplayNameSetting initialName={profile.display_name ?? ""} />
       <p className="rph-muted text-sm max-w-2xl">
-        Your account is active. Rental company onboarding (branches, fleet, policies) can be added here next.
+        Your account is active. Manage fleet under{" "}
+        <a href="/rental/vehicles" className="font-medium text-rph-rail underline-offset-2 hover:underline dark:text-rph-rail-soft">
+          Vehicles
+        </a>
+        .
       </p>
       {company ? (
         <RentalContractDetailsCard
