@@ -25,7 +25,7 @@ import {
   type VehicleStatus,
   type VehicleTransferRow,
 } from "@/lib/fleet/vehicles";
-import { VehicleDocDownloadButton, VehicleDocViewButton } from "./vehicle-doc-actions";
+import { VehicleDocActionsMenu } from "./vehicle-doc-actions";
 
 const btnPrimary = "rph-btn-primary";
 const btnContinue =
@@ -35,8 +35,6 @@ const btnGhostTall =
   "flex h-11 shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-raised px-4 text-sm font-medium text-rph-fg-secondary hover:bg-rph-chrome disabled:opacity-50";
 const btnDangerTall =
   "flex h-11 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300";
-const btnDanger =
-  "inline-flex h-9 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300";
 
 type SubOpt = { id: string; name: string | null; is_primary: boolean };
 
@@ -465,22 +463,32 @@ export function VehicleDetailsView({
                   <p className="font-semibold text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[docType]}</p>
                   <p className="rph-meta">{onFile ? (onFile.file_name ?? "PDF on file") : "Missing — upload PDF or images"}</p>
                 </div>
-                <span
-                  className={
-                    onFile
-                      ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
-                      : "rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100"
-                  }
-                >
-                  {onFile ? "On file" : "Missing"}
-                </span>
-              </div>
-              {onFile ? (
-                <div className="flex flex-wrap gap-2">
-                  <VehicleDocViewButton doc={onFile} onError={setError} />
-                  <VehicleDocDownloadButton doc={onFile} onError={setError} />
+                <div className="flex shrink-0 items-center gap-2">
+                  <span
+                    className={
+                      onFile
+                        ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+                        : "rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100"
+                    }
+                  >
+                    {onFile ? "On file" : "Missing"}
+                  </span>
+                  {onFile ? (
+                    <VehicleDocActionsMenu
+                      doc={onFile}
+                      canRemove={canManage}
+                      removeDisabled={busy}
+                      onRemove={() =>
+                        setRemoveDocConfirm({
+                          id: onFile.id,
+                          label: VEHICLE_DOC_TYPE_LABELS[docType],
+                        })
+                      }
+                      onError={setError}
+                    />
+                  ) : null}
                 </div>
-              ) : null}
+              </div>
               {canManage ? (
                 <>
                   <p className="rph-meta">
@@ -531,21 +539,6 @@ export function VehicleDetailsView({
                         </button>
                       </>
                     ) : null}
-                    {onFile ? (
-                      <button
-                        type="button"
-                        className={btnDanger}
-                        disabled={busy}
-                        onClick={() =>
-                          setRemoveDocConfirm({
-                            id: onFile.id,
-                            label: VEHICLE_DOC_TYPE_LABELS[docType],
-                          })
-                        }
-                      >
-                        Remove
-                      </button>
-                    ) : null}
                   </div>
                   {ready ? (
                     <ul className="rph-meta">
@@ -579,25 +572,18 @@ export function VehicleDetailsView({
                       <p className="font-medium text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[d.doc_type]}</p>
                       <p className="rph-meta">{d.file_name ?? d.file_path}</p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      <VehicleDocViewButton doc={d} onError={setError} />
-                      <VehicleDocDownloadButton doc={d} onError={setError} />
-                      {canManage ? (
-                        <button
-                          type="button"
-                          className={btnDanger}
-                          disabled={busy}
-                          onClick={() =>
-                            setRemoveDocConfirm({
-                              id: d.id,
-                              label: VEHICLE_DOC_TYPE_LABELS[d.doc_type],
-                            })
-                          }
-                        >
-                          Remove
-                        </button>
-                      ) : null}
-                    </div>
+                    <VehicleDocActionsMenu
+                      doc={d}
+                      canRemove={canManage}
+                      removeDisabled={busy}
+                      onRemove={() =>
+                        setRemoveDocConfirm({
+                          id: d.id,
+                          label: VEHICLE_DOC_TYPE_LABELS[d.doc_type],
+                        })
+                      }
+                      onError={setError}
+                    />
                   </li>
                 ))}
             </ul>
