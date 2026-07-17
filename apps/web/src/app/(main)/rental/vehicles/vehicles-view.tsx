@@ -14,6 +14,7 @@ import {
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
+import { useCanScanOrCaptureDocument } from "@/hooks/use-can-scan-or-capture-document";
 import {
   VEHICLE_DOC_TYPE_LABELS,
   VEHICLE_DOC_TYPES,
@@ -335,6 +336,7 @@ export function VehiclesView({
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const canScanOrCapture = useCanScanOrCaptureDocument();
 
   const primarySub = subcompanies.find((s) => s.is_primary)?.id ?? subcompanies[0]?.id ?? "";
   const baseline = useMemo(() => emptyForm(primarySub), [primarySub]);
@@ -698,32 +700,57 @@ export function VehiclesView({
             <section className="space-y-3 border-t border-slate-200 pt-6 dark:border-slate-700">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Documents</h3>
               {canManage ? (
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                  <Field label="Type">
-                    <select className={inputClass()} value={docType} onChange={(e) => setDocType(e.target.value as typeof docType)}>
-                      {VEHICLE_DOC_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {VEHICLE_DOC_TYPE_LABELS[t]}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Expiry (optional)">
-                    <input type="date" className={inputClass()} value={docExpiry} onChange={(e) => setDocExpiry(e.target.value)} />
-                  </Field>
-                  <label className={btnGhost + " cursor-pointer"}>
-                    Upload
-                    <input
-                      type="file"
-                      className="hidden"
-                      accept="application/pdf,image/jpeg,image/png,image/webp"
-                      disabled={pending}
-                      onChange={(e) => {
-                        submitDoc(e.target.files);
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
+                <div className="space-y-2">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                    <Field label="Type">
+                      <select className={inputClass()} value={docType} onChange={(e) => setDocType(e.target.value as typeof docType)}>
+                        {VEHICLE_DOC_TYPES.map((t) => (
+                          <option key={t} value={t}>
+                            {VEHICLE_DOC_TYPE_LABELS[t]}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Expiry (optional)">
+                      <input type="date" className={inputClass()} value={docExpiry} onChange={(e) => setDocExpiry(e.target.value)} />
+                    </Field>
+                    <div className="flex flex-wrap gap-2">
+                      <label className={btnGhost + " cursor-pointer"}>
+                        Choose file
+                        <input
+                          type="file"
+                          className="hidden"
+                          accept="application/pdf,image/jpeg,image/png,image/webp"
+                          disabled={pending}
+                          onChange={(e) => {
+                            submitDoc(e.target.files);
+                            e.target.value = "";
+                          }}
+                        />
+                      </label>
+                      {canScanOrCapture ? (
+                        <label className={btnPrimary + " cursor-pointer"}>
+                          Scan or take photo
+                          <input
+                            type="file"
+                            className="hidden"
+                            accept="image/*"
+                            capture="environment"
+                            disabled={pending}
+                            onChange={(e) => {
+                              submitDoc(e.target.files);
+                              e.target.value = "";
+                            }}
+                          />
+                        </label>
+                      ) : null}
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {canScanOrCapture
+                      ? "On supported phones, Scan or take photo opens the camera. On iPhone, Choose file → Browse can also offer Scan Documents."
+                      : "PDF or image up to 10 MB. On a phone with a camera, you’ll also see a scan / take photo option."}
+                  </p>
                 </div>
               ) : null}
               {!docs.length ? (
