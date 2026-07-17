@@ -117,6 +117,8 @@ export type VehicleDraftFields = {
   colour: string;
   first_reg_date: string;
   first_reg_uk_date: string;
+  /** UI-only: copy first_reg_date into first_reg_uk_date (not persisted to DB). */
+  same_uk_reg_as_first: boolean;
   fuel_type: string;
   seats: string;
   cc: string;
@@ -146,6 +148,7 @@ function emptyFields(defaultSubId: string): VehicleDraftFields {
     colour: "",
     first_reg_date: "",
     first_reg_uk_date: "",
+    same_uk_reg_as_first: false,
     fuel_type: "",
     seats: "",
     cc: "",
@@ -165,8 +168,8 @@ function fieldsToFormData(fields: VehicleDraftFields): FormData {
   const fd = new FormData();
   fd.set("subcompany_id", fields.subcompany_id);
   for (const [k, v] of Object.entries(fields)) {
-    if (k === "subcompany_id") continue;
-    fd.set(k, v);
+    if (k === "subcompany_id" || k === "same_uk_reg_as_first") continue;
+    fd.set(k, String(v));
   }
   return fd;
 }
@@ -427,16 +430,47 @@ export function AddVehicleModal({
       {step === 1 ? (
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="First registration">
-            <input type="date" className={inputClass()} value={fields.first_reg_date} onChange={(e) => setField("first_reg_date", e.target.value)} />
-          </Field>
-          <Field label="First UK registration">
             <input
               type="date"
               className={inputClass()}
-              value={fields.first_reg_uk_date}
-              onChange={(e) => setField("first_reg_uk_date", e.target.value)}
+              value={fields.first_reg_date}
+              onChange={(e) => {
+                const value = e.target.value;
+                setFields((p) => ({
+                  ...p,
+                  first_reg_date: value,
+                  first_reg_uk_date: p.same_uk_reg_as_first ? value : p.first_reg_uk_date,
+                }));
+              }}
             />
           </Field>
+          <div className="space-y-2">
+            <Field label="First UK registration">
+              <input
+                type="date"
+                className={inputClass()}
+                value={fields.first_reg_uk_date}
+                disabled={fields.same_uk_reg_as_first}
+                onChange={(e) => setField("first_reg_uk_date", e.target.value)}
+              />
+            </Field>
+            <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-zinc-300 text-rph-rail focus:ring-rph-rail/30"
+                checked={fields.same_uk_reg_as_first}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setFields((p) => ({
+                    ...p,
+                    same_uk_reg_as_first: checked,
+                    first_reg_uk_date: checked ? p.first_reg_date : p.first_reg_uk_date,
+                  }));
+                }}
+              />
+              Same as first registration
+            </label>
+          </div>
           <Field label="Fuel type">
             <input
               className={inputClass()}

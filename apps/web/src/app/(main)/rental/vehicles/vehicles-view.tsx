@@ -54,6 +54,7 @@ type FormSnapshot = {
   colour: string;
   first_reg_date: string;
   first_reg_uk_date: string;
+  same_uk_reg_as_first: boolean;
   fuel_type: string;
   seats: string;
   cc: string;
@@ -69,14 +70,17 @@ type FormSnapshot = {
 };
 
 function fromVehicle(v: VehicleRow): FormSnapshot {
+  const first = v.first_reg_date ?? "";
+  const uk = v.first_reg_uk_date ?? "";
   return {
     subcompany_id: v.subcompany_id,
     vrm: v.vrm,
     make: v.make,
     model: v.model,
     colour: v.colour ?? "",
-    first_reg_date: v.first_reg_date ?? "",
-    first_reg_uk_date: v.first_reg_uk_date ?? "",
+    first_reg_date: first,
+    first_reg_uk_date: uk,
+    same_uk_reg_as_first: Boolean(first && uk && first === uk),
     fuel_type: v.fuel_type ?? "",
     seats: v.seats != null ? String(v.seats) : "",
     cc: v.cc != null ? String(v.cc) : "",
@@ -95,8 +99,8 @@ function fromVehicle(v: VehicleRow): FormSnapshot {
 function snapshotToFormData(s: FormSnapshot): FormData {
   const fd = new FormData();
   for (const [k, v] of Object.entries(s)) {
-    if (k === "subcompany_id") continue;
-    fd.set(k, v);
+    if (k === "subcompany_id" || k === "same_uk_reg_as_first") continue;
+    fd.set(k, String(v));
   }
   return fd;
 }
@@ -623,10 +627,60 @@ export function VehiclesView({
 
           {manageStep === 1 ? (
             <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="First registration">
+                <input
+                  type="date"
+                  className={inputClass()}
+                  value={editForm.first_reg_date}
+                  disabled={!canManage}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setEditForm((p) =>
+                      p
+                        ? {
+                            ...p,
+                            first_reg_date: value,
+                            first_reg_uk_date: p.same_uk_reg_as_first ? value : p.first_reg_uk_date,
+                          }
+                        : p,
+                    );
+                  }}
+                />
+              </Field>
+              <div className="space-y-2">
+                <Field label="First UK registration">
+                  <input
+                    type="date"
+                    className={inputClass()}
+                    value={editForm.first_reg_uk_date}
+                    disabled={!canManage || editForm.same_uk_reg_as_first}
+                    onChange={(e) => setEditForm((p) => (p ? { ...p, first_reg_uk_date: e.target.value } : p))}
+                  />
+                </Field>
+                <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-zinc-300 text-rph-rail focus:ring-rph-rail/30"
+                    checked={editForm.same_uk_reg_as_first}
+                    disabled={!canManage}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setEditForm((p) =>
+                        p
+                          ? {
+                              ...p,
+                              same_uk_reg_as_first: checked,
+                              first_reg_uk_date: checked ? p.first_reg_date : p.first_reg_uk_date,
+                            }
+                          : p,
+                      );
+                    }}
+                  />
+                  Same as first registration
+                </label>
+              </div>
               {(
                 [
-                  ["first_reg_date", "First registration", "date"],
-                  ["first_reg_uk_date", "First UK registration", "date"],
                   ["fuel_type", "Fuel type", "text"],
                   ["seats", "Seats", "number"],
                   ["cc", "Engine CC", "number"],
