@@ -470,10 +470,10 @@ export function Option7Shell({
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col">
-          <main className="min-h-0 flex-1 overflow-auto p-4 md:p-6">
+          <main className="min-h-0 w-full min-w-0 flex-1 overflow-auto p-3">
             {variant === "driver" && driverLicenceBanner && driverLicenceBanner.bullets.length > 0 ? (
               <div
-                className="mx-auto mb-4 max-w-7xl rounded-xl border border-amber-300/90 bg-amber-50 px-4 py-3 dark:border-amber-800/80 dark:bg-amber-950/50 md:px-5"
+                className="mb-3 w-full rounded-xl border border-amber-300/90 bg-amber-50 px-4 py-3 dark:border-amber-800/80 dark:bg-amber-950/50"
                 role="status"
               >
                 <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">
@@ -492,7 +492,7 @@ export function Option7Shell({
                 </Link>
               </div>
             ) : null}
-            <div className="mx-auto max-w-7xl rounded-xl border border-slate-200/90 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:p-8">
+            <div className="w-full min-w-0 max-w-none rounded-xl border border-slate-200/90 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-4">
               {children}
             </div>
           </main>
