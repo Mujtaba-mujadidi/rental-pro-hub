@@ -1,5 +1,4 @@
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
-import { redirectIfRentalOnboardingIncomplete } from "@/lib/auth/rental-onboarding";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { StaffDirectory } from "./staff-directory";
@@ -7,7 +6,6 @@ import { StaffInviteTrigger } from "./invite-staff-modal";
 
 export default async function RentalStaffPage() {
   const { profile } = await requireRentalCompanyArea();
-  await redirectIfRentalOnboardingIncomplete(profile.company_id);
 
   const companyId = profile.company_id?.trim();
   if (!companyId) {
@@ -40,17 +38,15 @@ export default async function RentalStaffPage() {
         for (const p of profs ?? []) {
           nameByUser.set(p.id, p.display_name);
         }
-        const emailPairs = await Promise.all(
-          userIds.map((uid) =>
-            admin.auth.admin.getUserById(uid).then(({ data, error }) => {
-              if (error || !data?.user) return [uid, null] as const;
-              return [uid, data.user.email ?? null] as const;
-            }),
-          ),
+        // Only fetch the members on this page (parallel) — never scan all Auth users.
+        await Promise.all(
+          userIds.map(async (uid) => {
+            const { data, error } = await admin.auth.admin.getUserById(uid);
+            if (!error && data.user) {
+              emailByUser.set(uid, data.user.email ?? null);
+            }
+          }),
         );
-        for (const [uid, em] of emailPairs) {
-          emailByUser.set(uid, em);
-        }
       }
       if (mids.length > 0) {
         const { data: perms } = await admin

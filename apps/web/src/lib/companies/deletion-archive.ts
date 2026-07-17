@@ -171,9 +171,23 @@ export async function insertCompanyDeletionArchive(
   return { ok: true };
 }
 
-/** User IDs tied to this tenant: memberships + profiles.company_id (rental). */
+/**
+ * Auth user IDs tied to this tenant that must be removed on permanent purge:
+ * memberships, profiles.company_id (any role), primary_contact_user_id,
+ * and Auth user matching primary_contact_email (so mis-roled “driver” contacts are not left behind).
+ */
 export async function collectTenantAuthUserIds(admin: Admin, companyId: string): Promise<string[]> {
   const ids = new Set<string>();
+
+  const { data: company, error: cErr } = await admin
+    .from("companies")
+    .select("primary_contact_user_id, primary_contact_email")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (cErr) console.warn("[deleteCompany] company contact lookup", cErr.message);
+
+  const primaryUid = (company?.primary_contact_user_id as string | null | undefined)?.trim();
+  if (primaryUid) ids.add(primaryUid);
 
   const { data: mems, error: mErr } = await admin
     .from("user_company_memberships")
@@ -185,15 +199,31 @@ export async function collectTenantAuthUserIds(admin: Admin, companyId: string):
     if (uid) ids.add(uid);
   }
 
-  const { data: profs, error: pErr } = await admin
-    .from("profiles")
-    .select("id")
-    .eq("company_id", companyId)
-    .eq("role", "rental_company");
+  // Any profile pointing at this company (including accidental driver / broken promote).
+  const { data: profs, error: pErr } = await admin.from("profiles").select("id").eq("company_id", companyId);
   if (pErr) console.warn("[deleteCompany] profiles by company_id", pErr.message);
   for (const p of profs ?? []) {
     const id = p.id as string | undefined;
     if (id) ids.add(id);
+  }
+
+  const email = (company?.primary_contact_email as string | null | undefined)?.trim();
+  if (email) {
+    const { findAuthUserIdByEmail } = await import("@/lib/auth/ensure-rental-membership");
+    const byEmail = await findAuthUserIdByEmail(admin, email);
+    if (byEmail && !ids.has(byEmail)) {
+      // Mis-roled primary contacts may have no membership row. Only delete by email if they
+      // are not an active member of a different company.
+      const { data: otherMems, error: oErr } = await admin
+        .from("user_company_memberships")
+        .select("parent_company_id")
+        .eq("user_id", byEmail)
+        .eq("status", "active")
+        .neq("parent_company_id", companyId)
+        .limit(1);
+      if (oErr) console.warn("[deleteCompany] other memberships check", oErr.message);
+      else if (!otherMems?.length) ids.add(byEmail);
+    }
   }
 
   return [...ids];

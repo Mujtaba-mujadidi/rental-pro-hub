@@ -1,9 +1,11 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState, useTransition } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { inviteRentalStaffAction } from "@/app/actions/rental-staff";
 import type { CompanyMembershipRole } from "@/lib/auth/profile";
+import { FormModalShell } from "@/components/forms/form-modal-shell";
+import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
 
 const STEP_LABELS = ["Details", "Role & access", "Review"] as const;
 
@@ -77,6 +79,27 @@ function StepProgress({ step }: { step: number }) {
   );
 }
 
+type InviteSnapshot = {
+  step: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: CompanyMembershipRole;
+  accessScope: "all" | "explicit";
+  selectedSubIds: string[];
+};
+
+const INVITE_DRAFT_KEY = "invite-staff";
+const inviteBaseline: InviteSnapshot = {
+  step: 0,
+  firstName: "",
+  lastName: "",
+  email: "",
+  role: "operations",
+  accessScope: "all",
+  selectedSubIds: [],
+};
+
 export function InviteStaffModal({
   open,
   onOpenChange,
@@ -99,17 +122,45 @@ export function InviteStaffModal({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  useEffect(() => {
-    if (!open) return;
-    setStep(0);
+  const snapshot = useMemo<InviteSnapshot>(
+    () => ({ step, firstName, lastName, email, role, accessScope, selectedSubIds }),
+    [step, firstName, lastName, email, role, accessScope, selectedSubIds],
+  );
+
+  const applySnapshot = useCallback((s: InviteSnapshot) => {
+    setStep(s.step);
+    setFirstName(s.firstName);
+    setLastName(s.lastName);
+    setEmail(s.email);
+    setRole(s.role);
+    setAccessScope(s.accessScope);
+    setSelectedSubIds(s.selectedSubIds);
     setError(null);
-    setFirstName("");
-    setLastName("");
-    setEmail("");
-    setRole("operations");
-    setAccessScope("all");
-    setSelectedSubIds([]);
-  }, [open]);
+  }, []);
+
+  const {
+    saveNotice,
+    hasStoredDraft,
+    isDirty,
+    saveProgress,
+    requestClose,
+    requestStartFresh,
+    discardConfirmOpen,
+    confirmDiscardClose,
+    cancelDiscardClose,
+    startFreshConfirmOpen,
+    confirmStartFresh,
+    cancelStartFresh,
+    clearAfterSuccess,
+  } = useFormModalDraft({
+    draftKey: INVITE_DRAFT_KEY,
+    open,
+    snapshot,
+    baseline: inviteBaseline,
+    pending,
+    applySnapshot,
+    onClose: () => onOpenChange(false),
+  });
 
   useEffect(() => {
     if (role === "admin") {
@@ -117,19 +168,6 @@ export function InviteStaffModal({
       setSelectedSubIds([]);
     }
   }, [role]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !pending) onOpenChange(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, pending, onOpenChange]);
-
-  const close = useCallback(() => {
-    if (!pending) onOpenChange(false);
-  }, [pending, onOpenChange]);
 
   const step1Valid = useCallback(() => {
     if (role === "admin") return true;
@@ -183,223 +221,38 @@ export function InviteStaffModal({
           setError(res.error);
           return;
         }
+        clearAfterSuccess();
         onInvited?.();
         router.refresh();
         onOpenChange(false);
       })();
     });
-  }, [email, firstName, lastName, role, accessScope, selectedSubIds, onOpenChange, onInvited, router]);
-
-  if (!open) return null;
+  }, [email, firstName, lastName, role, accessScope, selectedSubIds, onOpenChange, onInvited, router, clearAfterSuccess]);
 
   return (
-    <div className="fixed inset-0 z-[310] flex items-center justify-center p-4 sm:p-6">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/50 backdrop-blur-[1px]"
-        aria-label="Close dialog"
-        disabled={pending}
-        onMouseDown={() => close()}
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="invite-staff-title"
-        className="relative z-[1] flex max-h-[min(90vh,52rem)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-950"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="shrink-0 border-b border-zinc-200/90 px-6 pb-4 pt-6 dark:border-zinc-700 sm:px-10 sm:pt-10">
-          <h2 id="invite-staff-title" className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-            Add staff
-          </h2>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            Invite by email, choose their role, and set which locations they can see after they sign in.
-          </p>
-          <StepProgress step={step} />
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 sm:px-10">
-          {error ? <p className="mb-4 rph-alert-error text-sm">{error}</p> : null}
-
-          {step === 0 ? (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1">
-                <label htmlFor="invite-staff-first" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  First name *
-                </label>
-                <input
-                  id="invite-staff-first"
-                  type="text"
-                  autoComplete="given-name"
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                  className={inputClass()}
-                />
-              </div>
-              <div className="space-y-1">
-                <label htmlFor="invite-staff-last" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  Last name *
-                </label>
-                <input
-                  id="invite-staff-last"
-                  type="text"
-                  autoComplete="family-name"
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                  className={inputClass()}
-                />
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <label htmlFor="invite-staff-email" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  Email *
-                </label>
-                <input
-                  id="invite-staff-email"
-                  type="email"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className={inputClass()}
-                  placeholder="colleague@company.com"
-                />
-              </div>
-            </div>
-          ) : null}
-
-          {step === 1 ? (
-            <div className="space-y-5">
-              <div className="space-y-1">
-                <label htmlFor="invite-staff-role" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  Role
-                </label>
-                <select
-                  id="invite-staff-role"
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as CompanyMembershipRole)}
-                  className={inputClass()}
-                >
-                  <option value="admin">Admin</option>
-                  <option value="operations">Operations</option>
-                  <option value="finance">Finance</option>
-                  <option value="viewer">Viewer</option>
-                </select>
-              </div>
-
-              {role === "admin" ? (
-                <p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-400">
-                  Admins always have access to <span className="font-semibold text-zinc-800 dark:text-zinc-200">all</span>{" "}
-                  subcompany locations.
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Subcompany access</p>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    They only see data for the locations you allow. You can change this later on the Staff page.
-                  </p>
-                  <fieldset className="space-y-2">
-                    <legend className="sr-only">Location access</legend>
-                    <label className="flex cursor-pointer items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-                      <input
-                        type="radio"
-                        name="invite-access-scope"
-                        className="mt-0.5"
-                        checked={accessScope === "all"}
-                        onChange={() => {
-                          setAccessScope("all");
-                          setSelectedSubIds([]);
-                        }}
-                      />
-                      <span>
-                        <span className="font-medium text-zinc-900 dark:text-zinc-100">All locations</span>
-                        <span className="block text-xs text-zinc-500 dark:text-zinc-400">Same as company-wide access.</span>
-                      </span>
-                    </label>
-                    <label className="flex cursor-pointer items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-                      <input
-                        type="radio"
-                        name="invite-access-scope"
-                        className="mt-0.5"
-                        checked={accessScope === "explicit"}
-                        onChange={() => setAccessScope("explicit")}
-                      />
-                      <span>
-                        <span className="font-medium text-zinc-900 dark:text-zinc-100">Selected locations only</span>
-                        <span className="block text-xs text-zinc-500 dark:text-zinc-400">Pick one or more subcompanies.</span>
-                      </span>
-                    </label>
-                  </fieldset>
-                  {accessScope === "explicit" ? (
-                    <div className="border-l-2 border-zinc-200 pl-3 dark:border-zinc-600">
-                      {subcompanies.length === 0 ? (
-                        <p className="text-sm text-amber-800 dark:text-amber-200">
-                          No subcompanies exist yet. Register locations under Subcompany first, or choose &quot;All
-                          locations&quot;.
-                        </p>
-                      ) : (
-                        <ul className="flex max-h-48 flex-col gap-2 overflow-y-auto pr-1">
-                          {subcompanies.map((s) => (
-                            <li key={s.id}>
-                              <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedSubIds.includes(s.id)}
-                                  onChange={() => toggleSub(s.id)}
-                                />
-                                <span>
-                                  {s.name}
-                                  {s.is_primary ? (
-                                    <span className="ml-1 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-900 dark:border-indigo-900/50 dark:bg-indigo-950/35 dark:text-indigo-100">
-                                      Main
-                                    </span>
-                                  ) : null}
-                                </span>
-                              </label>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              )}
-            </div>
-          ) : null}
-
-          {step === 2 ? (
-            <div className="space-y-4">
-              <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm dark:border-zinc-700 dark:bg-zinc-900/60">
-                <p className="font-semibold text-zinc-900 dark:text-zinc-100">Review invite</p>
-                <dl className="mt-3 space-y-2 text-zinc-600 dark:text-zinc-400">
-                  <div>
-                    <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">Name</dt>
-                    <dd className="text-zinc-900 dark:text-zinc-100">
-                      {[firstName.trim(), lastName.trim()].filter(Boolean).join(" ") || "—"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">Email</dt>
-                    <dd className="font-mono text-xs text-zinc-900 dark:text-zinc-100">{email.trim() || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">Role</dt>
-                    <dd className="capitalize text-zinc-900 dark:text-zinc-100">{role}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">Location access</dt>
-                    <dd className="text-zinc-900 dark:text-zinc-100">{accessSummary()}</dd>
-                  </div>
-                </dl>
-              </div>
-              <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-                If they already have an account with this email, they should sign in instead; this flow is for new accounts
-                on that address.
-              </p>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-zinc-200 px-6 py-4 dark:border-zinc-700 sm:px-10">
-          <button type="button" className={btnGhost} disabled={pending} onClick={close}>
+    <FormModalShell
+      open={open}
+      titleId="invite-staff-title"
+      title="Add staff"
+      description="Invite by email, choose their role, and set which locations they can see after they sign in."
+      headerExtra={<StepProgress step={step} />}
+      pending={pending}
+      maxWidthClass="max-w-2xl"
+      saveNotice={saveNotice}
+      hasStoredDraft={hasStoredDraft}
+      isDirty={isDirty}
+      onSaveProgress={saveProgress}
+      onRequestClose={requestClose}
+      onRequestStartFresh={requestStartFresh}
+      discardConfirmOpen={discardConfirmOpen}
+      onConfirmDiscard={confirmDiscardClose}
+      onCancelDiscard={cancelDiscardClose}
+      startFreshConfirmOpen={startFreshConfirmOpen}
+      onConfirmStartFresh={confirmStartFresh}
+      onCancelStartFresh={cancelStartFresh}
+      footer={
+        <>
+          <button type="button" className={btnGhost} disabled={pending} onClick={requestClose}>
             Cancel
           </button>
           <div className="flex flex-wrap gap-3">
@@ -423,9 +276,187 @@ export function InviteStaffModal({
               </button>
             )}
           </div>
+        </>
+      }
+    >
+      {error ? <p className="mb-4 rph-alert-error text-sm">{error}</p> : null}
+
+      {step === 0 ? (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1">
+            <label htmlFor="invite-staff-first" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              First name *
+            </label>
+            <input
+              id="invite-staff-first"
+              type="text"
+              autoComplete="given-name"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              className={inputClass()}
+            />
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="invite-staff-last" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              Last name *
+            </label>
+            <input
+              id="invite-staff-last"
+              type="text"
+              autoComplete="family-name"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              className={inputClass()}
+            />
+          </div>
+          <div className="space-y-1 sm:col-span-2">
+            <label htmlFor="invite-staff-email" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              Email *
+            </label>
+            <input
+              id="invite-staff-email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className={inputClass()}
+              placeholder="colleague@company.com"
+            />
+          </div>
         </div>
-      </div>
-    </div>
+      ) : null}
+
+      {step === 1 ? (
+        <div className="space-y-5">
+          <div className="space-y-1">
+            <label htmlFor="invite-staff-role" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              Role
+            </label>
+            <select
+              id="invite-staff-role"
+              value={role}
+              onChange={(e) => setRole(e.target.value as CompanyMembershipRole)}
+              className={inputClass()}
+            >
+              <option value="admin">Admin</option>
+              <option value="operations">Operations</option>
+              <option value="finance">Finance</option>
+              <option value="viewer">Viewer</option>
+            </select>
+          </div>
+
+          {role === "admin" ? (
+            <p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-400">
+              Admins always have access to <span className="font-semibold text-zinc-800 dark:text-zinc-200">all</span>{" "}
+              subcompany locations.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Subcompany access</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                They only see data for the locations you allow. You can change this later on the Staff page.
+              </p>
+              <fieldset className="space-y-2">
+                <legend className="sr-only">Location access</legend>
+                <label className="flex cursor-pointer items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                  <input
+                    type="radio"
+                    name="invite-access-scope"
+                    className="mt-0.5"
+                    checked={accessScope === "all"}
+                    onChange={() => {
+                      setAccessScope("all");
+                      setSelectedSubIds([]);
+                    }}
+                  />
+                  <span>
+                    <span className="font-medium text-zinc-900 dark:text-zinc-100">All locations</span>
+                    <span className="block text-xs text-zinc-500 dark:text-zinc-400">Same as company-wide access.</span>
+                  </span>
+                </label>
+                <label className="flex cursor-pointer items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                  <input
+                    type="radio"
+                    name="invite-access-scope"
+                    className="mt-0.5"
+                    checked={accessScope === "explicit"}
+                    onChange={() => setAccessScope("explicit")}
+                  />
+                  <span>
+                    <span className="font-medium text-zinc-900 dark:text-zinc-100">Selected locations only</span>
+                    <span className="block text-xs text-zinc-500 dark:text-zinc-400">Pick one or more subcompanies.</span>
+                  </span>
+                </label>
+              </fieldset>
+              {accessScope === "explicit" ? (
+                <div className="border-l-2 border-zinc-200 pl-3 dark:border-zinc-600">
+                  {subcompanies.length === 0 ? (
+                    <p className="text-sm text-amber-800 dark:text-amber-200">
+                      No subcompanies exist yet. Register locations under Subcompany first, or choose &quot;All
+                      locations&quot;.
+                    </p>
+                  ) : (
+                    <ul className="flex max-h-48 flex-col gap-2 overflow-y-auto pr-1">
+                      {subcompanies.map((s) => (
+                        <li key={s.id}>
+                          <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                            <input
+                              type="checkbox"
+                              checked={selectedSubIds.includes(s.id)}
+                              onChange={() => toggleSub(s.id)}
+                            />
+                            <span>
+                              {s.name}
+                              {s.is_primary ? (
+                                <span className="ml-1 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-900 dark:border-indigo-900/50 dark:bg-indigo-950/35 dark:text-indigo-100">
+                                  Main
+                                </span>
+                              ) : null}
+                            </span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {step === 2 ? (
+        <div className="space-y-4">
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm dark:border-zinc-700 dark:bg-zinc-900/60">
+            <p className="font-semibold text-zinc-900 dark:text-zinc-100">Review invite</p>
+            <dl className="mt-3 space-y-2 text-zinc-600 dark:text-zinc-400">
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">Name</dt>
+                <dd className="text-zinc-900 dark:text-zinc-100">
+                  {[firstName.trim(), lastName.trim()].filter(Boolean).join(" ") || "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">Email</dt>
+                <dd className="font-mono text-xs text-zinc-900 dark:text-zinc-100">{email.trim() || "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">Role</dt>
+                <dd className="capitalize text-zinc-900 dark:text-zinc-100">{role}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">Location access</dt>
+                <dd className="text-zinc-900 dark:text-zinc-100">{accessSummary()}</dd>
+              </div>
+            </dl>
+          </div>
+          <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+            If they already have an account with this email, they should sign in instead; this flow is for new accounts
+            on that address.
+          </p>
+        </div>
+      ) : null}
+    </FormModalShell>
   );
 }
 

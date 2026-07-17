@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   completeRentalOnboardingAction,
   saveRentalOnboardingStepAction,
@@ -12,6 +12,7 @@ import {
 import { inviteRentalStaffAction } from "@/app/actions/rental-staff";
 import type { CompanyMembershipRole } from "@/lib/auth/profile";
 import { CompanyStepProgress } from "@/components/forms/company-step-progress";
+import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 
 /** Short labels for the orange step rail (same pattern as super-admin registration). */
 const STEP_LABELS = ["Legal", "Logo", "Primary", "Locations", "Invite", "Finish"] as const;
@@ -69,7 +70,8 @@ export function RentalOnboardingWizard({
   const router = useRouter();
   const [step, setStep] = useState(() => Math.min(Math.max(0, initialStep), STEP_LABELS.length - 1));
   const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const [overlay, setOverlay] = useState<ActionStatusOverlayState | null>(null);
+  const pending = overlay?.phase === "pending";
 
   const [entityType, setEntityType] = useState(company.entity_type ?? "");
   const [tradingName, setTradingName] = useState(company.trading_name ?? "");
@@ -95,101 +97,90 @@ export function RentalOnboardingWizard({
       .join("\n");
   }, [company]);
 
-  const persistStep = useCallback(
-    (next: number) => {
-      startTransition(() => {
-        void (async () => {
-          const res = await saveRentalOnboardingStepAction(next);
-          if (!res.ok) {
-            setError(res.error);
-            return;
-          }
-          setStep(next);
-          setError(null);
-        })();
-      });
-    },
-    [startTransition],
-  );
+  const runBusy = useCallback(async (title: string, detail: string, work: () => Promise<void>) => {
+    setError(null);
+    setOverlay({ phase: "pending", title, detail });
+    try {
+      await work();
+      setOverlay(null);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Something went wrong.";
+      setError(message);
+      setOverlay({ phase: "error", title: "Could not continue", detail: message });
+    }
+  }, []);
 
-  const goNext = useCallback(() => {
+  const persistStep = useCallback(async (next: number) => {
+    const res = await saveRentalOnboardingStepAction(next);
+    if (!res.ok) {
+      throw new Error(res.error);
+    }
+    setStep(next);
+    setError(null);
+  }, []);
+
+  const goNext = useCallback(async () => {
     const next = Math.min(step + 1, STEP_LABELS.length - 1);
-    persistStep(next);
-  }, [step, persistStep]);
-
-  const goBack = useCallback(() => {
-    const prev = Math.max(step - 1, 0);
-    persistStep(prev);
-  }, [step, persistStep]);
-
-  const saveStep0 = useCallback(() => {
-    setError(null);
-    const fd = new FormData();
-    fd.set("entity_type", entityType);
-    fd.set("trading_name", tradingName);
-    fd.set("billing_email", billingEmail);
-    startTransition(() => {
-      void (async () => {
-        const res = await updateParentCompanyProfileFieldsAction(fd);
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
-        goNext();
-      })();
+    await runBusy("Saving…", "Moving to the next step. Please wait.", async () => {
+      await persistStep(next);
     });
-  }, [entityType, tradingName, billingEmail, goNext, startTransition]);
+  }, [step, persistStep, runBusy]);
 
-  const skipLogo = useCallback(() => {
-    setError(null);
-    goNext();
+  const goBack = useCallback(async () => {
+    const prev = Math.max(step - 1, 0);
+    await runBusy("Saving…", "Going back. Please wait.", async () => {
+      await persistStep(prev);
+    });
+  }, [step, persistStep, runBusy]);
+
+  const saveStep0 = useCallback(async () => {
+    await runBusy("Saving company details…", "Please wait while we save your legal profile.", async () => {
+      const fd = new FormData();
+      fd.set("entity_type", entityType);
+      fd.set("trading_name", tradingName);
+      fd.set("billing_email", billingEmail);
+      const res = await updateParentCompanyProfileFieldsAction(fd);
+      if (!res.ok) throw new Error(res.error);
+      await persistStep(Math.min(step + 1, STEP_LABELS.length - 1));
+    });
+  }, [entityType, tradingName, billingEmail, step, persistStep, runBusy]);
+
+  const skipLogo = useCallback(async () => {
+    await goNext();
   }, [goNext]);
 
   const uploadLogo = useCallback(
-    (file: File | null) => {
-      setError(null);
+    async (file: File | null) => {
       if (!file) {
         setError("Choose a logo file or use Skip for now.");
         return;
       }
-      const fd = new FormData();
-      fd.set("logo", file);
-      startTransition(() => {
-        void (async () => {
-          const res = await uploadParentCompanyLogoAction(fd);
-          if (!res.ok) {
-            setError(res.error);
-            return;
-          }
-          goNext();
-        })();
+      await runBusy("Uploading logo…", "Please wait while we save your company logo.", async () => {
+        const fd = new FormData();
+        fd.set("logo", file);
+        const res = await uploadParentCompanyLogoAction(fd);
+        if (!res.ok) throw new Error(res.error);
+        await persistStep(Math.min(step + 1, STEP_LABELS.length - 1));
       });
     },
-    [goNext, startTransition],
+    [step, persistStep, runBusy],
   );
 
-  const savePrimary = useCallback(() => {
-    setError(null);
-    const fd = new FormData();
-    fd.set("trading_name", opName.trim());
-    fd.set("display_name", displayName.trim());
-    startTransition(() => {
-      void (async () => {
-        const res = await updatePrimarySubcompanyOnboardingAction(fd);
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
-        goNext();
-      })();
+  const savePrimary = useCallback(async () => {
+    await runBusy("Saving primary unit…", "Please wait while we save your operational unit.", async () => {
+      const fd = new FormData();
+      fd.set("trading_name", opName.trim());
+      fd.set("display_name", displayName.trim());
+      const res = await updatePrimarySubcompanyOnboardingAction(fd);
+      if (!res.ok) throw new Error(res.error);
+      await persistStep(Math.min(step + 1, STEP_LABELS.length - 1));
     });
-  }, [opName, displayName, goNext, startTransition]);
+  }, [opName, displayName, step, persistStep, runBusy]);
 
-  const sendInvite = useCallback(() => {
-    setError(null);
+  const sendInvite = useCallback(async () => {
     const em = inviteEmail.trim();
     if (!em) {
-      goNext();
+      await goNext();
       return;
     }
     if (!inviteFirstName.trim()) {
@@ -200,38 +191,28 @@ export function RentalOnboardingWizard({
       setError("Last name is required to send an invite.");
       return;
     }
-    startTransition(() => {
-      void (async () => {
-        const res = await inviteRentalStaffAction(em, inviteRole, inviteFirstName, inviteLastName);
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
-        setInviteEmail("");
-        setInviteFirstName("");
-        setInviteLastName("");
-        goNext();
-      })();
+    await runBusy("Sending invite…", "Creating the staff invite. Please wait.", async () => {
+      const res = await inviteRentalStaffAction(em, inviteRole, inviteFirstName, inviteLastName);
+      if (!res.ok) throw new Error(res.error);
+      setInviteEmail("");
+      setInviteFirstName("");
+      setInviteLastName("");
+      await persistStep(Math.min(step + 1, STEP_LABELS.length - 1));
     });
-  }, [inviteEmail, inviteFirstName, inviteLastName, inviteRole, goNext, startTransition]);
+  }, [inviteEmail, inviteFirstName, inviteLastName, inviteRole, step, goNext, persistStep, runBusy]);
 
-  const finish = useCallback(() => {
-    setError(null);
-    startTransition(() => {
-      void (async () => {
-        const res = await completeRentalOnboardingAction();
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
-        router.replace("/rental");
-        router.refresh();
-      })();
+  const finish = useCallback(async () => {
+    await runBusy("Finishing setup…", "Opening your rental dashboard. Please wait.", async () => {
+      const res = await completeRentalOnboardingAction();
+      if (!res.ok) throw new Error(res.error);
+      router.replace("/rental");
+      router.refresh();
     });
-  }, [router, startTransition]);
+  }, [router, runBusy]);
 
   return (
-    <div className="mx-auto w-full max-w-3xl pb-6">
+    <div className="relative mx-auto w-full max-w-3xl pb-6">
+      <ActionStatusOverlay state={overlay} onDismiss={() => setOverlay(null)} />
       <div className="flex max-h-[min(90vh,52rem)] flex-col overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-950">
         <div className="shrink-0 border-b border-zinc-200/90 px-6 pb-4 pt-6 dark:border-zinc-700 sm:px-10 sm:pt-10">
           <h2 id="rental-onboarding-title" className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
@@ -245,7 +226,7 @@ export function RentalOnboardingWizard({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 sm:px-10">
-          {error ? (
+          {error && overlay?.phase !== "error" ? (
             <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
               {error}
             </p>
@@ -331,8 +312,8 @@ export function RentalOnboardingWizard({
               <div>
                 <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Company logo</h3>
                 <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                  Optional but recommended. PNG, JPEG, or WebP up to 2&nbsp;MB. You can skip and add this later in company
-                  settings.
+                  Optional but recommended. PNG, JPEG, or WebP up to 2&nbsp;MB. Images are resized for storage (max
+                  800×400px). On contracts the logo is capped so the header stays compact (about 140×36pt).
                 </p>
               </div>
               {company.logo_storage_path ? (
@@ -487,43 +468,48 @@ export function RentalOnboardingWizard({
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-zinc-200 px-6 py-4 dark:border-zinc-700 sm:px-10">
-          <button type="button" className={btnGhost} disabled={pending || step === 0} onClick={goBack}>
+          <button type="button" className={btnGhost} disabled={pending || step === 0} onClick={() => void goBack()}>
             Back
           </button>
           <div className="flex flex-wrap gap-3">
             {step === 0 ? (
-              <button type="button" className={btnContinue} disabled={pending} onClick={saveStep0}>
-                Continue
+              <button type="button" className={btnContinue} disabled={pending} onClick={() => void saveStep0()}>
+                {pending ? "Please wait…" : "Continue"}
               </button>
             ) : null}
             {step === 1 ? (
-              <button type="button" className={btnSkip} disabled={pending} onClick={skipLogo}>
-                Skip for now
+              <button type="button" className={btnSkip} disabled={pending} onClick={() => void skipLogo()}>
+                {pending ? "Please wait…" : "Skip for now"}
               </button>
             ) : null}
             {step === 2 ? (
-              <button type="button" className={btnContinue} disabled={pending || !opName.trim()} onClick={savePrimary}>
-                Continue
+              <button
+                type="button"
+                className={btnContinue}
+                disabled={pending || !opName.trim()}
+                onClick={() => void savePrimary()}
+              >
+                {pending ? "Please wait…" : "Continue"}
               </button>
             ) : null}
             {step === 3 ? (
-              <button type="button" className={btnContinue} disabled={pending} onClick={goNext}>
-                Continue
+              <button type="button" className={btnContinue} disabled={pending} onClick={() => void goNext()}>
+                {pending ? "Please wait…" : "Continue"}
               </button>
             ) : null}
             {step === 4 ? (
               <>
-                <button type="button" className={btnSkip} disabled={pending} onClick={() => goNext()}>
-                  Skip
+                <button type="button" className={btnSkip} disabled={pending} onClick={() => void goNext()}>
+                  {pending ? "Please wait…" : "Skip"}
                 </button>
-                <button type="button" className={btnContinue} disabled={pending} onClick={sendInvite}>
-                  {inviteEmail.trim() ? "Send invite & continue" : "Continue"}
+                <button type="button" className={btnContinue} disabled={pending} onClick={() => void sendInvite()}>
+                  {pending ? "Please wait…" : inviteEmail.trim() ? "Send invite & continue" : "Continue"}
                 </button>
               </>
             ) : null}
             {step === 5 ? (
-              <button type="button" className={btnContinue} disabled={pending} onClick={finish}>
-                Go to dashboard
+              <button type="button" className={btnContinue} disabled={pending} onClick={() => void finish()}>
+                {pending ? "Please wait…" : "Go to dashboard"}
               </button>
             ) : null}
           </div>

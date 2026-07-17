@@ -27,6 +27,7 @@ import {
 } from "@/lib/esign/saved-signatures";
 import { ESIGN_OWNER_ROLE, type EsignFieldLayoutItem } from "@/lib/esign/types";
 import type { FieldValueMap } from "@/lib/esign/pdf-stamp";
+import { formatEsignSignedAt } from "@/lib/esign/datetime";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 async function clientMeta() {
@@ -262,11 +263,11 @@ export async function applyOwnerSignatureQuickAction(
     return { ok: false, error: "No owner signature field on this envelope." };
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const signedAt = formatEsignSignedAt(new Date());
   const values: FieldValueMap = {};
   for (const f of ownerFields) {
     if (f.type === "signature") values[f.id] = { type: "signature", value: signatureDataUrl };
-    else if (f.type === "date") values[f.id] = { type: "date", value: today };
+    else if (f.type === "date") values[f.id] = { type: "date", value: signedAt };
     else if (f.type === "text") values[f.id] = { type: "text", value: confirmedName };
     else values[f.id] = { type: "text", value: confirmedName };
   }

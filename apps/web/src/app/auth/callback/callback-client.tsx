@@ -30,7 +30,25 @@ function userNeedsPasswordStep(user: User): boolean {
   );
 }
 
-function defaultPostLoginPath(requestedNext: string): string {
+function defaultPostLoginPath(requestedNext: string, user: User): string {
+  const uMeta = user.user_metadata as Record<string, unknown> | undefined;
+  const appRole = typeof uMeta?.app_role === "string" ? uMeta.app_role.toLowerCase() : "";
+  if (appRole === "rental_company") {
+    if (
+      requestedNext.startsWith("/rental") ||
+      requestedNext === "/super-admin" ||
+      (requestedNext.startsWith("/") &&
+        !requestedNext.startsWith("//") &&
+        requestedNext !== "/driver" &&
+        requestedNext !== "/driver/onboarding" &&
+        requestedNext !== "/auth/set-password" &&
+        requestedNext.length > 1)
+    ) {
+      return requestedNext;
+    }
+    return "/rental";
+  }
+
   if (requestedNext === "/auth/set-password") {
     return "/driver";
   }
@@ -85,7 +103,7 @@ function CallbackInner() {
           return;
         }
 
-        const dest = defaultPostLoginPath(requestedNext);
+        const dest = defaultPostLoginPath(requestedNext, user);
         window.location.replace(`${origin}${dest}`);
       };
 

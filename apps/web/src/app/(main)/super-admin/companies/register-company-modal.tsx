@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { registerCompanyAction, getRegisterCompanyInviteDefaultsAction } from "@/app/actions/admin-companies";
 import { listPricingPresetsForRegisterAction } from "@/app/actions/contract-presets";
@@ -10,6 +10,15 @@ import {
 } from "@/app/actions/contract-terms";
 import { TermsRichViewer } from "@/app/(main)/super-admin/settings/contract-terms/terms-rich-editor";
 import { CompanyStepProgress } from "@/components/forms/company-step-progress";
+import { FormModalShell } from "@/components/forms/form-modal-shell";
+import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
+import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
+import {
+  collectionItemDraftKey,
+  loadDraft,
+  removeCollectionDraft,
+  updateCollectionDraftMeta,
+} from "@/lib/forms/form-draft-collection";
 
 const STEP_LABELS = ["Company details", "Registered office", "Primary contact", "Commercial terms", "Review"] as const;
 
@@ -102,35 +111,140 @@ const initialDraft = {
   country: "GB",
 };
 
+type RegisterCompanySnapshot = {
+  step: number;
+  draft: typeof initialDraft;
+  sendInvite: boolean;
+  billingEmailSameAsPrimary: boolean;
+  signatoryEmailSameAsPrimary: boolean;
+};
+
+/** Collection id for multi-draft company registration (localStorage index). */
+export const REGISTER_COMPANY_DRAFT_COLLECTION = "register-company";
+/** @deprecated Legacy single-draft key — migrated into the collection on load. */
+export const REGISTER_COMPANY_DRAFT_KEY = "register-company";
+
+const registerCompanyBaseline: RegisterCompanySnapshot = {
+  step: 0,
+  draft: initialDraft,
+  sendInvite: true,
+  billingEmailSameAsPrimary: false,
+  signatoryEmailSameAsPrimary: false,
+};
+
 export type RegisterCompanyModalProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Active draft slot id from the companies page multi-draft list. */
+  draftId: string | null;
+  /** Called when drafts index should refresh (save / clear / remove empty). */
+  onDraftsChange?: () => void;
   /** Called after the company row is saved. Optional notice if invite or e-sign send failed or was skipped. */
   onRegistered?: (notice?: string) => void;
 };
 
-export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: RegisterCompanyModalProps) {
+export function RegisterCompanyModal({
+  open,
+  onOpenChange,
+  draftId,
+  onDraftsChange,
+  onRegistered,
+}: RegisterCompanyModalProps) {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState(initialDraft);
   const [presets, setPresets] = useState<{ id: string; name: string; pricing_model_type: string }[]>([]);
   const [publishedTerms, setPublishedTerms] = useState<{ id: string; version_label: string; title: string }[]>([]);
   const [sendInvite, setSendInvite] = useState(true);
+  const [billingEmailSameAsPrimary, setBillingEmailSameAsPrimary] = useState(false);
+  const [signatoryEmailSameAsPrimary, setSignatoryEmailSameAsPrimary] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [tcReviewOpen, setTcReviewOpen] = useState(false);
   const [tcReview, setTcReview] = useState<{ version_label: string; title: string; body: string } | null>(null);
   const [tcReviewErr, setTcReviewErr] = useState<string | null>(null);
   const [tcReviewPending, startTcReviewTransition] = useTransition();
+  const [createOverlay, setCreateOverlay] = useState<ActionStatusOverlayState | null>(null);
+  const creating = createOverlay?.phase === "pending";
+  const busy = pending || creating;
+
+  const draftKey = draftId
+    ? collectionItemDraftKey(REGISTER_COMPANY_DRAFT_COLLECTION, draftId)
+    : "register-company:none";
+
+  const snapshot = useMemo<RegisterCompanySnapshot>(
+    () => ({ step, draft, sendInvite, billingEmailSameAsPrimary, signatoryEmailSameAsPrimary }),
+    [step, draft, sendInvite, billingEmailSameAsPrimary, signatoryEmailSameAsPrimary],
+  );
+
+  const applySnapshot = useCallback((s: RegisterCompanySnapshot) => {
+    setStep(s.step);
+    setDraft({ ...s.draft });
+    setSendInvite(s.sendInvite);
+    setBillingEmailSameAsPrimary(Boolean(s.billingEmailSameAsPrimary));
+    setSignatoryEmailSameAsPrimary(Boolean(s.signatoryEmailSameAsPrimary));
+    setError(null);
+  }, []);
+
+  const handleAfterSave = useCallback(
+    (s: RegisterCompanySnapshot) => {
+      if (!draftId) return;
+      const name = s.draft.name.trim();
+      updateCollectionDraftMeta(REGISTER_COMPANY_DRAFT_COLLECTION, draftId, {
+        label: name || "Untitled draft",
+      });
+      onDraftsChange?.();
+    },
+    [draftId, onDraftsChange],
+  );
+
+  const handleAfterClear = useCallback(() => {
+    if (!draftId) return;
+    // Keep the slot but reset label; parent may remove empty drafts on close.
+    updateCollectionDraftMeta(REGISTER_COMPANY_DRAFT_COLLECTION, draftId, { label: "Untitled draft" });
+    onDraftsChange?.();
+  }, [draftId, onDraftsChange]);
+
+  const {
+    saveNotice,
+    hasStoredDraft,
+    isDirty,
+    saveProgress,
+    requestClose,
+    requestStartFresh,
+    discardConfirmOpen,
+    confirmDiscardClose,
+    cancelDiscardClose,
+    startFreshConfirmOpen,
+    confirmStartFresh,
+    cancelStartFresh,
+    clearAfterSuccess,
+  } = useFormModalDraft({
+    draftKey,
+    open: open && Boolean(draftId),
+    snapshot,
+    baseline: registerCompanyBaseline,
+    pending: busy,
+    applySnapshot,
+    onClose: () => {
+      if (draftId) {
+        const stored = loadDraft(draftKey);
+        if (!stored) {
+          removeCollectionDraft(REGISTER_COMPANY_DRAFT_COLLECTION, draftId);
+          onDraftsChange?.();
+        }
+      }
+      onOpenChange(false);
+    },
+    onAfterSave: handleAfterSave,
+    onAfterClear: handleAfterClear,
+  });
 
   useEffect(() => {
-    if (!open) return;
-    setStep(0);
-    setError(null);
+    if (!open || !draftId) return;
     setTcReviewOpen(false);
     setTcReview(null);
     setTcReviewErr(null);
-    setDraft({ ...initialDraft });
     void Promise.all([
       listPricingPresetsForRegisterAction().then((r) => {
         if (r.ok) setPresets(r.presets);
@@ -139,24 +253,22 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
         if (r.ok) setPublishedTerms(r.versions);
       }),
       getRegisterCompanyInviteDefaultsAction().then((d) => {
-        if (d.ok) setSendInvite(d.defaultSendInvite);
+        if (d.ok && !loadDraft(draftKey)) setSendInvite(d.defaultSendInvite);
       }),
     ]);
-  }, [open]);
+  }, [open, draftId, draftKey]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !tcReviewOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || pending) return;
-      if (tcReviewOpen) {
+      if (e.key === "Escape") {
+        e.stopPropagation();
         setTcReviewOpen(false);
-        return;
       }
-      onOpenChange(false);
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, pending, onOpenChange, tcReviewOpen]);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open, tcReviewOpen]);
 
   const openTermsReview = useCallback(() => {
     const id = draft.terms_catalog_version_id.trim();
@@ -176,12 +288,30 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
     });
   }, [draft.terms_catalog_version_id]);
 
-  const close = useCallback(() => {
-    if (!pending) onOpenChange(false);
-  }, [pending, onOpenChange]);
-
   const patch = useCallback(<K extends keyof typeof initialDraft>(field: K, value: (typeof initialDraft)[K]) => {
-    setDraft((d) => ({ ...d, [field]: value }));
+    setDraft((d) => {
+      const next = { ...d, [field]: value };
+      if (field === "primary_contact_email") {
+        const email = String(value);
+        if (billingEmailSameAsPrimary) next.billing_email = email;
+        if (signatoryEmailSameAsPrimary) next.signatory_email = email;
+      }
+      return next;
+    });
+  }, [billingEmailSameAsPrimary, signatoryEmailSameAsPrimary]);
+
+  const setBillingSameAsPrimary = useCallback((checked: boolean) => {
+    setBillingEmailSameAsPrimary(checked);
+    if (checked) {
+      setDraft((d) => ({ ...d, billing_email: d.primary_contact_email }));
+    }
+  }, []);
+
+  const setSignatorySameAsPrimary = useCallback((checked: boolean) => {
+    setSignatoryEmailSameAsPrimary(checked);
+    if (checked) {
+      setDraft((d) => ({ ...d, signatory_email: d.primary_contact_email }));
+    }
   }, []);
 
   const canGoNext = useCallback(() => {
@@ -254,7 +384,6 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
     const fd = new FormData();
     fd.set("name", draft.name.trim());
     fd.set("legal_name", draft.legal_name.trim());
-    fd.set("billing_email", draft.billing_email.trim());
     fd.set("company_number", draft.company_number.trim());
     fd.set("registered_address_line1", draft.registered_address_line1.trim());
     fd.set("registered_address_line2", draft.registered_address_line2.trim());
@@ -267,7 +396,7 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
     fd.set("primary_contact_dob", draft.primary_contact_dob.trim());
     fd.set("primary_contact_phone", draft.primary_contact_phone.trim());
     fd.set("primary_contact_email", draft.primary_contact_email.trim());
-    fd.set("billing_email", draft.billing_email.trim());
+    fd.set("billing_email", (billingEmailSameAsPrimary ? draft.primary_contact_email : draft.billing_email).trim());
     fd.set("contract_type", draft.contract_type.trim());
     fd.set("pricing_model", draft.pricing_model.trim());
     fd.set("billing_frequency", draft.billing_frequency.trim());
@@ -278,61 +407,109 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
     fd.set("recurring_amount", draft.recurring_amount.trim());
     fd.set("signatory_name", draft.signatory_name.trim());
     fd.set("signatory_title", draft.signatory_title.trim());
-    fd.set("signatory_email", draft.signatory_email.trim());
+    fd.set(
+      "signatory_email",
+      (signatoryEmailSameAsPrimary ? draft.primary_contact_email : draft.signatory_email).trim(),
+    );
     fd.set("pricing_preset_id", draft.pricing_preset_id.trim());
     fd.set("terms_catalog_version_id", draft.terms_catalog_version_id.trim());
     fd.set("status", draft.status);
     fd.set("notes", draft.notes.trim());
     fd.set("send_invite", sendInvite ? "true" : "false");
 
+    setError(null);
+    setCreateOverlay({
+      phase: "pending",
+      title: "Creating company…",
+      detail: sendInvite
+        ? "Saving the company record, preparing the contract, and sending the invite. Please wait."
+        : "Saving the company record and preparing the contract. Please wait.",
+    });
+
     startTransition(() => {
       void (async () => {
         const res = await registerCompanyAction(fd);
         if (!res.ok) {
           setError(res.error);
+          setCreateOverlay({
+            phase: "error",
+            title: "Could not create company",
+            detail: res.error,
+          });
           return;
         }
         const notices = [res.inviteWarning, res.eSignWarning].filter(Boolean);
+        setCreateOverlay({
+          phase: "success",
+          title: "Company created",
+          detail: notices.length
+            ? notices.join(" ")
+            : res.esignEnvelopeId
+              ? "Opening the contract for signature…"
+              : "The company is in the directory.",
+        });
         onRegistered?.(notices.length ? notices.join(" ") : undefined);
-        onOpenChange(false);
-        if (res.esignEnvelopeId) {
-          router.push(`/super-admin/esign/${res.esignEnvelopeId}`);
+        clearAfterSuccess();
+        if (draftId) {
+          removeCollectionDraft(REGISTER_COMPANY_DRAFT_COLLECTION, draftId);
+          onDraftsChange?.();
         }
+        window.setTimeout(() => {
+          setCreateOverlay(null);
+          onOpenChange(false);
+          if (res.esignEnvelopeId) {
+            router.push(`/super-admin/esign/${res.esignEnvelopeId}`);
+          }
+        }, notices.length || res.esignEnvelopeId ? 900 : 600);
       })();
     });
-  }, [draft, sendInvite, publishedTerms.length, onOpenChange, onRegistered, router]);
-
-  if (!open) return null;
+  }, [draft, sendInvite, billingEmailSameAsPrimary, signatoryEmailSameAsPrimary, publishedTerms.length, onOpenChange, onRegistered, router, clearAfterSuccess, draftId, onDraftsChange]);
 
   return (
     <>
-      <div className="fixed inset-0 z-[310] flex items-center justify-center p-4 sm:p-6">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/50 backdrop-blur-[1px]"
-        aria-label="Close dialog"
-        disabled={pending}
-        onMouseDown={() => close()}
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="register-company-title"
-        className="relative z-[1] flex max-h-[min(90vh,52rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-950"
-        onMouseDown={(e) => e.stopPropagation()}
+      <FormModalShell
+        open={open && Boolean(draftId)}
+        titleId="register-company-title"
+        title="Register company"
+        description="Parent company, registered office, primary contact, commercial terms, then review. Branding is added in rental onboarding."
+        headerExtra={<CompanyStepProgress step={step} labels={STEP_LABELS} />}
+        pending={busy}
+        saveNotice={saveNotice}
+        hasStoredDraft={hasStoredDraft}
+        isDirty={isDirty}
+        onSaveProgress={saveProgress}
+        onRequestClose={requestClose}
+        onRequestStartFresh={requestStartFresh}
+        discardConfirmOpen={discardConfirmOpen}
+        onConfirmDiscard={confirmDiscardClose}
+        onCancelDiscard={cancelDiscardClose}
+        startFreshConfirmOpen={startFreshConfirmOpen}
+        onConfirmStartFresh={confirmStartFresh}
+        onCancelStartFresh={cancelStartFresh}
+        footer={
+          <>
+            <button type="button" className={btnGhost} disabled={busy} onClick={requestClose}>
+              Cancel
+            </button>
+            <div className="flex flex-wrap gap-3">
+              {step > 0 ? (
+                <button type="button" className={btnGhost} disabled={busy} onClick={goBack}>
+                  Back
+                </button>
+              ) : null}
+              {step < STEP_LABELS.length - 1 ? (
+                <button type="button" className={btnContinue} disabled={busy} onClick={goNext}>
+                  Continue
+                </button>
+              ) : (
+                <button type="button" className={btnContinue} disabled={busy} onClick={submit}>
+                  {creating ? "Creating…" : "Create company"}
+                </button>
+              )}
+            </div>
+          </>
+        }
       >
-        <div className="shrink-0 border-b border-zinc-200/90 px-6 pb-4 pt-6 dark:border-zinc-700 sm:px-10 sm:pt-10">
-          <h2 id="register-company-title" className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-            Register company
-          </h2>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            Parent company, registered office, primary contact, commercial terms, then review. Branding is added in rental
-            onboarding.
-          </p>
-          <CompanyStepProgress step={step} labels={STEP_LABELS} />
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 sm:px-10">
           {error ? (
             <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
               {error}
@@ -608,7 +785,7 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
                       <button
                         type="button"
                         className={`${btnGhost} h-11 shrink-0`}
-                        disabled={!draft.terms_catalog_version_id.trim() || pending}
+                        disabled={!draft.terms_catalog_version_id.trim() || busy}
                         onClick={openTermsReview}
                       >
                         Review
@@ -623,12 +800,25 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
                 ) : null}
                 <div className="space-y-1 sm:col-span-2">
                   <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Billing / main email</label>
+                  <label className="mb-2 flex cursor-pointer items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                    <input
+                      type="checkbox"
+                      checked={billingEmailSameAsPrimary}
+                      onChange={(e) => setBillingSameAsPrimary(e.target.checked)}
+                      className="size-4 rounded border-zinc-300 text-rph-rail focus:ring-rph-rail/25 dark:border-zinc-600"
+                    />
+                    Same as primary contact email
+                  </label>
                   <input
                     type="email"
-                    value={draft.billing_email}
+                    value={
+                      billingEmailSameAsPrimary ? draft.primary_contact_email : draft.billing_email
+                    }
                     onChange={(e) => patch("billing_email", e.target.value)}
                     className={inputClass()}
                     placeholder="Accounts mailbox (optional)"
+                    disabled={billingEmailSameAsPrimary}
+                    readOnly={billingEmailSameAsPrimary}
                   />
                   <p className="text-xs text-zinc-500 dark:text-zinc-400">
                     Optional field on the company record. We do not send invoice emails to this address yet; in-app billing
@@ -780,12 +970,25 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
                   />
                 </div>
                 <div className="space-y-1 sm:col-span-2">
+                  <label className="mb-2 flex cursor-pointer items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                    <input
+                      type="checkbox"
+                      checked={signatoryEmailSameAsPrimary}
+                      onChange={(e) => setSignatorySameAsPrimary(e.target.checked)}
+                      className="size-4 rounded border-zinc-300 text-rph-rail focus:ring-rph-rail/25 dark:border-zinc-600"
+                    />
+                    Signatory email same as primary contact email
+                  </label>
                   <input
                     type="email"
-                    value={draft.signatory_email}
+                    value={
+                      signatoryEmailSameAsPrimary ? draft.primary_contact_email : draft.signatory_email
+                    }
                     onChange={(e) => patch("signatory_email", e.target.value)}
                     className={inputClass()}
                     placeholder="Signatory email"
+                    disabled={signatoryEmailSameAsPrimary}
+                    readOnly={signatoryEmailSameAsPrimary}
                   />
                 </div>
               </div>
@@ -884,46 +1087,16 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
               </div>
             </div>
           ) : null}
-        </div>
-
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-zinc-200 px-6 py-4 dark:border-zinc-700 sm:px-10">
-          <button type="button" className={btnGhost} disabled={pending} onClick={close}>
-            Cancel
-          </button>
-          <div className="flex flex-wrap gap-3">
-            {step > 0 ? (
-              <button type="button" className={btnGhost} disabled={pending} onClick={goBack}>
-                Back
-              </button>
-            ) : null}
-            {step < STEP_LABELS.length - 1 ? (
-              <button type="button" className={btnContinue} disabled={pending} onClick={goNext}>
-                Continue
-              </button>
-            ) : (
-              <button type="button" className={btnContinue} disabled={pending} onClick={submit}>
-                {pending ? "Saving…" : "Save company"}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
+      </FormModalShell>
 
       {tcReviewOpen ? (
         <div className="fixed inset-0 z-[320] flex items-center justify-center p-4 sm:p-6">
-          <button
-            type="button"
-            className="absolute inset-0 bg-black/60 backdrop-blur-[1px]"
-            aria-label="Close terms preview"
-            onMouseDown={() => setTcReviewOpen(false)}
-          />
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-[1px]" aria-hidden />
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="tc-review-title"
             className="relative z-[1] flex max-h-[min(85vh,40rem)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-950"
-            onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-zinc-700 sm:px-5">
               <div className="min-w-0">
@@ -962,6 +1135,11 @@ export function RegisterCompanyModal({ open, onOpenChange, onRegistered }: Regis
           </div>
         </div>
       ) : null}
+
+      <ActionStatusOverlay
+        state={createOverlay}
+        onDismiss={() => setCreateOverlay(null)}
+      />
     </>
   );
 }

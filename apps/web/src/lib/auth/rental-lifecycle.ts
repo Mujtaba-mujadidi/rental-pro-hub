@@ -1,32 +1,72 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { cache } from "react";
+import { getCachedCompanyGate } from "@/lib/auth/company-gate-cache";
+import { getAppProfile } from "@/lib/auth/profile";
 import { isSuperAdminEmail } from "@/lib/auth/roles";
+import { createClient } from "@/lib/supabase/server";
 
 export type RentalSessionLifecycle =
   | { kind: "not_rental" }
   | {
       kind: "rental";
       companyId: string;
+      companyName: string | null;
       deletionPhase: string;
       /** True when parent `company_contracts.status` is `active` (signed / legacy bootstrap). */
       contractActive: boolean;
       onboardingComplete: boolean;
     };
 
+async function loadRentalSessionLifecycleFromCompany(
+  companyId: string,
+): Promise<RentalSessionLifecycle> {
+  try {
+    const gate = await getCachedCompanyGate(companyId);
+    return {
+      kind: "rental",
+      companyId,
+      companyName: gate.companyName,
+      deletionPhase: gate.deletionPhase,
+      contractActive: gate.contractActive,
+      onboardingComplete: gate.onboardingComplete,
+    };
+  } catch {
+    // Service role / cache unavailable — fall back to user-scoped client.
+    const supabase = await createClient();
+    const [{ data: co }, { data: cc, error: ccErr }] = await Promise.all([
+      supabase
+        .from("companies")
+        .select("name, deletion_phase, rental_onboarding_completed_at")
+        .eq("id", companyId)
+        .maybeSingle(),
+      supabase.from("company_contracts").select("status").eq("parent_company_id", companyId).maybeSingle(),
+    ]);
+    return {
+      kind: "rental",
+      companyId,
+      companyName: (co?.name as string | null | undefined)?.trim() || null,
+      deletionPhase: (co?.deletion_phase as string) ?? "active",
+      contractActive: !ccErr && (cc?.status as string | undefined) === "active",
+      onboardingComplete: !!co?.rental_onboarding_completed_at,
+    };
+  }
+}
+
 /**
- * Resolves the active parent company and lifecycle fields for a session (RLS-safe).
- * Used by middleware and home-path resolution.
+ * Resolves lifecycle using a caller-provided client (login home redirect / API routes).
+ * Does not depend on React `getAppProfile` cache.
  */
 export async function getRentalSessionLifecycle(
   supabase: SupabaseClient,
   userId: string,
   email: string | undefined,
 ): Promise<RentalSessionLifecycle> {
-  const { data: profile } = await supabase.from("profiles").select("role, company_id").eq("id", userId).maybeSingle();
-
-  if (isSuperAdminEmail(email) || profile?.role === "super_admin") {
+  if (isSuperAdminEmail(email)) {
     return { kind: "not_rental" };
   }
-  if (profile?.role !== "rental_company") {
+
+  const { data: profile } = await supabase.from("profiles").select("role, company_id").eq("id", userId).maybeSingle();
+  if (profile?.role === "super_admin" || profile?.role !== "rental_company") {
     return { kind: "not_rental" };
   }
 
@@ -47,30 +87,25 @@ export async function getRentalSessionLifecycle(
     return { kind: "not_rental" };
   }
 
-  const { data: co } = await supabase
-    .from("companies")
-    .select("deletion_phase, rental_onboarding_completed_at")
-    .eq("id", activeParent)
-    .maybeSingle();
-
-  const deletionPhase = (co?.deletion_phase as string) ?? "active";
-
-  const { data: cc, error: ccErr } = await supabase
-    .from("company_contracts")
-    .select("status")
-    .eq("parent_company_id", activeParent)
-    .maybeSingle();
-
-  const contractActive = !ccErr && (cc?.status as string | undefined) === "active";
-
-  return {
-    kind: "rental",
-    companyId: activeParent,
-    deletionPhase,
-    contractActive,
-    onboardingComplete: !!co?.rental_onboarding_completed_at,
-  };
+  return loadRentalSessionLifecycleFromCompany(activeParent);
 }
+
+/**
+ * One lifecycle load per RSC request. Reuses `getAppProfile` (no duplicate profiles/memberships)
+ * and the cross-request company gate cache.
+ */
+export const getRentalSessionLifecycleCached = cache(async (userId: string, email: string | undefined) => {
+  if (isSuperAdminEmail(email)) {
+    return { kind: "not_rental" } as const;
+  }
+
+  const profile = await getAppProfile();
+  if (!profile || profile.id !== userId || profile.role !== "rental_company" || !profile.company_id) {
+    return { kind: "not_rental" } as const;
+  }
+
+  return loadRentalSessionLifecycleFromCompany(profile.company_id);
+});
 
 /**
  * Enforce rental-area URL policy. Returns a pathname to redirect to, or null if the current path is allowed.

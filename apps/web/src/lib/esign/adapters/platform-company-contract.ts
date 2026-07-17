@@ -2,6 +2,8 @@ import { buildContractPdfDocument } from "@/lib/esign/contract-document-text";
 import { ESIGN_RECIPIENT_ROLE } from "@/lib/esign/types";
 import { createEnvelopeFromPdf } from "@/lib/esign/envelope";
 import { createProfessionalContractPdf } from "@/lib/esign/pdf-generate";
+import { loadCompanyLogoForContractPdf } from "@/lib/companies/company-logo";
+import { revalidateCompanyGate } from "@/lib/auth/company-gate-cache";
 import type { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { notifyCompanyFinanceRoles } from "@/lib/platform-notifications";
 
@@ -63,6 +65,12 @@ export async function preparePlatformCompanyContractEnvelope(
   });
   // Mode chosen on the designer page; start with both blocks until then.
   pdfDoc.signatureMode = "owner_and_recipient";
+
+  const logo = await loadCompanyLogoForContractPdf(admin, companyId);
+  if (logo) {
+    pdfDoc.logoBytes = logo.bytes;
+    pdfDoc.logoContentType = logo.contentType;
+  }
 
   const rendered = await createProfessionalContractPdf(pdfDoc);
   const pdfBytes = rendered.bytes;
@@ -176,6 +184,7 @@ export async function onPlatformCompanyContractSigned(
 
   const parentId = (contract.parent_company_id as string) || envelope.parent_company_id;
   if (parentId) {
+    revalidateCompanyGate(parentId);
     await notifyCompanyFinanceRoles(admin, parentId, "contract_signed", {
       contract_id: contractId,
       envelope_id: envelope.id,

@@ -1,6 +1,7 @@
 import { Option7Shell } from "@/components/shell/option7-shell";
 import { getAppProfile, getSessionUser } from "@/lib/auth/profile";
 import { isSuperAdmin } from "@/lib/auth/roles";
+import { getRentalSessionLifecycleCached } from "@/lib/auth/rental-lifecycle";
 import {
   driverLicenceReviewRequired,
   driverLicenceReviewSummaryLines,
@@ -51,16 +52,12 @@ export default async function MainShellLayout({
     }
   }
 
-  if (variant === "rental_company" && profile.company_id) {
-    const supabase = await createClient();
-    const { data: company } = await supabase
-      .from("companies")
-      .select("name")
-      .eq("id", profile.company_id)
-      .maybeSingle();
+  if (variant === "rental_company") {
+    const life = await getRentalSessionLifecycleCached(user.id, user.email);
     const personal =
       profile.display_name?.trim() || user.email?.split("@")[0]?.trim() || "User";
-    accountDisplayName = company?.name?.trim() ? `${personal} · ${company.name.trim()}` : personal;
+    accountDisplayName =
+      life.kind === "rental" && life.companyName ? `${personal} · ${life.companyName}` : personal;
   }
 
   return (

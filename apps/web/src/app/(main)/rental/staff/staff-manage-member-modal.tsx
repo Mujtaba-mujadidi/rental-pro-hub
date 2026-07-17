@@ -2,7 +2,7 @@
 
 import * as Select from "@radix-ui/react-select";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import {
   setMembershipSubcompanyScopeAction,
   updateMembershipRoleAction,
@@ -10,6 +10,8 @@ import {
 } from "@/app/actions/rental-staff";
 import type { CompanyMembershipRole } from "@/lib/auth/profile";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { FormModalShell } from "@/components/forms/form-modal-shell";
+import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
 
 export type StaffMember = {
   id: string;
@@ -249,24 +251,85 @@ export function StaffManageMemberModal({
   const [roleConfirm, setRoleConfirm] = useState<RoleConfirmState | null>(null);
   const [lastOwnerConfirm, setLastOwnerConfirm] = useState<RoleConfirmState | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    setTab("access");
+  type ManageSnapshot = {
+    tab: TabId;
+    localStatus: StaffMember["status"];
+    accessMode: "all" | "explicit";
+    selectedSubs: string[];
+  };
+
+  const baseline = useMemo<ManageSnapshot>(() => {
+    if (!member) {
+      return { tab: "access", localStatus: "active", accessMode: "all", selectedSubs: [] };
+    }
+    const explicit = [...new Set(savedSubcompanyIds)].sort();
+    const hasExplicit = explicit.length > 0;
+    return {
+      tab: "access",
+      localStatus: member.status,
+      accessMode: member.subcompany_scope === "explicit" || hasExplicit ? "explicit" : "all",
+      selectedSubs: explicit,
+    };
+  }, [member, savedSubcompanyIds]);
+
+  const snapshot = useMemo<ManageSnapshot>(
+    () => ({
+      tab,
+      localStatus,
+      accessMode,
+      selectedSubs: [...selectedSubs].sort(),
+    }),
+    [tab, localStatus, accessMode, selectedSubs],
+  );
+
+  const applySnapshot = useCallback((s: ManageSnapshot) => {
+    setTab(s.tab);
+    setLocalStatus(s.localStatus);
+    setAccessMode(s.accessMode);
+    setSelectedSubs(s.selectedSubs);
     setError(null);
     setOk(null);
     setRoleConfirm(null);
     setLastOwnerConfirm(null);
-  }, [open, member?.id]);
+  }, []);
+
+  const draftKey = member ? `staff-manage:${member.id}` : "staff-manage:none";
+
+  const {
+    saveNotice,
+    hasStoredDraft,
+    isDirty,
+    saveProgress,
+    requestClose,
+    requestStartFresh,
+    discardConfirmOpen,
+    confirmDiscardClose,
+    cancelDiscardClose,
+    startFreshConfirmOpen,
+    confirmStartFresh,
+    cancelStartFresh,
+    clearAfterSuccess,
+  } = useFormModalDraft({
+    draftKey,
+    open: open && Boolean(member),
+    snapshot,
+    baseline,
+    pending,
+    applySnapshot,
+    onClose: () => onOpenChange(false),
+  });
 
   useEffect(() => {
+    if (!open) return;
+    setRoleConfirm(null);
+    setLastOwnerConfirm(null);
+  }, [open, member?.id]);
+
+  // Keep localRole synced to server member (role edits go through confirm, not draft).
+  useEffect(() => {
     if (!member) return;
-    setLocalStatus(member.status);
     setLocalRole(member.role);
-    const explicit = [...new Set(savedSubcompanyIds)];
-    const hasExplicit = explicit.length > 0;
-    setAccessMode(member.subcompany_scope === "explicit" || hasExplicit ? "explicit" : "all");
-    setSelectedSubs(explicit);
-  }, [member, savedSubcompanyIds]);
+  }, [member]);
 
   const runRoleUpdate = useCallback(
     (state: RoleConfirmState) => {
@@ -328,10 +391,11 @@ export function StaffManageMemberModal({
           return;
         }
         setOk("Status updated.");
+        clearAfterSuccess();
         router.refresh();
       })();
     });
-  }, [member, localStatus, router]);
+  }, [member, localStatus, router, clearAfterSuccess]);
 
   const saveAccess = useCallback(() => {
     if (!member || member.role === "owner" || member.role === "admin") return;
@@ -347,10 +411,11 @@ export function StaffManageMemberModal({
           return;
         }
         setOk("Access updated.");
+        clearAfterSuccess();
         router.refresh();
       })();
     });
-  }, [member, accessMode, selectedSubs, router]);
+  }, [member, accessMode, selectedSubs, router, clearAfterSuccess]);
 
   const toggleSub = useCallback((subId: string) => {
     setSelectedSubs((cur) => {
@@ -378,50 +443,59 @@ export function StaffManageMemberModal({
 
   return (
     <>
-      {open ? (
-        <div className="fixed inset-0 z-[280] flex items-center justify-center p-4 sm:p-6">
+      <FormModalShell
+        open={open}
+        titleId="staff-manage-title"
+        title={member.display_name?.trim() || "Team member"}
+        description={
+          <>
+            {member.email ?? "Email unavailable"}
+            <span className="mx-2 text-slate-400">·</span>
+            <span className="capitalize">{member.role}</span>
+            <span className="mx-2 text-slate-400">·</span>
+            <span className="capitalize">{member.status}</span>
+          </>
+        }
+        headerExtra={
+          <div className="mt-4 flex gap-4">
+            <button type="button" className={tab === "status" ? tabBtnActive : tabBtn} onClick={() => setTab("status")}>
+              Status
+            </button>
+            <button type="button" className={tab === "role" ? tabBtnActive : tabBtn} onClick={() => setTab("role")}>
+              Role
+            </button>
+            <button type="button" className={tab === "access" ? tabBtnActive : tabBtn} onClick={() => setTab("access")}>
+              Access
+            </button>
+          </div>
+        }
+        pending={pending}
+        zClass="z-[280]"
+        maxWidthClass="max-w-2xl"
+        panelClassName="relative z-[1] flex h-[min(90vh,720px)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+        saveNotice={saveNotice}
+        hasStoredDraft={hasStoredDraft}
+        isDirty={isDirty}
+        onSaveProgress={saveProgress}
+        onRequestClose={requestClose}
+        onRequestStartFresh={requestStartFresh}
+        discardConfirmOpen={discardConfirmOpen}
+        onConfirmDiscard={confirmDiscardClose}
+        onCancelDiscard={cancelDiscardClose}
+        startFreshConfirmOpen={startFreshConfirmOpen}
+        onConfirmStartFresh={confirmStartFresh}
+        onCancelStartFresh={cancelStartFresh}
+        footer={
           <button
             type="button"
-            className="absolute inset-0 bg-black/50 backdrop-blur-[1px]"
-            aria-label="Close dialog"
+            className="text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
             disabled={pending}
-            onMouseDown={() => {
-              if (!pending) onOpenChange(false);
-            }}
-          />
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="staff-manage-title"
-            className="relative z-[1] flex h-[min(90vh,720px)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
-            onMouseDown={(e) => e.stopPropagation()}
+            onClick={requestClose}
           >
-            <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-700">
-              <h2 id="staff-manage-title" className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-                {member.display_name?.trim() || "Team member"}
-              </h2>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-                {member.email ?? "Email unavailable"}
-                <span className="mx-2 text-slate-400">·</span>
-                <span className="capitalize">{member.role}</span>
-                <span className="mx-2 text-slate-400">·</span>
-                <span className="capitalize">{member.status}</span>
-              </p>
-            </div>
-
-            <div className="flex gap-4 border-b border-slate-200 px-5 pt-3 dark:border-slate-700">
-              <button type="button" className={tab === "status" ? tabBtnActive : tabBtn} onClick={() => setTab("status")}>
-                Status
-              </button>
-              <button type="button" className={tab === "role" ? tabBtnActive : tabBtn} onClick={() => setTab("role")}>
-                Role
-              </button>
-              <button type="button" className={tab === "access" ? tabBtnActive : tabBtn} onClick={() => setTab("access")}>
-                Access
-              </button>
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            Close
+          </button>
+        }
+      >
               {error ? <p className="rph-alert-error mb-3 text-sm">{error}</p> : null}
               {ok ? (
                 <p className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/35 dark:text-emerald-100">
@@ -602,21 +676,7 @@ export function StaffManageMemberModal({
                   )}
                 </div>
               ) : null}
-            </div>
-
-            <div className="border-t border-slate-200 px-5 py-3 dark:border-slate-700">
-              <button
-                type="button"
-                className="text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
-                disabled={pending}
-                onClick={() => onOpenChange(false)}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      </FormModalShell>
 
       {roleConfirm && roleDialogMeta ? (
         <ConfirmDialog

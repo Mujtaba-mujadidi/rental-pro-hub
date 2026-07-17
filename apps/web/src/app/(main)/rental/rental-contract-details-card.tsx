@@ -1,8 +1,10 @@
 "use client";
 
-import DOMPurify from "dompurify";
-import { useMemo, useState, useTransition } from "react";
+import DOMPurify from "isomorphic-dompurify";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import { requestRentalCompanyContractChangeAction } from "@/app/actions/rental-company-contract";
+import { FormModalShell } from "@/components/forms/form-modal-shell";
+import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
 import { rentalContractCopy } from "@/lib/rental-contract-copy";
 
 function inputClass() {
@@ -36,25 +38,31 @@ type TermsSnap = {
   body?: unknown;
 };
 
-export function RentalContractDetailsCard({
-  company,
-  termsSnapshot,
-  hasPendingChange,
-  canRequestContractChange,
-}: {
-  company: CompanyDetails;
-  /** Frozen terms from the signed contract version (not the live catalog). */
-  termsSnapshot: Record<string, unknown> | null;
-  hasPendingChange: boolean;
-  /** Matches RLS: only owner/admin may insert contract change requests. */
-  canRequestContractChange: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [ok, setOk] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-  const [draft, setDraft] = useState({
-    transition_type: "detail_change" as "detail_change" | "new_legal_entity",
+type ChangeDraft = {
+  transition_type: "detail_change" | "new_legal_entity";
+  name: string;
+  legal_name: string;
+  company_number: string;
+  registered_address_line1: string;
+  registered_address_line2: string;
+  registered_town: string;
+  registered_county: string;
+  registered_postcode: string;
+  country: string;
+  primary_contact_first_name: string;
+  primary_contact_last_name: string;
+  primary_contact_dob: string;
+  primary_contact_phone: string;
+  primary_contact_email: string;
+  notes: string;
+  signatory_name: string;
+  signatory_title: string;
+  signatory_email: string;
+};
+
+function companyBaseline(company: CompanyDetails): ChangeDraft {
+  return {
+    transition_type: "detail_change",
     name: company.name ?? "",
     legal_name: company.legal_name ?? "",
     company_number: company.company_number ?? "",
@@ -73,6 +81,56 @@ export function RentalContractDetailsCard({
     signatory_name: "",
     signatory_title: "",
     signatory_email: "",
+  };
+}
+
+export function RentalContractDetailsCard({
+  company,
+  termsSnapshot,
+  hasPendingChange,
+  canRequestContractChange,
+}: {
+  company: CompanyDetails;
+  /** Frozen terms from the signed contract version (not the live catalog). */
+  termsSnapshot: Record<string, unknown> | null;
+  hasPendingChange: boolean;
+  /** Matches RLS: only owner/admin may insert contract change requests. */
+  canRequestContractChange: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const baseline = useMemo(() => companyBaseline(company), [company]);
+  const [draft, setDraft] = useState<ChangeDraft>(baseline);
+
+  const applySnapshot = useCallback((s: ChangeDraft) => {
+    setDraft(s);
+    setError(null);
+  }, []);
+
+  const {
+    saveNotice,
+    hasStoredDraft,
+    isDirty,
+    saveProgress,
+    requestClose,
+    requestStartFresh,
+    discardConfirmOpen,
+    confirmDiscardClose,
+    cancelDiscardClose,
+    startFreshConfirmOpen,
+    confirmStartFresh,
+    cancelStartFresh,
+    clearAfterSuccess,
+  } = useFormModalDraft({
+    draftKey: `contract-change:${company.id}`,
+    open,
+    snapshot: draft,
+    baseline,
+    pending,
+    applySnapshot,
+    onClose: () => setOpen(false),
   });
 
   const contractStatusLabel = useMemo(
@@ -85,7 +143,7 @@ export function RentalContractDetailsCard({
     [hasPendingChange, company.contract_status],
   );
 
-  function patch<K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) {
+  function patch<K extends keyof ChangeDraft>(key: K, value: ChangeDraft[K]) {
     setDraft((d) => ({ ...d, [key]: value }));
   }
 
@@ -93,7 +151,7 @@ export function RentalContractDetailsCard({
     setError(null);
     setOk(null);
     const fd = new FormData();
-    (Object.keys(draft) as Array<keyof typeof draft>).forEach((k) => fd.set(k, draft[k]));
+    (Object.keys(draft) as Array<keyof ChangeDraft>).forEach((k) => fd.set(k, draft[k]));
     startTransition(() => {
       void (async () => {
         const res = await requestRentalCompanyContractChangeAction(fd);
@@ -102,6 +160,7 @@ export function RentalContractDetailsCard({
           return;
         }
         setOk(rentalContractCopy.legalChangeAfterSignature);
+        clearAfterSuccess();
         setOpen(false);
       })();
     });
@@ -185,20 +244,46 @@ export function RentalContractDetailsCard({
         </p>
       ) : null}
 
-      {open ? (
-        <div className="fixed inset-0 z-[310] flex items-center justify-center p-4 sm:p-6">
-          <button type="button" className="absolute inset-0 bg-black/50" onMouseDown={() => setOpen(false)} />
-          <div
-            role="dialog"
-            aria-modal="true"
-            className="relative z-[1] w-full max-w-3xl rounded-xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-700 dark:bg-zinc-950"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Request contract change</h3>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              {rentalContractCopy.legalChangeAfterSignature}
-            </p>
-            <div className="mt-4 space-y-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-600">
+      <FormModalShell
+        open={open}
+        titleId="contract-change-title"
+        title="Request contract change"
+        description={rentalContractCopy.legalChangeAfterSignature}
+        pending={pending}
+        saveNotice={saveNotice}
+        hasStoredDraft={hasStoredDraft}
+        isDirty={isDirty}
+        onSaveProgress={saveProgress}
+        onRequestClose={requestClose}
+        onRequestStartFresh={requestStartFresh}
+        discardConfirmOpen={discardConfirmOpen}
+        onConfirmDiscard={confirmDiscardClose}
+        onCancelDiscard={cancelDiscardClose}
+        startFreshConfirmOpen={startFreshConfirmOpen}
+        onConfirmStartFresh={confirmStartFresh}
+        onCancelStartFresh={cancelStartFresh}
+        footer={
+          <>
+            <button
+              type="button"
+              className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium dark:border-zinc-600"
+              disabled={pending}
+              onClick={requestClose}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="rounded-lg bg-rph-rail px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              disabled={pending}
+              onClick={submitRequest}
+            >
+              {pending ? "Submitting…" : "Submit change request"}
+            </button>
+          </>
+        }
+      >
+            <div className="space-y-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-600">
               <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Type of change</p>
               <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
                 <input
@@ -238,17 +323,7 @@ export function RentalContractDetailsCard({
               <input value={draft.signatory_title} onChange={(e) => patch("signatory_title", e.target.value)} className={inputClass()} placeholder="Signatory title (optional)" />
               <input type="email" value={draft.signatory_email} onChange={(e) => patch("signatory_email", e.target.value)} className={`${inputClass()} sm:col-span-2`} placeholder="Signatory email (optional)" />
             </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium dark:border-zinc-600" onClick={() => setOpen(false)}>
-                Cancel
-              </button>
-              <button type="button" className="rounded-lg bg-rph-rail px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={pending} onClick={submitRequest}>
-                {pending ? "Submitting…" : "Submit change request"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      </FormModalShell>
     </div>
   );
 }

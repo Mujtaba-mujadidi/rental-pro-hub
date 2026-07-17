@@ -1,7 +1,9 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState, useTransition } from "react";
+import { Fragment, useCallback, useMemo, useState, useTransition } from "react";
 import { registerSubcompanyAction } from "@/app/actions/rental-subcompanies";
+import { FormModalShell } from "@/components/forms/form-modal-shell";
+import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
 
 const STEP_LABELS = ["Company", "Registered office", "Primary contact", "Review"] as const;
 
@@ -92,6 +94,11 @@ const initialDraft = {
   country: "GB",
 };
 
+type SubcompanySnapshot = { step: number; draft: typeof initialDraft };
+
+const SUBCOMPANY_DRAFT_KEY = "register-subcompany";
+const subcompanyBaseline: SubcompanySnapshot = { step: 0, draft: initialDraft };
+
 export function RegisterSubcompanyModal({
   open,
   onOpenChange,
@@ -106,20 +113,41 @@ export function RegisterSubcompanyModal({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  useEffect(() => {
-    if (!open) return;
-    setStep(0);
+  const snapshot = useMemo<SubcompanySnapshot>(() => ({ step, draft }), [step, draft]);
+
+  const applySnapshot = useCallback((s: SubcompanySnapshot) => {
+    setStep(s.step);
+    setDraft({ ...s.draft });
     setError(null);
-    setDraft({ ...initialDraft });
-  }, [open]);
+  }, []);
+
+  const {
+    saveNotice,
+    hasStoredDraft,
+    isDirty,
+    saveProgress,
+    requestClose,
+    requestStartFresh,
+    discardConfirmOpen,
+    confirmDiscardClose,
+    cancelDiscardClose,
+    startFreshConfirmOpen,
+    confirmStartFresh,
+    cancelStartFresh,
+    clearAfterSuccess,
+  } = useFormModalDraft({
+    draftKey: SUBCOMPANY_DRAFT_KEY,
+    open,
+    snapshot,
+    baseline: subcompanyBaseline,
+    pending,
+    applySnapshot,
+    onClose: () => onOpenChange(false),
+  });
 
   const patch = useCallback(<K extends keyof typeof initialDraft>(field: K, value: (typeof initialDraft)[K]) => {
     setDraft((d) => ({ ...d, [field]: value }));
   }, []);
-
-  const close = useCallback(() => {
-    if (!pending) onOpenChange(false);
-  }, [pending, onOpenChange]);
 
   const canGoNext = useCallback(() => {
     if (step === 0) return draft.name.trim().length > 0;
@@ -161,130 +189,36 @@ export function RegisterSubcompanyModal({
           setError(res.error);
           return;
         }
+        clearAfterSuccess();
         onRegistered?.();
         onOpenChange(false);
       })();
     });
-  }, [draft, onOpenChange, onRegistered]);
-
-  if (!open) return null;
+  }, [draft, onOpenChange, onRegistered, clearAfterSuccess]);
 
   return (
-    <div className="fixed inset-0 z-[310] flex items-center justify-center p-4 sm:p-6">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/50 backdrop-blur-[1px]"
-        aria-label="Close dialog"
-        disabled={pending}
-        onMouseDown={() => close()}
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="register-subcompany-title"
-        className="relative z-[1] flex max-h-[min(90vh,52rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-950"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="shrink-0 border-b border-zinc-200/90 px-6 pb-4 pt-6 dark:border-zinc-700 sm:px-10 sm:pt-10">
-          <h2 id="register-subcompany-title" className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-            Register subcompany
-          </h2>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            Add a subcompany record under your rental company. This does not create a login account.
-          </p>
-          <StepProgress step={step} />
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 sm:px-10">
-          {error ? <p className="mb-4 rph-alert-error">{error}</p> : null}
-
-          {step === 0 ? (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1 sm:col-span-2">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Company name *</label>
-                <input value={draft.name} onChange={(e) => patch("name", e.target.value)} className={inputClass()} />
-              </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Legal name</label>
-                <input value={draft.legal_name} onChange={(e) => patch("legal_name", e.target.value)} className={inputClass()} />
-              </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Company number</label>
-                <input value={draft.company_number} onChange={(e) => patch("company_number", e.target.value)} className={inputClass()} />
-              </div>
-            </div>
-          ) : null}
-
-          {step === 1 ? (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1 sm:col-span-2">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Address line 1</label>
-                <input value={draft.registered_address_line1} onChange={(e) => patch("registered_address_line1", e.target.value)} className={inputClass()} />
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Address line 2</label>
-                <input value={draft.registered_address_line2} onChange={(e) => patch("registered_address_line2", e.target.value)} className={inputClass()} />
-              </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Town / city</label>
-                <input value={draft.registered_town} onChange={(e) => patch("registered_town", e.target.value)} className={inputClass()} />
-              </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">County</label>
-                <input value={draft.registered_county} onChange={(e) => patch("registered_county", e.target.value)} className={inputClass()} />
-              </div>
-              <div className="space-y-1 sm:max-w-xs">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Postcode</label>
-                <input value={draft.registered_postcode} onChange={(e) => patch("registered_postcode", e.target.value)} className={inputClass()} />
-              </div>
-            </div>
-          ) : null}
-
-          {step === 2 ? (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">First name *</label>
-                <input value={draft.primary_contact_first_name} onChange={(e) => patch("primary_contact_first_name", e.target.value)} className={inputClass()} />
-              </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Last name *</label>
-                <input value={draft.primary_contact_last_name} onChange={(e) => patch("primary_contact_last_name", e.target.value)} className={inputClass()} />
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Date of birth *</label>
-                <input type="date" value={draft.primary_contact_dob} onChange={(e) => patch("primary_contact_dob", e.target.value)} className={inputClass()} />
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Phone number *</label>
-                <input type="tel" value={draft.primary_contact_phone} onChange={(e) => patch("primary_contact_phone", e.target.value)} className={inputClass()} />
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Email *</label>
-                <input type="email" value={draft.primary_contact_email} onChange={(e) => patch("primary_contact_email", e.target.value)} className={inputClass()} />
-              </div>
-            </div>
-          ) : null}
-
-          {step === 3 ? (
-            <div className="space-y-4">
-              <div className="space-y-1 sm:max-w-xs">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Status</label>
-                <select value={draft.status} onChange={(e) => patch("status", e.target.value)} className={inputClass()}>
-                  <option value="active">Active</option>
-                  <option value="pending">Pending</option>
-                  <option value="inactive">Inactive</option>
-                </select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Internal notes</label>
-                <textarea value={draft.notes} onChange={(e) => patch("notes", e.target.value)} rows={2} className={inputClass()} />
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-zinc-200 px-6 py-4 dark:border-zinc-700 sm:px-10">
-          <button type="button" className={btnGhost} disabled={pending} onClick={close}>
+    <FormModalShell
+      open={open}
+      titleId="register-subcompany-title"
+      title="Register subcompany"
+      description="Add a subcompany record under your rental company. This does not create a login account."
+      headerExtra={<StepProgress step={step} />}
+      pending={pending}
+      saveNotice={saveNotice}
+      hasStoredDraft={hasStoredDraft}
+      isDirty={isDirty}
+      onSaveProgress={saveProgress}
+      onRequestClose={requestClose}
+      onRequestStartFresh={requestStartFresh}
+      discardConfirmOpen={discardConfirmOpen}
+      onConfirmDiscard={confirmDiscardClose}
+      onCancelDiscard={cancelDiscardClose}
+      startFreshConfirmOpen={startFreshConfirmOpen}
+      onConfirmStartFresh={confirmStartFresh}
+      onCancelStartFresh={cancelStartFresh}
+      footer={
+        <>
+          <button type="button" className={btnGhost} disabled={pending} onClick={requestClose}>
             Cancel
           </button>
           <div className="flex flex-wrap gap-3">
@@ -308,8 +242,129 @@ export function RegisterSubcompanyModal({
               </button>
             )}
           </div>
+        </>
+      }
+    >
+      {error ? <p className="mb-4 rph-alert-error">{error}</p> : null}
+
+      {step === 0 ? (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1 sm:col-span-2">
+            <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Company name *</label>
+            <input value={draft.name} onChange={(e) => patch("name", e.target.value)} className={inputClass()} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Legal name</label>
+            <input value={draft.legal_name} onChange={(e) => patch("legal_name", e.target.value)} className={inputClass()} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Company number</label>
+            <input value={draft.company_number} onChange={(e) => patch("company_number", e.target.value)} className={inputClass()} />
+          </div>
         </div>
-      </div>
-    </div>
+      ) : null}
+
+      {step === 1 ? (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1 sm:col-span-2">
+            <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Address line 1</label>
+            <input
+              value={draft.registered_address_line1}
+              onChange={(e) => patch("registered_address_line1", e.target.value)}
+              className={inputClass()}
+            />
+          </div>
+          <div className="space-y-1 sm:col-span-2">
+            <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Address line 2</label>
+            <input
+              value={draft.registered_address_line2}
+              onChange={(e) => patch("registered_address_line2", e.target.value)}
+              className={inputClass()}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Town / city</label>
+            <input value={draft.registered_town} onChange={(e) => patch("registered_town", e.target.value)} className={inputClass()} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">County</label>
+            <input value={draft.registered_county} onChange={(e) => patch("registered_county", e.target.value)} className={inputClass()} />
+          </div>
+          <div className="space-y-1 sm:max-w-xs">
+            <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Postcode</label>
+            <input
+              value={draft.registered_postcode}
+              onChange={(e) => patch("registered_postcode", e.target.value)}
+              className={inputClass()}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {step === 2 ? (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">First name *</label>
+            <input
+              value={draft.primary_contact_first_name}
+              onChange={(e) => patch("primary_contact_first_name", e.target.value)}
+              className={inputClass()}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Last name *</label>
+            <input
+              value={draft.primary_contact_last_name}
+              onChange={(e) => patch("primary_contact_last_name", e.target.value)}
+              className={inputClass()}
+            />
+          </div>
+          <div className="space-y-1 sm:col-span-2">
+            <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Date of birth *</label>
+            <input
+              type="date"
+              value={draft.primary_contact_dob}
+              onChange={(e) => patch("primary_contact_dob", e.target.value)}
+              className={inputClass()}
+            />
+          </div>
+          <div className="space-y-1 sm:col-span-2">
+            <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Phone number *</label>
+            <input
+              type="tel"
+              value={draft.primary_contact_phone}
+              onChange={(e) => patch("primary_contact_phone", e.target.value)}
+              className={inputClass()}
+            />
+          </div>
+          <div className="space-y-1 sm:col-span-2">
+            <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Email *</label>
+            <input
+              type="email"
+              value={draft.primary_contact_email}
+              onChange={(e) => patch("primary_contact_email", e.target.value)}
+              className={inputClass()}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {step === 3 ? (
+        <div className="space-y-4">
+          <div className="space-y-1 sm:max-w-xs">
+            <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Status</label>
+            <select value={draft.status} onChange={(e) => patch("status", e.target.value)} className={inputClass()}>
+              <option value="active">Active</option>
+              <option value="pending">Pending</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Internal notes</label>
+            <textarea value={draft.notes} onChange={(e) => patch("notes", e.target.value)} rows={2} className={inputClass()} />
+          </div>
+        </div>
+      ) : null}
+    </FormModalShell>
   );
 }

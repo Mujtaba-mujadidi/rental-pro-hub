@@ -1,13 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
-import { redirectIfRentalOnboardingIncomplete } from "@/lib/auth/rental-onboarding";
 import { RentalContractDetailsCard } from "./rental-contract-details-card";
 import { RentalDisplayNameSetting } from "./rental-display-name-setting";
 
 export default async function RentalCompanyHomePage() {
   const { profile } = await requireRentalCompanyArea();
   const user = await getSessionUser();
-  await redirectIfRentalOnboardingIncomplete(profile.company_id);
   const supabase = await createClient();
   const { data: company } = await supabase
     .from("companies")

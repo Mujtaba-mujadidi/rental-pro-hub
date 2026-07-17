@@ -49,22 +49,14 @@ export function ConfirmDialog({
       : `${btnRow} bg-rph-rail text-white shadow-sm hover:bg-rph-rail-hover dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer`;
 
   return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 sm:p-6">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/50 backdrop-blur-[1px]"
-        aria-label="Close dialog"
-        disabled={pending}
-        onMouseDown={() => {
-          if (!pending) onCancel();
-        }}
-      />
+    <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 sm:p-6">
+      {/* Backdrop does not dismiss — avoid accidental cancel */}
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-[1px]" aria-hidden />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="rph-confirm-title"
         className="relative z-[1] w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
-        onMouseDown={(e) => e.stopPropagation()}
       >
         <h2 id="rph-confirm-title" className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
           {title}

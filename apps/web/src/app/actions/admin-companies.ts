@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { revalidateCompanyGate } from "@/lib/auth/company-gate-cache";
 import { requireSuperAdmin } from "@/lib/auth/profile";
 import { useLegacyBootstrapContractSigning } from "@/lib/esign/legacy-bootstrap";
 import { preparePlatformCompanyContractEnvelope } from "@/lib/esign/adapters/platform-company-contract";
@@ -10,6 +11,11 @@ import { runPermanentCompanyPurgeWithProgress } from "@/lib/companies/permanent-
 import { createClient as createSupabasePublicClient } from "@supabase/supabase-js";
 import { resolveSupabasePublishableEnv } from "@/lib/supabase/env";
 import { getPublicSiteUrl } from "@/lib/supabase/site-url";
+import { companyIdentitiesMatch } from "@/lib/companies/company-identity";
+import {
+  ensureRentalCompanyMembership,
+  findAuthUserIdByEmail,
+} from "@/lib/auth/ensure-rental-membership";
 
 function nullIfEmpty(v: FormDataEntryValue | null): string | null {
   if (v == null) return null;
@@ -29,6 +35,44 @@ function isNextRedirectError(e: unknown): boolean {
   if (typeof e !== "object" || e === null || !("digest" in e)) return false;
   const d = (e as { digest: unknown }).digest;
   return typeof d === "string" && d.startsWith("NEXT_REDIRECT");
+}
+
+/** Convert / attach an Auth user as the company primary contact (owner). */
+async function promoteExistingUserToCompanyPrimary(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  companyId: string,
+  userId: string,
+  row: {
+    primary_contact_first_name: string | null;
+    primary_contact_last_name: string | null;
+  },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const first = row.primary_contact_first_name?.trim() || "";
+  const last = row.primary_contact_last_name?.trim() || "";
+  const ensured = await ensureRentalCompanyMembership(admin, {
+    userId,
+    companyId,
+    membershipRole: "owner",
+    companyRole: "admin",
+    firstName: first,
+    lastName: last,
+    displayName: [first, last].filter(Boolean).join(" ").trim() || "Company admin",
+    subcompanyScope: "all",
+  });
+  if (!ensured.ok) return ensured;
+
+  const now = new Date().toISOString();
+  const { error: upErr } = await admin
+    .from("companies")
+    .update({
+      primary_contact_user_id: userId,
+      invite_last_sent_at: now,
+      pending_primary_invite_after_contract_signed: false,
+    })
+    .eq("id", companyId);
+  if (upErr) return { ok: false, error: upErr.message };
+
+  return { ok: true };
 }
 
 async function sendCompanyPrimaryInviteForCompany(
@@ -61,6 +105,7 @@ async function sendCompanyPrimaryInviteForCompany(
         company_id: companyId,
         first_name: row.primary_contact_first_name ?? "",
         last_name: row.primary_contact_last_name ?? "",
+        rental_membership_role: "owner",
       },
     });
     inv = out.data;
@@ -73,36 +118,32 @@ async function sendCompanyPrimaryInviteForCompany(
   if (invErr) {
     const m = invErr.message;
     if (/already registered|already been registered|user already exists/i.test(m)) {
-      return {
-        ok: false,
-        error:
-          "This email already has an account. They can use “Forgot password” on the login page, or change the primary contact email on the company record.",
-      };
+      const existingId = await findAuthUserIdByEmail(admin, emailRaw);
+      if (!existingId) {
+        return {
+          ok: false,
+          error:
+            "This email already has an account, but it could not be linked. Ask them to use Forgot password, or change the primary contact email.",
+        };
+      }
+      // Account already has a password (e.g. accidental driver signup). Promote to rental owner.
+      return promoteExistingUserToCompanyPrimary(admin, companyId, existingId, row);
     }
     return { ok: false, error: m };
   }
 
-  const uid = inv?.user?.id;
-  const now = new Date().toISOString();
-
-  try {
-    const { error: upErr } = await admin
-      .from("companies")
-      .update({
-        ...(uid ? { primary_contact_user_id: uid } : {}),
-        invite_last_sent_at: now,
-        pending_primary_invite_after_contract_signed: false,
-      })
-      .eq("id", companyId);
-
-    if (upErr) {
-      return { ok: false, error: upErr.message };
-    }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not update company after invite." };
+  // Critical: do not trust handle_new_user alone — invite metadata is often missing on INSERT,
+  // which previously defaulted the user to profiles.role = driver.
+  const uid = inv?.user?.id ?? (await findAuthUserIdByEmail(admin, emailRaw));
+  if (!uid) {
+    return {
+      ok: false,
+      error:
+        "Invite may have been emailed, but the account could not be linked as company admin. Use Resend invite.",
+    };
   }
 
-  return { ok: true };
+  return promoteExistingUserToCompanyPrimary(admin, companyId, uid, row);
 }
 
 export async function sendCompanyPrimaryInviteAction(companyId: string): Promise<SendCompanyInviteResult> {
@@ -333,6 +374,42 @@ export async function getRegisterCompanyInviteDefaultsAction(): Promise<
   }
 }
 
+export async function listCompanyIdentitiesAction(): Promise<
+  | {
+      ok: true;
+      companies: { id: string; name: string; primary_contact_email: string | null; company_number: string | null }[];
+    }
+  | { ok: false; error: string }
+> {
+  try {
+    await requireSuperAdmin();
+  } catch (e) {
+    if (isNextRedirectError(e)) throw e;
+    return { ok: false, error: "Not authorised." };
+  }
+
+  let admin: ReturnType<typeof createSupabaseAdminClient>;
+  try {
+    admin = createSupabaseAdminClient();
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Server configuration error." };
+  }
+
+  const { data, error } = await admin
+    .from("companies")
+    .select("id, name, primary_contact_email, company_number");
+  if (error) return { ok: false, error: error.message };
+  return {
+    ok: true,
+    companies: (data ?? []).map((r) => ({
+      id: r.id as string,
+      name: String(r.name ?? ""),
+      primary_contact_email: (r.primary_contact_email as string | null) ?? null,
+      company_number: (r.company_number as string | null) ?? null,
+    })),
+  };
+}
+
 export async function registerCompanyAction(formData: FormData): Promise<RegisterCompanyResult> {
   const { user } = await requireSuperAdmin();
 
@@ -387,6 +464,43 @@ export async function registerCompanyAction(formData: FormData): Promise<Registe
   const regCounty = nullIfEmpty(formData.get("registered_county"));
   const country = nullIfEmpty(formData.get("country")) ?? "GB";
   const notes = nullIfEmpty(formData.get("notes"));
+
+  // Prevent duplicate companies (name, primary contact email, or company number).
+  const { data: existingRows, error: existingErr } = await admin
+    .from("companies")
+    .select("id, name, primary_contact_email, company_number");
+  if (existingErr) {
+    return { ok: false, error: existingErr.message };
+  }
+  const proposed = {
+    name,
+    primary_contact_email: contactEmail,
+    company_number: companyNumber,
+  };
+  const duplicate = (existingRows ?? []).find((row) =>
+    companyIdentitiesMatch(proposed, {
+      name: row.name ?? "",
+      primary_contact_email: row.primary_contact_email,
+      company_number: row.company_number,
+    }),
+  );
+  if (duplicate) {
+    const why =
+      contactEmail &&
+      duplicate.primary_contact_email &&
+      contactEmail.trim().toLowerCase() === String(duplicate.primary_contact_email).trim().toLowerCase()
+        ? "primary contact email"
+        : companyNumber &&
+            duplicate.company_number &&
+            companyNumber.trim().toUpperCase().replace(/\s+/g, "") ===
+              String(duplicate.company_number).trim().toUpperCase().replace(/\s+/g, "")
+          ? "company number"
+          : "company name";
+    return {
+      ok: false,
+      error: `A company with this ${why} already exists (${duplicate.name}). Open that company instead of creating a duplicate.`,
+    };
+  }
 
   const termsCatalogVersionIdEarly = nullIfEmpty(formData.get("terms_catalog_version_id"));
   const { count: publishedTermsCount, error: termsCountErr } = await admin
@@ -665,6 +779,7 @@ export async function startCompanyOffboardingAction(companyId: string): Promise<
       .eq("parent_company_id", trimmed);
     if (termErr) console.warn("[startCompanyOffboardingAction] terminate contract", termErr.message);
 
+    revalidateCompanyGate(trimmed);
     revalidatePath("/super-admin/companies");
     return { ok: true };
   } catch (e) {
@@ -724,6 +839,7 @@ export async function reactivateCompanyAction(companyId: string): Promise<Compan
       .eq("parent_company_id", trimmed);
     if (ctrErr) console.warn("[reactivateCompanyAction] contract reset", ctrErr.message);
 
+    revalidateCompanyGate(trimmed);
     revalidatePath("/super-admin/companies");
     revalidatePath("/rental");
     return { ok: true };
@@ -884,6 +1000,7 @@ export async function applyLatestCompanyContractChangeAction(
     });
     if (rpcErr) return { ok: false, error: rpcErr.message };
 
+    revalidateCompanyGate(trimmed);
     revalidatePath("/super-admin/companies");
     revalidatePath("/rental");
     return { ok: true };

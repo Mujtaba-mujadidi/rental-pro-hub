@@ -1,20 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { revalidateCompanyGate } from "@/lib/auth/company-gate-cache";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
+import { processCompanyLogoForStorage } from "@/lib/companies/company-logo";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const LOGO_MAX_BYTES = 2 * 1024 * 1024;
 const LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
-
-function extForMime(mime: string): string {
-  if (mime === "image/png") return "png";
-  if (mime === "image/jpeg") return "jpg";
-  if (mime === "image/webp") return "webp";
-  return "bin";
-}
 
 export type OnboardingActionResult = { ok: true } | { ok: false; error: string };
 
@@ -72,6 +67,7 @@ export async function completeRentalOnboardingAction(): Promise<OnboardingAction
 
   await supabase.from("profiles").update({ company_id: companyId }).eq("id", profile.id);
 
+  revalidateCompanyGate(companyId);
   revalidatePath("/rental");
   revalidatePath("/rental/onboarding");
   return { ok: true };
@@ -105,11 +101,26 @@ export async function uploadParentCompanyLogoAction(formData: FormData): Promise
     return { ok: false, error: e instanceof Error ? e.message : "Server configuration error." };
   }
 
-  const ext = extForMime(logo.type);
-  const path = `${companyId}/logo.${ext}`;
-  const buf = Buffer.from(await logo.arrayBuffer());
-  const { error: upErr } = await admin.storage.from("company-logos").upload(path, buf, {
-    contentType: logo.type,
+  const raw = Buffer.from(await logo.arrayBuffer());
+  const processed = await processCompanyLogoForStorage(raw, logo.type);
+  const path = `${companyId}/logo.${processed.ext}`;
+
+  // Remove prior logo objects that may use a different extension.
+  try {
+    const { data: listed } = await admin.storage.from("company-logos").list(companyId);
+    const stale = (listed ?? [])
+      .map((f) => f.name)
+      .filter((name) => name.startsWith("logo."))
+      .map((name) => `${companyId}/${name}`);
+    if (stale.length) {
+      await admin.storage.from("company-logos").remove(stale);
+    }
+  } catch {
+    /* best-effort cleanup */
+  }
+
+  const { error: upErr } = await admin.storage.from("company-logos").upload(path, processed.buffer, {
+    contentType: processed.contentType,
     upsert: true,
   });
   if (upErr) return { ok: false, error: upErr.message };

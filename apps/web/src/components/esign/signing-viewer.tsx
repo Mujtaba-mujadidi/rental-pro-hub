@@ -10,6 +10,11 @@ import { SignatureFieldInput } from "@/components/esign/signature-field-input";
 import { usePdfPages } from "@/components/esign/use-pdf-pages";
 import type { EsignFieldLayoutItem, EsignFieldType } from "@/lib/esign/types";
 import type { FieldValueMap } from "@/lib/esign/pdf-stamp";
+import {
+  parseEsignDateTimeInput,
+  stampValueFromEsignDateInput,
+  toEsignDateTimeLocalInput,
+} from "@/lib/esign/datetime";
 
 const FIELD_STYLES: Record<
   EsignFieldType,
@@ -22,7 +27,7 @@ const FIELD_STYLES: Record<
     ring: "ring-amber-400",
   },
   date: {
-    label: "Date",
+    label: "Date & time",
     border: "border-emerald-500",
     bg: "bg-emerald-400/30",
     ring: "ring-emerald-400",
@@ -122,7 +127,13 @@ export function GuidedSigningViewer({
 
   useEffect(() => {
     if (!current) return;
-    setDraft(values[current.id]?.value ?? (current.type === "date" ? new Date().toISOString().slice(0, 10) : ""));
+    if (current.type === "date") {
+      const existing = values[current.id]?.value;
+      const parsed = existing ? parseEsignDateTimeInput(existing) : null;
+      setDraft(toEsignDateTimeLocalInput(parsed ?? new Date()));
+    } else {
+      setDraft(values[current.id]?.value ?? "");
+    }
     const t = window.setTimeout(() => scrollToField(current.id), 80);
     return () => window.clearTimeout(t);
   }, [current, scrollToField, values]);
@@ -147,7 +158,7 @@ export function GuidedSigningViewer({
       current.type === "signature"
         ? draft
         : current.type === "date"
-          ? draft || new Date().toISOString().slice(0, 10)
+          ? stampValueFromEsignDateInput(draft || toEsignDateTimeLocalInput())
           : draft.trim();
     if (!value) return;
 
@@ -337,7 +348,7 @@ export function GuidedSigningViewer({
               />
             ) : current.type === "date" ? (
               <input
-                type="date"
+                type="datetime-local"
                 autoFocus
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 dark:border-slate-600 dark:bg-slate-900"
                 value={draft}

@@ -2,7 +2,6 @@ import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 import { resolveSupabasePublishableEnv } from "@/lib/supabase/env";
 import { resolveAppHomePath } from "@/lib/auth/driver-redirect";
-import { getRentalSessionLifecycle, rentalPathRequiresRedirect } from "@/lib/auth/rental-lifecycle";
 
 const protectedPrefixes = ["/super-admin", "/driver", "/rental"];
 
@@ -10,8 +9,20 @@ function isProtectedPath(pathname: string) {
   return protectedPrefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
+/**
+ * Fast edge gate: refresh cookies + JWT check only.
+ * Heavy role/lifecycle redirects run in route layouts (not on every middleware hop).
+ */
 export async function updateSession(request: NextRequest) {
-  let response = NextResponse.next({ request });
+  let response = NextResponse.next({
+    request: {
+      headers: (() => {
+        const h = new Headers(request.headers);
+        h.set("x-pathname", request.nextUrl.pathname);
+        return h;
+      })(),
+    },
+  });
 
   let url: string;
   let anonKey: string;
@@ -28,7 +39,11 @@ export async function updateSession(request: NextRequest) {
       },
       setAll(cookiesToSet) {
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-        response = NextResponse.next({ request });
+        const requestHeaders = new Headers(request.headers);
+        requestHeaders.set("x-pathname", request.nextUrl.pathname);
+        response = NextResponse.next({
+          request: { headers: requestHeaders },
+        });
         cookiesToSet.forEach(({ name, value, options }) =>
           response.cookies.set(name, value, options),
         );
@@ -36,52 +51,30 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
+  // Cookie/session parse only — no Auth/JWKS round-trip on every navigation.
+  // RSC layouts still verify via getClaims/getUser before rendering protected UI.
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+  } = await supabase.auth.getSession();
+  const hasSession = Boolean(session?.user?.id);
 
   const path = request.nextUrl.pathname;
 
-  if (!user && isProtectedPath(path)) {
+  if (!hasSession && isProtectedPath(path)) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
     redirectUrl.searchParams.set("next", path);
     return NextResponse.redirect(redirectUrl);
   }
 
-  if (user && (path === "/login" || path === "/signup")) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = await resolveAppHomePath(supabase, user.id, user.email);
-    redirectUrl.search = "";
-    return NextResponse.redirect(redirectUrl);
-  }
-
-  if (user && path === "/driver") {
-    const home = await resolveAppHomePath(supabase, user.id, user.email);
-    if (home !== "/driver") {
+  // Rare path (post-login landing): resolve home once — not on every tab switch.
+  if (hasSession && (path === "/login" || path === "/signup")) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) {
       const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = home;
-      redirectUrl.search = "";
-      return NextResponse.redirect(redirectUrl);
-    }
-  }
-
-  if (user && path.startsWith("/driver/")) {
-    const home = await resolveAppHomePath(supabase, user.id, user.email);
-    if (home.startsWith("/rental")) {
-      const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = home;
-      redirectUrl.search = "";
-      return NextResponse.redirect(redirectUrl);
-    }
-  }
-
-  if (user && path.startsWith("/rental")) {
-    const life = await getRentalSessionLifecycle(supabase, user.id, user.email);
-    const target = rentalPathRequiresRedirect(path, life);
-    if (target) {
-      const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = target;
+      redirectUrl.pathname = await resolveAppHomePath(supabase, user.id, user.email);
       redirectUrl.search = "";
       return NextResponse.redirect(redirectUrl);
     }

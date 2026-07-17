@@ -1,5 +1,6 @@
 import { buildContractPdfDocument } from "@/lib/esign/contract-document-text";
 import { createProfessionalContractPdf } from "@/lib/esign/pdf-generate";
+import { loadCompanyLogoForContractPdf } from "@/lib/companies/company-logo";
 import { ESIGN_BUCKET, type EsignFieldLayoutItem } from "@/lib/esign/types";
 import type { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -62,6 +63,14 @@ export async function regenerateEnvelopePdfForSignatureMode(
     pdfDoc.parties = pdfDoc.parties.map((p) =>
       p.roleLabel === "Platform" ? { ...p, lines: ["Contract owner / service provider"] } : p,
     );
+  }
+
+  if (parentId) {
+    const logo = await loadCompanyLogoForContractPdf(admin, parentId);
+    if (logo) {
+      pdfDoc.logoBytes = logo.bytes;
+      pdfDoc.logoContentType = logo.contentType;
+    }
   }
 
   const rendered = await createProfessionalContractPdf(pdfDoc);

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { revalidateProfileBundle } from "@/lib/auth/profile-bundle-cache";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
 import { createClient } from "@/lib/supabase/server";
@@ -19,6 +20,7 @@ export async function updateRentalDisplayNameAction(displayName: string): Promis
   const { error } = await supabase.from("profiles").update({ display_name: trimmed }).eq("id", profile.id);
   if (error) return { ok: false, error: error.message };
 
+  revalidateProfileBundle(profile.id);
   revalidatePath("/rental");
   revalidatePath("/rental/staff");
   revalidatePath("/rental/subcompany");

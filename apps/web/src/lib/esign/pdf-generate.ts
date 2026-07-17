@@ -1,5 +1,10 @@
 import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb, type RGB } from "pdf-lib";
 import {
+  CONTRACT_HEADER_LOGO_MAX_HEIGHT,
+  CONTRACT_HEADER_LOGO_MAX_WIDTH,
+  fitImageWithinBox,
+} from "@/lib/companies/company-logo";
+import {
   ESIGN_OWNER_ROLE,
   ESIGN_RECIPIENT_ROLE,
   type EsignFieldLayoutItem,
@@ -22,6 +27,9 @@ export type ContractPdfInput = {
   documentLabel?: string | null;
   issuedAt?: Date | null;
   platformName?: string | null;
+  /** Optional company/platform logo for the header (PNG or JPEG bytes). */
+  logoBytes?: Uint8Array | null;
+  logoContentType?: string | null;
   parties: ContractPdfParty[];
   commercialRows: ContractPdfCommercialRow[];
   termsHeading?: string;
@@ -519,8 +527,8 @@ function drawOneSignatureCard(
     color: rule,
   });
 
-  // Date — printed label above the writable field area
-  ctx.page.drawText("Date", {
+  // Date & time — printed label above the writable field area
+  ctx.page.drawText("Date & time", {
     x: x + 12,
     y: top - L.dateLabelTop,
     size: 7.5,
@@ -546,7 +554,7 @@ function cardFieldRects(x: number, top: number, width: number) {
   return {
     sig: toNormRect(sigX, sigTopFromTop, sigW, L.padH),
     name: toNormRect(sigX, nameTopFromTop, sigW, L.nameFieldH),
-    date: toNormRect(sigX, dateTopFromTop, Math.min(sigW * 0.55, 120), L.dateFieldH),
+    date: toNormRect(sigX, dateTopFromTop, Math.min(sigW * 0.85, 168), L.dateFieldH),
   };
 }
 
@@ -669,9 +677,43 @@ export async function createProfessionalContractPdf(
 
   const platformName = (input.platformName ?? "RMS").trim() || "RMS";
 
+  let logoDrawW = 0;
+  let logoDrawH = 0;
+  if (input.logoBytes && input.logoBytes.length > 0) {
+    try {
+      const isJpeg =
+        (input.logoContentType ?? "").includes("jpeg") || (input.logoContentType ?? "").includes("jpg");
+      const img = isJpeg
+        ? await doc.embedJpg(input.logoBytes)
+        : await doc.embedPng(input.logoBytes);
+      const fitted = fitImageWithinBox(
+        img.width,
+        img.height,
+        CONTRACT_HEADER_LOGO_MAX_WIDTH,
+        CONTRACT_HEADER_LOGO_MAX_HEIGHT,
+      );
+      logoDrawW = fitted.width;
+      logoDrawH = fitted.height;
+      const logoY = ctx.y - logoDrawH;
+      ctx.page.drawImage(img, {
+        x: MARGIN_X,
+        y: logoY,
+        width: logoDrawW,
+        height: logoDrawH,
+      });
+    } catch (e) {
+      console.warn("[contract-pdf] logo embed failed", e);
+      logoDrawW = 0;
+      logoDrawH = 0;
+    }
+  }
+
+  const headerTextX = logoDrawW > 0 ? MARGIN_X + logoDrawW + 12 : MARGIN_X;
+  const headerBand = Math.max(logoDrawH, 18);
+  const nameY = ctx.y - (logoDrawH > 0 ? Math.min(14, logoDrawH * 0.55) : 11);
   ctx.page.drawText(platformName.toUpperCase(), {
-    x: MARGIN_X,
-    y: ctx.y - 11,
+    x: headerTextX,
+    y: nameY,
     size: 9,
     font: fontBold,
     color: accent,
@@ -685,7 +727,7 @@ export async function createProfessionalContractPdf(
     font,
     color: muted,
   });
-  ctx.y -= 22;
+  ctx.y -= headerBand + 10;
   drawHorizontalRule(ctx);
 
   drawText(ctx, input.title, {
@@ -762,7 +804,7 @@ export async function createProfessionalContractPdf(
         role: ESIGN_OWNER_ROLE,
         page: blocks.page,
         ...blocks.ownerDate,
-        label: "Owner date",
+        label: "Owner date & time",
       },
     );
   }
@@ -789,7 +831,7 @@ export async function createProfessionalContractPdf(
       role: ESIGN_RECIPIENT_ROLE,
       page: blocks.page,
       ...blocks.recipientDate,
-      label: "Recipient date",
+      label: "Recipient date & time",
     },
   );
 

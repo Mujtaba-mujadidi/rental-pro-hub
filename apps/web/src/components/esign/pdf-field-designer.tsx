@@ -40,9 +40,9 @@ const FIELD_META: Record<
     bg: "bg-amber-400/35",
   },
   date: {
-    label: "Date signed",
-    hint: "Auto-filled or entered",
-    w: 0.16,
+    label: "Date & time signed",
+    hint: "Auto-filled with date and time",
+    w: 0.22,
     h: 0.035,
     color: "text-emerald-950",
     border: "border-emerald-500",

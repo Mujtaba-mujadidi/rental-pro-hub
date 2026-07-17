@@ -4,10 +4,15 @@ import { revalidatePath } from "next/cache";
 import { createHash, randomBytes } from "crypto";
 import type { CompanyMembershipRole } from "@/lib/auth/profile";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
+import { revalidateProfileBundle } from "@/lib/auth/profile-bundle-cache";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getPublicSiteUrl } from "@/lib/supabase/site-url";
+import {
+  ensureRentalCompanyMembership,
+  findAuthUserIdByEmail,
+} from "@/lib/auth/ensure-rental-membership";
 
 export type StaffActionResult =
   | { ok: true }
@@ -56,7 +61,7 @@ export async function inviteRentalStaffAction(
   }
 
   let scopeMeta: "all" | "explicit" = "all";
-  let subcompanyIdsJson = "[]";
+  let explicitIds: string[] = [];
   if (proposedRole !== "admin") {
     const acc = access ?? { scope: "all" as const, subcompanyIds: [] };
     if (acc.scope === "explicit") {
@@ -75,13 +80,13 @@ export async function inviteRentalStaffAction(
         return { ok: false, error: "Invalid subcompany selection for this company." };
       }
       scopeMeta = "explicit";
-      subcompanyIdsJson = JSON.stringify(filtered);
+      explicitIds = filtered;
     }
   }
 
   const callbackBase = `${getPublicSiteUrl()}/auth/callback`;
 
-  const { error: invErr } = await admin.auth.admin.inviteUserByEmail(em, {
+  const { data: invData, error: invErr } = await admin.auth.admin.inviteUserByEmail(em, {
     redirectTo: callbackBase,
     data: {
       app_role: "rental_company",
@@ -92,7 +97,7 @@ export async function inviteRentalStaffAction(
       last_name: last,
       full_name: `${first} ${last}`.trim(),
       rental_subcompany_scope: scopeMeta,
-      rental_subcompany_ids: subcompanyIdsJson,
+      rental_subcompany_ids: JSON.stringify(explicitIds),
     },
   });
 
@@ -107,6 +112,27 @@ export async function inviteRentalStaffAction(
     }
     return { ok: false, error: m };
   }
+
+  const uid = invData.user?.id ?? (await findAuthUserIdByEmail(admin, em));
+  if (!uid) {
+    return {
+      ok: false,
+      error: "Invite may have been emailed, but the staff account could not be linked. Try again.",
+    };
+  }
+
+  const ensured = await ensureRentalCompanyMembership(admin, {
+    userId: uid,
+    companyId,
+    membershipRole: proposedRole,
+    companyRole: proposedRole === "admin" ? "admin" : "staff",
+    firstName: first,
+    lastName: last,
+    displayName: `${first} ${last}`.trim(),
+    subcompanyScope: scopeMeta,
+    subcompanyIds: explicitIds,
+  });
+  if (!ensured.ok) return ensured;
 
   const tokenHash = createHash("sha256").update(randomBytes(32)).digest("hex");
   const expiresAt = new Date(Date.now() + 14 * 864e5).toISOString();
@@ -190,6 +216,7 @@ export async function updateMembershipRoleAction(
     .eq("id", mid);
   if (uErr) return { ok: false, error: uErr.message };
 
+  revalidateProfileBundle(row.user_id);
   revalidatePath("/rental/staff");
   return { ok: true };
 }
@@ -254,6 +281,7 @@ export async function updateMembershipStatusAction(
     .eq("id", mid);
   if (uErr) return { ok: false, error: uErr.message };
 
+  revalidateProfileBundle(row.user_id);
   revalidatePath("/rental/staff");
   return { ok: true };
 }

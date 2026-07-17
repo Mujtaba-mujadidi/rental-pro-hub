@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { resolveAppHomePath } from "@/lib/auth/driver-redirect";
 import {
   MIN_DRIVER_AGE_YEARS,
@@ -28,7 +29,17 @@ export async function signInAction(
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
-    return { error: error.message };
+    const msg = error.message || "Sign-in failed.";
+    const rateLimited =
+      error.status === 429 ||
+      /rate limit|too many requests/i.test(msg);
+    if (rateLimited) {
+      return {
+        error:
+          "Too many sign-in attempts. Wait a minute, then try again. If the page kept refreshing, wait for the limit to clear.",
+      };
+    }
+    return { error: msg };
   }
 
   const signedInUser = data.user;
@@ -82,6 +93,26 @@ export async function signUpDriverAction(
   if (!email) {
     return { error: "Email is required." };
   }
+
+  // Prevent company primary contacts from accidentally becoming drivers via public signup.
+  try {
+    const admin = createSupabaseAdminClient();
+    const { data: companyHit } = await admin
+      .from("companies")
+      .select("id, name")
+      .ilike("primary_contact_email", email)
+      .limit(1)
+      .maybeSingle();
+    if (companyHit?.id) {
+      return {
+        error:
+          "This email is registered as a rental company contact. Use Login (or Forgot password), then ask your platform admin to send/resend the company invite so your account is linked as a company user — do not use driver sign-up.",
+      };
+    }
+  } catch {
+    /* service role missing — skip guard */
+  }
+
   if (!phone) {
     return { error: "Contact phone number is required." };
   }

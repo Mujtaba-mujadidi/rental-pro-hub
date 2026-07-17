@@ -1,4 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { stampValueFromEsignDateInput } from "@/lib/esign/datetime";
 import type { EsignFieldLayoutItem } from "@/lib/esign/types";
 
 export type FieldValueMap = Record<
@@ -41,7 +42,10 @@ export async function stampPdfWithFieldValues(
       const img = isPng ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
       page.drawImage(img, { x, y, width: w, height: h });
     } else {
-      const text = entry.value.slice(0, 200);
+      const text =
+        field.type === "date"
+          ? stampValueFromEsignDateInput(entry.value).slice(0, 200)
+          : entry.value.slice(0, 200);
       const size = Math.min(11, Math.max(8, h * 0.45));
       page.drawText(text, {
         x: x + 2,

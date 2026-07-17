@@ -20,7 +20,13 @@ export default async function LoginPage({
         registered={Boolean(sp.registered)}
         nextPath={sp.next}
         configError={sp.error === "config"}
-        serverError={sp.error && sp.error !== "config" ? sp.error : undefined}
+        serverError={
+          sp.error === "profile"
+            ? "Signed in, but your account profile could not be loaded. Try again or contact support."
+            : sp.error && sp.error !== "config"
+              ? decodeURIComponent(sp.error)
+              : undefined
+        }
       />
       <p className="text-center text-sm text-slate-500">
         <Link

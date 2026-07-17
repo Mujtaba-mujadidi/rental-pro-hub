@@ -10,7 +10,9 @@ import {
 } from "@/app/actions/contract-terms";
 import { stripTagsToPlain, truncatePreview } from "@/lib/contract-terms/plain-preview";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
+import { FormModalShell } from "@/components/forms/form-modal-shell";
+import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
 import { TermsRichEditor, TermsRichViewer } from "./terms-rich-editor";
 
 function IconSearch(props: SVGProps<SVGSVGElement>) {
@@ -143,6 +145,67 @@ export function ContractTermsClient({ initialRows }: { initialRows: ContractTerm
   const [viewRow, setViewRow] = useState<ContractTermsVersionRow | null>(null);
   const [publishAfterSave, setPublishAfterSave] = useState(false);
 
+  type TermsFormSnapshot = {
+    title: string;
+    versionLabel: string;
+    bodyHtml: string;
+    publishAfterSave: boolean;
+  };
+
+  const [formBaseline, setFormBaseline] = useState<TermsFormSnapshot>({
+    title: "",
+    versionLabel: "",
+    bodyHtml: "",
+    publishAfterSave: false,
+  });
+
+  const formSnapshot = useMemo<TermsFormSnapshot>(
+    () => ({ title, versionLabel, bodyHtml, publishAfterSave }),
+    [title, versionLabel, bodyHtml, publishAfterSave],
+  );
+
+  const applyFormSnapshot = useCallback((s: TermsFormSnapshot) => {
+    setTitle(s.title);
+    setVersionLabel(s.versionLabel);
+    setSeedBody(s.bodyHtml);
+    setBodyHtml(s.bodyHtml);
+    setPublishAfterSave(s.publishAfterSave);
+    setEditorKey((k) => k + 1);
+    setErr(null);
+  }, []);
+
+  const formOpen = modal === "create" || modal === "edit";
+  const termsDraftKey =
+    modal === "edit" && editingId ? `contract-terms:${editingId}` : "contract-terms:create";
+
+  const {
+    saveNotice,
+    hasStoredDraft,
+    isDirty,
+    saveProgress,
+    requestClose,
+    requestStartFresh,
+    discardConfirmOpen,
+    confirmDiscardClose,
+    cancelDiscardClose,
+    startFreshConfirmOpen,
+    confirmStartFresh,
+    cancelStartFresh,
+    clearAfterSuccess,
+  } = useFormModalDraft({
+    draftKey: termsDraftKey,
+    open: formOpen,
+    snapshot: formSnapshot,
+    baseline: formBaseline,
+    pending,
+    applySnapshot: applyFormSnapshot,
+    onClose: () => {
+      setModal("closed");
+      setViewRow(null);
+      setEditingId(null);
+    },
+  });
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return initialRows;
@@ -169,11 +232,7 @@ export function ContractTermsClient({ initialRows }: { initialRows: ContractTerm
     setErr(null);
     setMsg(null);
     setEditingId(null);
-    setTitle("");
-    setVersionLabel("");
-    setSeedBody("");
-    setPublishAfterSave(false);
-    setEditorKey((k) => k + 1);
+    setFormBaseline({ title: "", versionLabel: "", bodyHtml: "", publishAfterSave: false });
     setModal("create");
   }
 
@@ -187,18 +246,18 @@ export function ContractTermsClient({ initialRows }: { initialRows: ContractTerm
     setErr(null);
     setMsg(null);
     setEditingId(row.id);
-    setTitle(row.title);
-    setVersionLabel(row.version_label);
-    setSeedBody(row.body);
-    setPublishAfterSave(false);
-    setEditorKey((k) => k + 1);
+    setFormBaseline({
+      title: row.title,
+      versionLabel: row.version_label,
+      bodyHtml: row.body,
+      publishAfterSave: false,
+    });
     setModal("edit");
   }
 
-  function closeModal() {
+  function closeViewModal() {
     setModal("closed");
     setViewRow(null);
-    setEditingId(null);
   }
 
   function submitForm(e: FormEvent) {
@@ -243,14 +302,16 @@ export function ContractTermsClient({ initialRows }: { initialRows: ContractTerm
           message = "Published as the active rental terms.";
         }
         setMsg(message);
-        closeModal();
+        clearAfterSuccess();
+        setModal("closed");
+        setViewRow(null);
+        setEditingId(null);
         router.refresh();
       })();
     });
   }
 
   const charCount = stripTagsToPlain(bodyHtml).length;
-  const formOpen = modal === "create" || modal === "edit";
 
   return (
     <div className="space-y-8">
@@ -434,156 +495,133 @@ export function ContractTermsClient({ initialRows }: { initialRows: ContractTerm
       {err ? <p className="text-sm text-red-600">{err}</p> : null}
       {msg ? <p className="text-sm text-emerald-700 dark:text-emerald-400">{msg}</p> : null}
 
-      {formOpen ? (
-        <div className="fixed inset-0 z-[320] flex items-center justify-center p-4 sm:p-6">
-          <button
-            type="button"
-            className="absolute inset-0 bg-black/50 backdrop-blur-[1px]"
-            aria-label="Close dialog"
-            disabled={pending}
-            onClick={closeModal}
-          />
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="terms-modal-title"
-            className="relative z-[1] flex max-h-[min(92vh,44rem)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-950"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <div className="shrink-0 border-b border-slate-200 bg-slate-50/90 px-6 py-4 dark:border-slate-700 dark:bg-slate-900/80">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 id="terms-modal-title" className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-                    {modal === "edit" ? "Edit terms & conditions" : "Create terms & conditions"}
-                  </h2>
-                  <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
-                    Add or update master terms used when registering rental companies.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="rounded-lg p-2 text-slate-500 hover:bg-slate-200/80 dark:hover:bg-slate-800"
-                  onClick={closeModal}
-                  aria-label="Close"
-                >
-                  <IconClose className="size-5" />
-                </button>
+      <FormModalShell
+        open={formOpen}
+        titleId="terms-modal-title"
+        title={modal === "edit" ? "Edit terms & conditions" : "Create terms & conditions"}
+        description="Add or update master terms used when registering rental companies."
+        pending={pending}
+        zClass="z-[320]"
+        maxWidthClass="max-w-2xl"
+        saveNotice={saveNotice}
+        hasStoredDraft={hasStoredDraft}
+        isDirty={isDirty}
+        onSaveProgress={saveProgress}
+        onRequestClose={requestClose}
+        onRequestStartFresh={requestStartFresh}
+        discardConfirmOpen={discardConfirmOpen}
+        onConfirmDiscard={confirmDiscardClose}
+        onCancelDiscard={cancelDiscardClose}
+        startFreshConfirmOpen={startFreshConfirmOpen}
+        onConfirmStartFresh={confirmStartFresh}
+        onCancelStartFresh={cancelStartFresh}
+        footer={
+          <>
+            <p className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+              <IconInfo className="size-3.5 shrink-0" />
+              Fields marked * are required.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={requestClose}
+                disabled={pending}
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                form="terms-form"
+                disabled={pending}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-rph-rail px-4 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer"
+              >
+                {pending ? "Saving…" : modal === "edit" ? "Save changes" : "Create terms & conditions"}
+              </button>
+            </div>
+          </>
+        }
+      >
+        <form id="terms-form" onSubmit={submitForm} className="space-y-5">
+          {err ? <p className="text-sm text-red-600">{err}</p> : null}
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Basic information</h3>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                Title <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <IconDoc className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className={inputClass}
+                  placeholder="e.g. Rental platform master terms"
+                  required
+                />
               </div>
             </div>
-
-            <form onSubmit={submitForm} className="flex min-h-0 flex-1 flex-col">
-              <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-5">
-                <section className="space-y-3">
-                  <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Basic information</h3>
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                      Title <span className="text-red-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <IconDoc className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-                      <input
-                        value={title}
-                        onChange={(e) => setTitle(e.target.value)}
-                        className={inputClass}
-                        placeholder="e.g. Rental platform master terms"
-                        required
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                      Version <span className="text-red-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <span className="pointer-events-none absolute left-3 top-1/2 text-sm text-slate-400">#</span>
-                      <input
-                        value={versionLabel}
-                        onChange={(e) => setVersionLabel(e.target.value)}
-                        className={`${inputClass} pl-9`}
-                        placeholder="e.g. 2026-04-03 or 1.0"
-                        required
-                      />
-                    </div>
-                  </div>
-                </section>
-
-                <section className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
-                  <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-200">
-                    <IconDoc className="size-4 text-rph-rail dark:text-rph-rail-softer" />
-                    Terms &amp; conditions content
-                  </h3>
-                  <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
-                    Content <span className="text-red-500">*</span>
-                  </label>
-                  <TermsRichEditor key={editorKey} initialHtml={seedBody} onChange={setBodyHtml} disabled={pending} />
-                  <p className="mt-2 text-right text-xs text-slate-500 dark:text-slate-400">{charCount} characters</p>
-                </section>
-
-                <section className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
-                  <h3 className="mb-3 text-sm font-semibold text-slate-800 dark:text-slate-200">Settings</h3>
-                  <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-600 dark:bg-slate-950">
-                    <input
-                      type="checkbox"
-                      checked={publishAfterSave}
-                      onChange={(e) => setPublishAfterSave(e.target.checked)}
-                      className="mt-1 size-4 rounded border-slate-300 text-rph-rail focus:ring-rph-rail/25 dark:border-slate-600"
-                    />
-                    <span className="text-sm text-slate-700 dark:text-slate-300">
-                      <span className="font-semibold text-slate-900 dark:text-slate-100">Publish after save</span>
-                      <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
-                        Makes this the active published version for new company registrations (any current published version is
-                        archived).
-                      </span>
-                    </span>
-                  </label>
-                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                    Drafts stay internal until you publish from here or use the Publish action in the table.
-                  </p>
-                </section>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                Version <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 text-sm text-slate-400">#</span>
+                <input
+                  value={versionLabel}
+                  onChange={(e) => setVersionLabel(e.target.value)}
+                  className={`${inputClass} pl-9`}
+                  placeholder="e.g. 2026-04-03 or 1.0"
+                  required
+                />
               </div>
+            </div>
+          </section>
 
-              <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-6 py-4 dark:border-slate-700 dark:bg-slate-950">
-                <p className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                  <IconInfo className="size-3.5 shrink-0" />
-                  Fields marked * are required.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={closeModal}
-                    disabled={pending}
-                    className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={pending}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-rph-rail px-4 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer"
-                  >
-                    {pending ? "Saving…" : modal === "edit" ? "Save changes" : "Create terms & conditions"}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
+          <section className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-200">
+              <IconDoc className="size-4 text-rph-rail dark:text-rph-rail-softer" />
+              Terms &amp; conditions content
+            </h3>
+            <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
+              Content <span className="text-red-500">*</span>
+            </label>
+            <TermsRichEditor key={editorKey} initialHtml={seedBody} onChange={setBodyHtml} disabled={pending} />
+            <p className="mt-2 text-right text-xs text-slate-500 dark:text-slate-400">{charCount} characters</p>
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+            <h3 className="mb-3 text-sm font-semibold text-slate-800 dark:text-slate-200">Settings</h3>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-600 dark:bg-slate-950">
+              <input
+                type="checkbox"
+                checked={publishAfterSave}
+                onChange={(e) => setPublishAfterSave(e.target.checked)}
+                className="mt-1 size-4 rounded border-slate-300 text-rph-rail focus:ring-rph-rail/25 dark:border-slate-600"
+              />
+              <span className="text-sm text-slate-700 dark:text-slate-300">
+                <span className="font-semibold text-slate-900 dark:text-slate-100">Publish after save</span>
+                <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                  Makes this the active published version for new company registrations (any current published version is
+                  archived).
+                </span>
+              </span>
+            </label>
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+              Drafts stay internal until you publish from here or use the Publish action in the table.
+            </p>
+          </section>
+        </form>
+      </FormModalShell>
 
       {modal === "view" && viewRow ? (
         <div className="fixed inset-0 z-[320] flex items-center justify-center p-4 sm:p-6">
-          <button
-            type="button"
-            className="absolute inset-0 bg-black/50 backdrop-blur-[1px]"
-            aria-label="Close dialog"
-            onClick={closeModal}
-          />
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-[1px]" aria-hidden />
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="terms-view-title"
             className="relative z-[1] flex max-h-[min(90vh,36rem)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-950"
-            onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-6 py-4 dark:border-slate-700">
               <div>
@@ -594,7 +632,7 @@ export function ContractTermsClient({ initialRows }: { initialRows: ContractTerm
                   Version {viewRow.version_label} · <span className={statusBadge(viewRow.status)}>{viewRow.status}</span>
                 </p>
               </div>
-              <button type="button" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={closeModal}>
+              <button type="button" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={closeViewModal}>
                 <IconClose className="size-5" />
               </button>
             </div>
@@ -604,7 +642,7 @@ export function ContractTermsClient({ initialRows }: { initialRows: ContractTerm
             <div className="border-t border-slate-200 px-6 py-3 dark:border-slate-700">
               <button
                 type="button"
-                onClick={closeModal}
+                onClick={closeViewModal}
                 className="w-full rounded-lg bg-rph-rail py-2.5 text-sm font-semibold text-white hover:bg-rph-rail-hover dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer sm:w-auto sm:px-6"
               >
                 Close

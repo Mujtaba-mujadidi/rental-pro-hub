@@ -22,21 +22,25 @@ export async function runPermanentCompanyPurgeWithProgress(
   const toRemove: string[] = [];
   for (const uid of tenantUserIds) {
     const { data: prof, error: profErr } = await admin.from("profiles").select("id, role").eq("id", uid).maybeSingle();
-    if (profErr || !prof?.id) continue;
-    const r = prof.role as string;
-    if (r === "super_admin" || r === "driver") continue;
-    if (r !== "rental_company") continue;
+    if (profErr) {
+      console.error("[permanent-company-purge] profile check", uid, profErr.message);
+      continue;
+    }
+    // Never delete platform super admins.
+    if (prof?.role === "super_admin") continue;
+    // Delete rental tenants and mis-classified primary contacts (e.g. stuck as driver).
+    // Also delete Auth users with no profile row (orphan after partial deletes).
     toRemove.push(uid);
   }
 
   const n = toRemove.length;
   if (n === 0) {
-    onProgress("No rental_company Auth accounts linked to this tenant.");
+    onProgress("No tenant Auth accounts linked to this company.");
   } else {
-    onProgress(`Deleting ${n} rental tenant Auth account(s)…`);
+    onProgress(`Deleting ${n} tenant Auth account(s)…`);
   }
 
-  for (let i = 0; i < toRemove.length; i++) {
+  for (let i = 0; i < n; i++) {
     const uid = toRemove[i]!;
     onProgress(`Deleting tenant account ${i + 1} of ${n}…`);
     const { error: authDelErr } = await admin.auth.admin.deleteUser(uid);

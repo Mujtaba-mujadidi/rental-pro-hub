@@ -1,8 +1,14 @@
 import type { User } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { redirectIfRentalContractNotActive } from "@/lib/auth/rental-contract-gate";
+import {
+  getCachedProfileBundle,
+  revalidateProfileBundle,
+  type CachedMembershipRow,
+} from "@/lib/auth/profile-bundle-cache";
 import { isSuperAdmin, isSuperAdminEmail } from "@/lib/auth/roles";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -87,23 +93,56 @@ export type AppProfile = {
   subcompany_scope: "all" | "explicit" | null;
 };
 
-export async function getSessionUser() {
+export const getSessionUser = cache(async () => {
   const supabase = await createClient();
+
+  // Cookie parse only — PostgREST still validates the JWT on every DB call.
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (session?.user?.id) {
+    return session.user;
+  }
+
+  // Prefer JWT claims (local/JWKS verify) — avoids Auth-server round-trip when session cookie is empty.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const claims = claimsData?.claims as
+    | {
+        sub?: string;
+        email?: string;
+        user_metadata?: Record<string, unknown>;
+        app_metadata?: Record<string, unknown>;
+        phone?: string;
+      }
+    | undefined;
+
+  if (claims?.sub) {
+    return {
+      id: claims.sub,
+      email: claims.email,
+      phone: claims.phone,
+      user_metadata: claims.user_metadata ?? {},
+      app_metadata: claims.app_metadata ?? {},
+      aud: "authenticated",
+      created_at: "",
+      // Minimal User shape for profile helpers; sensitive actions still call getUser when needed.
+    } as User;
+  }
+
   const {
     data: { user },
     error,
   } = await supabase.auth.getUser();
-
   if (error || !user) return null;
   return user;
-}
+});
 
 /** Insert a missing profiles row (RLS: own id only). Super admin role if SUPER_ADMIN_EMAIL matches. */
 async function ensureProfileRow(user: User): Promise<boolean> {
   const supabase = await createClient();
   const { data: existing, error: exErr } = await supabase
     .from("profiles")
-    .select("id")
+    .select("id, role, company_id")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -111,7 +150,6 @@ async function ensureProfileRow(user: User): Promise<boolean> {
     console.error("profiles check failed", exErr.message);
     return false;
   }
-  if (existing) return true;
 
   const meta = user.user_metadata as Record<string, unknown> | undefined;
   const fromMeta =
@@ -134,9 +172,106 @@ async function ensureProfileRow(user: User): Promise<boolean> {
       ? "rental_company"
       : "driver";
 
-  const withTenant =
-    role === "rental_company" ? { company_id: companyIdMeta, company_role: companyRoleMeta } : {};
-  const basePayload = { id: user.id, display_name: displayName, role };
+  // Profile already exists: upgrade accidental driver → rental when invite metadata is present.
+  // Never return false here — that locks the user out of the app (login → home → /login loop).
+  if (existing) {
+    if (
+      role === "rental_company" &&
+      (existing.role !== "rental_company" || existing.company_id !== companyIdMeta)
+    ) {
+      try {
+        const admin = createSupabaseAdminClient();
+        const { data: companyRow } = await admin
+          .from("companies")
+          .select("id")
+          .eq("id", companyIdMeta)
+          .maybeSingle();
+
+        if (!companyRow) {
+          console.error(
+            "profiles rental upgrade skipped: company_id missing from companies",
+            companyIdMeta,
+          );
+          // Stale invite metadata (e.g. company deleted/re-registered) — clear so we stop retrying.
+          await admin.auth.admin.updateUserById(user.id, {
+            user_metadata: {
+              app_role: null,
+              company_id: null,
+              company_role: null,
+            },
+          });
+          return true;
+        }
+
+        const { error: upErr } = await admin
+          .from("profiles")
+          .update({
+            role: "rental_company",
+            company_id: companyIdMeta,
+            company_role: companyRoleMeta,
+            display_name: displayName,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", user.id);
+        if (upErr) {
+          console.error("profiles rental upgrade failed", upErr.message);
+          return true;
+        }
+        await admin.from("user_company_memberships").upsert(
+          {
+            user_id: user.id,
+            parent_company_id: companyIdMeta,
+            role: "owner",
+            subcompany_scope: "all",
+            status: "active",
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id,parent_company_id" },
+        );
+        await admin.from("driver_profiles").delete().eq("user_id", user.id);
+      } catch (e) {
+        console.error("profiles rental upgrade unavailable", e);
+        return true;
+      }
+    }
+    return true;
+  }
+
+  let insertRole: AppProfile["role"] = role;
+  let withTenant =
+    insertRole === "rental_company" ? { company_id: companyIdMeta, company_role: companyRoleMeta } : {};
+
+  if (insertRole === "rental_company") {
+    try {
+      const admin = createSupabaseAdminClient();
+      const { data: companyRow } = await admin
+        .from("companies")
+        .select("id")
+        .eq("id", companyIdMeta)
+        .maybeSingle();
+      if (!companyRow) {
+        console.error(
+          "profiles insert: rental company_id missing; creating driver profile instead",
+          companyIdMeta,
+        );
+        await admin.auth.admin.updateUserById(user.id, {
+          user_metadata: {
+            app_role: null,
+            company_id: null,
+            company_role: null,
+          },
+        });
+        insertRole = "driver";
+        withTenant = {};
+      }
+    } catch (e) {
+      console.error("profiles insert: could not verify company_id", e);
+      insertRole = "driver";
+      withTenant = {};
+    }
+  }
+
+  const basePayload = { id: user.id, display_name: displayName, role: insertRole };
   const fullPayload = { ...basePayload, ...withTenant };
 
   /** Idempotent: auth trigger may already have inserted this row; races also cause duplicate PK. */
@@ -145,7 +280,7 @@ async function ensureProfileRow(user: User): Promise<boolean> {
       onConflict: "id",
       ignoreDuplicates: true,
     });
-    if (error && role === "rental_company" && isMissingCompanyColumnsError(error.message)) {
+    if (error && insertRole === "rental_company" && isMissingCompanyColumnsError(error.message)) {
       ({ error } = await client.from("profiles").upsert(basePayload, {
         onConflict: "id",
         ignoreDuplicates: true,
@@ -185,28 +320,64 @@ async function ensureProfileRow(user: User): Promise<boolean> {
   return true;
 }
 
-export async function getAppProfile(): Promise<AppProfile | null> {
+function profileNeedsRentalUpgrade(
+  user: User,
+  existing: { role: string; company_id: string | null },
+): boolean {
+  const meta = user.user_metadata as Record<string, unknown> | undefined;
+  const appRole = typeof meta?.app_role === "string" ? meta.app_role.toLowerCase() : "";
+  const companyIdMeta = typeof meta?.company_id === "string" ? meta.company_id.trim() : "";
+  const uuidOk = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    companyIdMeta,
+  );
+  if (isSuperAdminEmail(user.email)) return false;
+  if (!(appRole === "rental_company" && uuidOk)) return false;
+  return existing.role !== "rental_company" || existing.company_id !== companyIdMeta;
+}
+
+export const getAppProfile = cache(async (): Promise<AppProfile | null> => {
   const user = await getSessionUser();
   if (!user) return null;
 
+  let row: ProfileRow | null = null;
+  let memberships: CachedMembershipRow[] | null = null;
+
+  try {
+    const bundle = await getCachedProfileBundle(user.id);
+    row = bundle.row;
+    memberships = bundle.memberships;
+  } catch {
+    const supabase = await createClient();
+    const first = await fetchProfileRow(supabase, user.id);
+    if (first.error) {
+      console.error("profiles load failed", first.error.message);
+      return null;
+    }
+    row = first.data;
+  }
+
+  const needsEnsure = !row || profileNeedsRentalUpgrade(user, row);
+  if (needsEnsure) {
+    const ensured = await ensureProfileRow(user);
+    if (!ensured) return null;
+    revalidateProfileBundle(user.id);
+    const supabase = await createClient();
+    const second = await fetchProfileRow(supabase, user.id);
+    if (second.error) {
+      console.error("profiles load failed", second.error.message);
+      return null;
+    }
+    row = second.data;
+    memberships = null;
+  }
+
+  if (!row) return null;
+  if (memberships) {
+    return resolveRentalMemberships(null, user.id, user.email, row, memberships);
+  }
   const supabase = await createClient();
-  const { data, error } = await fetchProfileRow(supabase, user.id);
-
-  if (error) {
-    console.error("profiles load failed", error.message);
-    return null;
-  }
-
-  if (!data) {
-    const created = await ensureProfileRow(user);
-    if (!created) return null;
-    const { data: again, error: err2 } = await fetchProfileRow(supabase, user.id);
-    if (err2 || !again) return null;
-    return resolveRentalMemberships(supabase, user.id, user.email, again);
-  }
-
-  return resolveRentalMemberships(supabase, user.id, user.email, data);
-}
+  return resolveRentalMemberships(supabase, user.id, user.email, row, null);
+});
 
 function normalizeAppProfileRow(row: {
   id: string;
@@ -232,7 +403,7 @@ function normalizeAppProfileRow(row: {
 }
 
 async function resolveRentalMemberships(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: Awaited<ReturnType<typeof createClient>> | null,
   userId: string,
   email: string | undefined,
   row: {
@@ -242,6 +413,7 @@ async function resolveRentalMemberships(
     company_id: string | null;
     company_role: string | null;
   },
+  cachedMemberships?: CachedMembershipRow[] | null,
 ): Promise<AppProfile> {
   const base = normalizeAppProfileRow(row);
 
@@ -260,18 +432,22 @@ async function resolveRentalMemberships(
 
   if (base.role !== "rental_company") return base;
 
-  const { data: memberships, error: mErr } = await supabase
-    .from("user_company_memberships")
-    .select("parent_company_id, role, subcompany_scope")
-    .eq("user_id", userId)
-    .eq("status", "active");
+  let list: CachedMembershipRow[] = cachedMemberships ?? [];
+  if (!cachedMemberships) {
+    if (!supabase) return base;
+    const { data: memberships, error: mErr } = await supabase
+      .from("user_company_memberships")
+      .select("parent_company_id, role, subcompany_scope")
+      .eq("user_id", userId)
+      .eq("status", "active");
 
-  if (mErr) {
-    console.error("user_company_memberships load failed", mErr.message);
-    return base;
+    if (mErr) {
+      console.error("user_company_memberships load failed", mErr.message);
+      return base;
+    }
+    list = (memberships as CachedMembershipRow[] | null) ?? [];
   }
 
-  const list = memberships ?? [];
   if (list.length === 0) {
     return base;
   }

@@ -331,18 +331,12 @@ export function AdminCompanyDetailDialog({ open, title, loading, error, payload,
 
   return (
     <div className={outerClass}>
-      <button
-        type="button"
-        className="absolute inset-0 bg-slate-950/45 backdrop-blur-[3px] transition-opacity dark:bg-black/60"
-        aria-label="Close"
-        onMouseDown={onClose}
-      />
+      <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-[3px] transition-opacity dark:bg-black/60" aria-hidden />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="rph-company-detail-title"
         className={shellClass}
-        onMouseDown={(e) => e.stopPropagation()}
       >
         <div className={headerClass}>
           <div className="flex min-w-0 flex-1 gap-3.5">
