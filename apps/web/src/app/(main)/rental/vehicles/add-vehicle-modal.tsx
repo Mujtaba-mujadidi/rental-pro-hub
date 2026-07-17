@@ -105,7 +105,11 @@ type PendingDoc = {
   file: File;
 };
 
-type VehicleDraftFields = {
+const DRAFT_KEY = "add-vehicle";
+
+export const ADD_VEHICLE_DRAFT_KEY = DRAFT_KEY;
+
+export type VehicleDraftFields = {
   subcompany_id: string;
   vrm: string;
   make: string;
@@ -167,8 +171,6 @@ function fieldsToFormData(fields: VehicleDraftFields): FormData {
   return fd;
 }
 
-const DRAFT_KEY = "add-vehicle";
-
 export function AddVehicleModal({
   open,
   onOpenChange,
@@ -209,13 +211,21 @@ export function AddVehicleModal({
     [step, fields, pendingDocs],
   );
 
-  const applySnapshot = useCallback((s: VehicleSnapshot) => {
-    setStep(s.step);
-    setFields(s.fields);
-    // Files cannot be restored from localStorage — keep meta cleared on restore.
-    setPendingDocs([]);
-    setError(null);
-  }, []);
+  const applySnapshot = useCallback(
+    (s: VehicleSnapshot) => {
+      const mergedFields = { ...emptyFields(primarySub), ...(s.fields ?? {}) };
+      setStep(typeof s.step === "number" ? s.step : 0);
+      setFields(mergedFields);
+      // Browser drafts cannot store File blobs — remind user to re-attach photos/docs.
+      setPendingDocs([]);
+      setError(
+        s.pendingMeta?.length
+          ? `Draft restored. Re-attach ${s.pendingMeta.length} photo/document file(s) on the Photos or Documents steps — file contents are not kept in drafts.`
+          : null,
+      );
+    },
+    [primarySub],
+  );
 
   const {
     saveNotice,

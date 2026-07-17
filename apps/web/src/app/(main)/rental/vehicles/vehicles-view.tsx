@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useMemo, useState, useTransition } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   deleteVehicleAction,
@@ -13,6 +13,7 @@ import {
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useCanScanOrCaptureDocument } from "@/hooks/use-can-scan-or-capture-document";
+import { loadDraft } from "@/lib/forms/form-draft";
 import {
   VEHICLE_COMPLIANCE_DOC_TYPES,
   VEHICLE_DOC_TYPE_LABELS,
@@ -24,7 +25,7 @@ import {
   type VehicleStatus,
   type VehicleTransferRow,
 } from "@/lib/fleet/vehicles";
-import { AddVehicleModal } from "./add-vehicle-modal";
+import { ADD_VEHICLE_DRAFT_KEY, AddVehicleModal } from "./add-vehicle-modal";
 
 const MANAGE_STEPS = ["Details", "Specs", "Photos", "Documents"] as const;
 
@@ -186,6 +187,29 @@ export function VehiclesView({
   const [filter, setFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [createOpen, setCreateOpen] = useState(false);
+  const [draftHint, setDraftHint] = useState<{ vrm: string; make: string; model: string; updatedAt: string } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    function refreshDraftHint() {
+      const stored = loadDraft<{
+        fields?: { vrm?: string; make?: string; model?: string };
+      }>(ADD_VEHICLE_DRAFT_KEY);
+      if (!stored?.data) {
+        setDraftHint(null);
+        return;
+      }
+      const f = stored.data.fields ?? {};
+      setDraftHint({
+        vrm: f.vrm?.trim() || "",
+        make: f.make?.trim() || "",
+        model: f.model?.trim() || "",
+        updatedAt: stored.updatedAt,
+      });
+    }
+    refreshDraftHint();
+  }, [createOpen]);
 
   const [editVehicle, setEditVehicle] = useState<VehicleRow | null>(null);
   const [editForm, setEditForm] = useState<FormSnapshot | null>(null);
@@ -350,6 +374,24 @@ export function VehiclesView({
         ) : null}
       </div>
 
+      {draftHint && canManage && !createOpen ? (
+        <div className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between dark:border-amber-900/50 dark:bg-amber-950/30">
+          <div className="text-sm text-amber-950 dark:text-amber-100">
+            <p className="font-semibold">Unfinished vehicle draft on this device</p>
+            <p className="mt-0.5 text-amber-900/80 dark:text-amber-100/80">
+              {draftHint.vrm || draftHint.make
+                ? `${[draftHint.vrm, draftHint.make, draftHint.model].filter(Boolean).join(" · ")} — `
+                : null}
+              Drafts are only stored in this browser. They do not appear in the list until you finish and click{" "}
+              <span className="font-medium">Save vehicle</span>.
+            </p>
+          </div>
+          <button type="button" className={btnPrimary} onClick={() => setCreateOpen(true)}>
+            Continue draft
+          </button>
+        </div>
+      ) : null}
+
       {error && !editVehicle ? <p className="rph-alert-error text-sm">{error}</p> : null}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -416,9 +458,14 @@ export function VehiclesView({
       {canManage ? (
         <AddVehicleModal
           open={createOpen}
-          onOpenChange={setCreateOpen}
+          onOpenChange={(open) => {
+            setCreateOpen(open);
+          }}
           subcompanies={subcompanies}
-          onCreated={() => router.refresh()}
+          onCreated={() => {
+            setDraftHint(null);
+            router.refresh();
+          }}
         />
       ) : null}
 
