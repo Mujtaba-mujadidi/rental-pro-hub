@@ -27,7 +27,7 @@ import {
 } from "@/lib/fleet/vehicles";
 import { ADD_VEHICLE_DRAFT_KEY, AddVehicleModal } from "./add-vehicle-modal";
 
-const MANAGE_STEPS = ["Details", "Specs", "Photos", "Documents"] as const;
+const MANAGE_STEPS = ["Details", "Specs", "Documents"] as const;
 
 const btnPrimary =
   "inline-flex shrink-0 items-center justify-center rounded-lg bg-rph-rail px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer";
@@ -245,7 +245,6 @@ export function VehiclesView({
     });
   }, [vehicles, filter, statusFilter]);
 
-  const photos = docs.filter((d) => d.doc_type === "photo");
   const complianceDocs = docs.filter((d) => d.doc_type !== "photo");
 
   const refreshDetail = useCallback(
@@ -326,14 +325,13 @@ export function VehiclesView({
     });
   }
 
-  function submitDoc(fileList: FileList | null, forcedType?: VehicleDocType) {
+  function submitDoc(fileList: FileList | null) {
     if (!editVehicle || !fileList?.[0]) return;
     setError(null);
-    const type = forcedType ?? docType;
     const fd = new FormData();
     fd.set("vehicle_id", editVehicle.id);
-    fd.set("doc_type", type);
-    fd.set("expiry_date", forcedType === "photo" ? "" : docExpiry);
+    fd.set("doc_type", docType);
+    fd.set("expiry_date", docExpiry);
     fd.set("file", fileList[0]);
     startTransition(async () => {
       const res = await uploadVehicleDocumentAction(fd);
@@ -748,62 +746,10 @@ export function VehiclesView({
 
           {manageStep === 2 ? (
             <div className="space-y-4">
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">Vehicle photos for handover and fleet records.</p>
-              {canManage ? (
-                <div className="flex flex-wrap gap-2">
-                  <label className={btnGhost + " cursor-pointer"}>
-                    Choose photos
-                    <input
-                      type="file"
-                      className="hidden"
-                      accept="image/jpeg,image/png,image/webp"
-                      disabled={pending}
-                      onChange={(e) => {
-                        submitDoc(e.target.files, "photo");
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
-                  {canScanOrCapture ? (
-                    <label className={btnContinue + " cursor-pointer"}>
-                      Scan or take photo
-                      <input
-                        type="file"
-                        className="hidden"
-                        accept="image/*"
-                        capture="environment"
-                        disabled={pending}
-                        onChange={(e) => {
-                          submitDoc(e.target.files, "photo");
-                          e.target.value = "";
-                        }}
-                      />
-                    </label>
-                  ) : null}
-                </div>
-              ) : null}
-              {!photos.length ? (
-                <p className="text-sm text-slate-500">No photos uploaded.</p>
-              ) : (
-                <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
-                  {photos.map((d) => (
-                    <li key={d.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                      <span className="truncate text-slate-800 dark:text-slate-200">{d.file_name ?? d.file_path}</span>
-                      {canManage ? (
-                        <button type="button" className={btnDanger} disabled={pending} onClick={() => removeDoc(d.id)}>
-                          Remove
-                        </button>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ) : null}
-
-          {manageStep === 3 ? (
-            <div className="space-y-4">
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">MOT, insurance, logbook, and related compliance files.</p>
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                MOT, insurance, logbook, and related compliance files. Condition photos are handled at checkout /
+                check-in later.
+              </p>
               {canManage ? (
                 <>
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -836,7 +782,7 @@ export function VehiclesView({
                     </label>
                     {canScanOrCapture ? (
                       <label className={btnContinue + " cursor-pointer"}>
-                        Scan or take photo
+                        Scan document
                         <input
                           type="file"
                           className="hidden"

@@ -15,7 +15,7 @@ import {
   type VehicleStatus,
 } from "@/lib/fleet/vehicles";
 
-const STEP_LABELS = ["Basics", "Specs", "Photos", "Documents", "Review"] as const;
+const STEP_LABELS = ["Basics", "Specs", "Documents", "Review"] as const;
 
 const btnContinue =
   "flex h-11 min-w-[7rem] items-center justify-center rounded-lg bg-rph-rail px-4 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50";
@@ -227,7 +227,7 @@ export function AddVehicleModal({
       setPendingDocs([]);
       setError(
         s.pendingMeta?.length
-          ? `Draft restored. Re-attach ${s.pendingMeta.length} photo/document file(s) on the Photos or Documents steps — file contents are not kept in drafts.`
+          ? `Draft restored. Re-attach ${s.pendingMeta.length} document file(s) on the Documents step — file contents are not kept in drafts.`
           : null,
       );
     },
@@ -270,29 +270,25 @@ export function AddVehicleModal({
     return true;
   }
 
-  function addFiles(fileList: FileList | null, forcedType?: VehicleDocType) {
+  function addFiles(fileList: FileList | null) {
     if (!fileList?.length) return;
-    const type = forcedType ?? docType;
     const next: PendingDoc[] = [];
     for (const file of Array.from(fileList)) {
       next.push({
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         fileName: file.name || "upload",
-        docType: type,
-        expiry: forcedType === "photo" ? "" : docExpiry,
+        docType,
+        expiry: docExpiry,
         file,
       });
     }
     setPendingDocs((prev) => [...prev, ...next]);
-    if (forcedType !== "photo") setDocExpiry("");
+    setDocExpiry("");
   }
 
   function removePending(id: string) {
     setPendingDocs((prev) => prev.filter((d) => d.id !== id));
   }
-
-  const photos = pendingDocs.filter((d) => d.docType === "photo");
-  const complianceDocs = pendingDocs.filter((d) => d.docType !== "photo");
 
   function submitAll() {
     setError(null);
@@ -333,7 +329,7 @@ export function AddVehicleModal({
       open={open}
       titleId="add-vehicle-title"
       title="Add vehicle"
-      description="Register a fleet vehicle, then attach photos and compliance documents."
+      description="Register a fleet vehicle and optionally attach compliance documents."
       headerExtra={<StepProgress step={step} />}
       pending={pending}
       maxWidthClass="max-w-3xl"
@@ -564,66 +560,8 @@ export function AddVehicleModal({
       {step === 2 ? (
         <div className="space-y-4">
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Add vehicle photos now (optional). You can skip and continue — photos can also be added later from Manage.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <label className={btnGhost + " cursor-pointer"}>
-              Choose photos
-              <input
-                type="file"
-                className="hidden"
-                accept="image/jpeg,image/png,image/webp"
-                multiple
-                disabled={pending}
-                onChange={(e) => {
-                  addFiles(e.target.files, "photo");
-                  e.target.value = "";
-                }}
-              />
-            </label>
-            {canScanOrCapture ? (
-              <label className={btnContinue + " cursor-pointer"}>
-                Scan or take photo
-                <input
-                  type="file"
-                  className="hidden"
-                  accept="image/*"
-                  capture="environment"
-                  disabled={pending}
-                  onChange={(e) => {
-                    addFiles(e.target.files, "photo");
-                    e.target.value = "";
-                  }}
-                />
-              </label>
-            ) : null}
-          </div>
-          {canScanOrCapture ? (
-            <p className="text-xs text-slate-500">
-              On iPhone, Choose photos → Browse can also offer Scan Documents.
-            </p>
-          ) : null}
-          {!photos.length ? (
-            <p className="text-sm text-slate-500">No photos selected yet.</p>
-          ) : (
-            <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
-              {photos.map((p) => (
-                <li key={p.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                  <span className="truncate text-slate-800 dark:text-slate-200">{p.fileName}</span>
-                  <button type="button" className={btnGhost} onClick={() => removePending(p.id)}>
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ) : null}
-
-      {step === 3 ? (
-        <div className="space-y-4">
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
             Attach MOT, insurance, logbook, and other compliance files (optional). Skip if you will add them later.
+            Vehicle condition photos are captured later at checkout / check-in, not here.
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Document type">
@@ -655,7 +593,7 @@ export function AddVehicleModal({
             </label>
             {canScanOrCapture ? (
               <label className={btnContinue + " cursor-pointer"}>
-                Scan or take photo
+                Scan document
                 <input
                   type="file"
                   className="hidden"
@@ -670,11 +608,11 @@ export function AddVehicleModal({
               </label>
             ) : null}
           </div>
-          {!complianceDocs.length ? (
+          {!pendingDocs.length ? (
             <p className="text-sm text-slate-500">No documents selected yet.</p>
           ) : (
             <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
-              {complianceDocs.map((d) => (
+              {pendingDocs.map((d) => (
                 <li key={d.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                   <div className="min-w-0">
                     <p className="font-medium text-slate-800 dark:text-slate-200">{VEHICLE_DOC_TYPE_LABELS[d.docType]}</p>
@@ -693,7 +631,7 @@ export function AddVehicleModal({
         </div>
       ) : null}
 
-      {step === 4 ? (
+      {step === 3 ? (
         <div className="space-y-4 text-sm text-zinc-700 dark:text-zinc-300">
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
             <p className="font-semibold text-slate-900 dark:text-slate-100">
@@ -729,13 +667,10 @@ export function AddVehicleModal({
             </dl>
           </div>
           <p>
-            <span className="font-medium">{photos.length}</span> photo{photos.length === 1 ? "" : "s"} ·{" "}
-            <span className="font-medium">{complianceDocs.length}</span> document
-            {complianceDocs.length === 1 ? "" : "s"} ready to upload after save.
+            <span className="font-medium">{pendingDocs.length}</span> document
+            {pendingDocs.length === 1 ? "" : "s"} ready to upload after save.
           </p>
-          <p className="text-xs text-slate-500">
-            Saving creates the vehicle, then uploads any selected photos and documents.
-          </p>
+          <p className="text-xs text-slate-500">Saving creates the vehicle, then uploads any selected documents.</p>
         </div>
       ) : null}
     </FormModalShell>
