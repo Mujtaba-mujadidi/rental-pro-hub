@@ -83,9 +83,9 @@ export function VehicleDocAddMenu({
         <DropdownMenu.Portal>
           <DropdownMenu.Content
             side="bottom"
-            align="start"
+            align="end"
             sideOffset={6}
-            collisionPadding={12}
+            avoidCollisions={false}
             className={contentClass}
           >
             <DropdownMenu.Item

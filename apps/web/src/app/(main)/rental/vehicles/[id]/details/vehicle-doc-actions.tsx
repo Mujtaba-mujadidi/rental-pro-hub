@@ -129,7 +129,13 @@ export function VehicleDocRowMenu({
           </button>
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
-          <DropdownMenu.Content side="bottom" align="start" sideOffset={6} collisionPadding={12} className={contentClass}>
+          <DropdownMenu.Content
+            side="bottom"
+            align="end"
+            sideOffset={6}
+            avoidCollisions={false}
+            className={contentClass}
+          >
             {onFile ? (
               <>
                 <DropdownMenu.Item

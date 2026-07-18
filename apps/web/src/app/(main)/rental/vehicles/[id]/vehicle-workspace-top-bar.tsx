@@ -75,11 +75,11 @@ export function VehicleWorkspaceTopBar({
       <div className="flex items-center gap-2">
         <Link
           href="/rental/vehicles"
-          className="rph-link shrink-0 text-sm font-semibold"
+          className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-rph-border bg-rph-raised px-2 text-xs font-semibold text-rph-fg-secondary shadow-sm transition-colors hover:bg-rph-chrome hover:text-rph-fg"
           aria-label="Back to fleet"
         >
-          <span className="sm:hidden">←</span>
-          <span className="hidden sm:inline">← Fleet</span>
+          <IconArrowLeft className="h-3.5 w-3.5 shrink-0" />
+          Fleet
         </Link>
 
         <div className="relative min-w-0 flex-1 sm:max-w-56 sm:flex-none" ref={rootRef}>
@@ -180,7 +180,7 @@ export function VehicleWorkspaceTopBar({
         </div>
       </nav>
 
-      {/* Mobile-only status / location under nav */}
+      {/* Mobile-only status / subcompany under nav */}
       <div className="mt-2 flex items-center gap-2 sm:hidden">
         <StatusChip status={vehicle.status} />
         <span className="min-w-0 truncate text-xs font-medium text-rph-fg-muted">
@@ -188,6 +188,14 @@ export function VehicleWorkspaceTopBar({
         </span>
       </div>
     </div>
+  );
+}
+
+function IconArrowLeft({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+    </svg>
   );
 }
 

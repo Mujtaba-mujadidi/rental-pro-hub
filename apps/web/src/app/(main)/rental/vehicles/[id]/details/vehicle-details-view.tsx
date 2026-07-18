@@ -15,6 +15,10 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
 import {
+  vehicleExpiryAttentionItems,
+  worstVehicleExpiryTone,
+} from "@/lib/fleet/vehicle-expiry-attention";
+import {
   REQUIRED_VEHICLE_DOC_TYPES,
   VEHICLE_DOC_TYPE_LABELS,
   VEHICLE_STATUS_LABELS,
@@ -26,6 +30,8 @@ import {
   type VehicleStatus,
   type VehicleTransferRow,
 } from "@/lib/fleet/vehicles";
+import type { CompanyNotificationSettings } from "@/lib/settings/notification-settings";
+import { VehicleExpiryAlert } from "@/app/(main)/rental/vehicles/vehicle-expiry-indicators";
 import { VehicleDocRowMenu } from "./vehicle-doc-actions";
 
 const btnPrimary = "rph-btn-primary";
@@ -186,6 +192,7 @@ export function VehicleDetailsView({
   initialDocuments,
   initialTransfers,
   subcompanies,
+  notifySettings,
   canManage,
   canDelete,
 }: {
@@ -193,6 +200,7 @@ export function VehicleDetailsView({
   initialDocuments: VehicleDocumentRow[];
   initialTransfers: VehicleTransferRow[];
   subcompanies: SubOpt[];
+  notifySettings: CompanyNotificationSettings;
   canManage: boolean;
   canDelete: boolean;
 }) {
@@ -223,6 +231,8 @@ export function VehicleDetailsView({
   }, [initialVehicle, initialDocuments, initialTransfers, editSection]);
 
   const missingDocs = vehicle.missing_docs ?? [];
+  const expiryAttention = vehicleExpiryAttentionItems(vehicle, notifySettings);
+  const expiryTone = worstVehicleExpiryTone(expiryAttention);
   const complianceDocs = docs.filter((d) => d.doc_type !== "photo");
   const otherDocs = complianceDocs.filter(
     (d) =>
@@ -403,8 +413,10 @@ export function VehicleDetailsView({
 
       {error && !editSection ? <p className="rph-alert-error text-sm">{error}</p> : null}
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <section className="rph-card flex flex-col p-4 sm:p-5">
+      <VehicleExpiryAlert items={expiryAttention} tone={expiryTone} />
+
+      <div className="grid gap-4 xl:grid-cols-12">
+        <section className="rph-card flex flex-col p-4 sm:p-5 xl:col-span-5">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Specifications</h2>
             {canManage ? (
@@ -442,7 +454,7 @@ export function VehicleDetailsView({
           </div>
         </section>
 
-        <section className="rph-card p-4 sm:p-5">
+        <section className="rph-card p-4 sm:p-5 xl:col-span-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Registration</h2>
             {canManage ? (
@@ -470,7 +482,7 @@ export function VehicleDetailsView({
           </div>
         </section>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 xl:col-span-4">
           <section className="rph-card p-4 sm:p-5">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Ownership history</h2>
             {!transfers.length ? (

@@ -6,6 +6,7 @@ import type { CompanyMembershipRole } from "@/lib/auth/profile";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
 import { revalidateProfileBundle } from "@/lib/auth/profile-bundle-cache";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
+import { canManageStaff } from "@/lib/auth/rental-permissions";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getPublicSiteUrl } from "@/lib/supabase/site-url";
@@ -19,10 +20,6 @@ export type StaffActionResult =
   | { ok: false; error: string; code?: "LAST_OWNER_CONFIRM" };
 
 const INVITABLE_ROLES = new Set<CompanyMembershipRole>(["admin", "operations", "finance", "viewer"]);
-
-function isRentalAdmin(profile: { membership_role: string | null }) {
-  return profile.membership_role === "owner" || profile.membership_role === "admin";
-}
 
 export type InviteStaffAccess = { scope: "all" | "explicit"; subcompanyIds: string[] };
 
@@ -38,7 +35,7 @@ export async function inviteRentalStaffAction(
   if (!frozen.ok) return { ok: false, error: frozen.error };
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
-  if (!isRentalAdmin(profile)) {
+  if (!canManageStaff(profile)) {
     return { ok: false, error: "Only owners or admins can invite staff." };
   }
   if (proposedRole === "owner" || !INVITABLE_ROLES.has(proposedRole)) {
@@ -67,7 +64,7 @@ export async function inviteRentalStaffAction(
     if (acc.scope === "explicit") {
       const ids = [...new Set(acc.subcompanyIds.map((x) => x.trim()).filter(Boolean))];
       if (ids.length === 0) {
-        return { ok: false, error: "Choose at least one subcompany, or set access to all locations." };
+        return { ok: false, error: "Choose at least one subcompany, or set access to all subcompanies." };
       }
       const { data: subs, error: subErr } = await admin
         .from("subcompanies")
@@ -164,7 +161,7 @@ export async function updateMembershipRoleAction(
   if (!frozen.ok) return { ok: false, error: frozen.error };
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
-  if (!isRentalAdmin(profile)) {
+  if (!canManageStaff(profile)) {
     return { ok: false, error: "Only owners or admins can change roles." };
   }
 
@@ -232,7 +229,7 @@ export async function updateMembershipStatusAction(
   if (!frozen.ok) return { ok: false, error: frozen.error };
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
-  if (!isRentalAdmin(profile)) {
+  if (!canManageStaff(profile)) {
     return { ok: false, error: "Only owners or admins can change membership status." };
   }
 
@@ -296,7 +293,7 @@ export async function setMembershipSubcompanyScopeAction(
   if (!frozen.ok) return { ok: false, error: frozen.error };
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
-  if (!isRentalAdmin(profile)) {
+  if (!canManageStaff(profile)) {
     return { ok: false, error: "Only owners or admins can manage access." };
   }
 
@@ -351,7 +348,7 @@ export async function setMembershipSubcompanyScopeAction(
   const dedupedIds = [...new Set(subcompanyIds.map((id) => id.trim()).filter(Boolean))];
 
   if (scope === "explicit" && dedupedIds.length === 0) {
-    return { ok: false, error: "Choose at least one subcompany, or set access to all locations." };
+    return { ok: false, error: "Choose at least one subcompany, or set access to all subcompanies." };
   }
 
   if (scope === "explicit" && dedupedIds.length > 0) {

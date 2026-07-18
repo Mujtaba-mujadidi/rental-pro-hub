@@ -15,7 +15,7 @@ import { CompanyStepProgress } from "@/components/forms/company-step-progress";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 
 /** Short labels for the orange step rail (same pattern as super-admin registration). */
-const STEP_LABELS = ["Legal", "Logo", "Primary", "Locations", "Invite", "Finish"] as const;
+const STEP_LABELS = ["Legal", "Logo", "Primary", "Subcompanies", "Invite", "Finish"] as const;
 
 const btnContinue =
   "flex h-11 min-w-[7rem] items-center justify-center rounded-lg bg-rph-rail px-4 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50";
@@ -374,7 +374,7 @@ export function RentalOnboardingWizard({
           {step === 3 ? (
             <div className="space-y-4 pt-1">
               <div>
-                <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Additional locations</h3>
+                <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Additional subcompanies</h3>
                 <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
                   Register more subcompanies anytime from <span className="font-semibold text-zinc-700 dark:text-zinc-300">Subcompany</span>{" "}
                   in the sidebar. No separate logins for branches.

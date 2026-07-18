@@ -1,0 +1,32 @@
+---
+description: Fixed rental membership roles — do not build per-company custom RBAC
+alwaysApply: true
+---
+
+# Fixed rental roles (product decision)
+
+Do **not** build per-company custom roles or a customer-facing permission matrix.
+
+## Roles (only)
+
+`owner` | `admin` | `operations` | `finance` | `viewer`
+
+Plus **subcompany scope** (`all` / selected) for non-owner/admin members.
+
+## Capability mapping (use `can()` from `@/lib/auth/rental-permissions`)
+
+| Capability | Roles |
+|------------|--------|
+| `staff.manage` / `settings.manage` / `onboarding.manage` / `contract.change` | owner, admin |
+| `fleet.write` / `fleet_tracking.manage` / `subcompany.write` / `maintenance.write` | owner, admin, operations |
+| `fleet.delete` | owner, admin |
+| `billing.pay` | owner, admin, finance |
+| `maintenance.read` | owner, admin, operations, finance, viewer |
+
+When adding modules (claims, customer payments), map them onto these fixed roles — do not invent DIY company roles unless several paying customers block deals without them.
+
+## Implementation
+
+- Prefer `can(profile, "fleet.write")` over scattered `membership_role === …` checks.
+- Keep Postgres RLS aligned with the same fixed-role sets.
+- Never expose ProTrack / third-party “roles” as a substitute for company membership roles.

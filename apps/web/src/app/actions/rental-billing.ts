@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
+import { canSubmitBillingPayment } from "@/lib/auth/rental-permissions";
 import { notifySuperAdmins } from "@/lib/platform-notifications";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -16,8 +17,7 @@ export async function submitInvoicePaymentAction(formData: FormData): Promise<{ 
   const { profile } = await requireRentalCompanyArea();
   const frozen = await assertRentalCompanyWritable(profile);
   if (!frozen.ok) return { ok: false, error: frozen.error };
-  const mr = profile.membership_role;
-  if (mr !== "owner" && mr !== "admin" && mr !== "finance") {
+  if (!canSubmitBillingPayment(profile)) {
     return { ok: false, error: "Only owner, admin, or finance can submit payments." };
   }
 

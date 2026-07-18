@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
+import { canRequestContractChange } from "@/lib/auth/rental-permissions";
 import { RentalContractDetailsCard } from "./rental-contract-details-card";
 import { RentalDisplayNameSetting } from "./rental-display-name-setting";
 
@@ -72,9 +73,7 @@ export default async function RentalCompanyHomePage() {
           company={company}
           termsSnapshot={termsSnapshot}
           hasPendingChange={!!pendingChange?.id || company.contract_status === "pending_renewal"}
-          canRequestContractChange={
-            profile.membership_role === "owner" || profile.membership_role === "admin"
-          }
+          canRequestContractChange={canRequestContractChange(profile)}
         />
       ) : null}
     </div>

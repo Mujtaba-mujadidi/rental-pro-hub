@@ -52,12 +52,24 @@ export default async function MainShellLayout({
     }
   }
 
+  let fleetTrackingEnabled = false;
   if (variant === "rental_company") {
     const life = await getRentalSessionLifecycleCached(user.id, user.email);
     const personal =
       profile.display_name?.trim() || user.email?.split("@")[0]?.trim() || "User";
     accountDisplayName =
       life.kind === "rental" && life.companyName ? `${personal} · ${life.companyName}` : personal;
+
+    const companyId = profile.company_id?.trim();
+    if (companyId) {
+      const supabase = await createClient();
+      const { data } = await supabase
+        .from("companies")
+        .select("fleet_tracking_enabled")
+        .eq("id", companyId)
+        .maybeSingle();
+      fleetTrackingEnabled = Boolean(data?.fleet_tracking_enabled);
+    }
   }
 
   return (
@@ -66,6 +78,7 @@ export default async function MainShellLayout({
       displayName={accountDisplayName}
       driverNavMode={variant === "driver" ? driverNavMode : undefined}
       driverLicenceBanner={variant === "driver" ? driverLicenceBanner : null}
+      fleetTrackingEnabled={fleetTrackingEnabled}
     >
       {children}
     </Option7Shell>

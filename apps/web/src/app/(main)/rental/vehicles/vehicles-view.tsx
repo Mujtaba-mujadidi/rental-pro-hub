@@ -5,8 +5,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { loadDraft } from "@/lib/forms/form-draft";
 import { VEHICLE_DOC_TYPE_LABELS, VEHICLE_STATUS_LABELS, VEHICLE_STATUSES, type VehicleRow } from "@/lib/fleet/vehicles";
+import {
+  vehicleExpiryAttentionItems,
+  vehicleExpiryTextClass,
+  worstVehicleExpiryTone,
+} from "@/lib/fleet/vehicle-expiry-attention";
 import { vehicleWorkspaceHref } from "@/lib/fleet/vehicle-workspace-nav";
 import { formatUkDate } from "@/lib/datetime/uk";
+import type { CompanyNotificationSettings } from "@/lib/settings/notification-settings";
+import { VehicleExpiryPills } from "./vehicle-expiry-indicators";
 import { ADD_VEHICLE_DRAFT_KEY, AddVehicleModal } from "./add-vehicle-modal";
 
 const btnPrimary = "rph-btn-primary";
@@ -17,11 +24,13 @@ type SubOpt = { id: string; name: string | null; is_primary: boolean };
 export function VehiclesView({
   vehicles,
   subcompanies,
+  notifySettings,
   canManage,
   canDelete: _canDelete,
 }: {
   vehicles: VehicleRow[];
   subcompanies: SubOpt[];
+  notifySettings: CompanyNotificationSettings;
   canManage: boolean;
   canDelete: boolean;
 }) {
@@ -67,6 +76,11 @@ export function VehiclesView({
     });
   }, [vehicles, filter, statusFilter]);
 
+  const fleetAttentionCount = useMemo(
+    () => vehicles.filter((v) => vehicleExpiryAttentionItems(v, notifySettings).length > 0).length,
+    [vehicles, notifySettings],
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -77,7 +91,7 @@ export function VehiclesView({
           </p>
           {!canManage ? (
             <p className="rph-muted mt-2 text-xs">
-              You can view vehicles in your assigned locations. Ask an owner, admin, or operations user to add or edit
+              You can view vehicles in your assigned subcompanies. Ask an owner, admin, or operations user to add or edit
               fleet.
             </p>
           ) : null}
@@ -88,6 +102,19 @@ export function VehiclesView({
           </button>
         ) : null}
       </div>
+
+      {fleetAttentionCount > 0 ? (
+        <div className="rph-alert-warn text-sm">
+          <p className="font-semibold">
+            {fleetAttentionCount === 1
+              ? "1 vehicle has an expired or soon-to-expire date"
+              : `${fleetAttentionCount} vehicles have expired or soon-to-expire dates`}
+          </p>
+          <p className="mt-0.5 opacity-90">
+            Thresholds match Settings → Notifications (MOT, tax, PHV/Taxi). Open a vehicle to update dates on Details.
+          </p>
+        </div>
+      ) : null}
 
       {draftHint && canManage && !createOpen ? (
         <div className="rph-alert-warn flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -142,7 +169,7 @@ export function VehiclesView({
                 <th className="px-4 py-3 font-semibold">Subcompany</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold">Documents</th>
-                <th className="px-4 py-3 font-semibold">MOT</th>
+                <th className="px-4 py-3 font-semibold">Expiry</th>
                 <th className="px-4 py-3 font-semibold" />
               </tr>
             </thead>
@@ -151,8 +178,20 @@ export function VehiclesView({
                 const missing = v.missing_docs ?? [];
                 const workspaceHref = vehicleWorkspaceHref(v.id);
                 const detailsHref = vehicleWorkspaceHref(v.id, "details");
+                const attention = vehicleExpiryAttentionItems(v, notifySettings);
+                const expiryTone = worstVehicleExpiryTone(attention);
+                const motItem = attention.find((i) => i.kind === "mot");
                 return (
-                  <tr key={v.id} className="bg-rph-raised">
+                  <tr
+                    key={v.id}
+                    className={`bg-rph-raised ${
+                      expiryTone === "expired"
+                        ? "bg-red-50/70 dark:bg-red-950/20"
+                        : expiryTone === "expiring"
+                          ? "bg-amber-50/70 dark:bg-amber-950/20"
+                          : ""
+                    }`}
+                  >
                     <td className="px-4 py-3 font-mono font-semibold text-rph-fg">
                       <Link href={workspaceHref} className="hover:underline">
                         {v.vrm}
@@ -186,7 +225,18 @@ export function VehiclesView({
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-rph-fg-muted">{formatUkDate(v.mot_expiry)}</td>
+                    <td className="px-4 py-3">
+                      {attention.length ? (
+                        <div className="space-y-1">
+                          <VehicleExpiryPills items={attention} />
+                          <p className={`text-xs ${vehicleExpiryTextClass(motItem?.tone ?? "ok")}`}>
+                            MOT {formatUkDate(v.mot_expiry)}
+                          </p>
+                        </div>
+                      ) : (
+                        <span className="text-rph-fg-muted">MOT {formatUkDate(v.mot_expiry)}</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right">
                       <Link href={workspaceHref} className={btnGhost}>
                         {canManage ? "Open" : "View"}

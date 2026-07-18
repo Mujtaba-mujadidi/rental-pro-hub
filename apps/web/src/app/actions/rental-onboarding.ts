@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { revalidateCompanyGate } from "@/lib/auth/company-gate-cache";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
+import { canManageOnboarding } from "@/lib/auth/rental-permissions";
 import { processCompanyLogoForStorage } from "@/lib/companies/company-logo";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -12,13 +13,6 @@ const LOGO_MAX_BYTES = 2 * 1024 * 1024;
 const LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 export type OnboardingActionResult = { ok: true } | { ok: false; error: string };
-
-function canManageOnboarding(profile: {
-  membership_role: string | null;
-  company_role: "admin" | "staff" | null;
-}) {
-  return profile.membership_role === "owner" || profile.membership_role === "admin" || profile.company_role === "admin";
-}
 
 export async function saveRentalOnboardingStepAction(stepIndex: number): Promise<OnboardingActionResult> {
   const { profile } = await requireRentalCompanyArea();

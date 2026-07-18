@@ -13,6 +13,7 @@ export default async function VehicleDetailsPage({ params }: { params: Promise<{
       initialDocuments={data.documents}
       initialTransfers={data.transfers}
       subcompanies={data.subcompanies}
+      notifySettings={data.notifySettings}
       canManage={data.canManage}
       canDelete={data.canDelete}
     />

@@ -41,7 +41,7 @@ const rowActionItemClass =
   "flex cursor-default select-none items-center px-3 py-2 text-sm text-slate-800 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-slate-100 dark:text-slate-200 dark:data-[highlighted]:bg-slate-800";
 
 type StaffRoleFilter = "all" | CompanyMembershipRole;
-type StaffAccessFilter = "all" | "all_locations" | "selected_locations";
+type StaffAccessFilter = "all" | "all_subcompanies" | "selected_subcompanies";
 type StaffStatusFilter = "all" | StaffMember["status"];
 
 const ROLE_FILTER_OPTIONS: { value: StaffRoleFilter; label: string }[] = [
@@ -55,8 +55,8 @@ const ROLE_FILTER_OPTIONS: { value: StaffRoleFilter; label: string }[] = [
 
 const ACCESS_FILTER_OPTIONS: { value: StaffAccessFilter; label: string }[] = [
   { value: "all", label: "All access types" },
-  { value: "all_locations", label: "All locations" },
-  { value: "selected_locations", label: "Selected locations only" },
+  { value: "all_subcompanies", label: "All subcompanies" },
+  { value: "selected_subcompanies", label: "Selected subcompanies only" },
 ];
 
 const STATUS_FILTER_OPTIONS: { value: StaffStatusFilter; label: string }[] = [
@@ -111,21 +111,21 @@ function matchesAccessFilter(m: StaffMember, savedIds: string[], filter: StaffAc
     m.role !== "owner" &&
     m.role !== "admin" &&
     (m.subcompany_scope === "explicit" || (savedIds?.length ?? 0) > 0);
-  if (filter === "all_locations") return isFullAccess;
-  if (filter === "selected_locations") return isSelectedOnly;
+  if (filter === "all_subcompanies") return isFullAccess;
+  if (filter === "selected_subcompanies") return isSelectedOnly;
   return true;
 }
 
 function accessSummaryText(m: StaffMember, savedIds: string[], subs: Sub[]): string {
-  if (m.role === "owner" || m.role === "admin") return "All locations";
-  if (m.subcompany_scope === "all") return "All locations";
+  if (m.role === "owner" || m.role === "admin") return "All subcompanies";
+  if (m.subcompany_scope === "all") return "All subcompanies";
   const unique = [...new Set(savedIds)];
   if (unique.length === 0) return "None set";
   const byId = new Map(subs.map((s) => [s.id, s]));
   if (unique.length <= 2) {
     return unique.map((id) => byId.get(id)?.name ?? `${id.slice(0, 8)}…`).join(", ");
   }
-  return `${unique.length} locations`;
+  return unique.length === 1 ? "1 subcompany" : `${unique.length} subcompanies`;
 }
 
 function statusBadge(status: StaffMember["status"]) {
@@ -482,7 +482,7 @@ export function StaffDirectory({
             <div className="shrink-0 sm:min-w-[12rem] sm:max-w-[14rem]">
               <span className="mb-1.5 block text-sm font-semibold tracking-tight text-slate-800 dark:text-slate-200">Access</span>
               <Select.Root value={accessFilter} onValueChange={(v) => setAccessFilter(v as StaffAccessFilter)}>
-                <Select.Trigger className={selectTriggerClass} aria-label="Filter by location access">
+                <Select.Trigger className={selectTriggerClass} aria-label="Filter by subcompany access">
                   <Select.Value>
                     {ACCESS_FILTER_OPTIONS.find((o) => o.value === accessFilter)?.label ?? "All access types"}
                   </Select.Value>

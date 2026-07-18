@@ -1415,6 +1415,21 @@ export function AdminCompaniesTable({
           setDetailError(null);
           setDetailPayload(null);
         }}
+        onFleetTrackingChanged={() => {
+          const id = detailCompanyId;
+          if (!id) return;
+          setDetailLoading(true);
+          setDetailError(null);
+          void (async () => {
+            const res = await getAdminCompanyDetailAction(id);
+            setDetailLoading(false);
+            if (!res.ok) {
+              setDetailError(res.error);
+              return;
+            }
+            setDetailPayload(res.payload);
+          })();
+        }}
       />
     </div>
   );

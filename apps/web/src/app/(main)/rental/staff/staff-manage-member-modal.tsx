@@ -108,7 +108,7 @@ function roleChangeDescription(
       title: isSelf ? "Restore owner role?" : `Make ${displayName || "this user"} an owner?`,
       description: isSelf
         ? "You will have full owner permissions again, including assigning the owner role to others."
-        : "Owners have full access to the company, all locations, and sensitive actions. Confirm this is intended.",
+        : "Owners have full access to the company, all subcompanies, and sensitive actions. Confirm this is intended.",
       variant: "default",
       confirmLabel: "Assign owner",
     };
@@ -151,10 +151,10 @@ function CurrentAccessCallout({
     return (
       <div className="rounded-lg border border-slate-200 bg-slate-50/90 px-4 py-3 dark:border-slate-600 dark:bg-slate-800/50">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Current access</p>
-        <p className="mt-1 text-sm text-slate-800 dark:text-slate-200">Full access to every location (owner / admin).</p>
+        <p className="mt-1 text-sm text-slate-800 dark:text-slate-200">Full access to every subcompany (owner / admin).</p>
         {subcompanies.length > 0 ? (
           <>
-            <p className="mt-3 text-xs font-medium text-slate-600 dark:text-slate-400">Locations in this company</p>
+            <p className="mt-3 text-xs font-medium text-slate-600 dark:text-slate-400">Subcompanies in this company</p>
             <ul className="mt-2 grid gap-2 sm:grid-cols-2">
               {subcompanies.map((s) => (
                 <li key={s.id} className="text-sm text-slate-800 dark:text-slate-200">
@@ -174,7 +174,7 @@ function CurrentAccessCallout({
     return (
       <div className="rounded-lg border border-slate-200 bg-slate-50/90 px-4 py-3 dark:border-slate-600 dark:bg-slate-800/50">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Current access</p>
-        <p className="mt-1 text-sm text-slate-800 dark:text-slate-200">All locations — can open every subcompany below.</p>
+        <p className="mt-1 text-sm text-slate-800 dark:text-slate-200">All subcompanies — can open every subcompany below.</p>
         {subcompanies.length > 0 ? (
           <ul className="mt-3 grid gap-2 sm:grid-cols-2">
             {subcompanies.map((s) => (
@@ -193,7 +193,7 @@ function CurrentAccessCallout({
       <div className="rounded-lg border border-amber-200/80 bg-amber-50/60 px-4 py-3 dark:border-amber-900/45 dark:bg-amber-950/25">
         <p className="text-xs font-semibold uppercase tracking-wide text-amber-900 dark:text-amber-200">Current access</p>
         <p className="mt-1 text-sm text-amber-950 dark:text-amber-100">
-          No specific locations are saved yet. Their scope is set to selected locations only — choose at least one below and
+          No specific subcompanies are saved yet. Their scope is set to selected subcompanies only — choose at least one below and
           save.
         </p>
       </div>
@@ -203,13 +203,13 @@ function CurrentAccessCallout({
   return (
     <div className="rounded-lg border border-emerald-200/80 bg-emerald-50/50 px-4 py-3 dark:border-emerald-900/40 dark:bg-emerald-950/20">
       <p className="text-xs font-semibold uppercase tracking-wide text-emerald-900 dark:text-emerald-200">Current access</p>
-      <p className="mt-1 text-sm text-slate-700 dark:text-slate-300">They can open these locations after sign-in:</p>
+      <p className="mt-1 text-sm text-slate-700 dark:text-slate-300">They can open these subcompanies after sign-in:</p>
       <ul className="mt-2 grid gap-2 sm:grid-cols-2">
         {uniqueSaved.map((id) => {
           const s = byId.get(id);
           return (
             <li key={id} className="text-sm text-slate-900 dark:text-slate-100">
-              {s ? subcompanyLine(s) : <span className="font-medium text-amber-800 dark:text-amber-200">Unknown location ({id.slice(0, 8)}…)</span>}
+              {s ? subcompanyLine(s) : <span className="font-medium text-amber-800 dark:text-amber-200">Unknown subcompany ({id.slice(0, 8)}…)</span>}
             </li>
           );
         })}
@@ -564,7 +564,7 @@ export function StaffManageMemberModal({
                 <div className="space-y-4">
                   <p className="text-sm text-slate-600 dark:text-slate-400">
                     Role changes take effect immediately after you confirm. Owners and admins always have access to all
-                    locations.
+                    subcompanies.
                   </p>
                   <div className="block">
                     <span className="mb-1.5 block text-sm font-semibold text-slate-800 dark:text-slate-200">Role</span>
@@ -624,11 +624,11 @@ export function StaffManageMemberModal({
                       <div className="border-t border-slate-200 pt-4 dark:border-slate-600">
                         <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Change access</p>
                         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          Choose all locations or pick specific subcompanies. Save applies your full selection.
+                          Choose all subcompanies or pick specific ones. Save applies your full selection.
                         </p>
                       </div>
                       <fieldset className="space-y-2">
-                        <legend className="sr-only">Location access</legend>
+                        <legend className="sr-only">Subcompany access</legend>
                         <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700 dark:text-slate-300">
                           <input
                             type="radio"
@@ -640,7 +640,7 @@ export function StaffManageMemberModal({
                             }}
                           />
                           <span>
-                            <span className="font-medium text-slate-900 dark:text-slate-100">All locations</span>
+                            <span className="font-medium text-slate-900 dark:text-slate-100">All subcompanies</span>
                             <span className="block text-xs text-slate-500 dark:text-slate-400">Company-wide visibility.</span>
                           </span>
                         </label>
@@ -652,7 +652,7 @@ export function StaffManageMemberModal({
                             onChange={() => setAccessMode("explicit")}
                           />
                           <span>
-                            <span className="font-medium text-slate-900 dark:text-slate-100">Selected locations only</span>
+                            <span className="font-medium text-slate-900 dark:text-slate-100">Selected subcompanies only</span>
                             <span className="block text-xs text-slate-500 dark:text-slate-400">Tick subcompanies below, then save.</span>
                           </span>
                         </label>

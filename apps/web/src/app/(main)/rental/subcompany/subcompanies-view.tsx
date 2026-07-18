@@ -21,16 +21,16 @@ export function SubcompaniesView({ canRegisterSubcompany }: { canRegisterSubcomp
         <div>
           <h1 className="rph-h1">Subcompany</h1>
           <p className="rph-muted mt-1 max-w-2xl text-sm">
-            Register and manage operational locations under your rental parent company.
+            Register and manage subcompanies under your rental parent company.
           </p>
           <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            The <span className="font-semibold">primary</span> unit is your default operational location. The parent
+            The <span className="font-semibold">primary</span> unit is your default subcompany. The parent
             company holds the contract; signed amendments may sync trading name and primary contact to the primary unit
             only — not full legal entity fields.
           </p>
           {!canRegisterSubcompany ? (
             <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-              You only see subcompanies your admin has granted. Ask an owner or admin to register new locations or adjust
+              You only see subcompanies your admin has granted. Ask an owner or admin to register new subcompanies or adjust
               your access.
             </p>
           ) : null}

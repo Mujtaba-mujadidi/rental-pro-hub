@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { APP_NAME } from "@rph/shared";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserAccountMenu } from "@/components/shell/user-account-menu";
@@ -71,6 +71,12 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
     }
     if (pathname === "/rental/notifications" || pathname.startsWith("/rental/notifications/")) {
       return [{ label: "Home", href: "/rental" }, { label: "Notifications", href: "/rental/notifications" }];
+    }
+    if (pathname === "/rental/settings" || pathname.startsWith("/rental/settings/")) {
+      return [{ label: "Home", href: "/rental" }, { label: "Settings", href: "/rental/settings" }];
+    }
+    if (pathname === "/rental/fleet-tracking" || pathname.startsWith("/rental/fleet-tracking/")) {
+      return [{ label: "Home", href: "/rental" }, { label: "Fleet Tracking", href: "/rental/fleet-tracking" }];
     }
     return [{ label: "Home", href: "/rental" }, { label: "Page" }];
   }
@@ -220,6 +226,7 @@ export function Option7Shell({
   displayName,
   driverNavMode,
   driverLicenceBanner,
+  fleetTrackingEnabled = false,
   children,
 }: {
   variant: ShellVariant;
@@ -227,18 +234,24 @@ export function Option7Shell({
   driverNavMode?: DriverNavMode;
   /** Shown for drivers when licences must be reviewed (expiry / address). */
   driverLicenceBanner?: { title: string; bullets: string[] } | null;
+  /** Rental companies with Fleet Tracking (SmartCar Tracker) enabled by super-admin. */
+  fleetTrackingEnabled?: boolean;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
+  // Always start expanded so SSR HTML matches the first client render; restore preference after mount.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1") {
+        setSidebarCollapsed(true);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const toggleSidebarCollapsed = useCallback(() => {
     setSidebarCollapsed((prev) => {
@@ -328,6 +341,15 @@ export function Option7Shell({
         >
           Vehicles
         </NavLink>
+        {fleetTrackingEnabled ? (
+          <NavLink
+            href="/rental/fleet-tracking"
+            active={pathname === "/rental/fleet-tracking" || pathname.startsWith("/rental/fleet-tracking/")}
+            onNavigate={closeMobileNav}
+          >
+            Fleet Tracking
+          </NavLink>
+        ) : null}
         <NavLink
           href="/rental/staff"
           active={pathname === "/rental/staff" || pathname.startsWith("/rental/staff/")}
@@ -348,6 +370,13 @@ export function Option7Shell({
           onNavigate={closeMobileNav}
         >
           Notifications
+        </NavLink>
+        <NavLink
+          href="/rental/settings"
+          active={pathname === "/rental/settings" || pathname.startsWith("/rental/settings/")}
+          onNavigate={closeMobileNav}
+        >
+          Settings
         </NavLink>
       </>
     ) : driverNavMode !== "full" ? (

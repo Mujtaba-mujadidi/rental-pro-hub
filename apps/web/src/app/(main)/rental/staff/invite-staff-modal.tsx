@@ -190,11 +190,11 @@ export function InviteStaffModal({
   }
 
   const accessSummary = useCallback(() => {
-    if (role === "admin") return "All locations (admins always have full access).";
-    if (accessScope === "all") return "All subcompany locations.";
+    if (role === "admin") return "All subcompanies (admins always have full access).";
+    if (accessScope === "all") return "All subcompanies.";
     if (selectedSubIds.length === 0) return "—";
     const names = subcompanies.filter((s) => selectedSubIds.includes(s.id)).map((s) => s.name);
-    return names.length ? names.join(", ") : `${selectedSubIds.length} location(s)`;
+    return names.length ? names.join(", ") : `${selectedSubIds.length} subcompan${selectedSubIds.length === 1 ? "y" : "ies"}`;
   }, [role, accessScope, selectedSubIds, subcompanies]);
 
   const sendInvite = useCallback(() => {
@@ -235,7 +235,7 @@ export function InviteStaffModal({
       open={open}
       titleId="invite-staff-title"
       title="Add staff"
-      description="Invite by email, choose their role, and set which locations they can see after they sign in."
+      description="Invite by email, choose their role, and set which subcompanies they can see after they sign in."
       headerExtra={<StepProgress step={step} />}
       pending={pending}
       maxWidthClass="max-w-2xl"
@@ -350,16 +350,16 @@ export function InviteStaffModal({
           {role === "admin" ? (
             <p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-400">
               Admins always have access to <span className="font-semibold text-zinc-800 dark:text-zinc-200">all</span>{" "}
-              subcompany locations.
+              subcompanies.
             </p>
           ) : (
             <div className="space-y-3">
               <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Subcompany access</p>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                They only see data for the locations you allow. You can change this later on the Staff page.
+                They only see data for the subcompanies you allow. You can change this later on the Staff page.
               </p>
               <fieldset className="space-y-2">
-                <legend className="sr-only">Location access</legend>
+                <legend className="sr-only">Subcompany access</legend>
                 <label className="flex cursor-pointer items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
                   <input
                     type="radio"
@@ -372,7 +372,7 @@ export function InviteStaffModal({
                     }}
                   />
                   <span>
-                    <span className="font-medium text-zinc-900 dark:text-zinc-100">All locations</span>
+                    <span className="font-medium text-zinc-900 dark:text-zinc-100">All subcompanies</span>
                     <span className="block text-xs text-zinc-500 dark:text-zinc-400">Same as company-wide access.</span>
                   </span>
                 </label>
@@ -385,7 +385,7 @@ export function InviteStaffModal({
                     onChange={() => setAccessScope("explicit")}
                   />
                   <span>
-                    <span className="font-medium text-zinc-900 dark:text-zinc-100">Selected locations only</span>
+                    <span className="font-medium text-zinc-900 dark:text-zinc-100">Selected subcompanies only</span>
                     <span className="block text-xs text-zinc-500 dark:text-zinc-400">Pick one or more subcompanies.</span>
                   </span>
                 </label>
@@ -394,8 +394,8 @@ export function InviteStaffModal({
                 <div className="border-l-2 border-zinc-200 pl-3 dark:border-zinc-600">
                   {subcompanies.length === 0 ? (
                     <p className="text-sm text-amber-800 dark:text-amber-200">
-                      No subcompanies exist yet. Register locations under Subcompany first, or choose &quot;All
-                      locations&quot;.
+                      No subcompanies exist yet. Register subcompanies under Subcompany first, or choose &quot;All
+                      subcompanies&quot;.
                     </p>
                   ) : (
                     <ul className="flex max-h-48 flex-col gap-2 overflow-y-auto pr-1">
@@ -447,7 +447,7 @@ export function InviteStaffModal({
                 <dd className="capitalize text-zinc-900 dark:text-zinc-100">{role}</dd>
               </div>
               <div>
-                <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">Location access</dt>
+                <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">Subcompany access</dt>
                 <dd className="text-zinc-900 dark:text-zinc-100">{accessSummary()}</dd>
               </div>
             </dl>

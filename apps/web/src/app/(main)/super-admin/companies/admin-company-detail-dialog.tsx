@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, useTransition } from "react";
+import { setCompanyFleetTrackingEnabledAction } from "@/app/actions/admin-fleet-tracking";
 import type { AdminCompanyDetailPayload } from "@/lib/admin/company-list-shared";
 import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
 
@@ -88,6 +89,7 @@ const FIELD_LABELS: Record<string, string> = {
   rental_onboarding_step: "Onboarding step",
   rental_onboarding_completed_at: "Onboarding completed",
   pending_primary_invite_after_contract_signed: "Pending invite after contract signed",
+  fleet_tracking_enabled: "Fleet Tracking enabled",
   created_at: "Created",
   updated_at: "Updated",
   parent_company_id: "Parent company ID",
@@ -143,6 +145,7 @@ const COMPANY_KEY_PRIORITY = [
   "rental_onboarding_step",
   "rental_onboarding_completed_at",
   "pending_primary_invite_after_contract_signed",
+  "fleet_tracking_enabled",
   "created_at",
   "updated_at",
 ] as const;
@@ -199,6 +202,9 @@ function formatDetailValue(value: unknown): string {
 
 function orderedKeys(record: Record<string, unknown>, priority: readonly string[]): string[] {
   const keys = new Set(Object.keys(record));
+  // Never surface encrypted credentials in the admin detail grid
+  keys.delete("fleet_tracking_password_encrypted");
+  keys.delete("fleet_tracking_account");
   const out: string[] = [];
   for (const k of priority) {
     if (keys.has(k)) {
@@ -263,6 +269,8 @@ export type AdminCompanyDetailDialogProps = {
   error: string | null;
   payload: AdminCompanyDetailPayload | null;
   onClose: () => void;
+  /** After toggling Fleet Tracking, parent should reload detail. */
+  onFleetTrackingChanged?: () => void;
 };
 
 const iconGhostBtn =
@@ -275,11 +283,21 @@ const tabSegInactive =
 const tabSegActive =
   "bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/80 dark:bg-slate-700 dark:text-white dark:ring-slate-600/80";
 
-export function AdminCompanyDetailDialog({ open, title, loading, error, payload, onClose }: AdminCompanyDetailDialogProps) {
+export function AdminCompanyDetailDialog({
+  open,
+  title,
+  loading,
+  error,
+  payload,
+  onClose,
+  onFleetTrackingChanged,
+}: AdminCompanyDetailDialogProps) {
   const baseId = useId();
   const [activeTab, setActiveTab] = useState<DetailTabId>("company");
   const [expandedSubcompanyIds, setExpandedSubcompanyIds] = useState<Set<string>>(() => new Set());
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fleetTogglePending, startFleetToggle] = useTransition();
+  const [fleetToggleError, setFleetToggleError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -295,6 +313,7 @@ export function AdminCompanyDetailDialog({ open, title, loading, error, payload,
       setActiveTab("company");
       setExpandedSubcompanyIds(new Set());
       setIsFullscreen(false);
+      setFleetToggleError(null);
     }
   }, [open]);
 
@@ -432,6 +451,49 @@ export function AdminCompanyDetailDialog({ open, title, loading, error, payload,
                 aria-labelledby={tabId("company")}
                 hidden={activeTab !== "company"}
               >
+                {payload.company && typeof payload.company.id === "string" ? (
+                  <div className="mb-6 rounded-2xl border border-slate-200/90 bg-slate-50/60 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Fleet Tracking</p>
+                        <p className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                          Allow this company to connect SmartCar Tracker and see live vehicle location in the rental app.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={fleetTogglePending}
+                        className={`inline-flex h-10 shrink-0 items-center justify-center rounded-lg px-4 text-sm font-semibold disabled:opacity-50 ${
+                          payload.company.fleet_tracking_enabled === true
+                            ? "border border-red-200 bg-red-50 text-red-800 hover:bg-red-100 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
+                            : "bg-rph-rail text-white hover:bg-rph-rail-hover"
+                        }`}
+                        onClick={() => {
+                          const companyId = String(payload.company.id);
+                          const next = payload.company.fleet_tracking_enabled !== true;
+                          setFleetToggleError(null);
+                          startFleetToggle(async () => {
+                            const res = await setCompanyFleetTrackingEnabledAction(companyId, next);
+                            if (!res.ok) {
+                              setFleetToggleError(res.error);
+                              return;
+                            }
+                            onFleetTrackingChanged?.();
+                          });
+                        }}
+                      >
+                        {fleetTogglePending
+                          ? "Saving…"
+                          : payload.company.fleet_tracking_enabled === true
+                            ? "Disable"
+                            : "Enable"}
+                      </button>
+                    </div>
+                    {fleetToggleError ? (
+                      <p className="mt-2 text-sm text-red-700 dark:text-red-300">{fleetToggleError}</p>
+                    ) : null}
+                  </div>
+                ) : null}
                 <DetailGrid record={payload.company} priority={COMPANY_KEY_PRIORITY} />
               </div>
               <div

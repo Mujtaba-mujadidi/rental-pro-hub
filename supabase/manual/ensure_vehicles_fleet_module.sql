@@ -413,3 +413,10 @@ alter table public.vehicle_documents
   check (doc_type in (
     'mot', 'logbook', 'phv_taxi_licence_paper', 'phv_licence', 'insurance', 'permission_letter', 'photo', 'other'
   ));
+
+-- Fleet Tracking IMEI links (also in ensure_fleet_tracking.sql)
+alter table public.vehicles
+  add column if not exists gps_primary_imei text;
+
+alter table public.vehicles
+  add column if not exists gps_secondary_imei text;

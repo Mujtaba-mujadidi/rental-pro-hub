@@ -104,6 +104,8 @@ export type VehicleRow = {
   current_mileage: number | null;
   next_service_mileage: number | null;
   notes: string | null;
+  gps_primary_imei: string | null;
+  gps_secondary_imei: string | null;
   created_at: string;
   updated_at: string;
   subcompany_name?: string | null;

@@ -14,6 +14,7 @@ export default async function RentalVehiclesPage() {
     <VehiclesView
       vehicles={data.vehicles}
       subcompanies={data.subcompanies}
+      notifySettings={data.notifySettings}
       canManage={data.canManage}
       canDelete={data.canDelete}
     />

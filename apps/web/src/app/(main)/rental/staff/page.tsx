@@ -1,4 +1,5 @@
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
+import { canManageStaff } from "@/lib/auth/rental-permissions";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { StaffDirectory } from "./staff-directory";
@@ -80,7 +81,7 @@ export default async function RentalStaffPage() {
     explicitSubsByMembership.set(r.membership_id, list);
   }
 
-  const canManage = profile.membership_role === "owner" || profile.membership_role === "admin";
+  const canManage = canManageStaff(profile);
 
   const ownerCount = (memberships ?? []).filter((m) => m.role === "owner" && m.status === "active").length;
 
@@ -101,8 +102,8 @@ export default async function RentalStaffPage() {
         <div>
           <h1 className="rph-h1">Staff</h1>
           <p className="rph-muted mt-1 max-w-2xl text-sm">
-            Invite colleagues and control their role and which subcompany locations they can see. Owners and admins always
-            have access to all locations.
+            Invite colleagues and control their role and which subcompanies they can see. Owners and admins always
+            have access to all subcompanies.
           </p>
         </div>
         {canManage ? <StaffInviteTrigger subcompanies={subs ?? []} /> : null}
