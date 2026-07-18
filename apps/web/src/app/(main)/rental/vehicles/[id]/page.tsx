@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { loadVehicleDetailAction } from "@/app/actions/rental-vehicles";
+import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
 import { VEHICLE_DOC_TYPE_LABELS, VEHICLE_STATUS_LABELS } from "@/lib/fleet/vehicles";
 
 export default async function VehicleDashboardPage({ params }: { params: Promise<{ id: string }> }) {
@@ -46,15 +47,15 @@ export default async function VehicleDashboardPage({ params }: { params: Promise
           <dl className="mt-2 space-y-1 text-sm text-rph-fg-secondary">
             <div className="flex justify-between gap-2">
               <dt className="text-rph-fg-muted">MOT</dt>
-              <dd>{vehicle.mot_expiry ?? "—"}</dd>
+              <dd>{formatUkDate(vehicle.mot_expiry)}</dd>
             </div>
             <div className="flex justify-between gap-2">
               <dt className="text-rph-fg-muted">Tax</dt>
-              <dd>{vehicle.tax_expiry ?? "—"}</dd>
+              <dd>{formatUkDate(vehicle.tax_expiry)}</dd>
             </div>
             <div className="flex justify-between gap-2">
               <dt className="text-rph-fg-muted">PHV/Taxi</dt>
-              <dd>{vehicle.phv_licence_expiry ?? "—"}</dd>
+              <dd>{formatUkDate(vehicle.phv_licence_expiry)}</dd>
             </div>
           </dl>
         </div>
@@ -63,7 +64,7 @@ export default async function VehicleDashboardPage({ params }: { params: Promise
           <dl className="mt-2 space-y-1 text-sm text-rph-fg-secondary">
             <div className="flex justify-between gap-2">
               <dt className="text-rph-fg-muted">Due date</dt>
-              <dd>{vehicle.service_due_at ?? "—"}</dd>
+              <dd>{formatUkDate(vehicle.service_due_at)}</dd>
             </div>
             <div className="flex justify-between gap-2">
               <dt className="text-rph-fg-muted">Current miles</dt>
@@ -86,7 +87,7 @@ export default async function VehicleDashboardPage({ params }: { params: Promise
               {transfers.slice(0, 5).map((t) => (
                 <li key={t.id}>
                   {t.from_name ?? "—"} → {t.to_name ?? "—"}{" "}
-                  <span className="rph-meta">· {new Date(t.transferred_at).toLocaleString("en-GB")}</span>
+                  <span className="rph-meta">· {formatUkDateTime(t.transferred_at)}</span>
                 </li>
               ))}
             </ul>

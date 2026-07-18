@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useState } from "react";
 import type { AdminCompanyDetailPayload } from "@/lib/admin/company-list-shared";
+import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
 
 type DetailTabId = "company" | "contract" | "subcompanies";
 
@@ -186,15 +187,9 @@ function formatDetailValue(value: unknown): string {
       const d = new Date(value);
       if (!Number.isNaN(d.getTime())) {
         if (value.includes("T")) {
-          return d.toLocaleString("en-GB", {
-            day: "numeric",
-            month: "short",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          });
+          return formatUkDateTime(d);
         }
-        return value.slice(0, 10);
+        return formatUkDate(value);
       }
     }
     return value;

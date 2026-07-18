@@ -11,6 +11,7 @@ import {
 } from "@tanstack/react-table";
 import { useEffect, useMemo, useState } from "react";
 import type { CompanyMembershipRole } from "@/lib/auth/profile";
+import { formatUkDate } from "@/lib/datetime/uk";
 import { StaffManageMemberModal, type StaffMember } from "./staff-manage-member-modal";
 
 export type { StaffMember };
@@ -139,11 +140,7 @@ function statusBadge(status: StaffMember["status"]) {
 }
 
 function formatAdded(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-  } catch {
-    return "—";
-  }
+  return formatUkDate(iso);
 }
 
 export function StaffDirectory({

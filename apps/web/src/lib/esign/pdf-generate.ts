@@ -9,6 +9,7 @@ import {
   ESIGN_RECIPIENT_ROLE,
   type EsignFieldLayoutItem,
 } from "@/lib/esign/types";
+import { formatUkDateLong } from "@/lib/datetime/uk";
 
 export type ContractPdfParty = {
   roleLabel: string;
@@ -88,12 +89,7 @@ function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): 
 }
 
 function formatIssuedDate(d: Date | null | undefined): string {
-  const date = d ?? new Date();
-  return date.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  return formatUkDateLong(d ?? new Date());
 }
 
 type DrawCtx = {

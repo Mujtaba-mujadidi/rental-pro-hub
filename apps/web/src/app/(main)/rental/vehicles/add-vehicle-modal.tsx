@@ -6,7 +6,6 @@ import { createVehicleAction, uploadVehicleDocumentAction } from "@/app/actions/
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
-import { useCanScanOrCaptureDocument } from "@/hooks/use-can-scan-or-capture-document";
 import {
   REQUIRED_VEHICLE_DOC_TYPES,
   VEHICLE_DOC_TYPE_LABELS,
@@ -15,6 +14,7 @@ import {
   type RequiredVehicleDocType,
   type VehicleStatus,
 } from "@/lib/fleet/vehicles";
+import { VehicleDocAddMenu } from "./vehicle-doc-add-menu";
 
 const STEP_LABELS = ["Basics", "Specs", "Documents", "Review"] as const;
 
@@ -189,7 +189,6 @@ export function AddVehicleModal({
   onCreated?: () => void;
 }) {
   const router = useRouter();
-  const canScanOrCapture = useCanScanOrCaptureDocument();
   const primarySub = subcompanies.find((s) => s.is_primary)?.id ?? subcompanies[0]?.id ?? "";
   const baseline = useMemo<VehicleSnapshot>(
     () => ({ step: 0, fields: emptyFields(primarySub), pendingMeta: [] }),
@@ -625,36 +624,7 @@ export function AddVehicleModal({
                   </p>
                 )}
                 <div className="flex flex-wrap gap-2">
-                  <label className={btnGhost + " cursor-pointer"}>
-                    Add PDF / images
-                    <input
-                      type="file"
-                      className="hidden"
-                      accept="application/pdf,image/jpeg,image/png,image/webp"
-                      multiple
-                      disabled={busy}
-                      onChange={(e) => {
-                        addFiles(docType, e.target.files);
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
-                  {canScanOrCapture ? (
-                    <label className={btnContinue + " cursor-pointer"}>
-                      Scan with camera
-                      <input
-                        type="file"
-                        className="hidden"
-                        accept="image/*"
-                        capture="environment"
-                        disabled={busy}
-                        onChange={(e) => {
-                          addFiles(docType, e.target.files);
-                          e.target.value = "";
-                        }}
-                      />
-                    </label>
-                  ) : null}
+                  <VehicleDocAddMenu disabled={busy} onFiles={(files) => addFiles(docType, files)} />
                   {ready ? (
                     <button type="button" className={btnGhost} onClick={() => clearBundle(docType)}>
                       Clear

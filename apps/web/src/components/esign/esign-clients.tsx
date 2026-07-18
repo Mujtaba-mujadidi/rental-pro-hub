@@ -14,6 +14,7 @@ import {
   sendEsignEnvelopeAction,
 } from "@/app/actions/esign";
 import type { EsignFieldLayoutItem } from "@/lib/esign/types";
+import { formatUkDateTime } from "@/lib/datetime/uk";
 
 export { EsignSignClient } from "@/components/esign/signing-viewer";
 
@@ -175,10 +176,7 @@ export function EsignDesignerClient({
               <p className="truncate text-sm text-slate-500">
                 {title}
                 {completedAt
-                  ? ` · Signed ${new Date(completedAt).toLocaleString(undefined, {
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                    })}`
+                  ? ` · Signed ${formatUkDateTime(completedAt)}`
                   : " · Completed"}
               </p>
             </div>

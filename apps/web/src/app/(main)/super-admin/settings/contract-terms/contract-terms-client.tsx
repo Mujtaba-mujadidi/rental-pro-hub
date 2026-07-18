@@ -9,6 +9,7 @@ import {
   type ContractTermsVersionRow,
 } from "@/app/actions/contract-terms";
 import { stripTagsToPlain, truncatePreview } from "@/lib/contract-terms/plain-preview";
+import { formatUkDate } from "@/lib/datetime/uk";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState, useTransition } from "react";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
@@ -385,11 +386,7 @@ export function ContractTermsClient({ initialRows }: { initialRows: ContractTerm
                       <span className={statusBadge(row.status)}>{row.status}</span>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-slate-600 dark:text-slate-300">
-                      {new Date(row.created_at).toLocaleDateString(undefined, {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })}
+                      {formatUkDate(row.created_at)}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">

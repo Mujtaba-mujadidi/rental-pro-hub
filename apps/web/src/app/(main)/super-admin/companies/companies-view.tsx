@@ -12,6 +12,7 @@ import {
   removeCollectionDraft,
   type FormDraftMeta,
 } from "@/lib/forms/form-draft-collection";
+import { formatUkDateTime } from "@/lib/datetime/uk";
 import { AdminCompaniesTable } from "./admin-companies-table";
 import {
   RegisterCompanyModal,
@@ -32,14 +33,7 @@ const btnRow =
   "inline-flex items-center justify-center rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50";
 
 function formatDraftTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    });
-  } catch {
-    return iso;
-  }
+  return formatUkDateTime(iso, iso);
 }
 
 export function CompaniesView() {

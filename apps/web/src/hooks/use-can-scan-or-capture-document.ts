@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 
 /**
- * Detect phones/tablets where a camera capture input is useful for document photos.
- * True document OCR/edge-scan is OS-native (e.g. iOS “Scan Documents” in the file sheet);
- * we surface a dedicated camera capture control when the device can use it.
+ * Detect phones/tablets where camera / system document-scan sheet options are useful.
+ *
+ * Browsers cannot force iOS “Scan Documents” directly. Without `capture`, the system
+ * file sheet may offer Scan Documents (edge crop, multi-page). With `capture`, only
+ * the camera opens (one image per open).
  */
 export function useCanScanOrCaptureDocument(): boolean {
   const [can, setCan] = useState(false);

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { loadDriverPreviewBundle } from "@/lib/admin/load-driver-preview";
+import { formatUkDateLong } from "@/lib/datetime/uk";
 import {
   DriverProfileTabs,
   type DriverProfileLabels,
@@ -7,10 +8,7 @@ import {
 } from "@/app/(main)/driver/profile/profile-tabs";
 
 function formatJoinedAt(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  return formatUkDateLong(iso);
 }
 
 export default async function AdminDriverPreviewProfilePage({

@@ -1,4 +1,5 @@
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
+import { formatUkDateTime } from "@/lib/datetime/uk";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function RentalNotificationsPage() {
@@ -23,7 +24,7 @@ export default async function RentalNotificationsPage() {
             <li key={n.id} className="p-4">
               <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{n.type.replace(/_/g, " ")}</p>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {n.created_at ? new Date(n.created_at).toLocaleString() : ""}
+                {n.created_at ? formatUkDateTime(n.created_at, "") : ""}
                 {n.read_at ? " · Read" : ""}
               </p>
               <pre className="mt-2 max-h-32 overflow-auto rounded bg-slate-50 p-2 text-xs dark:bg-slate-900/60">

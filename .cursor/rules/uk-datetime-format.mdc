@@ -1,0 +1,20 @@
+---
+description: Use UK (en-GB) date/time formatting for all user-facing dates
+alwaysApply: true
+---
+
+# UK date and time format
+
+Always display dates and times in UK format via `apps/web/src/lib/datetime/uk.ts`.
+
+- Calendar / DB `date` columns (`YYYY-MM-DD`): `formatUkDate` or `formatUkDateLong`
+- Timestamps (`created_at`, etc.): `formatUkDateTime`
+- E-sign / legal stamps with seconds: `formatUkDateTimeSeconds` or existing `formatEsignSignedAt`
+
+Do **not** use:
+
+- `toLocaleString()` / `toLocaleDateString()` without `"en-GB"`
+- `toLocaleString(undefined, …)` (browser locale)
+- Raw ISO strings (`2026-07-17`, `2026-07-17T20:16:00Z`) in UI copy
+
+`<input type="date">` values stay `YYYY-MM-DD` internally; only **display** uses UK helpers.

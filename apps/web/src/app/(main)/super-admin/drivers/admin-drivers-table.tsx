@@ -19,6 +19,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { driverIsBlocked, type AdminDriverListRow } from "@/lib/admin/driver-list-shared";
 import type { DriverListStatusFilter } from "@/lib/admin/drivers-query";
 import { DriverRowActionsMenu } from "./driver-row-actions-menu";
+import { formatUkDateTime } from "@/lib/datetime/uk";
 
 type DriversConfirmState =
   | { kind: "reset_password"; userId: string }
@@ -26,16 +27,7 @@ type DriversConfirmState =
   | null;
 
 function formatRegisteredAt(iso: string): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatUkDateTime(iso);
 }
 
 const btn =

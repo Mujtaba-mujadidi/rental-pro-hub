@@ -1,4 +1,5 @@
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
+import { formatUkDateLong } from "@/lib/datetime/uk";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
@@ -22,11 +23,7 @@ export default async function RentalOffboardingPage() {
     redirect("/rental");
   }
 
-  const ends = company?.offboarding_ends_at ? new Date(company.offboarding_ends_at) : null;
-  const endsLabel =
-    ends && !Number.isNaN(ends.getTime())
-      ? ends.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
-      : null;
+  const endsLabel = company?.offboarding_ends_at ? formatUkDateLong(company.offboarding_ends_at, "") || null : null;
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">

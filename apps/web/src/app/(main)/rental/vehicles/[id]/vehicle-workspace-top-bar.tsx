@@ -71,12 +71,18 @@ export function VehicleWorkspaceTopBar({
 
   return (
     <div className="rph-chrome -mx-3 -mt-3 mb-5 border-b px-3 py-2.5">
-      <div className="flex items-center gap-2 sm:gap-3">
-        <Link href="/rental/vehicles" className="rph-link shrink-0 text-sm font-semibold">
-          ← Fleet
+      {/* Row 1: back + vehicle switcher (+ status on sm+) */}
+      <div className="flex items-center gap-2">
+        <Link
+          href="/rental/vehicles"
+          className="rph-link shrink-0 text-sm font-semibold"
+          aria-label="Back to fleet"
+        >
+          <span className="sm:hidden">←</span>
+          <span className="hidden sm:inline">← Fleet</span>
         </Link>
 
-        <div className="relative w-[min(100%,16rem)] shrink-0 sm:w-56" ref={rootRef}>
+        <div className="relative min-w-0 flex-1 sm:max-w-56 sm:flex-none" ref={rootRef}>
           <button
             type="button"
             className="flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-rph-border bg-rph-raised px-2.5 text-left text-sm shadow-sm"
@@ -86,7 +92,7 @@ export function VehicleWorkspaceTopBar({
           >
             <span className="min-w-0 truncate">
               <span className="font-mono font-semibold text-rph-fg">{vehicle.vrm}</span>
-              <span className="hidden text-rph-fg-muted sm:inline">
+              <span className="text-rph-fg-muted">
                 {" "}
                 · {vehicle.make} {vehicle.model}
               </span>
@@ -97,7 +103,7 @@ export function VehicleWorkspaceTopBar({
           </button>
 
           {open ? (
-            <div className="absolute left-0 z-40 mt-1 w-[min(100vw-2rem,20rem)] overflow-hidden rounded-lg border border-rph-border bg-rph-elevated shadow-lg">
+            <div className="absolute left-0 right-0 z-40 mt-1 max-h-[min(70vh,24rem)] overflow-hidden rounded-lg border border-rph-border bg-rph-elevated shadow-lg sm:left-0 sm:right-auto sm:w-[min(100vw-2rem,20rem)]">
               <div className="border-b border-rph-border p-2">
                 <input
                   ref={inputRef}
@@ -107,7 +113,7 @@ export function VehicleWorkspaceTopBar({
                   onChange={(e) => setQuery(e.target.value)}
                 />
               </div>
-              <ul className="max-h-64 overflow-y-auto py-1" role="listbox">
+              <ul className="max-h-64 overflow-y-auto overscroll-contain py-1" role="listbox">
                 {!filtered.length ? (
                   <li className="px-3 py-2 text-sm text-rph-fg-muted">No vehicles match.</li>
                 ) : (
@@ -120,7 +126,7 @@ export function VehicleWorkspaceTopBar({
                           role="option"
                           aria-selected={active}
                           className={[
-                            "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm",
+                            "flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm sm:py-2",
                             active
                               ? "bg-rph-rail/10 text-rph-link"
                               : "text-rph-fg hover:bg-rph-chrome",
@@ -145,29 +151,41 @@ export function VehicleWorkspaceTopBar({
           ) : null}
         </div>
 
-        <nav className="min-w-0 flex-1 overflow-x-auto" aria-label="Vehicle sections">
-          <div className="flex w-max gap-1 pr-1">
-            {items.map((item) => {
-              const active = isVehicleWorkspaceNavItemActive(pathname, item);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={active ? "rph-pill-active" : "rph-pill"}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </div>
-        </nav>
-
         <div className="hidden shrink-0 items-center gap-2 sm:flex">
           <StatusChip status={vehicle.status} />
           <span className="max-w-[8rem] truncate text-xs font-medium text-rph-fg-muted lg:max-w-[12rem]">
             {vehicle.subcompany_name ?? "—"}
           </span>
         </div>
+      </div>
+
+      {/* Row 2: section pills — full-width scroll on all sizes */}
+      <nav
+        className="-mx-3 mt-2 overflow-x-auto overscroll-x-contain px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        aria-label="Vehicle sections"
+      >
+        <div className="flex w-max gap-1 pb-0.5">
+          {items.map((item) => {
+            const active = isVehicleWorkspaceNavItemActive(pathname, item);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={active ? "rph-pill-active" : "rph-pill"}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
+
+      {/* Mobile-only status / location under nav */}
+      <div className="mt-2 flex items-center gap-2 sm:hidden">
+        <StatusChip status={vehicle.status} />
+        <span className="min-w-0 truncate text-xs font-medium text-rph-fg-muted">
+          {vehicle.subcompany_name ?? "—"}
+        </span>
       </div>
     </div>
   );

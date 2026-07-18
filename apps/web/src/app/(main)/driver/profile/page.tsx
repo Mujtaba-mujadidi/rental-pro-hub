@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { requireDriverArea } from "@/lib/auth/profile";
+import { formatUkDateLong } from "@/lib/datetime/uk";
 import { type DriverOnboardingRow, driverOnboardingComplete } from "@/lib/driver/licence-check";
 import { redirect } from "next/navigation";
 import {
@@ -69,10 +70,7 @@ const DRIVER_PROFILE_SELECT =
   ].join(", ");
 
 function formatJoinedAt(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  return formatUkDateLong(iso);
 }
 
 export default async function DriverProfilePage({

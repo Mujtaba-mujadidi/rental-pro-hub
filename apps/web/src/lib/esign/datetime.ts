@@ -1,5 +1,7 @@
 /** Helpers for e-sign “date signed” fields (date + time, UK display). */
 
+import { formatUkDateTimeSeconds } from "@/lib/datetime/uk";
+
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
@@ -11,15 +13,7 @@ export function toEsignDateTimeLocalInput(d = new Date()): string {
 
 /** Human-readable stamp on the PDF / stored field value (UK, 24h with seconds). */
 export function formatEsignSignedAt(d = new Date()): string {
-  return d.toLocaleString("en-GB", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
+  return formatUkDateTimeSeconds(d);
 }
 
 /** Parse datetime-local, ISO, date-only, or UK stamped values. */

@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { getRentalSubcompaniesPageAction } from "@/app/actions/rental-subcompanies-list";
 import type { RentalSubcompanyListRow } from "@/lib/rental/subcompany-list-shared";
 import type { RentalSubcompanyStatusFilter } from "@/lib/rental/subcompanies-query";
+import { formatUkDateTime } from "@/lib/datetime/uk";
 
 const btn =
   "inline-flex items-center justify-center rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50";
@@ -58,16 +59,7 @@ function SortGlyph({ state }: { state: false | "asc" | "desc" }) {
 }
 
 function formatRegisteredAt(iso: string): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatUkDateTime(iso);
 }
 
 function statusBadge(status: string) {

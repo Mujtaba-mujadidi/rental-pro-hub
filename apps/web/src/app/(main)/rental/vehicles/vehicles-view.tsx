@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { loadDraft } from "@/lib/forms/form-draft";
 import { VEHICLE_DOC_TYPE_LABELS, VEHICLE_STATUS_LABELS, VEHICLE_STATUSES, type VehicleRow } from "@/lib/fleet/vehicles";
 import { vehicleWorkspaceHref } from "@/lib/fleet/vehicle-workspace-nav";
+import { formatUkDate } from "@/lib/datetime/uk";
 import { ADD_VEHICLE_DRAFT_KEY, AddVehicleModal } from "./add-vehicle-modal";
 
 const btnPrimary = "rph-btn-primary";
@@ -185,7 +186,7 @@ export function VehiclesView({
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-rph-fg-muted">{v.mot_expiry ?? "—"}</td>
+                    <td className="px-4 py-3 text-rph-fg-muted">{formatUkDate(v.mot_expiry)}</td>
                     <td className="px-4 py-3 text-right">
                       <Link href={workspaceHref} className={btnGhost}>
                         {canManage ? "Open" : "View"}
