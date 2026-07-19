@@ -6,7 +6,6 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { redirectIfRentalContractNotActive } from "@/lib/auth/rental-contract-gate";
 import {
   getCachedProfileBundle,
-  revalidateProfileBundle,
   type CachedMembershipRow,
 } from "@/lib/auth/profile-bundle-cache";
 import { isSuperAdmin, isSuperAdminEmail } from "@/lib/auth/roles";
@@ -360,7 +359,8 @@ export const getAppProfile = cache(async (): Promise<AppProfile | null> => {
   if (needsEnsure) {
     const ensured = await ensureProfileRow(user);
     if (!ensured) return null;
-    revalidateProfileBundle(user.id);
+    // Do not revalidateTag here — getAppProfile runs during RSC render.
+    // Fresh row is loaded below; cache TTL (45s) covers the next request.
     const supabase = await createClient();
     const second = await fetchProfileRow(supabase, user.id);
     if (second.error) {

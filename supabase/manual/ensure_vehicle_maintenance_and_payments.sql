@@ -157,7 +157,7 @@ create table if not exists public.vehicle_maintenance_records (
   occurred_on date not null,
   category text not null
     check (category in (
-      'service', 'mot', 'repair', 'tyres', 'bodywork', 'glass', 'electrical', 'other'
+      'service', 'mot', 'tax', 'phv_taxi_licence', 'repair', 'tyres', 'bodywork', 'glass', 'electrical', 'other'
     )),
   description text not null default '',
   amount_gbp numeric(12, 2) not null check (amount_gbp >= 0),
@@ -167,11 +167,28 @@ create table if not exists public.vehicle_maintenance_records (
   paid_by_label text,
   payment_method_id uuid not null references public.company_payment_methods (id) on delete restrict,
   payment_account_id uuid not null references public.company_payment_accounts (id) on delete restrict,
+  payment_reference text not null default '',
   source text not null default 'manual' check (source in ('manual', 'csv')),
   created_by uuid references auth.users (id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Widen category check for existing databases (create table if not exists won't alter).
+alter table public.vehicle_maintenance_records
+  drop constraint if exists vehicle_maintenance_records_category_check;
+
+alter table public.vehicle_maintenance_records
+  add constraint vehicle_maintenance_records_category_check
+  check (category in (
+    'service', 'mot', 'tax', 'phv_taxi_licence', 'repair', 'tyres', 'bodywork', 'glass', 'electrical', 'other'
+  ));
+
+alter table public.vehicle_maintenance_records
+  add column if not exists payment_reference text not null default '';
+
+comment on column public.vehicle_maintenance_records.payment_reference is
+  'Optional bank / card / transfer payment reference.';
 
 create index if not exists vehicle_maintenance_records_vehicle_idx
   on public.vehicle_maintenance_records (vehicle_id, occurred_on desc);
@@ -228,7 +245,7 @@ create trigger vehicle_maintenance_enforce_vehicle_tenancy
   before insert or update of vehicle_id on public.vehicle_maintenance_records
   for each row execute function public.vehicle_maintenance_enforce_vehicle_tenancy();
 
--- Payment lookups must belong to same company
+-- Payment lookups must belong to same company (account optional for Cash)
 create or replace function public.vehicle_maintenance_enforce_payment_company()
 returns trigger
 language plpgsql
@@ -241,15 +258,18 @@ begin
   from public.company_payment_methods
   where id = new.payment_method_id;
 
-  select parent_company_id into account_company
-  from public.company_payment_accounts
-  where id = new.payment_account_id;
-
   if method_company is null or method_company <> new.parent_company_id then
     raise exception 'payment method must belong to the vehicle company';
   end if;
-  if account_company is null or account_company <> new.parent_company_id then
-    raise exception 'payment account must belong to the vehicle company';
+
+  if new.payment_account_id is not null then
+    select parent_company_id into account_company
+    from public.company_payment_accounts
+    where id = new.payment_account_id;
+
+    if account_company is null or account_company <> new.parent_company_id then
+      raise exception 'payment account must belong to the vehicle company';
+    end if;
   end if;
   return new;
 end;

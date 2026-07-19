@@ -39,7 +39,7 @@ export async function ensureDefaultPaymentMethodsAction(): Promise<
   const supabase = await createClient();
   const { data: existing, error: listErr } = await supabase
     .from("company_payment_methods")
-    .select("id, parent_company_id, name, is_active, sort_order, created_at")
+    .select("id, parent_company_id, name, is_active, requires_account, sort_order, created_at")
     .eq("parent_company_id", companyId)
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
@@ -53,22 +53,40 @@ export async function ensureDefaultPaymentMethodsAction(): Promise<
         parent_company_id: companyId,
         name,
         is_active: true,
+        requires_account: name.toLowerCase() !== "cash",
         sort_order: i,
       }));
       const { error: insErr } = await supabase.from("company_payment_methods").insert(rows);
       if (insErr) return { ok: false, error: insErr.message };
       const { data: seeded, error: reloadErr } = await supabase
         .from("company_payment_methods")
-        .select("id, parent_company_id, name, is_active, sort_order, created_at")
+        .select("id, parent_company_id, name, is_active, requires_account, sort_order, created_at")
         .eq("parent_company_id", companyId)
         .order("sort_order", { ascending: true })
         .order("name", { ascending: true });
       if (reloadErr) return { ok: false, error: reloadErr.message };
-      return { ok: true, methods: (seeded ?? []) as PaymentMethodRow[] };
+      return { ok: true, methods: normalizeMethods(seeded ?? []) };
     }
   }
 
-  return { ok: true, methods: (existing ?? []) as PaymentMethodRow[] };
+  return { ok: true, methods: normalizeMethods(existing ?? []) };
+}
+
+function normalizeMethods(
+  rows: {
+    id: string;
+    parent_company_id: string;
+    name: string;
+    is_active: boolean;
+    requires_account?: boolean | null;
+    sort_order: number;
+    created_at: string;
+  }[],
+): PaymentMethodRow[] {
+  return rows.map((m) => ({
+    ...m,
+    requires_account: m.requires_account !== false && m.name.trim().toLowerCase() !== "cash",
+  }));
 }
 
 export async function loadPaymentSettingsAction(): Promise<

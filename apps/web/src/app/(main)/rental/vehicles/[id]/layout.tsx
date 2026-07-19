@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
+import { canWriteMaintenance } from "@/lib/auth/rental-permissions";
 import { loadVehicleDetailAction, loadVehicleSwitcherList } from "@/app/actions/rental-vehicles";
+import { VehicleDocAttentionBanner } from "./vehicle-doc-attention-banner";
 import { VehicleWorkspaceTopBar } from "./vehicle-workspace-top-bar";
 
 export default async function VehicleWorkspaceLayout({
@@ -10,7 +12,7 @@ export default async function VehicleWorkspaceLayout({
   children: React.ReactNode;
   params: Promise<{ id: string }>;
 }) {
-  await requireRentalCompanyArea();
+  const { profile } = await requireRentalCompanyArea();
   const { id } = await params;
   const [data, fleet] = await Promise.all([loadVehicleDetailAction(id), loadVehicleSwitcherList()]);
   if (!data.ok) notFound();
@@ -21,6 +23,12 @@ export default async function VehicleWorkspaceLayout({
   return (
     <div>
       <VehicleWorkspaceTopBar vehicle={data.vehicle} fleet={fleet} />
+      <VehicleDocAttentionBanner
+        vehicleId={data.vehicle.id}
+        motAttentionAt={data.vehicle.mot_doc_attention_at}
+        phvAttentionAt={data.vehicle.phv_doc_attention_at}
+        canConfirm={canWriteMaintenance(profile)}
+      />
       {children}
     </div>
   );

@@ -156,7 +156,7 @@ create table if not exists public.vehicle_maintenance_records (
   occurred_on date not null,
   category text not null
     check (category in (
-      'service', 'mot', 'repair', 'tyres', 'bodywork', 'glass', 'electrical', 'other'
+      'service', 'mot', 'tax', 'phv_taxi_licence', 'repair', 'tyres', 'bodywork', 'glass', 'electrical', 'other'
     )),
   description text not null default '',
   amount_gbp numeric(12, 2) not null check (amount_gbp >= 0),
@@ -228,6 +228,7 @@ create trigger vehicle_maintenance_enforce_vehicle_tenancy
   for each row execute function public.vehicle_maintenance_enforce_vehicle_tenancy();
 
 -- Payment lookups must belong to same company
+-- Payment lookups must belong to same company (account optional for Cash)
 create or replace function public.vehicle_maintenance_enforce_payment_company()
 returns trigger
 language plpgsql
@@ -240,15 +241,18 @@ begin
   from public.company_payment_methods
   where id = new.payment_method_id;
 
-  select parent_company_id into account_company
-  from public.company_payment_accounts
-  where id = new.payment_account_id;
-
   if method_company is null or method_company <> new.parent_company_id then
     raise exception 'payment method must belong to the vehicle company';
   end if;
-  if account_company is null or account_company <> new.parent_company_id then
-    raise exception 'payment account must belong to the vehicle company';
+
+  if new.payment_account_id is not null then
+    select parent_company_id into account_company
+    from public.company_payment_accounts
+    where id = new.payment_account_id;
+
+    if account_company is null or account_company <> new.parent_company_id then
+      raise exception 'payment account must belong to the vehicle company';
+    end if;
   end if;
   return new;
 end;

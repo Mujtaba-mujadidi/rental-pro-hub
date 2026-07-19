@@ -106,6 +106,10 @@ export type VehicleRow = {
   notes: string | null;
   gps_primary_imei: string | null;
   gps_secondary_imei: string | null;
+  /** Set when MOT maintenance logged; cleared on MOT doc upload or confirm. */
+  mot_doc_attention_at: string | null;
+  /** Set when PHV maintenance logged; cleared on PHV paper upload or confirm. */
+  phv_doc_attention_at: string | null;
   created_at: string;
   updated_at: string;
   subcompany_name?: string | null;

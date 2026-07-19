@@ -434,6 +434,21 @@ export async function uploadVehicleDocumentAction(formData: FormData): Promise<V
     return { ok: false, error: insErr.message };
   }
 
+  // Clear MOT / PHV document attention when the matching file is uploaded.
+  if (docTypeRaw === "mot") {
+    await supabase
+      .from("vehicles")
+      .update({ mot_doc_attention_at: null })
+      .eq("id", vehicleId)
+      .eq("parent_company_id", parentCompanyId);
+  } else if (isPhvTaxiLicencePaperDocType(docTypeRaw)) {
+    await supabase
+      .from("vehicles")
+      .update({ phv_doc_attention_at: null })
+      .eq("id", vehicleId)
+      .eq("parent_company_id", parentCompanyId);
+  }
+
   revalidateVehiclePaths(vehicleId);
   return { ok: true, id: vehicleId };
 }
@@ -594,6 +609,8 @@ export async function loadVehiclesPageData(): Promise<VehiclesPageData | { error
     return {
       ...(rest as Omit<VehicleRow, "subcompany_name" | "missing_docs">),
       status: rest.status as VehicleStatus,
+      mot_doc_attention_at: (rest as { mot_doc_attention_at?: string | null }).mot_doc_attention_at ?? null,
+      phv_doc_attention_at: (rest as { phv_doc_attention_at?: string | null }).phv_doc_attention_at ?? null,
       subcompany_name: subName ?? null,
       missing_docs: missingRequiredDocTypes(typesByVehicle.get(v.id) ?? []),
     };
@@ -691,6 +708,8 @@ export async function loadVehicleDetailAction(vehicleId: string): Promise<
     vehicle: {
       ...(rest as Omit<VehicleRow, "subcompany_name" | "missing_docs">),
       status: rest.status as VehicleStatus,
+      mot_doc_attention_at: (rest as { mot_doc_attention_at?: string | null }).mot_doc_attention_at ?? null,
+      phv_doc_attention_at: (rest as { phv_doc_attention_at?: string | null }).phv_doc_attention_at ?? null,
       subcompany_name: subName ?? null,
       missing_docs: missingRequiredDocTypes((docs ?? []).map((d) => d.doc_type)),
     },
