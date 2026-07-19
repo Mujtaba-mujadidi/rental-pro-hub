@@ -1,0 +1,42 @@
+---
+description: Call before any build — KISS/DRY, readable code, no hallucination, RMS constraints, validate without inventing a test suite.
+alwaysApply: false
+---
+
+# Build standards (`build`)
+
+Invoke this rule before implementing features. Prefer clarity over cleverness.
+
+## Core
+
+- **KISS** — simplest solution that meets the request; no premature abstraction
+- **DRY** — extract a helper only when the same logic is real and repeated (not speculative)
+- **Readable** — a human should understand the code without a tour; boring linear code beats clever indirection
+- **Comment why**, not what; skip obvious narration
+- **Do not hallucinate** — check the repo for APIs, columns, env vars, helpers before inventing them
+- **Scope** — only change what the request needs; no drive-by refactors or unrelated files
+
+## This repo
+
+- Fixed rental roles + `can()` from `@/lib/auth/rental-permissions` — no DIY permission matrices
+- UK dates/times via `@/lib/datetime/uk` helpers — not raw ISO or browser locale
+- Theme: `rph-*` tokens / utilities from `globals.css` — no ad-hoc `dark:bg-zinc-*` stacks on new UI
+- DB changes: migration + idempotent `supabase/manual/ensure_*.sql` when schema changes
+- Match nearby patterns (server actions, FormModalShell, overlays, vehicle workspace)
+
+## Product safety
+
+- Do not silently invent or restore history (e.g. previous MOT expiry) without stored data
+- Keep expense logs separate from vehicle source-of-truth fields unless the feature explicitly updates both
+- Permissions and RLS must stay aligned with fixed roles
+
+## Validate (tests)
+
+This project does **not** require automated tests for every feature yet.
+
+- **Do not** invent a test framework, snapshot suites, or flaky E2E unless the user asks
+- **Do** validate by tracing the real path: UI → server action → DB → reload / permissions
+- Prefer a short manual check list in the reply (what to click, what should happen)
+- If adding tests later: start with pure helpers (dates, money, permissions), not full-page UI
+
+When the user later asks for tests, write focused unit tests for logic that is easy to get wrong — not coverage theatre.
