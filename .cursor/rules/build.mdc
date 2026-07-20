@@ -1,5 +1,5 @@
 ---
-description: Call before any build — KISS/DRY, readable code, no hallucination, RMS constraints, validate without inventing a test suite.
+description: Call before any build — KISS/DRY, readable code, no hallucination, RMS constraints, unit tests for all pure lib functions.
 alwaysApply: false
 ---
 
@@ -30,13 +30,18 @@ Invoke this rule before implementing features. Prefer clarity over cleverness.
 - Keep expense logs separate from vehicle source-of-truth fields unless the feature explicitly updates both
 - Permissions and RLS must stay aligned with fixed roles
 
-## Validate (tests)
+## Validate (unit tests)
 
-This project does **not** require automated tests for every feature yet.
+Vitest lives in `apps/web` (`*.test.ts` next to the module under `src/`).
 
-- **Do not** invent a test framework, snapshot suites, or flaky E2E unless the user asks
-- **Do** validate by tracing the real path: UI → server action → DB → reload / permissions
-- Prefer a short manual check list in the reply (what to click, what should happen)
-- If adding tests later: start with pure helpers (dates, money, permissions), not full-page UI
+**Goal:** every **pure** exported function in `src/lib` has unit tests (happy path + branches).
 
-When the user later asks for tests, write focused unit tests for logic that is easy to get wrong — not coverage theatre.
+- Pure = sync logic with no Supabase/Next/fetch/env secrets (dates, money, permissions, identity, validation, mapping, etc.)
+- **Not** unit-tested here: server actions, React pages, Supabase queries, PDF/mail, env-keyed crypto — validate those manually or with later integration tests
+- When you add a new pure helper, add `foo.test.ts` beside it covering all exports and branches
+- **After each implementation:** `npm test` (root) or `npm run test --workspace=@rph/web`
+- **To verify coverage of the pure set:** `npm run test:coverage --workspace=@rph/web` (see `vitest.config.ts` `PURE_LIB_COVERAGE`)
+- Still include a short manual check list for UI wiring
+- **Do not** invent flaky E2E unless the user asks
+
+Colocate tests as `foo.test.ts` beside `foo.ts`. Keep tests deterministic (`vi.useFakeTimers()` for “today”).

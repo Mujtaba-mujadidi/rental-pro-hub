@@ -109,3 +109,17 @@ export function formatUkDateTimeSeconds(value: string | Date | null | undefined,
     hour12: false,
   });
 }
+
+function utcStartOfDayMs(d: Date): number {
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+/** Whole calendar days from today (UTC) to expiry date; negative if expired. */
+export function daysFromTodayToExpiry(isoDate: string | null | undefined): number | null {
+  if (!isoDate) return null;
+  const exp = parseCalendarDay(isoDate.slice(0, 10));
+  if (!exp) return null;
+  const today = new Date();
+  const diff = utcStartOfDayMs(exp) - utcStartOfDayMs(today);
+  return Math.round(diff / 86400000);
+}

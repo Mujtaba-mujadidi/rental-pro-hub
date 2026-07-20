@@ -1,8 +1,8 @@
-import { parseUkDate } from "@/lib/validation/driver-signup";
 import {
   defaultNotificationSettings,
   type CompanyNotificationSettings,
 } from "@/lib/settings/notification-settings";
+import { daysFromTodayToExpiry } from "@/lib/datetime/uk";
 
 export type VehicleExpiryKind = "mot" | "tax" | "phv";
 
@@ -26,19 +26,7 @@ const LABELS: Record<VehicleExpiryKind, string> = {
   phv: "PHV/Taxi",
 };
 
-function utcStartOfDay(d: Date): number {
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-}
-
-/** Whole calendar days from today (UTC) to expiry date; negative if expired. */
-export function daysFromTodayToExpiry(isoDate: string | null | undefined): number | null {
-  if (!isoDate) return null;
-  const exp = parseUkDate(isoDate.slice(0, 10));
-  if (!exp) return null;
-  const today = new Date();
-  const diff = utcStartOfDay(exp) - utcStartOfDay(today);
-  return Math.round(diff / 86400000);
-}
+export { daysFromTodayToExpiry };
 
 function shortStatusFor(daysUntil: number): string {
   if (daysUntil < 0) {

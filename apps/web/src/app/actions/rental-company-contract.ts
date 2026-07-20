@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireRentalCompanyArea, requireSuperAdmin } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
+import { canRequestContractChange } from "@/lib/auth/rental-permissions";
 import { notifyCompanyFinanceRoles, notifySuperAdmins } from "@/lib/platform-notifications";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -24,8 +25,7 @@ export async function requestRentalCompanyContractChangeAction(
   const parentCompanyId = profile.company_id?.trim();
   if (!parentCompanyId) return { ok: false, error: "Missing rental company context." };
 
-  const mr = profile.membership_role;
-  if (mr !== "owner" && mr !== "admin") {
+  if (!canRequestContractChange(profile)) {
     return { ok: false, error: "Only company owners and admins can request legal or contract changes." };
   }
 

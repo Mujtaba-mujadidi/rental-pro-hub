@@ -942,7 +942,7 @@ export function VehicleMaintenanceView({ initial }: { initial: VehicleMaintenanc
                       <td className="px-2 py-1.5 font-semibold">{r.ok ? "OK" : "Error"}</td>
                       <td className="px-2 py-1.5">
                         {r.ok
-                          ? `${r.occurred_on} · ${r.category} · ${formatGbp(r.amount_gbp ?? 0)} · ${r.payment_method}${r.payment_account ? ` / ${r.payment_account}` : ""}`
+                          ? `${formatUkDate(r.occurred_on)} · ${r.category} · ${formatGbp(r.amount_gbp ?? 0)} · ${r.payment_method}${r.payment_account ? ` / ${r.payment_account}` : ""}`
                           : r.error}
                       </td>
                     </tr>
@@ -1136,7 +1136,7 @@ export function VehicleMaintenanceView({ initial }: { initial: VehicleMaintenanc
               </button>
               <Link
                 href={`/rental/vehicles/${initial.vehicle.id}/details#documents`}
-                className="rph-btn-ghost inline-flex items-center justify-center"
+                className="rph-btn-ghost inline-flex shrink-0 items-center justify-center"
                 onClick={() => {
                   setDocConfirm(null);
                   setDocConfirmChecked(false);
@@ -1146,7 +1146,7 @@ export function VehicleMaintenanceView({ initial }: { initial: VehicleMaintenanc
               </Link>
               <button
                 type="button"
-                className="rph-btn-primary"
+                className="inline-flex h-9 shrink-0 items-center justify-center rounded-lg bg-rph-rail px-3 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer"
                 disabled={!docConfirmChecked}
                 onClick={() => {
                   setDocConfirm(null);

@@ -6,10 +6,11 @@ import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-gua
 import { canReadMaintenance, canWriteMaintenance } from "@/lib/auth/rental-permissions";
 import { parseCsv } from "@/lib/csv/parse-csv";
 import {
-  expiryOneYearFromDate,
+  expiryFromStartOrOverride,
   isMaintenanceCategory,
   MAINTENANCE_CATEGORIES,
   MAINTENANCE_IMPORT_HEADERS,
+  normalizeRequiresAccount,
   paymentMethodRequiresAccount,
   type MaintenanceCategory,
   type MaintenanceRecordRow,
@@ -71,7 +72,7 @@ function normalizeMethods(
 ): PaymentMethodRow[] {
   return rows.map((m) => ({
     ...m,
-    requires_account: m.requires_account !== false && m.name.trim().toLowerCase() !== "cash",
+    requires_account: normalizeRequiresAccount(m.name, m.requires_account),
   }));
 }
 
@@ -185,7 +186,7 @@ export async function loadVehicleMaintenancePageAction(
 
   const methods = (methodsRaw ?? []).map((m) => ({
     ...m,
-    requires_account: m.requires_account !== false && m.name.trim().toLowerCase() !== "cash",
+    requires_account: normalizeRequiresAccount(m.name, m.requires_account),
   })) as PaymentMethodRow[];
   const methodName = new Map(methods.map((m) => [m.id, m.name]));
   const accountName = new Map((accounts ?? []).map((a) => [a.id, a.name]));
@@ -288,14 +289,13 @@ async function applyVehicleSideEffects(
     const start = parseFlexibleDate(startRaw);
     if (!start) return { ok: false, error: "Enter a valid MOT start date." };
     const overrideRaw = opts.mot_expiry?.trim() ?? "";
-    let expiry: string | null = null;
+    let override: string | null = null;
     if (overrideRaw) {
-      expiry = parseFlexibleDate(overrideRaw);
-      if (!expiry) return { ok: false, error: "Enter a valid MOT expiry date." };
-    } else {
-      expiry = expiryOneYearFromDate(start);
-      if (!expiry) return { ok: false, error: "Could not calculate MOT expiry." };
+      override = parseFlexibleDate(overrideRaw);
+      if (!override) return { ok: false, error: "Enter a valid MOT expiry date." };
     }
+    const expiry = expiryFromStartOrOverride(start, override);
+    if (!expiry) return { ok: false, error: "Could not calculate MOT expiry." };
     vehiclePatch.mot_expiry = expiry;
     vehiclePatch.mot_doc_attention_at = new Date().toISOString();
   }
@@ -313,14 +313,13 @@ async function applyVehicleSideEffects(
     const start = parseFlexibleDate(startRaw);
     if (!start) return { ok: false, error: "Enter a valid PHV/Taxi licence start date." };
     const overrideRaw = opts.phv_licence_expiry?.trim() ?? "";
-    let expiry: string | null = null;
+    let override: string | null = null;
     if (overrideRaw) {
-      expiry = parseFlexibleDate(overrideRaw);
-      if (!expiry) return { ok: false, error: "Enter a valid PHV/Taxi licence expiry date." };
-    } else {
-      expiry = expiryOneYearFromDate(start);
-      if (!expiry) return { ok: false, error: "Could not calculate PHV/Taxi licence expiry." };
+      override = parseFlexibleDate(overrideRaw);
+      if (!override) return { ok: false, error: "Enter a valid PHV/Taxi licence expiry date." };
     }
+    const expiry = expiryFromStartOrOverride(start, override);
+    if (!expiry) return { ok: false, error: "Could not calculate PHV/Taxi licence expiry." };
     vehiclePatch.phv_licence_expiry = expiry;
     vehiclePatch.phv_doc_attention_at = new Date().toISOString();
   }
@@ -385,7 +384,7 @@ export async function saveMaintenanceRecordAction(
 
   const needsAccount = paymentMethodRequiresAccount({
     name: methodRow.name,
-    requires_account: methodRow.requires_account !== false,
+    requires_account: normalizeRequiresAccount(methodRow.name, methodRow.requires_account),
   });
   const accountId = input.payment_account_id?.trim() || null;
   if (needsAccount && !accountId) return { ok: false, error: "Select a payment account." };
@@ -472,7 +471,7 @@ export async function saveMaintenanceRecordAction(
   if (input.category === "mot") {
     const start = parseFlexibleDate(input.mot_date?.trim() || occurred);
     const override = input.mot_expiry?.trim() ? parseFlexibleDate(input.mot_expiry.trim()) : null;
-    motExpiry = override ?? (start ? expiryOneYearFromDate(start) ?? undefined : undefined);
+    motExpiry = start ? expiryFromStartOrOverride(start, override) ?? undefined : undefined;
   }
   if (input.category === "tax") {
     taxExpiry = parseFlexibleDate(input.tax_expiry?.trim() ?? "") ?? undefined;
@@ -482,7 +481,7 @@ export async function saveMaintenanceRecordAction(
     const override = input.phv_licence_expiry?.trim()
       ? parseFlexibleDate(input.phv_licence_expiry.trim())
       : null;
-    phvExpiry = override ?? (start ? expiryOneYearFromDate(start) ?? undefined : undefined);
+    phvExpiry = start ? expiryFromStartOrOverride(start, override) ?? undefined : undefined;
   }
 
   revalidateMaintenance(vehicleId);
@@ -705,7 +704,7 @@ function validateImportMatrix(opts: {
 
     const needsAccount = paymentMethodRequiresAccount({
       name: method.name,
-      requires_account: method.requires_account !== false,
+      requires_account: normalizeRequiresAccount(method.name, method.requires_account),
     });
     let accountId: string | null = null;
     if (needsAccount) {
@@ -721,14 +720,13 @@ function validateImportMatrix(opts: {
       const start = parseFlexibleDate(motRaw || occurred_on);
       if (!start) return { line, ok: false, error: "Invalid mot_date" };
       mot_date = start;
+      let override: string | null = null;
       if (motExpiryRaw) {
-        const md = parseFlexibleDate(motExpiryRaw);
-        if (!md) return { line, ok: false, error: "Invalid mot_expiry" };
-        mot_expiry = md;
-      } else {
-        mot_expiry = expiryOneYearFromDate(start);
-        if (!mot_expiry) return { line, ok: false, error: "Could not calculate mot_expiry" };
+        override = parseFlexibleDate(motExpiryRaw);
+        if (!override) return { line, ok: false, error: "Invalid mot_expiry" };
       }
+      mot_expiry = expiryFromStartOrOverride(start, override);
+      if (!mot_expiry) return { line, ok: false, error: "Could not calculate mot_expiry" };
     } else {
       if (motRaw) {
         const md = parseFlexibleDate(motRaw);
@@ -760,14 +758,13 @@ function validateImportMatrix(opts: {
       const start = parseFlexibleDate(phvStartRaw || occurred_on);
       if (!start) return { line, ok: false, error: "Invalid phv_start_date" };
       phv_start_date = start;
+      let override: string | null = null;
       if (phvExpiryRaw) {
-        const pd = parseFlexibleDate(phvExpiryRaw);
-        if (!pd) return { line, ok: false, error: "Invalid phv_licence_expiry" };
-        phv_licence_expiry = pd;
-      } else {
-        phv_licence_expiry = expiryOneYearFromDate(start);
-        if (!phv_licence_expiry) return { line, ok: false, error: "Could not calculate phv_licence_expiry" };
+        override = parseFlexibleDate(phvExpiryRaw);
+        if (!override) return { line, ok: false, error: "Invalid phv_licence_expiry" };
       }
+      phv_licence_expiry = expiryFromStartOrOverride(start, override);
+      if (!phv_licence_expiry) return { line, ok: false, error: "Could not calculate phv_licence_expiry" };
     } else {
       if (phvStartRaw) {
         const start = parseFlexibleDate(phvStartRaw);

@@ -112,8 +112,18 @@ export function paymentMethodRequiresAccount(
   method: Pick<PaymentMethodRow, "name" | "requires_account"> | null | undefined,
 ): boolean {
   if (!method) return true;
-  if (method.requires_account === false) return false;
-  return method.name.trim().toLowerCase() !== "cash";
+  return normalizeRequiresAccount(method.name, method.requires_account);
+}
+
+/**
+ * Normalize DB/API `requires_account` for display and validation.
+ * Cash never requires an account, even if the column still says true.
+ */
+export function normalizeRequiresAccount(
+  name: string,
+  requiresAccount: boolean | null | undefined,
+): boolean {
+  return requiresAccount !== false && name.trim().toLowerCase() !== "cash";
 }
 
 /**
@@ -134,6 +144,19 @@ export function expiryOneYearFromDate(isoDate: string): string | null {
   const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(dt.getUTCDate()).padStart(2, "0");
   return `${yy}-${mm}-${dd}`;
+}
+
+/**
+ * Prefer an explicit expiry override; otherwise start date + 1 year.
+ * `startIso` / `overrideIso` must already be valid YYYY-MM-DD when provided.
+ */
+export function expiryFromStartOrOverride(
+  startIso: string,
+  overrideIso?: string | null,
+): string | null {
+  const override = overrideIso?.trim();
+  if (override) return override.slice(0, 10);
+  return expiryOneYearFromDate(startIso);
 }
 
 /** @deprecated Prefer expiryOneYearFromDate */

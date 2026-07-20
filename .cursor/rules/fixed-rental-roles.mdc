@@ -29,4 +29,4 @@ When adding modules (claims, customer payments), map them onto these fixed roles
 
 - Prefer `can(profile, "fleet.write")` over scattered `membership_role === …` checks.
 - Keep Postgres RLS aligned with the same fixed-role sets.
-- Never expose ProTrack / third-party “roles” as a substitute for company membership roles.
+- Never expose SmartCar Tracker / third-party “roles” as a substitute for company membership roles.

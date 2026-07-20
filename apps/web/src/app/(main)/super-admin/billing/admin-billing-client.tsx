@@ -6,6 +6,7 @@ import {
   validateInvoicePaymentAction,
 } from "@/app/actions/admin-billing";
 import { applyInvoiceDiscountAction, createBillingAmendmentAction, applyBillingAmendmentAction } from "@/app/actions/billing-adjustments";
+import { formatUkDate } from "@/lib/datetime/uk";
 import { rentalContractCopy } from "@/lib/rental-contract-copy";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -103,7 +104,7 @@ export function AdminBillingClient({
               >
                 <p className="font-mono text-sm font-semibold">{s.invoices.invoice_number}</p>
                 <p className="text-xs text-slate-500">
-                  {s.payment_date} · {s.payment_method} · ref {s.reference ?? "—"}
+                  {formatUkDate(s.payment_date)} · {s.payment_method} · ref {s.reference ?? "—"}
                 </p>
                 <p className="text-sm">
                   {s.invoices.currency} {Number(s.invoices.total).toFixed(2)}
@@ -164,7 +165,7 @@ export function AdminBillingClient({
               <li key={it.id} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-sm">
                   <span>
-                    {it.period_start} → {it.period_end}
+                    {formatUkDate(it.period_start)} → {formatUkDate(it.period_end)}
                   </span>
                   <span className="ml-2 font-mono">
                     {it.currency} {Number(it.amount_due).toFixed(2)}

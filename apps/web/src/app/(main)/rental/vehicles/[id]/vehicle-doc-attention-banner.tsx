@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { confirmVehicleDocAttentionAction } from "@/app/actions/rental-maintenance";
 
@@ -99,11 +98,6 @@ export function VehicleDocAttentionBanner({
           </div>
         ) : null}
       </div>
-      <p>
-        <Link href={`/rental/vehicles/${vehicleId}/details#documents`} className="rph-link font-semibold">
-          Open Documents
-        </Link>
-      </p>
     </div>
   );
 }

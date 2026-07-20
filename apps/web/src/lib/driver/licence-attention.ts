@@ -1,4 +1,4 @@
-import { parseUkDate } from "@/lib/validation/driver-signup";
+import { daysFromTodayToExpiry } from "@/lib/datetime/uk";
 import { phvLicenceNeedsAddressCatchUp, type DriverOnboardingRow } from "./licence-check";
 
 export type LicenceReviewReasonCode =
@@ -15,22 +15,10 @@ export type LicenceReviewReason = {
   daysUntilExpiry?: number;
 };
 
-function utcStartOfDay(d: Date): number {
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-}
-
 /** Upper bound (inclusive) for days-until-expiry when we treat a licence as expiring soon. */
 export const LICENCE_EXPIRING_SOON_MAX_DAYS = 30;
 
-/** Whole calendar days from today (UTC) to expiry date; negative if expired. */
-export function daysFromTodayToExpiry(isoDate: string | null | undefined): number | null {
-  if (!isoDate) return null;
-  const exp = parseUkDate(isoDate.slice(0, 10));
-  if (!exp) return null;
-  const today = new Date();
-  const diff = utcStartOfDay(exp) - utcStartOfDay(today);
-  return Math.round(diff / 86400000);
-}
+export { daysFromTodayToExpiry };
 
 function pushExpiryReasons(
   iso: string | null | undefined,

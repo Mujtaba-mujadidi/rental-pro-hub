@@ -1,11 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { decryptFleetTrackingPassword } from "@/lib/fleet-tracking/crypto";
-import {
-  clearAccessTokenCache,
-  getAccessToken,
-  type ProtrackDebugPayload,
-} from "@/lib/fleet-tracking/protrack-client";
+import { clearAccessTokenCache, getAccessToken } from "@/lib/fleet-tracking/smartcar-tracker-client";
 
 export type CompanyFleetTrackingRow = {
   id: string;
@@ -41,10 +37,7 @@ export async function loadCompanyFleetTracking(
 
 export async function getCompanyAccessToken(
   companyId: string,
-): Promise<
-  | { ok: true; token: string; account: string; debug?: ProtrackDebugPayload }
-  | { ok: false; error: string; debug?: ProtrackDebugPayload }
-> {
+): Promise<{ ok: true; token: string; account: string } | { ok: false; error: string }> {
   const row = await loadCompanyFleetTracking(companyId);
   if (!row?.fleet_tracking_enabled) {
     return { ok: false, error: "Fleet Tracking is not enabled for this company." };
@@ -65,7 +58,7 @@ export async function getCompanyAccessToken(
   const tokenRes = await getAccessToken(account, password, companyId);
   if (!tokenRes.ok) {
     clearAccessTokenCache(companyId);
-    return { ok: false, error: tokenRes.error, debug: tokenRes.debug };
+    return { ok: false, error: tokenRes.error };
   }
-  return { ok: true, token: tokenRes.data, account, debug: tokenRes.debug };
+  return { ok: true, token: tokenRes.data, account };
 }

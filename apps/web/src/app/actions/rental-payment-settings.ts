@@ -6,6 +6,7 @@ import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-gua
 import { canManageSettings } from "@/lib/auth/rental-permissions";
 import {
   DEFAULT_PAYMENT_METHOD_NAMES,
+  normalizeRequiresAccount,
   type PaymentAccountRow,
   type PaymentMethodRow,
 } from "@/lib/fleet/maintenance";
@@ -85,7 +86,7 @@ function normalizeMethods(
 ): PaymentMethodRow[] {
   return rows.map((m) => ({
     ...m,
-    requires_account: m.requires_account !== false && m.name.trim().toLowerCase() !== "cash",
+    requires_account: normalizeRequiresAccount(m.name, m.requires_account),
   }));
 }
 

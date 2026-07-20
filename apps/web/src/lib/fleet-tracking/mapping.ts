@@ -43,6 +43,22 @@ export function isImobDeviceLabel(raw: string): boolean {
   return IMOB_SUFFIX_RE.test(raw.trim());
 }
 
+export type TrackingDataSource = {
+  vehicleVrm: string;
+  role: "primary";
+  deviceLabel: string;
+  isImobDevice: boolean;
+  hasSecondaryDevice: boolean;
+  secondaryDeviceLabel: string | null;
+};
+
+/** UI line for where live tracker readings come from. */
+export function describeTrackingDataSource(source: TrackingDataSource): string {
+  const device = source.deviceLabel.trim() || source.vehicleVrm;
+  const role = source.isImobDevice ? "Primary device (immobiliser)" : "Primary device";
+  return `${role} · ${device}`;
+}
+
 /** Prefer device name; fall back to plate number. */
 export function deviceMatchLabel(d: TrackerDevice): string {
   return (d.devicename || d.platenumber || "").trim();

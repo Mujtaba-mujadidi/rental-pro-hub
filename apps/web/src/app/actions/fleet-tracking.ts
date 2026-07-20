@@ -10,30 +10,34 @@ import {
   loadCompanyFleetTracking,
 } from "@/lib/fleet-tracking/credentials";
 import {
+  deviceMatchLabel,
+  isImobDeviceLabel,
   suggestVehicleMappings,
   type MappingSuggestion,
   type DeviceGroup,
+  type TrackingDataSource,
 } from "@/lib/fleet-tracking/mapping";
 import {
   accStatusLabel,
   clearAccessTokenCache,
   dataStatusLabel,
   getAccessToken,
+  getDevicesByImeis,
   listDevices,
   mileageReport,
+  sanitizeMileageError,
   setDeviceMileage,
   trackDevices,
   weeklyMileageWindowUnix,
-  type ProtrackDebugPayload,
-  type ProtrackTrackRecord,
-} from "@/lib/fleet-tracking/protrack-client";
+  type TrackerTrackRecord,
+} from "@/lib/fleet-tracking/smartcar-tracker-client";
 import { formatUkDateTime } from "@/lib/datetime/uk";
 import {
   formatMiles,
   kmhToMph,
   kmToMiles,
   metresToMiles,
-  milesToKm,
+  milesToSetMileageKmString,
 } from "@/lib/fleet-tracking/units";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -67,9 +71,7 @@ export async function loadFleetTrackingSettingsAction(): Promise<
 export async function saveFleetTrackingCredentialsAction(input: {
   account: string;
   password: string;
-}): Promise<
-  { ok: true; connectionWarning?: string; apiDebug?: ProtrackDebugPayload } | { ok: false; error: string; apiDebug?: ProtrackDebugPayload }
-> {
+}): Promise<{ ok: true; connectionWarning?: string } | { ok: false; error: string }> {
   const { profile } = await requireRentalCompanyArea();
   const writable = await assertRentalCompanyWritable(profile);
   if (!writable.ok) return writable;
@@ -114,28 +116,24 @@ export async function saveFleetTrackingCredentialsAction(input: {
 
   // Validate against SmartCar Tracker after save (does not block saving)
   let connectionWarning: string | undefined;
-  let apiDebug: ProtrackDebugPayload | undefined;
   if (password) {
     const test = await getAccessToken(account, password, companyId);
-    apiDebug = test.debug;
     if (!test.ok) {
       clearAccessTokenCache(companyId);
       connectionWarning = test.error;
     }
   } else {
     const tokenRes = await getCompanyAccessToken(companyId);
-    apiDebug = tokenRes.debug;
     if (!tokenRes.ok) connectionWarning = tokenRes.error;
   }
 
   revalidatePath("/rental/fleet-tracking");
-  if (connectionWarning) return { ok: true, connectionWarning, apiDebug };
-  return { ok: true, apiDebug };
+  if (connectionWarning) return { ok: true, connectionWarning };
+  return { ok: true };
 }
 
 export async function testFleetTrackingConnectionAction(): Promise<
-  | { ok: true; deviceCount: number; apiDebug?: ProtrackDebugPayload }
-  | { ok: false; error: string; apiDebug?: ProtrackDebugPayload }
+  { ok: true; deviceCount: number } | { ok: false; error: string }
 > {
   const { profile } = await requireRentalCompanyArea();
   const companyId = profile.company_id?.trim();
@@ -143,14 +141,14 @@ export async function testFleetTrackingConnectionAction(): Promise<
 
   const tokenRes = await getCompanyAccessToken(companyId);
   if (!tokenRes.ok) {
-    return { ok: false, error: tokenRes.error, apiDebug: tokenRes.debug };
+    return { ok: false, error: tokenRes.error };
   }
 
   const devices = await listDevices(tokenRes.token, tokenRes.account);
   if (!devices.ok) {
-    return { ok: false, error: devices.error, apiDebug: tokenRes.debug };
+    return { ok: false, error: devices.error };
   }
-  return { ok: true, deviceCount: devices.data.length, apiDebug: tokenRes.debug };
+  return { ok: true, deviceCount: devices.data.length };
 }
 
 export async function loadMappingSuggestionsAction(): Promise<
@@ -259,7 +257,37 @@ export type LiveTrackSnapshot = {
   mapUrl: string | null;
 };
 
-function snapshotFromTrack(rec: ProtrackTrackRecord): LiveTrackSnapshot {
+async function resolveTrackingDataSource(
+  accessToken: string,
+  vehicle: {
+    vrm: string;
+    gps_primary_imei: string;
+    gps_secondary_imei: string | null;
+  },
+): Promise<TrackingDataSource> {
+  const imeis = [vehicle.gps_primary_imei, vehicle.gps_secondary_imei].filter(
+    (x): x is string => Boolean(x?.trim()),
+  );
+  const unique = [...new Set(imeis.map((i) => i.trim()))];
+  const details = await getDevicesByImeis(accessToken, unique);
+  const byImei = new Map(
+    (details.ok ? details.data : []).map((d) => [d.imei, d] as const),
+  );
+  const primary = byImei.get(vehicle.gps_primary_imei.trim());
+  const primaryLabel = primary ? deviceMatchLabel(primary) : "";
+  const secondaryImei = vehicle.gps_secondary_imei?.trim() || null;
+  const secondary = secondaryImei ? byImei.get(secondaryImei) : null;
+  return {
+    vehicleVrm: vehicle.vrm,
+    role: "primary",
+    deviceLabel: primaryLabel || vehicle.vrm,
+    isImobDevice: primaryLabel ? isImobDeviceLabel(primaryLabel) : false,
+    hasSecondaryDevice: Boolean(secondaryImei),
+    secondaryDeviceLabel: secondary ? deviceMatchLabel(secondary) : null,
+  };
+}
+
+function snapshotFromTrack(rec: TrackerTrackRecord): LiveTrackSnapshot {
   const lat = rec.latitude != null && Number.isFinite(rec.latitude) ? rec.latitude : null;
   const lng = rec.longitude != null && Number.isFinite(rec.longitude) ? rec.longitude : null;
   const odo =
@@ -286,7 +314,9 @@ function snapshotFromTrack(rec: ProtrackTrackRecord): LiveTrackSnapshot {
 }
 
 export async function getVehicleLiveTrackAction(vehicleId: string): Promise<
-  { ok: true; linked: false } | { ok: true; linked: true; snapshot: LiveTrackSnapshot } | { ok: false; error: string }
+  | { ok: true; linked: false }
+  | { ok: true; linked: true; snapshot: LiveTrackSnapshot; source: TrackingDataSource }
+  | { ok: false; error: string }
 > {
   const { profile } = await requireRentalCompanyArea();
   const companyId = profile.company_id?.trim();
@@ -298,7 +328,7 @@ export async function getVehicleLiveTrackAction(vehicleId: string): Promise<
   const supabase = await createClient();
   const { data: vehicle, error } = await supabase
     .from("vehicles")
-    .select("id, gps_primary_imei")
+    .select("id, vrm, gps_primary_imei, gps_secondary_imei")
     .eq("id", vehicleId.trim())
     .eq("parent_company_id", companyId)
     .maybeSingle();
@@ -308,18 +338,28 @@ export async function getVehicleLiveTrackAction(vehicleId: string): Promise<
   const tokenRes = await getCompanyAccessToken(companyId);
   if (!tokenRes.ok) return tokenRes;
 
-  const track = await trackDevices(tokenRes.token, [vehicle.gps_primary_imei]);
+  const [track, source] = await Promise.all([
+    trackDevices(tokenRes.token, [vehicle.gps_primary_imei]),
+    resolveTrackingDataSource(tokenRes.token, {
+      vrm: vehicle.vrm,
+      gps_primary_imei: vehicle.gps_primary_imei,
+      gps_secondary_imei: vehicle.gps_secondary_imei,
+    }),
+  ]);
   if (!track.ok) return { ok: false, error: track.error };
   const rec = track.data[0];
   if (!rec) return { ok: false, error: "No track data returned for this device." };
 
-  return { ok: true, linked: true, snapshot: snapshotFromTrack(rec) };
+  return { ok: true, linked: true, snapshot: snapshotFromTrack(rec), source };
 }
 
 export async function setVehicleTrackerMileageAction(
   vehicleId: string,
   mileageMiles: number,
-): Promise<{ ok: true; results: { imei: string; response: string }[] } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; response: string; targetMiles: number; deviceCount: number }
+  | { ok: false; error: string }
+> {
   const { profile } = await requireRentalCompanyArea();
   const writable = await assertRentalCompanyWritable(profile);
   if (!writable.ok) return writable;
@@ -331,6 +371,7 @@ export async function setVehicleTrackerMileageAction(
   if (!Number.isFinite(mileageMiles) || mileageMiles < 0) {
     return { ok: false, error: "Enter a valid mileage in miles." };
   }
+  const milesInt = Math.ceil(mileageMiles);
 
   const supabase = await createClient();
   const { data: vehicle, error } = await supabase
@@ -352,24 +393,29 @@ export async function setVehicleTrackerMileageAction(
   const tokenRes = await getCompanyAccessToken(companyId);
   if (!tokenRes.ok) return tokenRes;
 
-  const mileageKm = milesToKm(mileageMiles);
-  const results: { imei: string; response: string }[] = [];
+  const mileageKm = milesToSetMileageKmString(milesInt);
+  const responses: string[] = [];
   for (const imei of unique) {
     const res = await setDeviceMileage(tokenRes.token, imei, mileageKm);
     if (!res.ok) return { ok: false, error: `${imei}: ${res.error}` };
-    results.push({ imei, response: res.data.response });
+    responses.push(res.data.response);
   }
 
-  // Keep RMS odometer in sync (miles)
+  // Keep RMS odometer in sync (whole miles)
   await supabase
     .from("vehicles")
-    .update({ current_mileage: Math.round(mileageMiles) })
+    .update({ current_mileage: milesInt })
     .eq("id", vehicle.id)
     .eq("parent_company_id", companyId);
 
   revalidatePath(`/rental/vehicles/${vehicle.id}`);
   revalidatePath(`/rental/vehicles/${vehicle.id}/details`);
-  return { ok: true, results };
+  return {
+    ok: true,
+    response: responses[responses.length - 1] ?? "OK",
+    targetMiles: milesInt,
+    deviceCount: unique.length,
+  };
 }
 
 export type WeeklyMileageRow = {
@@ -411,7 +457,7 @@ export async function loadWeeklyMileageReportAction(): Promise<
 
   const imeis = linked.map((v) => v.gps_primary_imei as string);
   const report = await mileageReport(tokenRes.token, imeis, beginUnix, endUnix);
-  if (!report.ok) return { ok: false, error: report.error };
+  if (!report.ok) return { ok: false, error: sanitizeMileageError(report.error) };
 
   const byImei = new Map(report.data.map((r) => [r.imei, r.mileageKm]));
   const rows: WeeklyMileageRow[] = (vehicles ?? []).map((v) => {
@@ -451,7 +497,7 @@ export async function loadWeeklyMileageReportAction(): Promise<
 
 export async function getVehicleWeeklyMileageAction(vehicleId: string): Promise<
   | { ok: true; linked: false }
-  | { ok: true; linked: true; miles: number; beginLabel: string; endLabel: string }
+  | { ok: true; linked: true; miles: number; beginLabel: string; endLabel: string; source: TrackingDataSource }
   | { ok: false; error: string }
 > {
   const { profile } = await requireRentalCompanyArea();
@@ -464,7 +510,7 @@ export async function getVehicleWeeklyMileageAction(vehicleId: string): Promise<
   const supabase = await createClient();
   const { data: vehicle, error } = await supabase
     .from("vehicles")
-    .select("id, gps_primary_imei")
+    .select("id, vrm, gps_primary_imei, gps_secondary_imei")
     .eq("id", vehicleId.trim())
     .eq("parent_company_id", companyId)
     .maybeSingle();
@@ -475,8 +521,15 @@ export async function getVehicleWeeklyMileageAction(vehicleId: string): Promise<
   if (!tokenRes.ok) return tokenRes;
 
   const { beginUnix, endUnix } = weeklyMileageWindowUnix();
-  const report = await mileageReport(tokenRes.token, [vehicle.gps_primary_imei], beginUnix, endUnix);
-  if (!report.ok) return { ok: false, error: report.error };
+  const [report, source] = await Promise.all([
+    mileageReport(tokenRes.token, [vehicle.gps_primary_imei], beginUnix, endUnix),
+    resolveTrackingDataSource(tokenRes.token, {
+      vrm: vehicle.vrm,
+      gps_primary_imei: vehicle.gps_primary_imei,
+      gps_secondary_imei: vehicle.gps_secondary_imei,
+    }),
+  ]);
+  if (!report.ok) return { ok: false, error: sanitizeMileageError(report.error) };
   const km = report.data[0]?.mileageKm;
   if (km == null) return { ok: false, error: "No mileage data for this period." };
 
@@ -486,6 +539,7 @@ export async function getVehicleWeeklyMileageAction(vehicleId: string): Promise<
     miles: kmToMiles(km),
     beginLabel: formatUkDateTime(new Date(beginUnix * 1000)),
     endLabel: formatUkDateTime(new Date(endUnix * 1000)),
+    source,
   };
 }
 
