@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isPhvTaxiLicencePaperDocType,
+  isOwnershipEventType,
   isVehicleDocType,
   isVehicleStatus,
   missingRequiredDocTypes,
@@ -17,9 +18,17 @@ describe("normalizeVrm", () => {
 describe("isVehicleStatus / isVehicleDocType", () => {
   it("accepts known values only", () => {
     expect(isVehicleStatus("available")).toBe(true);
-    expect(isVehicleStatus("sold")).toBe(false);
+    expect(isVehicleStatus("sold")).toBe(true);
     expect(isVehicleDocType("mot")).toBe(true);
     expect(isVehicleDocType("MOT")).toBe(false);
+  });
+});
+
+describe("isOwnershipEventType", () => {
+  it("accepts purchase and sale only", () => {
+    expect(isOwnershipEventType("purchase")).toBe(true);
+    expect(isOwnershipEventType("sale")).toBe(true);
+    expect(isOwnershipEventType("transfer")).toBe(false);
   });
 });
 

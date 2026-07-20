@@ -12,10 +12,12 @@ import {
 import {
   baseVrmFromDeviceLabel,
   describeTrackingDataSource,
+  deviceGroupOptionLabel,
   deviceMatchLabel,
   groupDevicesByBaseVrm,
   isImobDeviceLabel,
   suggestVehicleMappings,
+  validateVehicleMappingLinks,
   type TrackerDevice,
 } from "@/lib/fleet-tracking/mapping";
 import {
@@ -113,6 +115,62 @@ describe("fleet-tracking mapping", () => {
     expect(suggestions[0]!.alreadyLinked).toBe(false);
     expect(unmatchedVehicles.map((v) => v.id)).toEqual(["v2"]);
     expect(unmatchedDevices.some((g) => g.baseVrm === "ZZ99ZZZ")).toBe(true);
+  });
+
+  it("labels device groups for manual link dropdowns", () => {
+    const groups = groupDevicesByBaseVrm(devices);
+    const ab = groups.find((g) => g.baseVrm === "AB12CDE");
+    expect(ab).toBeDefined();
+    expect(deviceGroupOptionLabel(ab!)).toBe("AB12CDE iMob + AB12CDE (AB12CDE)");
+  });
+
+  it("validates manual mapping links", () => {
+    const vehicles = [
+      {
+        id: "v1",
+        vrm: "AB12CDE",
+        gps_primary_imei: null,
+        gps_secondary_imei: null,
+      },
+      {
+        id: "v2",
+        vrm: "ZZ99ZZZ",
+        gps_primary_imei: "9",
+        gps_secondary_imei: null,
+      },
+    ];
+    const accountImeis = new Set(["1", "2", "3", "9"]);
+
+    expect(
+      validateVehicleMappingLinks(
+        [{ vehicleId: "v1", primaryImei: "3", secondaryImei: null }],
+        { accountImeis, vehicles },
+      ).ok,
+    ).toBe(true);
+
+    expect(
+      validateVehicleMappingLinks(
+        [{ vehicleId: "v1", primaryImei: "3", secondaryImei: "3" }],
+        { accountImeis, vehicles },
+      ),
+    ).toEqual({ ok: false, error: "Secondary device must differ from primary." });
+
+    expect(
+      validateVehicleMappingLinks(
+        [{ vehicleId: "v1", primaryImei: "9", secondaryImei: null }],
+        { accountImeis, vehicles },
+      ),
+    ).toEqual({ ok: false, error: "Device 9 is already linked to ZZ99ZZZ." });
+
+    expect(
+      validateVehicleMappingLinks(
+        [
+          { vehicleId: "v1", primaryImei: "1", secondaryImei: null },
+          { vehicleId: "missing", primaryImei: "2", secondaryImei: null },
+        ],
+        { accountImeis, vehicles },
+      ),
+    ).toEqual({ ok: false, error: "One or more vehicles could not be found." });
   });
 });
 

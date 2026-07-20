@@ -207,7 +207,9 @@ function StatusChip({ status }: { status: VehicleStatus }) {
         ? "bg-sky-50 text-sky-800 dark:bg-sky-950/60 dark:text-sky-200 dark:ring-sky-800/60"
         : status === "repair" || status === "accident_claim"
           ? "bg-amber-50 text-amber-900 dark:bg-amber-950/50 dark:text-amber-100 dark:ring-amber-800/50"
-          : "bg-rph-chrome text-rph-fg-secondary dark:ring-rph-border-strong";
+          : status === "sold"
+            ? "bg-rph-chrome text-rph-fg-muted dark:ring-rph-border-strong"
+            : "bg-rph-chrome text-rph-fg-secondary dark:ring-rph-border-strong";
 
   return (
     <span

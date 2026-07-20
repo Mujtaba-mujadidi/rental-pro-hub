@@ -12,6 +12,8 @@ import {
 } from "@/lib/fleet/vehicle-expiry-attention";
 import { vehicleWorkspaceHref } from "@/lib/fleet/vehicle-workspace-nav";
 import { formatUkDate } from "@/lib/datetime/uk";
+import { formatGbp } from "@/lib/fleet/maintenance";
+import type { FleetVehiclePnlSummary } from "@/app/actions/rental-vehicle-financials";
 import type { CompanyNotificationSettings } from "@/lib/settings/notification-settings";
 import { VehicleExpiryPills } from "./vehicle-expiry-indicators";
 import { ADD_VEHICLE_DRAFT_KEY, AddVehicleModal } from "./add-vehicle-modal";
@@ -27,12 +29,14 @@ export function VehiclesView({
   notifySettings,
   canManage,
   canDelete: _canDelete,
+  pnlByVehicle,
 }: {
   vehicles: VehicleRow[];
   subcompanies: SubOpt[];
   notifySettings: CompanyNotificationSettings;
   canManage: boolean;
   canDelete: boolean;
+  pnlByVehicle?: Map<string, FleetVehiclePnlSummary>;
 }) {
   const router = useRouter();
   const [filter, setFilter] = useState("");
@@ -168,6 +172,9 @@ export function VehiclesView({
                 <th className="px-4 py-3 font-semibold">Vehicle</th>
                 <th className="px-4 py-3 font-semibold">Subcompany</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
+                <th className="px-4 py-3 font-semibold">Purchase</th>
+                <th className="px-4 py-3 font-semibold">Sale</th>
+                <th className="px-4 py-3 font-semibold">P&amp;L</th>
                 <th className="px-4 py-3 font-semibold">Documents</th>
                 <th className="px-4 py-3 font-semibold">Expiry</th>
                 <th className="px-4 py-3 font-semibold" />
@@ -181,6 +188,13 @@ export function VehiclesView({
                 const attention = vehicleExpiryAttentionItems(v, notifySettings);
                 const expiryTone = worstVehicleExpiryTone(attention);
                 const motItem = attention.find((i) => i.kind === "mot");
+                const pnl = pnlByVehicle?.get(v.id);
+                const pnlDisplay =
+                  pnl?.netPnlGbp != null
+                    ? formatGbp(pnl.netPnlGbp)
+                    : pnl?.bookPositionGbp != null
+                      ? formatGbp(pnl.bookPositionGbp)
+                      : "—";
                 return (
                   <tr
                     key={v.id}
@@ -207,6 +221,13 @@ export function VehiclesView({
                         {VEHICLE_STATUS_LABELS[v.status]}
                       </span>
                     </td>
+                    <td className="px-4 py-3 text-rph-fg-secondary">
+                      {pnl?.purchaseGbp != null ? formatGbp(pnl.purchaseGbp) : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-rph-fg-secondary">
+                      {pnl?.saleGbp != null ? formatGbp(pnl.saleGbp) : "—"}
+                    </td>
+                    <td className="px-4 py-3 font-medium text-rph-fg-secondary">{pnlDisplay}</td>
                     <td className="px-4 py-3">
                       {missing.length ? (
                         <Link href={`${detailsHref}#documents`} className="flex flex-wrap gap-1" title="Add missing documents">

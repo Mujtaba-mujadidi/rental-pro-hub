@@ -646,7 +646,7 @@ export function VehicleDetailsView({
         }}
         onCancelDiscard={() => setDiscardConfirm(false)}
         footer={
-          <div className="ml-auto">
+          <div className="rph-btn-modal-footer">
             <button type="button" className={btnContinue} disabled={busy} onClick={submitSave}>
               {saving ? "Saving…" : "Save changes"}
             </button>

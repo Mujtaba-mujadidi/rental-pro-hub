@@ -29,6 +29,97 @@ export type MappingSuggestion = {
   alreadyLinked: boolean;
 };
 
+export type VehicleMappingLinkInput = {
+  vehicleId: string;
+  primaryImei: string;
+  secondaryImei: string | null;
+};
+
+export type VehicleImeiRow = {
+  id: string;
+  vrm: string;
+  gps_primary_imei: string | null;
+  gps_secondary_imei: string | null;
+};
+
+function linkedImeisForVehicle(vehicle: VehicleImeiRow): string[] {
+  const imeis: string[] = [];
+  const primary = vehicle.gps_primary_imei?.trim();
+  const secondary = vehicle.gps_secondary_imei?.trim();
+  if (primary) imeis.push(primary);
+  if (secondary && secondary !== primary) imeis.push(secondary);
+  return imeis;
+}
+
+/** Dropdown label for an unmatched device group. */
+export function deviceGroupOptionLabel(group: DeviceGroup): string {
+  const names = group.secondaryName ? `${group.primaryName} + ${group.secondaryName}` : group.primaryName;
+  return `${names} (${group.baseVrm})`;
+}
+
+/**
+ * Validates mapping links before persisting IMEIs on vehicles.
+ * Ensures devices exist on the tracker account and are not linked to another vehicle.
+ */
+export function validateVehicleMappingLinks(
+  links: VehicleMappingLinkInput[],
+  context: {
+    accountImeis: ReadonlySet<string>;
+    vehicles: VehicleImeiRow[];
+  },
+): { ok: true } | { ok: false; error: string } {
+  if (!links.length) return { ok: false, error: "No mappings to save." };
+
+  const vehicleById = new Map(context.vehicles.map((vehicle) => [vehicle.id, vehicle]));
+  const imeiOwner = new Map<string, string>();
+  for (const vehicle of context.vehicles) {
+    for (const imei of linkedImeisForVehicle(vehicle)) {
+      imeiOwner.set(imei, vehicle.id);
+    }
+  }
+
+  const usedImeis = new Set<string>();
+
+  for (const link of links) {
+    const vehicleId = link.vehicleId.trim();
+    const primary = link.primaryImei.trim();
+    const secondary = link.secondaryImei?.trim() || null;
+
+    if (!vehicleId) return { ok: false, error: "Every mapping needs a vehicle." };
+    if (!primary) return { ok: false, error: "Every mapping needs a primary device." };
+
+    const vehicle = vehicleById.get(vehicleId);
+    if (!vehicle) return { ok: false, error: "One or more vehicles could not be found." };
+
+    if (!context.accountImeis.has(primary)) {
+      return { ok: false, error: `Primary device ${primary} is not on this tracker account.` };
+    }
+    if (secondary) {
+      if (secondary === primary) {
+        return { ok: false, error: "Secondary device must differ from primary." };
+      }
+      if (!context.accountImeis.has(secondary)) {
+        return { ok: false, error: `Secondary device ${secondary} is not on this tracker account.` };
+      }
+    }
+
+    for (const imei of [primary, secondary].filter((value): value is string => Boolean(value))) {
+      if (usedImeis.has(imei)) {
+        return { ok: false, error: `Device ${imei} is linked more than once in this request.` };
+      }
+      usedImeis.add(imei);
+
+      const ownerId = imeiOwner.get(imei);
+      if (ownerId && ownerId !== vehicleId) {
+        const owner = vehicleById.get(ownerId);
+        return { ok: false, error: `Device ${imei} is already linked to ${owner?.vrm ?? ownerId}.` };
+      }
+    }
+  }
+
+  return { ok: true };
+}
+
 const IMOB_SUFFIX_RE = /(?:[-_\s]*)IMOB$/i;
 
 /** Strip immobiliser suffix and normalise like VRM. */

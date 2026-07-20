@@ -13,6 +13,7 @@ export function vehicleWorkspaceNav(vehicleId: string): VehicleWorkspaceNavItem[
     { href: `${base}/details`, label: "Details", match: "prefix" },
     { href: `${base}/rentals`, label: "Rentals", match: "prefix" },
     { href: `${base}/maintenance`, label: "Maintenance", match: "prefix" },
+    { href: `${base}/financials`, label: "Financials", match: "prefix" },
     { href: `${base}/pcn`, label: "PCN", match: "prefix" },
     { href: `${base}/claims`, label: "Claims", match: "prefix" },
   ];
@@ -20,12 +21,19 @@ export function vehicleWorkspaceNav(vehicleId: string): VehicleWorkspaceNavItem[
 
 export function vehicleWorkspaceHref(
   vehicleId: string,
-  path: "" | "details" | "rentals" | "maintenance" | "pcn" | "claims" = "",
+  path: "" | "details" | "rentals" | "maintenance" | "financials" | "pcn" | "claims" = "",
 ) {
   return path ? `/rental/vehicles/${vehicleId}/${path}` : `/rental/vehicles/${vehicleId}`;
 }
 
-export type VehicleWorkspaceSection = "" | "details" | "rentals" | "maintenance" | "pcn" | "claims";
+export type VehicleWorkspaceSection =
+  | ""
+  | "details"
+  | "rentals"
+  | "maintenance"
+  | "financials"
+  | "pcn"
+  | "claims";
 
 /** Current section under a vehicle workspace URL (preserves tab when switching vehicles). */
 export function parseVehicleWorkspaceSection(pathname: string, vehicleId: string): VehicleWorkspaceSection {
@@ -37,6 +45,7 @@ export function parseVehicleWorkspaceSection(pathname: string, vehicleId: string
     segment === "details" ||
     segment === "rentals" ||
     segment === "maintenance" ||
+    segment === "financials" ||
     segment === "pcn" ||
     segment === "claims"
   ) {

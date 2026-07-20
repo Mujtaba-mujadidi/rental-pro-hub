@@ -122,15 +122,27 @@ body {
 .rph-input-auth {
   @apply py-2;
 }
+
+/* Shared button base — use rph-btn-primary / rph-btn-ghost (or rph-btn + variant) */
+.rph-btn {
+  @apply inline-flex h-11 min-w-[7rem] shrink-0 items-center justify-center rounded-lg px-4 text-sm font-medium disabled:pointer-events-none disabled:opacity-50;
+}
 .rph-btn-primary,
 .rph-btn-primary-wide {
-  @apply inline-flex h-11 items-center justify-center rounded-lg bg-rph-rail px-4 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer;
+  @apply inline-flex h-11 min-w-[7rem] shrink-0 items-center justify-center rounded-lg px-4 text-sm font-semibold text-white shadow-sm disabled:pointer-events-none disabled:opacity-50;
+  @apply bg-rph-rail hover:bg-rph-rail-hover dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer;
 }
 .rph-btn-primary-wide {
-  @apply mt-2 w-full font-medium;
+  @apply mt-2 w-full min-w-0 font-medium;
 }
 .rph-btn-ghost {
-  @apply inline-flex h-9 shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-raised px-3 text-sm font-medium text-rph-fg-secondary hover:bg-rph-chrome disabled:opacity-50;
+  @apply inline-flex h-11 min-w-[7rem] shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-raised px-4 text-sm font-medium text-rph-fg-secondary hover:bg-rph-chrome disabled:pointer-events-none disabled:opacity-50;
+}
+.rph-btn-toolbar {
+  @apply flex flex-wrap items-center gap-2;
+}
+.rph-btn-modal-footer {
+  @apply flex w-full flex-wrap items-center justify-end gap-2;
 }
 .rph-link-inline {
   @apply font-medium text-rph-link underline decoration-rph-link/40 hover:text-rph-link-hover hover:decoration-rph-link-hover;

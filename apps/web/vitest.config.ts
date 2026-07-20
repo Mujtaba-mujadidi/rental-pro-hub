@@ -22,6 +22,8 @@ const PURE_LIB_COVERAGE = [
   "src/lib/esign/datetime.ts",
   "src/lib/esign/roles.ts",
   "src/lib/fleet/maintenance.ts",
+  "src/lib/fleet/vehicle-pnl.ts",
+  "src/lib/fleet/vehicle-purchase.ts",
   "src/lib/fleet/vehicle-expiry-attention.ts",
   "src/lib/fleet/vehicle-workspace-nav.ts",
   "src/lib/fleet/vehicles.ts",

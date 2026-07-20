@@ -572,7 +572,7 @@ export function VehicleMaintenanceView({ initial }: { initial: VehicleMaintenanc
         onCancelDiscard={() => setDiscardConfirm(false)}
 
         footer={
-          <div className="ml-auto">
+          <div className="rph-btn-modal-footer">
             <button
               type="button"
               className="rph-btn-primary"

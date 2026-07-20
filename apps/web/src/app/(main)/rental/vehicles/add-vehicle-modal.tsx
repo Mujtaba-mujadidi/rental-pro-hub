@@ -1,11 +1,22 @@
 "use client";
 
-import { Fragment, useCallback, useMemo, useState, useTransition } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { loadPaymentSettingsAction } from "@/app/actions/rental-payment-settings";
 import { createVehicleAction, uploadVehicleDocumentAction } from "@/app/actions/rental-vehicles";
+import { recordVehiclePurchaseOnCreateAction } from "@/app/actions/rental-vehicle-financials";
+import { VehiclePurchaseFormFields } from "@/components/fleet/vehicle-purchase-form-fields";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
+import { formatGbp } from "@/lib/fleet/maintenance";
+import {
+  emptyPurchaseForm,
+  shouldSavePurchase,
+  validatePurchaseEventForm,
+  type PurchaseEventForm,
+} from "@/lib/fleet/vehicle-purchase";
+import type { PaymentAccountRow, PaymentMethodRow } from "@/lib/fleet/maintenance";
 import {
   REQUIRED_VEHICLE_DOC_TYPES,
   VEHICLE_DOC_TYPE_LABELS,
@@ -16,7 +27,7 @@ import {
 } from "@/lib/fleet/vehicles";
 import { VehicleDocAddMenu } from "./vehicle-doc-add-menu";
 
-const STEP_LABELS = ["Basics", "Specs", "Documents", "Review"] as const;
+const STEP_LABELS = ["Basics", "Specs", "Documents", "Purchase", "Review"] as const;
 
 const btnContinue =
   "flex h-11 min-w-[7rem] items-center justify-center rounded-lg bg-rph-rail px-4 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer";
@@ -138,6 +149,7 @@ export type VehicleDraftFields = {
   current_mileage: string;
   next_service_mileage: string;
   notes: string;
+  purchase: PurchaseEventForm;
 };
 
 function emptyFields(defaultSubId: string): VehicleDraftFields {
@@ -164,15 +176,38 @@ function emptyFields(defaultSubId: string): VehicleDraftFields {
     current_mileage: "",
     next_service_mileage: "",
     notes: "",
+    purchase: emptyPurchaseForm([], []),
   };
 }
 
+const VEHICLE_ONLY_KEYS: (keyof Omit<VehicleDraftFields, "purchase" | "same_uk_reg_as_first">)[] = [
+  "subcompany_id",
+  "vrm",
+  "make",
+  "model",
+  "colour",
+  "first_reg_date",
+  "first_reg_uk_date",
+  "fuel_type",
+  "seats",
+  "cc",
+  "mot_expiry",
+  "tax_expiry",
+  "phv_licence_no",
+  "phv_licence_expiry",
+  "licensing_authority_name",
+  "status",
+  "vehicle_age_limit_years",
+  "service_due_at",
+  "current_mileage",
+  "next_service_mileage",
+  "notes",
+];
+
 function fieldsToFormData(fields: VehicleDraftFields): FormData {
   const fd = new FormData();
-  fd.set("subcompany_id", fields.subcompany_id);
-  for (const [k, v] of Object.entries(fields)) {
-    if (k === "subcompany_id" || k === "same_uk_reg_as_first") continue;
-    fd.set(k, String(v));
+  for (const k of VEHICLE_ONLY_KEYS) {
+    fd.set(k, String(fields[k]));
   }
   return fd;
 }
@@ -198,6 +233,8 @@ export function AddVehicleModal({
   const [step, setStep] = useState(0);
   const [fields, setFields] = useState<VehicleDraftFields>(() => emptyFields(primarySub));
   const [bundles, setBundles] = useState<DocBundles>(() => emptyBundles());
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodRow[]>([]);
+  const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccountRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saveOverlay, setSaveOverlay] = useState<ActionStatusOverlayState | null>(null);
   const [pending, startTransition] = useTransition();
@@ -207,6 +244,28 @@ export function AddVehicleModal({
   const setField = useCallback(<K extends keyof VehicleDraftFields>(key: K, value: VehicleDraftFields[K]) => {
     setFields((p) => ({ ...p, [key]: value }));
   }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void loadPaymentSettingsAction().then((res) => {
+      if (cancelled || !res.ok) return;
+      setPaymentMethods(res.methods);
+      setPaymentAccounts(res.accounts);
+      setFields((prev) => ({
+        ...prev,
+        purchase: {
+          ...emptyPurchaseForm(res.methods, res.accounts),
+          ...prev.purchase,
+          payment_method_id: prev.purchase.payment_method_id || res.methods.find((m) => m.is_active)?.id || "",
+          payment_account_id: prev.purchase.payment_account_id || res.accounts.find((a) => a.is_active)?.id || "",
+        },
+      }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   const snapshot = useMemo<VehicleSnapshot>(
     () => ({
@@ -223,6 +282,21 @@ export function AddVehicleModal({
   const applySnapshot = useCallback(
     (s: VehicleSnapshot) => {
       const mergedFields = { ...emptyFields(primarySub), ...(s.fields ?? {}) };
+      const raw = s.fields as VehicleDraftFields & {
+        purchase_date?: string;
+        purchase_amount_gbp?: string;
+        purchase_counterparty?: string;
+      };
+      if (raw?.purchase && typeof raw.purchase === "object") {
+        mergedFields.purchase = { ...emptyPurchaseForm([], []), ...raw.purchase };
+      } else if (raw?.purchase_amount_gbp !== undefined || raw?.purchase_date !== undefined) {
+        mergedFields.purchase = {
+          ...emptyPurchaseForm([], []),
+          occurred_on: raw.purchase_date ?? mergedFields.purchase.occurred_on,
+          amount_gbp: raw.purchase_amount_gbp ?? "",
+          counterparty: raw.purchase_counterparty ?? "",
+        };
+      }
       const maxStep = STEP_LABELS.length - 1;
       setStep(Math.min(typeof s.step === "number" ? s.step : 0, maxStep));
       setFields(mergedFields);
@@ -268,6 +342,10 @@ export function AddVehicleModal({
     if (step === 0) {
       return Boolean(fields.subcompany_id && fields.vrm.trim().length >= 2 && fields.make.trim() && fields.model.trim());
     }
+    if (step === 3 && shouldSavePurchase(fields.purchase)) {
+      const method = paymentMethods.find((m) => m.id === fields.purchase.payment_method_id) ?? null;
+      return validatePurchaseEventForm(fields.purchase, method) === null;
+    }
     return true;
   }
 
@@ -289,6 +367,14 @@ export function AddVehicleModal({
 
   function submitAll() {
     setError(null);
+    if (shouldSavePurchase(fields.purchase)) {
+      const method = paymentMethods.find((m) => m.id === fields.purchase.payment_method_id) ?? null;
+      const purchaseErr = validatePurchaseEventForm(fields.purchase, method);
+      if (purchaseErr) {
+        setError(purchaseErr);
+        return;
+      }
+    }
     const willUpload = REQUIRED_VEHICLE_DOC_TYPES.some((t) => bundles[t].files.length > 0);
     setSaveOverlay({
       phase: "pending",
@@ -307,6 +393,22 @@ export function AddVehicleModal({
       }
 
       const uploadErrors: string[] = [];
+
+      if (shouldSavePurchase(fields.purchase)) {
+        const purchaseRes = await recordVehiclePurchaseOnCreateAction(created.id, {
+          occurred_on: fields.purchase.occurred_on || new Date().toISOString().slice(0, 10),
+          amount_gbp: fields.purchase.amount_gbp,
+          counterparty: fields.purchase.counterparty,
+          payment_method_id: fields.purchase.payment_method_id || null,
+          payment_account_id: fields.purchase.payment_account_id || null,
+          payment_reference: fields.purchase.payment_reference,
+          notes: fields.purchase.notes,
+        });
+        if (!purchaseRes.ok) {
+          uploadErrors.push(`Purchase: ${purchaseRes.error}`);
+        }
+      }
+
       for (const docType of REQUIRED_VEHICLE_DOC_TYPES) {
         const bundle = bundles[docType];
         if (!bundle.files.length) continue;
@@ -645,6 +747,21 @@ export function AddVehicleModal({
       ) : null}
 
       {step === 3 ? (
+        <div className="space-y-4">
+          <p className="text-sm text-rph-fg-muted">
+            Optional — record what your company paid for this vehicle. You can skip and add it later on the vehicle{" "}
+            <span className="font-medium">Financials</span> tab.
+          </p>
+          <VehiclePurchaseFormFields
+            form={fields.purchase}
+            onChange={(purchase) => setField("purchase", purchase)}
+            methods={paymentMethods}
+            accounts={paymentAccounts}
+          />
+        </div>
+      ) : null}
+
+      {step === 4 ? (
         <div className="space-y-4 text-sm text-rph-fg-secondary">
           <div className="rounded-lg border border-rph-border bg-rph-chrome p-4">
             <p className="font-semibold text-rph-fg">
@@ -667,6 +784,25 @@ export function AddVehicleModal({
                 </li>
               ))}
             </ul>
+          </div>
+          <div className="space-y-2">
+            <p className="font-medium text-rph-fg">Purchase</p>
+            {shouldSavePurchase(fields.purchase) ? (
+              <ul className="space-y-1">
+                <li className="flex justify-between gap-2">
+                  <span>Amount</span>
+                  <span className="font-semibold text-rph-fg">{formatGbp(Number.parseFloat(fields.purchase.amount_gbp))}</span>
+                </li>
+                {fields.purchase.counterparty ? (
+                  <li className="flex justify-between gap-2">
+                    <span>Seller</span>
+                    <span>{fields.purchase.counterparty}</span>
+                  </li>
+                ) : null}
+              </ul>
+            ) : (
+              <p className="text-amber-700 dark:text-amber-300">Skipped — add on Financials later</p>
+            )}
           </div>
           <p className="rph-meta">
             Saving creates the vehicle now. Missing documents stay flagged on the fleet list until you add them from Manage.

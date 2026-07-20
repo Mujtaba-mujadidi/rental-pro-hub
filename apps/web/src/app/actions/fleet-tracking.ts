@@ -13,6 +13,7 @@ import {
   deviceMatchLabel,
   isImobDeviceLabel,
   suggestVehicleMappings,
+  validateVehicleMappingLinks,
   type MappingSuggestion,
   type DeviceGroup,
   type TrackingDataSource,
@@ -219,20 +220,51 @@ export async function confirmVehicleMappingsAction(
   if (!companyId) return { ok: false, error: "No active company." };
   if (!links.length) return { ok: false, error: "No mappings selected." };
 
+  const tokenRes = await getCompanyAccessToken(companyId);
+  if (!tokenRes.ok) return tokenRes;
+
+  const devicesRes = await listDevices(tokenRes.token, tokenRes.account);
+  if (!devicesRes.ok) return { ok: false, error: devicesRes.error };
+
+  const accountImeis = new Set(
+    devicesRes.data.map((device) => device.imei.trim()).filter((imei) => imei.length > 0),
+  );
+
   const supabase = await createClient();
+  const { data: vehicles, error: vehiclesError } = await supabase
+    .from("vehicles")
+    .select("id, vrm, gps_primary_imei, gps_secondary_imei")
+    .eq("parent_company_id", companyId);
+  if (vehiclesError) return { ok: false, error: vehiclesError.message };
+
+  const normalizedLinks = links
+    .map((link) => ({
+      vehicleId: link.vehicleId.trim(),
+      primaryImei: link.primaryImei.trim(),
+      secondaryImei: link.secondaryImei?.trim() || null,
+    }))
+    .filter((link) => link.vehicleId && link.primaryImei);
+
+  const validation = validateVehicleMappingLinks(normalizedLinks, {
+    accountImeis,
+    vehicles: (vehicles ?? []).map((vehicle) => ({
+      id: vehicle.id,
+      vrm: vehicle.vrm,
+      gps_primary_imei: vehicle.gps_primary_imei ?? null,
+      gps_secondary_imei: vehicle.gps_secondary_imei ?? null,
+    })),
+  });
+  if (!validation.ok) return validation;
+
   let updated = 0;
-  for (const link of links) {
-    const vehicleId = link.vehicleId.trim();
-    const primary = link.primaryImei.trim();
-    if (!vehicleId || !primary) continue;
-    const secondary = link.secondaryImei?.trim() || null;
+  for (const link of normalizedLinks) {
     const { error } = await supabase
       .from("vehicles")
       .update({
-        gps_primary_imei: primary,
-        gps_secondary_imei: secondary,
+        gps_primary_imei: link.primaryImei,
+        gps_secondary_imei: link.secondaryImei,
       })
-      .eq("id", vehicleId)
+      .eq("id", link.vehicleId)
       .eq("parent_company_id", companyId);
     if (error) return { ok: false, error: error.message };
     updated += 1;

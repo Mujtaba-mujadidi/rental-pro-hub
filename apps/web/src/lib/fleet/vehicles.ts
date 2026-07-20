@@ -6,6 +6,7 @@ export const VEHICLE_STATUSES = [
   "reserved",
   "repair",
   "accident_claim",
+  "sold",
 ] as const;
 
 export type VehicleStatus = (typeof VEHICLE_STATUSES)[number];
@@ -16,6 +17,39 @@ export const VEHICLE_STATUS_LABELS: Record<VehicleStatus, string> = {
   reserved: "Reserved",
   repair: "Repair",
   accident_claim: "Accident claim",
+  sold: "Sold",
+};
+
+export const OWNERSHIP_EVENT_TYPES = ["purchase", "sale"] as const;
+export type OwnershipEventType = (typeof OWNERSHIP_EVENT_TYPES)[number];
+
+export const OWNERSHIP_EVENT_LABELS: Record<OwnershipEventType, string> = {
+  purchase: "Purchase",
+  sale: "Sale",
+};
+
+export function isOwnershipEventType(v: string): v is OwnershipEventType {
+  return (OWNERSHIP_EVENT_TYPES as readonly string[]).includes(v);
+}
+
+export type VehicleOwnershipEventRow = {
+  id: string;
+  vehicle_id: string;
+  parent_company_id: string;
+  subcompany_id: string;
+  event_type: OwnershipEventType;
+  occurred_on: string;
+  amount_gbp: number;
+  counterparty: string;
+  payment_method_id: string | null;
+  payment_account_id: string | null;
+  payment_reference: string;
+  notes: string | null;
+  recorded_by: string | null;
+  created_at: string;
+  updated_at: string;
+  payment_method_name?: string | null;
+  payment_account_name?: string | null;
 };
 
 export const VEHICLE_DOC_TYPES = [

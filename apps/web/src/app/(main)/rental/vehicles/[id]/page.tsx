@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { loadVehicleFinancialsAction } from "@/app/actions/rental-vehicle-financials";
 import { loadVehicleDetailAction } from "@/app/actions/rental-vehicles";
 import { VehicleFleetTrackingCard } from "@/app/(main)/rental/vehicles/[id]/vehicle-fleet-tracking-card";
 import { VehicleExpiryAlert, VehicleExpiryPills } from "@/app/(main)/rental/vehicles/vehicle-expiry-indicators";
@@ -10,6 +11,7 @@ import {
   vehicleExpiryTextClass,
   worstVehicleExpiryTone,
 } from "@/lib/fleet/vehicle-expiry-attention";
+import { formatGbp } from "@/lib/fleet/maintenance";
 import { VEHICLE_DOC_TYPE_LABELS, VEHICLE_STATUS_LABELS } from "@/lib/fleet/vehicles";
 
 function IconArrowRight({ className }: { className?: string }) {
@@ -22,10 +24,11 @@ function IconArrowRight({ className }: { className?: string }) {
 
 export default async function VehicleDashboardPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const data = await loadVehicleDetailAction(id);
+  const [data, financials] = await Promise.all([loadVehicleDetailAction(id), loadVehicleFinancialsAction(id)]);
   if (!data.ok) notFound();
 
   const { vehicle, transfers, canManage, notifySettings } = data;
+  const pnl = financials.ok ? financials.data.pnl : null;
   const missing = vehicle.missing_docs ?? [];
   const allDates = assessVehicleExpiries(vehicle, notifySettings);
   const attention = vehicleExpiryAttentionItems(vehicle, notifySettings);
@@ -124,6 +127,40 @@ export default async function VehicleDashboardPage({ params }: { params: Promise
             className="mt-3 inline-flex h-8 items-center gap-1 rounded-lg border border-rph-border bg-rph-raised px-2.5 text-xs font-semibold text-rph-fg-secondary shadow-sm transition-colors hover:bg-rph-chrome hover:text-rph-fg"
           >
             View maintenance
+            <IconArrowRight className="h-3.5 w-3.5 shrink-0" />
+          </Link>
+        </div>
+        <div className="rph-card p-4">
+          <p className="rph-meta font-semibold uppercase tracking-wide">Financials</p>
+          {pnl ? (
+            <dl className="mt-2 space-y-1 text-sm text-rph-fg-secondary">
+              <div className="flex justify-between gap-2">
+                <dt className="text-rph-fg-muted">Purchase</dt>
+                <dd>{pnl.purchaseGbp != null ? formatGbp(pnl.purchaseGbp) : "—"}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-rph-fg-muted">Maintenance</dt>
+                <dd>{formatGbp(pnl.maintenanceTotalGbp)}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-rph-fg-muted">{pnl.isSold ? "Net P&L" : "Book position"}</dt>
+                <dd className="font-semibold text-rph-fg">
+                  {pnl.isSold && pnl.netPnlGbp != null
+                    ? formatGbp(pnl.netPnlGbp)
+                    : pnl.bookPositionGbp != null
+                      ? formatGbp(pnl.bookPositionGbp)
+                      : "—"}
+                </dd>
+              </div>
+            </dl>
+          ) : (
+            <p className="rph-muted mt-2 text-sm">Financial data unavailable.</p>
+          )}
+          <Link
+            href={`/rental/vehicles/${vehicle.id}/financials`}
+            className="mt-3 inline-flex h-8 items-center gap-1 rounded-lg border border-rph-border bg-rph-raised px-2.5 text-xs font-semibold text-rph-fg-secondary shadow-sm transition-colors hover:bg-rph-chrome hover:text-rph-fg"
+          >
+            Open Financials
             <IconArrowRight className="h-3.5 w-3.5 shrink-0" />
           </Link>
         </div>
