@@ -24,6 +24,21 @@ Invoke this rule before implementing features. Prefer clarity over cleverness.
 - DB changes: migration + idempotent `supabase/manual/ensure_*.sql` when schema changes
 - Match nearby patterns (server actions, FormModalShell, overlays, vehicle workspace)
 
+## Multi-step modals (UI consistency)
+
+Use the same chrome for every stepped `FormModalShell` flow:
+
+- **Shell** — `FormModalShell` from `@/components/forms/form-modal-shell` (backdrop does not dismiss; Close/Cancel + discard confirm)
+- **Progress** — `FormModalStepProgress` in `headerExtra` with a `STEP_LABELS` array; **0-based** `step` prop (`step - 1` if your wizard stores 1-based steps)
+- **Title** — stable action name (`New hire contract`, `Add vehicle`); put “Step X of Y” in the progress component, not the title
+- **Footer** — `Cancel` left; `Back` / primary action right via `formModalBtnGhost` / `formModalBtnContinue` from `@/components/forms/form-modal-actions`
+- **Fields** — `rph-input`, `FormModalField`, `rph-meta`, `rph-card`; UK dates via `@/lib/datetime/uk`
+- **Drafts** — browser drafts: `useFormModalDraft` + shell `onSaveProgress` / `onSaveAndClose`; server drafts: `showDraftActions={false}` and a footer `formModalBtnSecondary` “Save draft” that calls your server action
+- **Large forms** — `allowMaximize` + `maxWidthClass` when needed (match hire/terms modals)
+- **Reference** — `add-vehicle-modal.tsx`, `register-subcompany-modal.tsx`, `hire-contract-wizard-modal.tsx`
+
+Do not invent a new step indicator or footer button layout when extending an existing wizard.
+
 ## Product safety
 
 - Do not silently invent or restore history (e.g. previous MOT expiry) without stored data

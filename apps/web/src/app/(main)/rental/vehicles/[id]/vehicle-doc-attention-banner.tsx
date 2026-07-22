@@ -1,21 +1,14 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { confirmVehicleDocAttentionAction } from "@/app/actions/rental-maintenance";
+import { useVehicleWorkspace } from "@/app/(main)/rental/vehicles/[id]/vehicle-workspace-provider";
 
-export function VehicleDocAttentionBanner({
-  vehicleId,
-  motAttentionAt,
-  phvAttentionAt,
-  canConfirm,
-}: {
-  vehicleId: string;
-  motAttentionAt: string | null;
-  phvAttentionAt: string | null;
-  canConfirm: boolean;
-}) {
-  const router = useRouter();
+export function VehicleDocAttentionBanner({ canConfirm }: { canConfirm: boolean }) {
+  const { shell, refreshShell } = useVehicleWorkspace();
+  const vehicleId = shell.vehicle.id;
+  const motAttentionAt = shell.vehicle.mot_doc_attention_at;
+  const phvAttentionAt = shell.vehicle.phv_doc_attention_at;
   const [pending, startTransition] = useTransition();
   const [motChecked, setMotChecked] = useState(false);
   const [phvChecked, setPhvChecked] = useState(false);
@@ -35,7 +28,7 @@ export function VehicleDocAttentionBanner({
       }
       if (kind === "mot") setMotChecked(false);
       else setPhvChecked(false);
-      router.refresh();
+      await refreshShell();
     });
   }
 

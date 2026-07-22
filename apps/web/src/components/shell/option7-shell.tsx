@@ -26,6 +26,16 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
     if (pathname === "/rental/subcompany" || pathname.startsWith("/rental/subcompany/")) {
       return [{ label: "Home", href: "/rental" }, { label: "Subcompany", href: "/rental/subcompany" }];
     }
+    if (pathname === "/rental/hires" || pathname.startsWith("/rental/hires/")) {
+      return [{ label: "Home", href: "/rental" }, { label: "Hires", href: "/rental/hires" }];
+    }
+    if (pathname.startsWith("/rental/esign/")) {
+      return [
+        { label: "Home", href: "/rental" },
+        { label: "Hires", href: "/rental/hires" },
+        { label: "E-sign" },
+      ];
+    }
     if (pathname === "/rental/vehicles" || pathname.startsWith("/rental/vehicles/")) {
       const parts = pathname.split("/").filter(Boolean);
       // /rental/vehicles/:id[/section]
@@ -126,6 +136,9 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
   if (pathname === "/driver/profile" || pathname.startsWith("/driver/profile/")) {
     return [{ label: "Home", href: "/driver" }, { label: "Profile" }];
   }
+  if (pathname === "/driver/hire-requests" || pathname.startsWith("/driver/hire-requests/")) {
+    return [{ label: "Home", href: "/driver" }, { label: "Hire requests" }];
+  }
   return [{ label: "Home", href: "/driver" }, { label: "Driver" }];
 }
 
@@ -133,11 +146,13 @@ function NavLink({
   href,
   active,
   children,
+  badge,
   onNavigate,
 }: {
   href: string;
   active: boolean;
   children: React.ReactNode;
+  badge?: number;
   onNavigate?: () => void;
 }) {
   return (
@@ -145,13 +160,16 @@ function NavLink({
       href={href}
       prefetch={false}
       onClick={onNavigate}
-      className={`block rounded-lg px-3 py-2.5 text-sm transition-colors ${
+      className={`flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors ${
         active
           ? "bg-rph-rail-soft font-semibold text-white shadow-md shadow-black/20"
           : "text-slate-400 hover:bg-white/[0.06] hover:text-slate-200"
       }`}
     >
-      {children}
+      <span>{children}</span>
+      {badge && badge > 0 ? (
+        <span className="rounded-full bg-white/15 px-2 py-0.5 text-xs font-semibold text-white">{badge}</span>
+      ) : null}
     </Link>
   );
 }
@@ -226,6 +244,7 @@ export function Option7Shell({
   displayName,
   driverNavMode,
   driverLicenceBanner,
+  driverPendingHireRequests = 0,
   fleetTrackingEnabled = false,
   children,
 }: {
@@ -234,6 +253,8 @@ export function Option7Shell({
   driverNavMode?: DriverNavMode;
   /** Shown for drivers when licences must be reviewed (expiry / address). */
   driverLicenceBanner?: { title: string; bullets: string[] } | null;
+  /** Pending hire access requests for driver nav badge. */
+  driverPendingHireRequests?: number;
   /** Rental companies with Fleet Tracking (SmartCar Tracker) enabled by super-admin. */
   fleetTrackingEnabled?: boolean;
   children: React.ReactNode;
@@ -341,6 +362,13 @@ export function Option7Shell({
         >
           Vehicles
         </NavLink>
+        <NavLink
+          href="/rental/hires"
+          active={pathname === "/rental/hires" || pathname.startsWith("/rental/hires/")}
+          onNavigate={closeMobileNav}
+        >
+          Hires
+        </NavLink>
         {fleetTrackingEnabled ? (
           <NavLink
             href="/rental/fleet-tracking"
@@ -380,17 +408,35 @@ export function Option7Shell({
         </NavLink>
       </>
     ) : driverNavMode !== "full" ? (
-      <NavLink
-        href="/driver/onboarding"
-        active={pathname.startsWith("/driver/onboarding")}
-        onNavigate={closeMobileNav}
-      >
-        Onboarding
-      </NavLink>
+      <>
+        <NavLink
+          href="/driver/hire-requests"
+          active={pathname === "/driver/hire-requests" || pathname.startsWith("/driver/hire-requests/")}
+          badge={driverPendingHireRequests}
+          onNavigate={closeMobileNav}
+        >
+          Hire requests
+        </NavLink>
+        <NavLink
+          href="/driver/onboarding"
+          active={pathname.startsWith("/driver/onboarding")}
+          onNavigate={closeMobileNav}
+        >
+          Onboarding
+        </NavLink>
+      </>
     ) : (
       <>
         <NavLink href="/driver" active={pathname === "/driver"} onNavigate={closeMobileNav}>
           Dashboard
+        </NavLink>
+        <NavLink
+          href="/driver/hire-requests"
+          active={pathname === "/driver/hire-requests" || pathname.startsWith("/driver/hire-requests/")}
+          badge={driverPendingHireRequests}
+          onNavigate={closeMobileNav}
+        >
+          Hire requests
         </NavLink>
         <NavLink
           href="/driver/onboarding"

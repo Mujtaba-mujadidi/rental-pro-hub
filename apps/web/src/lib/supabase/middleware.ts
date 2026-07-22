@@ -69,6 +69,15 @@ export async function updateSession(request: NextRequest) {
 
   // Rare path (post-login landing): resolve home once — not on every tab switch.
   if (hasSession && (path === "/login" || path === "/signup")) {
+    const next = request.nextUrl.searchParams.get("next");
+    if (next?.startsWith("/") && !next.startsWith("//")) {
+      const redirectUrl = request.nextUrl.clone();
+      const parsed = new URL(next, request.nextUrl.origin);
+      redirectUrl.pathname = parsed.pathname;
+      redirectUrl.search = parsed.search;
+      return NextResponse.redirect(redirectUrl);
+    }
+
     const {
       data: { user },
     } = await supabase.auth.getUser();

@@ -18,6 +18,7 @@ describe("defaultNotificationSettings", () => {
       notify_mot_days_before: 5,
       notify_tax_days_before: 5,
       notify_phv_licence_days_before: 28,
+      notify_contract_expiry_days_before: 28,
     });
   });
 });

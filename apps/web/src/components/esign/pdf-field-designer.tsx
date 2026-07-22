@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EsignFieldLayoutItem, EsignFieldType } from "@/lib/esign/types";
 import { ESIGN_OWNER_ROLE, ESIGN_RECIPIENT_ROLE } from "@/lib/esign/types";
 import { normalizeFieldRole } from "@/lib/esign/roles";
@@ -118,6 +118,14 @@ export function PdfFieldDesigner({
   useEffect(() => {
     setFields(initialFields);
   }, [initialFields]);
+
+  const displayFields = useMemo(
+    () =>
+      allowOwnerFields
+        ? fields
+        : fields.filter((f) => normalizeFieldRole(f.role) !== ESIGN_OWNER_ROLE),
+    [allowOwnerFields, fields],
+  );
 
   useEffect(() => {
     if (!allowOwnerFields && fieldParty === ESIGN_OWNER_ROLE) {
@@ -326,7 +334,7 @@ export function PdfFieldDesigner({
     }
   }
 
-  const selected = fields.find((f) => f.id === selectedId) ?? null;
+  const selected = displayFields.find((f) => f.id === selectedId) ?? null;
   const canEdit = !disabled && !busy && sendPhase !== "sending" && sendPhase !== "success";
   const canClickSend = canSend && !busy && sendPhase !== "sending" && sendPhase !== "success";
 
@@ -430,7 +438,7 @@ export function PdfFieldDesigner({
             disabled={!canClickSend}
             onClick={() => void handleSend()}
             className="rounded-lg bg-rph-rail px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
-            title={!canSend ? "Sign as contract owner before sending" : undefined}
+            title={!canSend ? "Complete contract preparation before sending to the recipient" : undefined}
           >
             {sendPhase === "sending" ? "Sending…" : "Send to recipient"}
           </button>
@@ -464,7 +472,7 @@ export function PdfFieldDesigner({
                   onDrop={(e) => onPageDrop(page, e)}
                 >
                   <canvas id={`esign-page-${page}`} className="block max-w-full bg-white" />
-                  {fields
+                  {displayFields
                     .filter((f) => f.page === page)
                     .map((f) => {
                       const meta = FIELD_META[f.type];
@@ -624,7 +632,7 @@ export function PdfFieldDesigner({
 
           <div className="border-t border-slate-200 p-3 text-xs text-slate-500 dark:border-slate-700">
             <p className="font-medium text-slate-700 dark:text-slate-200">
-              {fields.length} field{fields.length === 1 ? "" : "s"} placed
+              {displayFields.length} field{displayFields.length === 1 ? "" : "s"} placed
             </p>
             {selected ? (
               <p className="mt-1">

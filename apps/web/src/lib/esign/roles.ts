@@ -17,5 +17,20 @@ export function fieldsForRole(layout: EsignFieldLayoutItem[], role: string): Esi
 }
 
 export function layoutHasRoleSignature(layout: EsignFieldLayoutItem[], role: string): boolean {
-  return fieldsForRole(layout, role).some((f) => f.type === "signature");
+  return fieldsForRole(layout, role).some((f) => f.type === "signature" && !f.derivedFrom?.trim());
+}
+
+/** True when layout includes any owner signature placeholders (execution block or per-page paraphs). */
+export function layoutIncludesOwnerSignFields(layout: EsignFieldLayoutItem[]): boolean {
+  return layout.some(
+    (f) => normalizeFieldRole(f.role) === ESIGN_OWNER_ROLE && f.type === "signature",
+  );
+}
+
+export function filterLayoutForSignatureMode(
+  layout: EsignFieldLayoutItem[],
+  requiresOwner: boolean,
+): EsignFieldLayoutItem[] {
+  if (requiresOwner) return layout;
+  return layout.filter((f) => normalizeFieldRole(f.role) !== ESIGN_OWNER_ROLE);
 }

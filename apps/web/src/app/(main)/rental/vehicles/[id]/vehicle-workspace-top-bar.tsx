@@ -6,7 +6,6 @@ import { usePathname, useRouter } from "next/navigation";
 import type { VehicleSwitcherOption } from "@/app/actions/rental-vehicles";
 import {
   VEHICLE_STATUS_LABELS,
-  type VehicleRow,
   type VehicleStatus,
 } from "@/lib/fleet/vehicles";
 import {
@@ -15,14 +14,15 @@ import {
   vehicleWorkspaceHref,
   vehicleWorkspaceNav,
 } from "@/lib/fleet/vehicle-workspace-nav";
+import { useVehicleWorkspace } from "@/app/(main)/rental/vehicles/[id]/vehicle-workspace-provider";
 
 export function VehicleWorkspaceTopBar({
-  vehicle,
   fleet,
 }: {
-  vehicle: VehicleRow;
   fleet: VehicleSwitcherOption[];
 }) {
+  const { shell } = useVehicleWorkspace();
+  const vehicle = shell.vehicle;
   const pathname = usePathname();
   const router = useRouter();
   const section = parseVehicleWorkspaceSection(pathname, vehicle.id);

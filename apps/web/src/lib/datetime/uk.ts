@@ -77,6 +77,18 @@ export function formatUkDateLong(value: string | Date | null | undefined, empty 
  * UK date + time: `17 Jul 2026, 21:16` (24-hour).
  * Use for created_at / transferred_at / signed_at style timestamps.
  */
+/** Calendar date at a fixed UK time, e.g. `17 July 2026 at 09:00`. */
+export function formatUkDateAtTime(
+  dateYmd: string | null | undefined,
+  time24: string,
+  empty = "—",
+): string {
+  const datePart = formatUkDateLong(dateYmd, "");
+  if (!datePart) return empty;
+  const t = time24.trim();
+  return t ? `${datePart} at ${t}` : datePart;
+}
+
 export function formatUkDateTime(value: string | Date | null | undefined, empty = "—"): string {
   if (value == null || value === "") return empty;
   const d = parseInstant(value);

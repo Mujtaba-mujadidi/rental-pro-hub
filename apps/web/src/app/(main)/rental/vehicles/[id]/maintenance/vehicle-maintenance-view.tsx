@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   deleteMaintenanceRecordAction,
@@ -124,8 +123,13 @@ function fromRecord(
   };
 }
 
-export function VehicleMaintenanceView({ initial }: { initial: VehicleMaintenancePageData }) {
-  const router = useRouter();
+export function VehicleMaintenanceView({
+  initial,
+  onDataChange,
+}: {
+  initial: VehicleMaintenancePageData;
+  onDataChange?: () => void | Promise<void>;
+}) {
   const [pending, startTransition] = useTransition();
   const [overlay, setOverlay] = useState<ActionStatusOverlayState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -183,7 +187,7 @@ export function VehicleMaintenanceView({ initial }: { initial: VehicleMaintenanc
   }, [initial.records, initial.totalAmount, initial.yearTotalAmount]);
 
   function refreshFromServer() {
-    router.refresh();
+    void onDataChange?.();
   }
 
   function openAdd() {

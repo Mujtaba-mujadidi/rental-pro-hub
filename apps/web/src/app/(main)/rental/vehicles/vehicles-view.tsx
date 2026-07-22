@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { loadDraft } from "@/lib/forms/form-draft";
-import { VEHICLE_DOC_TYPE_LABELS, VEHICLE_STATUS_LABELS, VEHICLE_STATUSES, type VehicleRow } from "@/lib/fleet/vehicles";
+import { VEHICLE_DOC_TYPE_LABELS, VEHICLE_STATUS_LABELS, VEHICLE_STATUSES, vehicleStatusPillClass, type VehicleRow } from "@/lib/fleet/vehicles";
 import {
   vehicleExpiryAttentionItems,
   vehicleExpiryTextClass,
@@ -217,7 +217,7 @@ export function VehiclesView({
                     </td>
                     <td className="px-4 py-3 text-rph-fg-muted">{v.subcompany_name ?? "—"}</td>
                     <td className="px-4 py-3">
-                      <span className="inline-flex rounded-full bg-rph-chrome px-2 py-0.5 text-xs font-medium text-rph-fg-secondary">
+                      <span className={vehicleStatusPillClass(v.status)}>
                         {VEHICLE_STATUS_LABELS[v.status]}
                       </span>
                     </td>

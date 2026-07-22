@@ -18,37 +18,27 @@ import {
   type VehicleTransferRow,
 } from "@/lib/fleet/vehicles";
 import { prepareVehicleDocumentPdf } from "@/lib/fleet/vehicle-document-pdf";
+import { getVehicleWorkspaceShell } from "@/lib/fleet/load-vehicle-workspace-shell";
 import {
-  clampNotifyDays,
-  defaultNotificationSettings,
+  parseCompanyNotificationSettings,
   type CompanyNotificationSettings,
 } from "@/lib/settings/notification-settings";
 import { createClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { reconcileBlockingHireVehicleStatusesForCompany } from "@/lib/fleet/sync-vehicle-hire-status";
 
 async function loadCompanyNotifySettings(
   supabase: Awaited<ReturnType<typeof createClient>>,
   parentCompanyId: string,
 ): Promise<CompanyNotificationSettings> {
-  const defaults = defaultNotificationSettings();
   const { data } = await supabase
     .from("companies")
-    .select("notify_mot_days_before, notify_tax_days_before, notify_phv_licence_days_before")
+    .select(
+      "notify_mot_days_before, notify_tax_days_before, notify_phv_licence_days_before, notify_contract_expiry_days_before",
+    )
     .eq("id", parentCompanyId)
     .maybeSingle();
-  return {
-    notify_mot_days_before:
-      typeof data?.notify_mot_days_before === "number"
-        ? clampNotifyDays(data.notify_mot_days_before)
-        : defaults.notify_mot_days_before,
-    notify_tax_days_before:
-      typeof data?.notify_tax_days_before === "number"
-        ? clampNotifyDays(data.notify_tax_days_before)
-        : defaults.notify_tax_days_before,
-    notify_phv_licence_days_before:
-      typeof data?.notify_phv_licence_days_before === "number"
-        ? clampNotifyDays(data.notify_phv_licence_days_before)
-        : defaults.notify_phv_licence_days_before,
-  };
+  return parseCompanyNotificationSettings(data ?? undefined);
 }
 
 export type VehicleActionResult = { ok: true; id?: string } | { ok: false; error: string };
@@ -568,6 +558,13 @@ export async function loadVehiclesPageData(): Promise<VehiclesPageData | { error
   const parentCompanyId = profile.company_id?.trim();
   if (!parentCompanyId) return { error: "No active company." };
 
+  try {
+    const admin = createSupabaseAdminClient();
+    await reconcileBlockingHireVehicleStatusesForCompany(admin, parentCompanyId);
+  } catch {
+    /* fleet status repair is best-effort */
+  }
+
   const supabase = await createClient();
   const [
     { data: vehicles, error: vErr },
@@ -642,90 +639,5 @@ export async function loadVehicleDetailAction(vehicleId: string): Promise<
     }
   | { ok: false; error: string }
 > {
-  const { profile } = await requireRentalCompanyArea();
-  const parentCompanyId = profile.company_id?.trim();
-  if (!parentCompanyId) return { ok: false, error: "No active company." };
-
-  const id = vehicleId.trim();
-  if (!id) return { ok: false, error: "Missing vehicle." };
-
-  const supabase = await createClient();
-  const [
-    { data: vehicle, error: vErr },
-    { data: docs, error: dErr },
-    { data: transfers, error: tErr },
-    { data: subs, error: sErr },
-    notifySettings,
-  ] = await Promise.all([
-    supabase
-      .from("vehicles")
-      .select("*, subcompanies(name)")
-      .eq("id", id)
-      .eq("parent_company_id", parentCompanyId)
-      .maybeSingle(),
-    supabase
-      .from("vehicle_documents")
-      .select("id, vehicle_id, doc_type, file_path, file_name, content_type, expiry_date, issued_date, notes, created_at")
-      .eq("vehicle_id", id)
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("vehicle_transfers")
-      .select("id, vehicle_id, from_subcompany_id, to_subcompany_id, transferred_at, notes")
-      .eq("vehicle_id", id)
-      .order("transferred_at", { ascending: false })
-      .limit(20),
-    supabase
-      .from("subcompanies")
-      .select("id, name, is_primary")
-      .eq("parent_company_id", parentCompanyId)
-      .order("created_at", { ascending: true }),
-    loadCompanyNotifySettings(supabase, parentCompanyId),
-  ]);
-
-  if (vErr) return { ok: false, error: vErr.message };
-  if (!vehicle) return { ok: false, error: "Vehicle not found." };
-  if (dErr) return { ok: false, error: dErr.message };
-  if (tErr) return { ok: false, error: tErr.message };
-  if (sErr) return { ok: false, error: sErr.message };
-
-  const nested = vehicle.subcompanies as { name: string | null } | { name: string | null }[] | null;
-  const subName = Array.isArray(nested) ? nested[0]?.name : nested?.name;
-  const { subcompanies: _s, ...rest } = vehicle as typeof vehicle & { subcompanies?: unknown };
-
-  const subIds = [
-    ...new Set((transfers ?? []).flatMap((t) => [t.from_subcompany_id, t.to_subcompany_id])),
-  ];
-  const nameById = new Map<string, string | null>();
-  for (const s of subs ?? []) nameById.set(s.id, s.name);
-  for (const sid of subIds) {
-    if (!nameById.has(sid)) {
-      // already loaded all company subs above
-    }
-  }
-
-  return {
-    ok: true,
-    vehicle: {
-      ...(rest as Omit<VehicleRow, "subcompany_name" | "missing_docs">),
-      status: rest.status as VehicleStatus,
-      mot_doc_attention_at: (rest as { mot_doc_attention_at?: string | null }).mot_doc_attention_at ?? null,
-      phv_doc_attention_at: (rest as { phv_doc_attention_at?: string | null }).phv_doc_attention_at ?? null,
-      subcompany_name: subName ?? null,
-      missing_docs: missingRequiredDocTypes((docs ?? []).map((d) => d.doc_type)),
-    },
-    documents: (docs ?? []) as VehicleDocumentRow[],
-    transfers: (transfers ?? []).map((t) => ({
-      ...t,
-      from_name: nameById.get(t.from_subcompany_id) ?? null,
-      to_name: nameById.get(t.to_subcompany_id) ?? null,
-    })),
-    subcompanies: (subs ?? []).map((s) => ({
-      id: s.id,
-      name: s.name,
-      is_primary: Boolean(s.is_primary),
-    })),
-    notifySettings,
-    canManage: canManageFleet(profile),
-    canDelete: canDeleteFleet(profile),
-  };
+  return getVehicleWorkspaceShell(vehicleId);
 }

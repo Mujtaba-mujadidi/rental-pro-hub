@@ -95,15 +95,13 @@ export type AppProfile = {
 export const getSessionUser = cache(async () => {
   const supabase = await createClient();
 
-  // Cookie parse only — PostgREST still validates the JWT on every DB call.
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (session?.user?.id) {
-    return session.user;
-  }
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+  if (!error && user?.id) return user;
 
-  // Prefer JWT claims (local/JWKS verify) — avoids Auth-server round-trip when session cookie is empty.
+  // Prefer JWT claims (local/JWKS verify) when Auth server is unreachable.
   const { data: claimsData } = await supabase.auth.getClaims();
   const claims = claimsData?.claims as
     | {
@@ -128,12 +126,7 @@ export const getSessionUser = cache(async () => {
     } as User;
   }
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-  if (error || !user) return null;
-  return user;
+  return null;
 });
 
 /** Insert a missing profiles row (RLS: own id only). Super admin role if SUPER_ADMIN_EMAIL matches. */
@@ -378,6 +371,19 @@ export const getAppProfile = cache(async (): Promise<AppProfile | null> => {
   const supabase = await createClient();
   return resolveRentalMemberships(supabase, user.id, user.email, row, null);
 });
+
+/** Route handlers should use this instead of cached `getAppProfile()`. */
+export async function loadAppProfileFromRequest(): Promise<AppProfile | null> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.id) return null;
+
+  const first = await fetchProfileRow(supabase, user.id);
+  if (first.error || !first.data) return null;
+  return resolveRentalMemberships(supabase, user.id, user.email, first.data, null);
+}
 
 function normalizeAppProfileRow(row: {
   id: string;

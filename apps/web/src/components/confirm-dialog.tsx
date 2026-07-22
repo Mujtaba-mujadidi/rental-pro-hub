@@ -61,7 +61,7 @@ export function ConfirmDialog({
         <h2 id="rph-confirm-title" className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
           {title}
         </h2>
-        <p className="mt-3 text-sm leading-relaxed text-slate-600 dark:text-slate-400">{description}</p>
+        <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-600 dark:text-slate-400">{description}</p>
         <div className="mt-8 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
             type="button"

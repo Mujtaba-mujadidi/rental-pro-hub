@@ -1,13 +1,5 @@
-import { loadVehicleFinancialsAction } from "@/app/actions/rental-vehicle-financials";
-import { VehicleFinancialsView } from "./vehicle-financials-view";
+import { VehicleFinancialsPageClient } from "./vehicle-financials-page-client";
 
-export default async function VehicleFinancialsPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const res = await loadVehicleFinancialsAction(id);
-
-  if (!res.ok) {
-    return <p className="rph-alert-error text-sm">{res.error}</p>;
-  }
-
-  return <VehicleFinancialsView initial={res.data} />;
+export default function VehicleFinancialsPage() {
+  return <VehicleFinancialsPageClient />;
 }

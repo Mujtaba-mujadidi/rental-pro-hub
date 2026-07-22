@@ -20,6 +20,21 @@ export const VEHICLE_STATUS_LABELS: Record<VehicleStatus, string> = {
   sold: "Sold",
 };
 
+/** Status pill colours for fleet lists and workspace chrome. */
+export function vehicleStatusPillClass(status: VehicleStatus): string {
+  const tone =
+    status === "available"
+      ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200"
+      : status === "on_rent" || status === "reserved"
+        ? "bg-sky-50 text-sky-800 dark:bg-sky-950/60 dark:text-sky-200"
+        : status === "repair" || status === "accident_claim"
+          ? "bg-amber-50 text-amber-900 dark:bg-amber-950/50 dark:text-amber-100"
+          : status === "sold"
+            ? "bg-rph-chrome text-rph-fg-muted"
+            : "bg-rph-chrome text-rph-fg-secondary";
+  return `inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${tone}`;
+}
+
 export const OWNERSHIP_EVENT_TYPES = ["purchase", "sale"] as const;
 export type OwnershipEventType = (typeof OWNERSHIP_EVENT_TYPES)[number];
 

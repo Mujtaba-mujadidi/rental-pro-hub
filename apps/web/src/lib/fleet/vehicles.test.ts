@@ -6,12 +6,20 @@ import {
   isVehicleStatus,
   missingRequiredDocTypes,
   normalizeVrm,
+  vehicleStatusPillClass,
 } from "@/lib/fleet/vehicles";
 
 describe("normalizeVrm", () => {
   it("uppercases and strips spaces/hyphens", () => {
     expect(normalizeVrm(" ab12 cde ")).toBe("AB12CDE");
     expect(normalizeVrm("AB-12-CDE")).toBe("AB12CDE");
+  });
+});
+
+describe("vehicleStatusPillClass", () => {
+  it("includes reserved label styling distinct from available", () => {
+    expect(vehicleStatusPillClass("reserved")).toContain("sky");
+    expect(vehicleStatusPillClass("available")).toContain("emerald");
   });
 });
 

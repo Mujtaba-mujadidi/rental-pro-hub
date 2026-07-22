@@ -9,6 +9,7 @@ import {
 import { SignatureFieldInput } from "@/components/esign/signature-field-input";
 import { usePdfPages } from "@/components/esign/use-pdf-pages";
 import type { EsignFieldLayoutItem, EsignFieldType } from "@/lib/esign/types";
+import { signableFieldLayout, buildSignerPrefillValues } from "@/lib/esign/field-values";
 import type { FieldValueMap } from "@/lib/esign/pdf-stamp";
 import {
   parseEsignDateTimeInput,
@@ -84,6 +85,8 @@ export function GuidedSigningViewer({
   pending,
   error,
   savedSignatureDataUrl,
+  prefillSignerName,
+  sessionKey,
   startButtonLabel = "Start signing",
   submitButtonLabel = "Finish & submit",
   reviewHint = "Scroll the full document above. When you start, we'll take you to each field in order.",
@@ -98,11 +101,15 @@ export function GuidedSigningViewer({
   pending: boolean;
   error: string | null;
   savedSignatureDataUrl?: string | null;
+  /** Pre-fill name and date/time fields (hirer signing). */
+  prefillSignerName?: string;
+  /** When this changes, the walkthrough resets (e.g. next agreement in a bundle). */
+  sessionKey?: string;
   startButtonLabel?: string;
   submitButtonLabel?: string;
   reviewHint?: string;
 }) {
-  const ordered = sortFields(fields);
+  const ordered = sortFields(signableFieldLayout(fields));
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
@@ -111,6 +118,14 @@ export function GuidedSigningViewer({
   const [saveForFuture, setSaveForFuture] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fieldEls = useRef<Record<string, HTMLDivElement | null>>({});
+
+  useEffect(() => {
+    setStarted(false);
+    setStepIndex(0);
+    setDraft("");
+    setSaveForFuture(false);
+    setValues(buildSignerPrefillValues(fields, { signerName: prefillSignerName }));
+  }, [sessionKey, fields, prefillSignerName]);
 
   const { pageCount, ready: pdfReady } = usePdfPages(pdfUrl, "sign-page-", {
     scale: 1.15,
@@ -149,7 +164,8 @@ export function GuidedSigningViewer({
   function startSigning() {
     if (ordered.length === 0) return;
     setStarted(true);
-    setStepIndex(0);
+    const firstEmpty = ordered.findIndex((f) => !isFilled(f, values));
+    setStepIndex(firstEmpty >= 0 ? firstEmpty : 0);
   }
 
   function saveCurrentAndAdvance() {

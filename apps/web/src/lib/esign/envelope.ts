@@ -2,6 +2,7 @@ import { appendEsignAudit } from "@/lib/esign/audit";
 import { generateAccessToken, generateOtp, hashSecret, safeEqualHash } from "@/lib/esign/crypto";
 import { sendEsignMail } from "@/lib/esign/mail";
 import { stampPdfWithFieldValues, type FieldValueMap } from "@/lib/esign/pdf-stamp";
+import { expandDerivedFieldValues } from "@/lib/esign/field-values";
 import {
   ESIGN_OWNER_ROLE,
   ESIGN_RECIPIENT_ROLE,
@@ -60,6 +61,7 @@ function validateRoleValues(
 ): string | null {
   const roleFields = fieldsForRole(layout, role);
   for (const f of roleFields) {
+    if (f.derivedFrom?.trim()) continue;
     if (f.type === "signature" && !values[f.id]?.value?.trim()) {
       return "Signature is required.";
     }
@@ -84,7 +86,8 @@ async function stampAndStorePdf(
   if (!unsigned) return { ok: false, error: "Could not load unsigned PDF." };
   let stamped: Uint8Array;
   try {
-    stamped = await stampPdfWithFieldValues(unsigned, layout, values);
+    const expanded = expandDerivedFieldValues(layout, values);
+    stamped = await stampPdfWithFieldValues(unsigned, layout, expanded);
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Could not stamp PDF." };
   }

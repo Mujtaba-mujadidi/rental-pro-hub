@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { normalizeUkSortCodeForStorage } from "@/lib/payments/uk-sort-code";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
 import { canManageSettings } from "@/lib/auth/rental-permissions";
@@ -109,7 +110,9 @@ export async function loadPaymentSettingsAction(): Promise<
   const supabase = await createClient();
   const { data: accounts, error: aErr } = await supabase
     .from("company_payment_accounts")
-    .select("id, parent_company_id, name, notes, is_active, sort_order, created_at")
+    .select(
+      "id, parent_company_id, name, notes, payee_name, sort_code, account_number, payment_reference_hint, show_to_hirer, is_active, sort_order, created_at",
+    )
     .eq("parent_company_id", companyId)
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
@@ -196,6 +199,11 @@ export async function updatePaymentMethodAction(input: {
 export async function createPaymentAccountAction(input: {
   name: string;
   notes?: string;
+  payee_name?: string | null;
+  sort_code?: string | null;
+  account_number?: string | null;
+  payment_reference_hint?: string | null;
+  show_to_hirer?: boolean;
 }): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const gate = await requireCompanyWritableAdmin();
   if (!gate.ok) return gate;
@@ -218,6 +226,11 @@ export async function createPaymentAccountAction(input: {
       parent_company_id: gate.companyId,
       name,
       notes: input.notes?.trim() || null,
+      payee_name: input.payee_name?.trim() || null,
+      sort_code: normalizeUkSortCodeForStorage(input.sort_code),
+      account_number: input.account_number?.trim() || null,
+      payment_reference_hint: input.payment_reference_hint?.trim() || null,
+      show_to_hirer: input.show_to_hirer ?? false,
       is_active: true,
       sort_order: (maxRow?.sort_order ?? -1) + 1,
     })
@@ -236,6 +249,11 @@ export async function updatePaymentAccountAction(input: {
   id: string;
   name?: string;
   notes?: string | null;
+  payee_name?: string | null;
+  sort_code?: string | null;
+  account_number?: string | null;
+  payment_reference_hint?: string | null;
+  show_to_hirer?: boolean;
   is_active?: boolean;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const gate = await requireCompanyWritableAdmin();
@@ -248,6 +266,13 @@ export async function updatePaymentAccountAction(input: {
     patch.name = name;
   }
   if (input.notes !== undefined) patch.notes = input.notes?.trim() || null;
+  if (input.payee_name !== undefined) patch.payee_name = input.payee_name?.trim() || null;
+  if (input.sort_code !== undefined) patch.sort_code = normalizeUkSortCodeForStorage(input.sort_code);
+  if (input.account_number !== undefined) patch.account_number = input.account_number?.trim() || null;
+  if (input.payment_reference_hint !== undefined) {
+    patch.payment_reference_hint = input.payment_reference_hint?.trim() || null;
+  }
+  if (input.show_to_hirer !== undefined) patch.show_to_hirer = input.show_to_hirer;
   if (input.is_active !== undefined) patch.is_active = input.is_active;
   if (!Object.keys(patch).length) return { ok: false, error: "Nothing to update." };
 

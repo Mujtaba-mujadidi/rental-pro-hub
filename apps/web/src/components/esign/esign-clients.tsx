@@ -14,7 +14,27 @@ import {
   sendEsignEnvelopeAction,
 } from "@/app/actions/esign";
 import type { EsignFieldLayoutItem } from "@/lib/esign/types";
-import { formatUkDateTime } from "@/lib/datetime/uk";
+import type { HireEnvelopeDesignerContext } from "@/lib/esign/hire-envelope-designer";
+import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
+
+export type EsignDesignerActions = {
+  saveFieldLayout: typeof saveEsignFieldLayoutAction;
+  sendEnvelope: typeof sendEsignEnvelopeAction;
+  resendEnvelope: typeof resendEsignEnvelopeAction;
+  getOwnerSavedSignature: typeof getOwnerSavedSignatureAction;
+  applyOwnerSignatureQuick: typeof applyOwnerSignatureQuickAction;
+  configureSignatureMode: typeof configureEsignSignatureModeAction;
+  refreshContractPdf?: (envelopeId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+};
+
+const superAdminDesignerActions: EsignDesignerActions = {
+  saveFieldLayout: saveEsignFieldLayoutAction,
+  sendEnvelope: sendEsignEnvelopeAction,
+  resendEnvelope: resendEsignEnvelopeAction,
+  getOwnerSavedSignature: getOwnerSavedSignatureAction,
+  applyOwnerSignatureQuick: applyOwnerSignatureQuickAction,
+  configureSignatureMode: configureEsignSignatureModeAction,
+};
 
 export { EsignSignClient } from "@/components/esign/signing-viewer";
 
@@ -57,6 +77,50 @@ function StepBackButton({
   );
 }
 
+function HireBundleDocumentBanner({ ctx }: { ctx: HireEnvelopeDesignerContext }) {
+  if (ctx.total <= 1) return null;
+
+  return (
+    <div className="mx-4 mt-3 space-y-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100 md:mx-6">
+      <p>
+        <span className="font-semibold">
+          Contract {ctx.index} of {ctx.total}
+        </span>
+        {" · "}
+        {ctx.lengthLabel} · {ctx.vrm} · ends {formatUkDate(ctx.endDate)}
+        {" · "}
+        <span className="font-medium">{ctx.preparationLabel}</span>
+      </p>
+      <p className="text-xs text-amber-900/90 dark:text-amber-100/90">
+        This hire has {ctx.total} agreements (same terms, different end dates). Who signs is shared across all of
+        them — review signature placement on each contract before sending the bundle to the hirer.
+      </p>
+      <div className="flex flex-wrap gap-1.5 pt-0.5">
+        {ctx.siblings.map((s) =>
+          s.envelopeId ? (
+            <Link
+              key={s.agreementId}
+              href={`/rental/esign/${s.envelopeId}`}
+              className={
+                s.isCurrent
+                  ? "rph-pill-active text-xs"
+                  : "rph-pill text-xs hover:bg-rph-chrome"
+              }
+              aria-current={s.isCurrent ? "page" : undefined}
+            >
+              {s.index}. {s.lengthLabel} · {s.preparationLabel}
+            </Link>
+          ) : (
+            <span key={s.agreementId} className="rph-pill text-xs opacity-60">
+              {s.index}. {s.lengthLabel} · {s.preparationLabel}
+            </span>
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function EsignDesignerClient({
   envelopeId,
   title,
@@ -68,6 +132,14 @@ export function EsignDesignerClient({
   requiresOwnerSignature,
   modeConfigured,
   defaultOwnerName = "",
+  backHref = "/super-admin/companies",
+  backLabel = "Companies",
+  designerActions = superAdminDesignerActions,
+  recipientOnlyTitle = "Recipient only",
+  recipientOnlyDescription = "Customer signs. No platform/owner signature on this envelope.",
+  ownerAndRecipientTitle = "Owner + recipient",
+  ownerAndRecipientDescription = "You sign first (saved signature reused when available), then send to the customer.",
+  hireBundleContext = null,
 }: {
   envelopeId: string;
   title: string;
@@ -80,10 +152,19 @@ export function EsignDesignerClient({
   /** True once the user has chosen recipient-only vs owner+recipient. */
   modeConfigured?: boolean;
   defaultOwnerName?: string;
+  backHref?: string;
+  backLabel?: string;
+  designerActions?: EsignDesignerActions;
+  recipientOnlyTitle?: string;
+  recipientOnlyDescription?: string;
+  ownerAndRecipientTitle?: string;
+  ownerAndRecipientDescription?: string;
+  /** Hire groups: which agreement in a multi-contract bundle is being prepared. */
+  hireBundleContext?: HireEnvelopeDesignerContext | null;
 }) {
   const router = useRouter();
   const [fields, setFields] = useState(initialFields);
-  const [requiresOwner, setRequiresOwner] = useState(requiresOwnerSignature !== false);
+  const [requiresOwner, setRequiresOwner] = useState(requiresOwnerSignature === true);
   const [configured, setConfigured] = useState(
     Boolean(modeConfigured || initialFields.length > 0 || ownerSigned),
   );
@@ -97,21 +178,55 @@ export function EsignDesignerClient({
   const [resendFeedback, setResendFeedback] = useState<{ ok: boolean; message: string } | null>(null);
   const [pending, startTransition] = useTransition();
   const [pdfCacheKey, setPdfCacheKey] = useState(0);
+  const [pdfReady, setPdfReady] = useState(false);
 
   const canEditLayout = (status === "awaiting_placement" || status === "draft") && !ownerDone;
+  const layoutPrepared = fields.length > 0;
+  const canSendToRecipient = layoutPrepared && pdfReady && (!requiresOwner || ownerDone);
   const isCompleted = status === "completed" && hasSignedPdf;
   const unsignedPdfUrl = `/api/esign/${envelopeId}/pdf?v=${pdfCacheKey}`;
   const signedPdfUrl = `/api/esign/${envelopeId}/pdf?variant=signed`;
   const currentPdfUrl = `/api/esign/${envelopeId}/pdf?variant=current&v=${pdfCacheKey}`;
+  const documentSubtitle =
+    hireBundleContext && hireBundleContext.total > 1
+      ? `Contract ${hireBundleContext.index} of ${hireBundleContext.total} · ${hireBundleContext.lengthLabel} · ${hireBundleContext.vrm} · ${hireBundleContext.preparationLabel}`
+      : title;
+  const canRefreshPdf =
+    Boolean(designerActions.refreshContractPdf) &&
+    Boolean(hireBundleContext) &&
+    !isCompleted &&
+    status !== "sent" &&
+    status !== "viewed" &&
+    !ownerDone;
+
+  function regeneratePdf() {
+    if (!designerActions.refreshContractPdf) return;
+    setModeError(null);
+    startTransition(() => {
+      void (async () => {
+        const res = await designerActions.refreshContractPdf!(envelopeId);
+        if (!res.ok) {
+          setModeError(res.error);
+          return;
+        }
+        setPdfCacheKey(Date.now());
+        router.refresh();
+      })();
+    });
+  }
 
   useEffect(() => {
     setFields(initialFields);
   }, [initialFields]);
 
   useEffect(() => {
+    setRequiresOwner(requiresOwnerSignature === true);
+  }, [requiresOwnerSignature]);
+
+  useEffect(() => {
     if (!ownerStep || !requiresOwner || ownerDone) return;
     void (async () => {
-      const res = await getOwnerSavedSignatureAction();
+      const res = await designerActions.getOwnerSavedSignature();
       if (res.ok) setSavedSig(res.dataUrl);
       setSavedSigChecked(true);
     })();
@@ -121,7 +236,7 @@ export function EsignDesignerClient({
     setModeError(null);
     startTransition(() => {
       void (async () => {
-        const res = await configureEsignSignatureModeAction(envelopeId, mode);
+        const res = await designerActions.configureSignatureMode(envelopeId, mode);
         if (!res.ok) {
           setModeError(res.error);
           return;
@@ -132,7 +247,7 @@ export function EsignDesignerClient({
         // Only cache-bust when the PDF bytes actually changed
         if (res.pdfRegenerated) setPdfCacheKey(Date.now());
         if (res.hasSavedOwnerSignature) {
-          const saved = await getOwnerSavedSignatureAction();
+          const saved = await designerActions.getOwnerSavedSignature();
           if (saved.ok) setSavedSig(saved.dataUrl);
         }
         setSavedSigChecked(true);
@@ -149,7 +264,7 @@ export function EsignDesignerClient({
     setModeError(null);
     startTransition(() => {
       void (async () => {
-        const res = await applyOwnerSignatureQuickAction(envelopeId, dataUrl, {
+        const res = await designerActions.applyOwnerSignatureQuick(envelopeId, dataUrl, {
           saveSignature: true,
           ownerFullName: name,
         });
@@ -170,11 +285,11 @@ export function EsignDesignerClient({
       <div className="-m-4 flex min-h-0 flex-col md:-m-6">
         <div className="flex shrink-0 flex-wrap items-end justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-950 md:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <StepBackButton href="/super-admin/companies" label="Companies" />
+            <StepBackButton href={backHref} label={backLabel} />
             <div className="min-w-0">
               <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Signed contract</h1>
               <p className="truncate text-sm text-slate-500">
-                {title}
+                {documentSubtitle}
                 {completedAt
                   ? ` · Signed ${formatUkDateTime(completedAt)}`
                   : " · Completed"}
@@ -199,6 +314,7 @@ export function EsignDesignerClient({
             </a>
           </div>
         </div>
+        {hireBundleContext ? <HireBundleDocumentBanner ctx={hireBundleContext} /> : null}
         <div className="relative min-h-0 flex-1 bg-slate-200 p-3 dark:bg-slate-800 md:p-4">
           <iframe
             title="Signed contract PDF"
@@ -215,7 +331,7 @@ export function EsignDesignerClient({
       setResendFeedback(null);
       startTransition(() => {
         void (async () => {
-          const res = await resendEsignEnvelopeAction(envelopeId);
+          const res = await designerActions.resendEnvelope(envelopeId);
           if (!res.ok) {
             setResendFeedback({ ok: false, message: res.error });
             return;
@@ -232,11 +348,11 @@ export function EsignDesignerClient({
       <div className="-m-4 flex min-h-0 flex-col md:-m-6">
         <div className="flex shrink-0 flex-wrap items-end justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-950 md:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <StepBackButton href="/super-admin/companies" label="Companies" />
+            <StepBackButton href={backHref} label={backLabel} />
             <div className="min-w-0">
               <h1 className="text-lg font-semibold">Awaiting recipient signature</h1>
               <p className="truncate text-sm text-slate-500">
-                {title} · {status === "viewed" ? "Recipient opened the link" : "Sent to recipient"}
+                {documentSubtitle} · {status === "viewed" ? "Recipient opened the link" : "Sent to recipient"}
               </p>
             </div>
           </div>
@@ -266,6 +382,7 @@ export function EsignDesignerClient({
             </button>
           </div>
         </div>
+        {hireBundleContext ? <HireBundleDocumentBanner ctx={hireBundleContext} /> : null}
         {resendFeedback ? (
           <p
             className={`mx-4 mt-3 rounded-lg border px-3 py-2 text-sm md:mx-6 ${
@@ -304,15 +421,39 @@ export function EsignDesignerClient({
   if (!configured) {
     return (
       <div className="-m-4 flex min-h-[28rem] flex-col md:-m-6">
-        <div className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-950 md:px-6">
-          <StepBackButton href="/super-admin/companies" label="Companies" />
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-950 md:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <StepBackButton href={backHref} label={backLabel} />
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Who needs to sign?</h1>
+              <p className="truncate text-sm text-slate-500">{documentSubtitle}</p>
+            </div>
+          </div>
+          {canRefreshPdf ? (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={regeneratePdf}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+            >
+              {pending ? "Regenerating…" : "Regenerate PDF"}
+            </button>
+          ) : null}
         </div>
+        {hireBundleContext ? <HireBundleDocumentBanner ctx={hireBundleContext} /> : null}
         <div className="flex flex-1 flex-col items-center justify-center gap-6 p-8">
           <div className="w-full max-w-lg space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-950">
             <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Who needs to sign?</h1>
             <p className="text-sm text-slate-600 dark:text-slate-300">
               Signature placeholders will be placed automatically at the end of the contract. You can nudge them
               afterwards if needed.
+              {hireBundleContext && hireBundleContext.total > 1 ? (
+                <>
+                  {" "}
+                  This choice applies to all {hireBundleContext.total} agreements in this hire (same signing
+                  arrangement, different end dates).
+                </>
+              ) : null}
             </p>
             {modeError ? <p className="text-sm text-red-600">{modeError}</p> : null}
             <div className="grid gap-3 sm:grid-cols-2">
@@ -322,10 +463,8 @@ export function EsignDesignerClient({
                 onClick={() => chooseMode("recipient_only")}
                 className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-left hover:border-rph-rail/40 hover:bg-white disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900"
               >
-                <span className="block text-sm font-semibold text-slate-900 dark:text-slate-50">Recipient only</span>
-                <span className="mt-1 block text-xs text-slate-500">
-                  Customer signs. No platform/owner signature on this envelope.
-                </span>
+                <span className="block text-sm font-semibold text-slate-900 dark:text-slate-50">{recipientOnlyTitle}</span>
+                <span className="mt-1 block text-xs text-slate-500">{recipientOnlyDescription}</span>
               </button>
               <button
                 type="button"
@@ -333,10 +472,8 @@ export function EsignDesignerClient({
                 onClick={() => chooseMode("owner_and_recipient")}
                 className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-left hover:border-rph-rail/40 hover:bg-white disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900"
               >
-                <span className="block text-sm font-semibold text-slate-900 dark:text-slate-50">Owner + recipient</span>
-                <span className="mt-1 block text-xs text-slate-500">
-                  You sign first (saved signature reused when available), then send to the customer.
-                </span>
+                <span className="block text-sm font-semibold text-slate-900 dark:text-slate-50">{ownerAndRecipientTitle}</span>
+                <span className="mt-1 block text-xs text-slate-500">{ownerAndRecipientDescription}</span>
               </button>
             </div>
             {pending ? (
@@ -371,10 +508,11 @@ export function EsignDesignerClient({
             />
             <div className="min-w-0">
               <h1 className="text-lg font-semibold">Owner signature</h1>
-              <p className="truncate text-sm text-slate-500">{title}</p>
+              <p className="truncate text-sm text-slate-500">{documentSubtitle}</p>
             </div>
           </div>
         </div>
+        {hireBundleContext ? <HireBundleDocumentBanner ctx={hireBundleContext} /> : null}
         <div className="mx-auto w-full max-w-lg space-y-4 p-6">
           <p className="text-sm text-slate-600 dark:text-slate-300">
             Confirm your printed name, then apply your signature. Date is filled automatically with today.
@@ -438,7 +576,7 @@ export function EsignDesignerClient({
       <div className="flex shrink-0 flex-wrap items-end justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-950 md:px-6">
         <div className="flex min-w-0 items-center gap-3">
           {ownerDone ? (
-            <StepBackButton href="/super-admin/companies" label="Companies" />
+            <StepBackButton href={backHref} label={backLabel} />
           ) : (
             <StepBackButton
               disabled={pending}
@@ -451,12 +589,22 @@ export function EsignDesignerClient({
               {ownerDone ? "Ready to send" : "Review signature fields"}
             </h1>
             <p className="truncate text-sm text-slate-500">
-              {title} ·{" "}
+              {documentSubtitle} ·{" "}
               {requiresOwner ? (ownerDone ? "Owner signed" : "Owner + recipient") : "Recipient only"}
             </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {canRefreshPdf ? (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={regeneratePdf}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+            >
+              {pending ? "Regenerating…" : "Regenerate PDF"}
+            </button>
+          ) : null}
           {ownerDone ? (
             <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
               Owner signature applied — send when ready
@@ -469,7 +617,7 @@ export function EsignDesignerClient({
               onClick={() => {
                 startTransition(() => {
                   void (async () => {
-                    const res = await saveEsignFieldLayoutAction(envelopeId, fields);
+                    const res = await designerActions.saveFieldLayout(envelopeId, fields);
                     if (!res.ok) {
                       setModeError(res.error);
                       return;
@@ -486,9 +634,10 @@ export function EsignDesignerClient({
           ) : null}
         </div>
       </div>
+      {hireBundleContext ? <HireBundleDocumentBanner ctx={hireBundleContext} /> : null}
       <p className="mx-4 mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-900/40 dark:bg-sky-950/40 dark:text-sky-100 md:mx-6">
         Placeholders sit on the execution section at the end of the PDF. Drag them if you need a slight adjustment,
-        then {requiresOwner && !ownerDone ? "continue to owner signature" : "save and send"}.
+        then {requiresOwner && !ownerDone ? "continue to lessor signature" : "send to the hirer"}.
       </p>
       {modeError ? <p className="mx-4 mt-2 text-sm text-red-600 md:mx-6">{modeError}</p> : null}
       <div className="relative min-h-0 flex-1 p-3 md:p-4">
@@ -496,15 +645,16 @@ export function EsignDesignerClient({
           pdfUrl={ownerDone ? currentPdfUrl : unsignedPdfUrl}
           initialFields={fields}
           disabled={!canEditLayout}
-          canSend={!requiresOwner || ownerDone}
+          canSend={canSendToRecipient}
           allowOwnerFields={requiresOwner}
+          onLoadingChange={(loading) => setPdfReady(!loading)}
           onSave={async (next) => {
-            const res = await saveEsignFieldLayoutAction(envelopeId, next);
+            const res = await designerActions.saveFieldLayout(envelopeId, next);
             if (!res.ok) throw new Error(res.error);
             setFields(next);
           }}
           onSend={async () => {
-            const res = await sendEsignEnvelopeAction(envelopeId);
+            const res = await designerActions.sendEnvelope(envelopeId);
             if (!res.ok) throw new Error(res.error);
           }}
           onAfterSendSuccess={() => {

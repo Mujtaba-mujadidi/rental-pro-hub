@@ -5,23 +5,18 @@ import {
   loadCompanyNotificationSettingsAction,
   saveCompanyNotificationSettingsAction,
 } from "@/app/actions/rental-settings";
-import {
-  createPaymentAccountAction,
-  createPaymentMethodAction,
-  loadPaymentSettingsAction,
-  updatePaymentAccountAction,
-  updatePaymentMethodAction,
-} from "@/app/actions/rental-payment-settings";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
+import { HirePermissionLetterSettingsSection } from "@/app/(main)/rental/settings/hire-permission-letter-settings-section";
+import { HireTermsSettingsSection } from "@/app/(main)/rental/settings/hire-terms-settings-section";
+import { PaymentSettingsSection } from "@/app/(main)/rental/settings/payment-settings-section";
 import {
+  DEFAULT_NOTIFY_CONTRACT_EXPIRY_DAYS,
   DEFAULT_NOTIFY_MOT_DAYS,
   DEFAULT_NOTIFY_PHV_LICENCE_DAYS,
   DEFAULT_NOTIFY_TAX_DAYS,
   type CompanyNotificationSettings,
 } from "@/lib/settings/notification-settings";
-import type { PaymentAccountRow, PaymentMethodRow } from "@/lib/fleet/maintenance";
-
-type SettingsTab = "notifications" | "payments";
+type SettingsTab = "notifications" | "payments" | "hire_terms" | "permission_letter";
 
 export function RentalSettingsClient() {
   const [tab, setTab] = useState<SettingsTab>("notifications");
@@ -34,14 +29,9 @@ export function RentalSettingsClient() {
     notify_mot_days_before: DEFAULT_NOTIFY_MOT_DAYS,
     notify_tax_days_before: DEFAULT_NOTIFY_TAX_DAYS,
     notify_phv_licence_days_before: DEFAULT_NOTIFY_PHV_LICENCE_DAYS,
+    notify_contract_expiry_days_before: DEFAULT_NOTIFY_CONTRACT_EXPIRY_DAYS,
   });
   const [loaded, setLoaded] = useState(false);
-  const [methods, setMethods] = useState<PaymentMethodRow[]>([]);
-  const [accounts, setAccounts] = useState<PaymentAccountRow[]>([]);
-  const [paymentsLoaded, setPaymentsLoaded] = useState(false);
-  const [newMethodName, setNewMethodName] = useState("");
-  const [newAccountName, setNewAccountName] = useState("");
-  const [newAccountNotes, setNewAccountNotes] = useState("");
 
   useEffect(() => {
     startTransition(async () => {
@@ -56,22 +46,6 @@ export function RentalSettingsClient() {
       setLoaded(true);
     });
   }, []);
-
-  useEffect(() => {
-    if (tab !== "payments" || paymentsLoaded) return;
-    startTransition(async () => {
-      const res = await loadPaymentSettingsAction();
-      if (!res.ok) {
-        setError(res.error);
-        setPaymentsLoaded(true);
-        return;
-      }
-      setMethods(res.methods);
-      setAccounts(res.accounts);
-      setCanManage(res.canManage);
-      setPaymentsLoaded(true);
-    });
-  }, [tab, paymentsLoaded]);
 
   function saveNotifications() {
     setError(null);
@@ -97,107 +71,6 @@ export function RentalSettingsClient() {
     });
   }
 
-  async function reloadPayments() {
-    const res = await loadPaymentSettingsAction();
-    if (!res.ok) {
-      setError(res.error);
-      return;
-    }
-    setMethods(res.methods);
-    setAccounts(res.accounts);
-  }
-
-  function addMethod() {
-    setError(null);
-    setMessage(null);
-    const name = newMethodName.trim();
-    if (!name) return;
-    setOverlay({ phase: "pending", title: "Adding payment method…", detail: "" });
-    startTransition(async () => {
-      const res = await createPaymentMethodAction({ name });
-      if (!res.ok) {
-        setOverlay({ phase: "error", title: "Could not add method", detail: res.error  });
-        setError(res.error);
-        return;
-      }
-      setNewMethodName("");
-      await reloadPayments();
-      setOverlay({ phase: "success", title: "Payment method added", detail: "" });
-    });
-  }
-
-  function addAccount() {
-    setError(null);
-    setMessage(null);
-    const name = newAccountName.trim();
-    if (!name) return;
-    setOverlay({ phase: "pending", title: "Adding payment account…", detail: "" });
-    startTransition(async () => {
-      const res = await createPaymentAccountAction({ name, notes: newAccountNotes });
-      if (!res.ok) {
-        setOverlay({ phase: "error", title: "Could not add account", detail: res.error  });
-        setError(res.error);
-        return;
-      }
-      setNewAccountName("");
-      setNewAccountNotes("");
-      await reloadPayments();
-      setOverlay({ phase: "success", title: "Payment account added", detail: "" });
-    });
-  }
-
-  function toggleMethod(m: PaymentMethodRow) {
-    setOverlay({ phase: "pending", title: m.is_active ? "Deactivating…" : "Activating…", detail: "" });
-    startTransition(async () => {
-      const res = await updatePaymentMethodAction({ id: m.id, is_active: !m.is_active });
-      if (!res.ok) {
-        setOverlay({ phase: "error", title: "Could not update method", detail: res.error  });
-        return;
-      }
-      await reloadPayments();
-      setOverlay({ phase: "success", title: "Payment method updated", detail: "" });
-    });
-  }
-
-  function toggleAccount(a: PaymentAccountRow) {
-    setOverlay({ phase: "pending", title: a.is_active ? "Deactivating…" : "Activating…", detail: "" });
-    startTransition(async () => {
-      const res = await updatePaymentAccountAction({ id: a.id, is_active: !a.is_active });
-      if (!res.ok) {
-        setOverlay({ phase: "error", title: "Could not update account", detail: res.error  });
-        return;
-      }
-      await reloadPayments();
-      setOverlay({ phase: "success", title: "Payment account updated", detail: "" });
-    });
-  }
-
-  function renameMethod(m: PaymentMethodRow, name: string) {
-    const next = name.trim();
-    if (!next || next === m.name) return;
-    startTransition(async () => {
-      const res = await updatePaymentMethodAction({ id: m.id, name: next });
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      await reloadPayments();
-    });
-  }
-
-  function renameAccount(a: PaymentAccountRow, name: string) {
-    const next = name.trim();
-    if (!next || next === a.name) return;
-    startTransition(async () => {
-      const res = await updatePaymentAccountAction({ id: a.id, name: next });
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      await reloadPayments();
-    });
-  }
-
   const busy = pending || overlay?.phase === "pending";
 
   return (
@@ -216,6 +89,8 @@ export function RentalSettingsClient() {
           [
             ["notifications", "Notifications"],
             ["payments", "Payments"],
+            ["hire_terms", "Hire terms"],
+            ["permission_letter", "Permission letter"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -255,7 +130,7 @@ export function RentalSettingsClient() {
           {!loaded ? (
             <p className="rph-muted text-sm">Loading…</p>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <Field
                 label="MOT"
                 hint="Days before MOT expiry"
@@ -277,6 +152,13 @@ export function RentalSettingsClient() {
                 disabled={!canManage || busy}
                 onChange={(n) => setForm((p) => ({ ...p, notify_phv_licence_days_before: n }))}
               />
+              <Field
+                label="Hire contracts"
+                hint="Days before contract end date"
+                value={form.notify_contract_expiry_days_before}
+                disabled={!canManage || busy}
+                onChange={(n) => setForm((p) => ({ ...p, notify_contract_expiry_days_before: n }))}
+              />
             </div>
           )}
 
@@ -292,138 +174,10 @@ export function RentalSettingsClient() {
         </section>
       ) : null}
 
-      {tab === "payments" ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <section className="rph-card space-y-4 p-4 sm:p-5">
-            <div>
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Payment methods</h2>
-              <p className="rph-meta mt-1">How expenses can be paid (Cash, Card, Bank transfer, …).</p>
-            </div>
-            {!paymentsLoaded ? (
-              <p className="rph-muted text-sm">Loading…</p>
-            ) : (
-              <ul className="divide-y divide-rph-border">
-                {methods.map((m) => (
-                  <li key={m.id} className="flex flex-wrap items-center gap-2 py-2.5">
-                    <input
-                      className="rph-input min-w-0 flex-1"
-                      defaultValue={m.name}
-                      disabled={!canManage || busy || !m.is_active}
-                      onBlur={(e) => renameMethod(m, e.target.value)}
-                    />
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                        m.is_active
-                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
-                          : "bg-rph-chrome text-rph-fg-muted"
-                      }`}
-                    >
-                      {m.is_active ? "Active" : "Inactive"}
-                    </span>
-                    {canManage ? (
-                      <button type="button" className="rph-btn-ghost h-8 px-2 text-xs" disabled={busy} onClick={() => toggleMethod(m)}>
-                        {m.is_active ? "Deactivate" : "Activate"}
-                      </button>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {canManage ? (
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <input
-                  className="rph-input flex-1"
-                  placeholder="New method name"
-                  value={newMethodName}
-                  disabled={busy}
-                  onChange={(e) => setNewMethodName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") addMethod();
-                  }}
-                />
-                <button type="button" className="rph-btn-primary" disabled={busy || !newMethodName.trim()} onClick={addMethod}>
-                  Add method
-                </button>
-              </div>
-            ) : (
-              <p className="rph-meta">Only owners and admins can change payment settings.</p>
-            )}
-          </section>
+      {tab === "payments" ? <PaymentSettingsSection /> : null}
 
-          <section className="rph-card space-y-4 p-4 sm:p-5">
-            <div>
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Payment accounts</h2>
-              <p className="rph-meta mt-1">Accounts money comes from (Barclays Business, Petty cash, …).</p>
-            </div>
-            {!paymentsLoaded ? (
-              <p className="rph-muted text-sm">Loading…</p>
-            ) : !accounts.length ? (
-              <p className="rph-muted text-sm">No accounts yet. Add at least one before logging maintenance.</p>
-            ) : (
-              <ul className="divide-y divide-rph-border">
-                {accounts.map((a) => (
-                  <li key={a.id} className="space-y-1 py-2.5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        className="rph-input min-w-0 flex-1"
-                        defaultValue={a.name}
-                        disabled={!canManage || busy || !a.is_active}
-                        onBlur={(e) => renameAccount(a, e.target.value)}
-                      />
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                          a.is_active
-                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
-                            : "bg-rph-chrome text-rph-fg-muted"
-                        }`}
-                      >
-                        {a.is_active ? "Active" : "Inactive"}
-                      </span>
-                      {canManage ? (
-                        <button
-                          type="button"
-                          className="rph-btn-ghost h-8 px-2 text-xs"
-                          disabled={busy}
-                          onClick={() => toggleAccount(a)}
-                        >
-                          {a.is_active ? "Deactivate" : "Activate"}
-                        </button>
-                      ) : null}
-                    </div>
-                    {a.notes ? <p className="text-xs text-rph-fg-muted">{a.notes}</p> : null}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {canManage ? (
-              <div className="space-y-2">
-                <input
-                  className="rph-input w-full"
-                  placeholder="New account name"
-                  value={newAccountName}
-                  disabled={busy}
-                  onChange={(e) => setNewAccountName(e.target.value)}
-                />
-                <input
-                  className="rph-input w-full"
-                  placeholder="Notes (optional)"
-                  value={newAccountNotes}
-                  disabled={busy}
-                  onChange={(e) => setNewAccountNotes(e.target.value)}
-                />
-                <button
-                  type="button"
-                  className="rph-btn-primary"
-                  disabled={busy || !newAccountName.trim()}
-                  onClick={addAccount}
-                >
-                  Add account
-                </button>
-              </div>
-            ) : null}
-          </section>
-        </div>
-      ) : null}
+      {tab === "hire_terms" ? <HireTermsSettingsSection /> : null}
+      {tab === "permission_letter" ? <HirePermissionLetterSettingsSection /> : null}
 
       <ActionStatusOverlay state={overlay} onDismiss={() => setOverlay(null)} />
     </div>

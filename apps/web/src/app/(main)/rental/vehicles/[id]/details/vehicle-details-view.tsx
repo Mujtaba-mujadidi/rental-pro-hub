@@ -1,15 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import {
   deleteVehicleAction,
   deleteVehicleDocumentAction,
-  loadVehicleDetailAction,
   transferVehicleAction,
   updateVehicleAction,
   uploadVehicleDocumentAction,
 } from "@/app/actions/rental-vehicles";
+import { useVehicleWorkspace } from "@/app/(main)/rental/vehicles/[id]/vehicle-workspace-provider";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
@@ -204,7 +203,7 @@ export function VehicleDetailsView({
   canManage: boolean;
   canDelete: boolean;
 }) {
-  const router = useRouter();
+  const { refreshShell } = useVehicleWorkspace();
   const [pending, startTransition] = useTransition();
   const [saveOverlay, setSaveOverlay] = useState<ActionStatusOverlayState | null>(null);
   const saving = saveOverlay?.phase === "pending";
@@ -241,16 +240,9 @@ export function VehicleDetailsView({
   );
 
   const refresh = useCallback(async () => {
-    const res = await loadVehicleDetailAction(vehicle.id);
-    if (!res.ok) {
-      setError(res.error);
-      return;
-    }
-    setVehicle(res.vehicle);
-    setDocs(res.documents);
-    setTransfers(res.transfers);
-    setForm(fromVehicle(res.vehicle));
-  }, [vehicle.id]);
+    const ok = await refreshShell();
+    if (!ok) setError("Could not refresh vehicle.");
+  }, [refreshShell]);
 
   function openEdit(section: EditSection) {
     setForm(fromVehicle(vehicle));
@@ -281,7 +273,6 @@ export function VehicleDetailsView({
       setSaveOverlay(null);
       setEditSection(null);
       await refresh();
-      router.refresh();
     });
   }
 
@@ -297,7 +288,6 @@ export function VehicleDetailsView({
       setTransferOpen(false);
       setTransferNotes("");
       await refresh();
-      router.refresh();
     });
   }
 
@@ -342,7 +332,6 @@ export function VehicleDetailsView({
       }
       clearUploadBundle(docType);
       await refresh();
-      router.refresh();
     });
   }
 
@@ -356,7 +345,6 @@ export function VehicleDetailsView({
       }
       setRemoveDocConfirm(null);
       await refresh();
-      router.refresh();
     });
   }
 

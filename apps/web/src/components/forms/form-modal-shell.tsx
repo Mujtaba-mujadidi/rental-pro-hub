@@ -1,12 +1,31 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
 const btnGhost =
   "inline-flex h-9 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800";
 const btnSave =
   "inline-flex h-9 shrink-0 items-center justify-center rounded-lg border border-rph-rail/30 bg-rph-rail/10 px-3 text-sm font-semibold text-rph-rail hover:bg-rph-rail/15 disabled:opacity-50 dark:border-rph-rail-soft/40 dark:bg-rph-rail-soft/15 dark:text-rph-rail-soft dark:hover:bg-rph-rail-soft/25";
+const iconGhostBtn =
+  "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rph-rail/35 focus-visible:ring-offset-2 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 dark:focus-visible:ring-offset-slate-900";
+
+function IconExpand({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+    </svg>
+  );
+}
+
+function IconCollapse({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4" />
+    </svg>
+  );
+}
 
 export type FormModalShellProps = {
   open: boolean;
@@ -21,6 +40,8 @@ export type FormModalShellProps = {
   zClass?: string;
   panelClassName?: string;
   maxWidthClass?: string;
+  /** Fixed or max height for the panel body (non-maximized). Default: max-h-[min(90vh,52rem)] */
+  panelHeightClass?: string;
   saveNotice?: string | null;
   hasStoredDraft?: boolean;
   isDirty?: boolean;
@@ -37,6 +58,9 @@ export type FormModalShellProps = {
   startFreshConfirmOpen?: boolean;
   onConfirmStartFresh?: () => void;
   onCancelStartFresh?: () => void;
+  /** Show expand / restore control for large forms (e.g. terms editor). */
+  allowMaximize?: boolean;
+  onMaximizedChange?: (maximized: boolean) => void;
 };
 
 /**
@@ -55,6 +79,7 @@ export function FormModalShell({
   zClass = "z-[310]",
   panelClassName,
   maxWidthClass = "max-w-3xl",
+  panelHeightClass = "max-h-[min(90vh,52rem)]",
   saveNotice,
   hasStoredDraft = false,
   isDirty = false,
@@ -69,22 +94,48 @@ export function FormModalShell({
   startFreshConfirmOpen = false,
   onConfirmStartFresh,
   onCancelStartFresh,
+  allowMaximize = false,
+  onMaximizedChange,
 }: FormModalShellProps) {
+  const [maximized, setMaximized] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setMaximized(false);
+      onMaximizedChange?.(false);
+    }
+  }, [open, onMaximizedChange]);
+
+  function toggleMaximize() {
+    setMaximized((m) => {
+      const next = !m;
+      onMaximizedChange?.(next);
+      return next;
+    });
+  }
+
   if (!open) return null;
+
+  const panelClasses =
+    panelClassName ??
+    (maximized
+      ? "relative z-[1] flex h-[100dvh] min-h-0 w-full max-w-none flex-col overflow-hidden rounded-none border-0 bg-white shadow-none dark:bg-zinc-950"
+      : `relative z-[1] flex ${panelHeightClass} w-full ${maxWidthClass} flex-col overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-950`);
+
+  const outerClass = maximized
+    ? `fixed inset-0 ${zClass} flex items-stretch justify-stretch p-0`
+    : `fixed inset-0 ${zClass} flex items-center justify-center p-4 sm:p-6`;
 
   return (
     <>
-      <div className={`fixed inset-0 ${zClass} flex items-center justify-center p-4 sm:p-6`}>
+      <div className={outerClass}>
         {/* Decorative backdrop — does not close the modal */}
         <div className="absolute inset-0 bg-black/50 backdrop-blur-[1px]" aria-hidden />
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
-          className={
-            panelClassName ??
-            `relative z-[1] flex max-h-[min(90vh,52rem)] w-full ${maxWidthClass} flex-col overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-950`
-          }
+          className={panelClasses}
         >
           <div className="shrink-0 border-b border-zinc-200/90 px-6 pb-4 pt-6 dark:border-zinc-700 sm:px-10 sm:pt-8">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -124,9 +175,24 @@ export function FormModalShell({
                     Save and close
                   </button>
                 ) : null}
-                <button type="button" className={btnGhost} disabled={pending} onClick={onRequestClose}>
-                  Close
-                </button>
+                <div className="flex shrink-0 items-center gap-1">
+                  {allowMaximize ? (
+                    <button
+                      type="button"
+                      className={iconGhostBtn}
+                      disabled={pending}
+                      aria-pressed={maximized}
+                      onClick={toggleMaximize}
+                      title={maximized ? "Exit full screen" : "Full screen"}
+                    >
+                      {maximized ? <IconCollapse /> : <IconExpand />}
+                      <span className="sr-only">{maximized ? "Exit full screen" : "Full screen"}</span>
+                    </button>
+                  ) : null}
+                  <button type="button" className={btnGhost} disabled={pending} onClick={onRequestClose}>
+                    Close
+                  </button>
+                </div>
               </div>
             </div>
             {saveNotice ? (

@@ -15,7 +15,9 @@ export type RentalCapability =
   | "subcompany.write"
   | "billing.pay"
   | "maintenance.read"
-  | "maintenance.write";
+  | "maintenance.write"
+  | "rentals.read"
+  | "rentals.write";
 
 const ROLE_CAPS: Record<CompanyMembershipRole, ReadonlySet<RentalCapability>> = {
   owner: new Set([
@@ -30,6 +32,8 @@ const ROLE_CAPS: Record<CompanyMembershipRole, ReadonlySet<RentalCapability>> = 
     "billing.pay",
     "maintenance.read",
     "maintenance.write",
+    "rentals.read",
+    "rentals.write",
   ]),
   admin: new Set([
     "staff.manage",
@@ -43,6 +47,8 @@ const ROLE_CAPS: Record<CompanyMembershipRole, ReadonlySet<RentalCapability>> = 
     "billing.pay",
     "maintenance.read",
     "maintenance.write",
+    "rentals.read",
+    "rentals.write",
   ]),
   operations: new Set([
     "fleet.write",
@@ -50,9 +56,11 @@ const ROLE_CAPS: Record<CompanyMembershipRole, ReadonlySet<RentalCapability>> = 
     "subcompany.write",
     "maintenance.read",
     "maintenance.write",
+    "rentals.read",
+    "rentals.write",
   ]),
-  finance: new Set(["billing.pay", "maintenance.read"]),
-  viewer: new Set(["maintenance.read"]),
+  finance: new Set(["billing.pay", "maintenance.read", "rentals.read"]),
+  viewer: new Set(["maintenance.read", "rentals.read"]),
 };
 
 function effectiveMembershipRole(profile: Pick<AppProfile, "membership_role" | "company_role">): CompanyMembershipRole | null {
@@ -114,6 +122,14 @@ export function canReadMaintenance(profile: Pick<AppProfile, "membership_role" |
 
 export function canWriteMaintenance(profile: Pick<AppProfile, "membership_role" | "company_role">) {
   return can(profile, "maintenance.write");
+}
+
+export function canReadRentals(profile: Pick<AppProfile, "membership_role" | "company_role">) {
+  return can(profile, "rentals.read");
+}
+
+export function canWriteRentals(profile: Pick<AppProfile, "membership_role" | "company_role">) {
+  return can(profile, "rentals.write");
 }
 
 /** Remaining planned modules (not yet wired as capabilities). */

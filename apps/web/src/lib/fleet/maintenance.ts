@@ -47,6 +47,11 @@ export type PaymentAccountRow = {
   parent_company_id: string;
   name: string;
   notes: string | null;
+  payee_name: string | null;
+  sort_code: string | null;
+  account_number: string | null;
+  payment_reference_hint: string | null;
+  show_to_hirer: boolean;
   is_active: boolean;
   sort_order: number;
   created_at: string;

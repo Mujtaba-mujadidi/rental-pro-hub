@@ -33,6 +33,8 @@ export default async function MainShellLayout({
 
   let driverNavMode: "onboarding" | "full" = "full";
   let driverLicenceBanner: { title: string; bullets: string[] } | null = null;
+  let fleetTrackingEnabled = false;
+  let driverPendingHireRequests = 0;
   if (variant === "driver") {
     const supabase = await createClient();
     const { data } = await supabase
@@ -42,7 +44,6 @@ export default async function MainShellLayout({
       .maybeSingle();
     const complete = driverOnboardingComplete(data);
     const review = complete && data && driverLicenceReviewRequired(data);
-    // Onboarding completion is the only gating condition. Licence review is a reminder, not a lockout.
     driverNavMode = complete ? "full" : "onboarding";
     if (complete && data && review) {
       driverLicenceBanner = {
@@ -50,9 +51,13 @@ export default async function MainShellLayout({
         bullets: driverLicenceReviewSummaryLines(data),
       };
     }
+    const { count } = await supabase
+      .from("company_driver_access_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("driver_user_id", user.id)
+      .eq("status", "pending");
+    driverPendingHireRequests = count ?? 0;
   }
-
-  let fleetTrackingEnabled = false;
   if (variant === "rental_company") {
     const life = await getRentalSessionLifecycleCached(user.id, user.email);
     const personal =
@@ -78,6 +83,7 @@ export default async function MainShellLayout({
       displayName={accountDisplayName}
       driverNavMode={variant === "driver" ? driverNavMode : undefined}
       driverLicenceBanner={variant === "driver" ? driverLicenceBanner : null}
+      driverPendingHireRequests={variant === "driver" ? driverPendingHireRequests : 0}
       fleetTrackingEnabled={fleetTrackingEnabled}
     >
       {children}

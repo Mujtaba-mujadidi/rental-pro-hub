@@ -4,10 +4,9 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { requireSuperAdmin } from "@/lib/auth/profile";
 import {
-  onPlatformCompanyContractOwnerSigned,
-  onPlatformCompanyContractSigned,
   preparePlatformCompanyContractEnvelope,
 } from "@/lib/esign/adapters/platform-company-contract";
+import { dispatchEnvelopeCompleted, dispatchEnvelopeOwnerSigned } from "@/lib/esign/adapters/dispatch-envelope-hooks";
 import { regenerateEnvelopePdfForSignatureMode } from "@/lib/esign/adapters/regenerate-pdf";
 import {
   completeOwnerSigning,
@@ -18,7 +17,8 @@ import {
   sendEnvelope,
   verifyRecipientOtp,
 } from "@/lib/esign/envelope";
-import { fieldsForRole, normalizeFieldRole } from "@/lib/esign/roles";
+import { fieldsForRole, filterLayoutForSignatureMode, layoutIncludesOwnerSignFields } from "@/lib/esign/roles";
+import { signableFieldLayout } from "@/lib/esign/field-values";
 import {
   getSavedSignatureForEmail,
   getSavedSignatureForUser,
@@ -185,14 +185,13 @@ export async function configureEsignSignatureModeAction(
   const existingSuggested = Array.isArray(env.suggested_field_layout)
     ? (env.suggested_field_layout as EsignFieldLayoutItem[])
     : [];
-  const suggestedHasOwner = existingSuggested.some(
-    (f) => normalizeFieldRole(f.role) === ESIGN_OWNER_ROLE && f.type === "signature",
-  );
+  const layoutMatchesMode = (layout: EsignFieldLayoutItem[]) =>
+    layoutIncludesOwnerSignFields(layout) === requiresOwner;
 
   // Prepare already builds owner+recipient PDF — skip a second full regenerate when it matches.
   let fields: EsignFieldLayoutItem[];
   let pdfRegenerated = false;
-  if (existingSuggested.length > 0 && suggestedHasOwner === requiresOwner) {
+  if (existingSuggested.length > 0 && layoutMatchesMode(existingSuggested)) {
     fields = existingSuggested;
   } else {
     const regenerated = await regenerateEnvelopePdfForSignatureMode(admin, id, mode);
@@ -200,6 +199,8 @@ export async function configureEsignSignatureModeAction(
     fields = regenerated.suggestedFields;
     pdfRegenerated = true;
   }
+
+  fields = filterLayoutForSignatureMode(fields, requiresOwner);
 
   if (!fields.length) {
     return { ok: false, error: "No signature placeholders available on this contract PDF." };
@@ -258,7 +259,7 @@ export async function applyOwnerSignatureQuickAction(
   if (env.owner_signed_at) return { ok: false, error: "Owner has already signed." };
 
   const layout = (env.field_layout ?? []) as EsignFieldLayoutItem[];
-  const ownerFields = fieldsForRole(layout, ESIGN_OWNER_ROLE);
+  const ownerFields = fieldsForRole(signableFieldLayout(layout), ESIGN_OWNER_ROLE);
   if (!ownerFields.some((f) => f.type === "signature")) {
     return { ok: false, error: "No owner signature field on this envelope." };
   }
@@ -281,7 +282,7 @@ export async function applyOwnerSignatureQuickAction(
       ip: meta.ip,
       userAgent: meta.userAgent,
     },
-    onPlatformCompanyContractOwnerSigned,
+    dispatchEnvelopeOwnerSigned,
   );
   if (!res.ok) return res;
 
@@ -311,7 +312,7 @@ export async function completeOwnerEsignSigningAction(
       ip: meta.ip,
       userAgent: meta.userAgent,
     },
-    onPlatformCompanyContractOwnerSigned,
+    dispatchEnvelopeOwnerSigned,
   );
   if (!res.ok) return res;
 
@@ -364,7 +365,7 @@ export async function completeEsignSigningAction(
       ip: meta.ip,
       userAgent: meta.userAgent,
     },
-    onPlatformCompanyContractSigned,
+    dispatchEnvelopeCompleted,
   );
   if (!res.ok) return res;
 

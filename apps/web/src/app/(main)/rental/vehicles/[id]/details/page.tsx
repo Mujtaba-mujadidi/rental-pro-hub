@@ -1,21 +1,5 @@
-import { notFound } from "next/navigation";
-import { loadVehicleDetailAction } from "@/app/actions/rental-vehicles";
-import { VehicleDetailsView } from "./vehicle-details-view";
+import { VehicleDetailsPageClient } from "./vehicle-details-page-client";
 
-export default async function VehicleDetailsPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const data = await loadVehicleDetailAction(id);
-  if (!data.ok) notFound();
-
-  return (
-    <VehicleDetailsView
-      initialVehicle={data.vehicle}
-      initialDocuments={data.documents}
-      initialTransfers={data.transfers}
-      subcompanies={data.subcompanies}
-      notifySettings={data.notifySettings}
-      canManage={data.canManage}
-      canDelete={data.canDelete}
-    />
-  );
+export default function VehicleDetailsPage() {
+  return <VehicleDetailsPageClient />;
 }

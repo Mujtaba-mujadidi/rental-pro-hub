@@ -187,6 +187,11 @@ export function buildContractPdfDocument(input: {
     "Customer";
 
   const platformName = input.platformName?.trim() || "RMS";
+  const companyNumber =
+    snapshotString(input.legalSnapshot, "company_number") ??
+    snapshotString(input.legalSnapshot, "companies_house_number");
+  const contactEmail = snapshotString(input.legalSnapshot, "primary_contact_email");
+  const contactPhone = snapshotString(input.legalSnapshot, "primary_contact_phone");
 
   const parties: ContractPdfParty[] = [
     {
@@ -212,11 +217,14 @@ export function buildContractPdfDocument(input: {
     platformName,
     parties,
     commercialRows: formatCommercialRows(input.commercialSnapshot),
-    termsHeading: "Terms and conditions",
+    termsHeading: "Terms and Conditions",
     termsParagraphs:
       termsParagraphs.length > 0
         ? termsParagraphs
         : ["No terms body was stored for this contract version."],
+    companyNumber,
+    contactEmail,
+    contactPhone,
     acceptanceText:
       "By signing, each party confirms they have read and agree to the terms and commercial summary in this agreement. This is an electronic signature for contractual acceptance (not a qualified electronic signature under eIDAS).",
   };

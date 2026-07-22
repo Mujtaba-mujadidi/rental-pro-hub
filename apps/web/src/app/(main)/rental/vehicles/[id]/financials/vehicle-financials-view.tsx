@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import {
   saveVehicleOwnershipEventAction,
   type VehicleFinancialsPageData,
@@ -37,8 +36,13 @@ function pnlTone(value: number | null): string {
   return "text-rph-fg";
 }
 
-export function VehicleFinancialsView({ initial }: { initial: VehicleFinancialsPageData }) {
-  const router = useRouter();
+export function VehicleFinancialsView({
+  initial,
+  onDataChange,
+}: {
+  initial: VehicleFinancialsPageData;
+  onDataChange?: () => void | Promise<void>;
+}) {
   const [pending, startTransition] = useTransition();
   const [overlay, setOverlay] = useState<ActionStatusOverlayState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -134,7 +138,7 @@ export function VehicleFinancialsView({ initial }: { initial: VehicleFinancialsP
       setOverlay({ phase: "success", title: "Purchase saved", detail: "" });
       setPurchaseOpen(false);
       setPurchaseBaseline(null);
-      router.refresh();
+      await onDataChange?.();
     });
   }
 
@@ -176,7 +180,7 @@ export function VehicleFinancialsView({ initial }: { initial: VehicleFinancialsP
       setOverlay({ phase: "success", title: "Vehicle marked as sold", detail: "" });
       setSaleOpen(false);
       setSaleBaseline(null);
-      router.refresh();
+      await onDataChange?.();
     });
   }
 
@@ -227,8 +231,8 @@ export function VehicleFinancialsView({ initial }: { initial: VehicleFinancialsP
             <dd className="mt-0.5 font-semibold text-rph-fg">{formatGbp(pnl.maintenanceTotalGbp)}</dd>
           </div>
           <div>
-            <dt className="text-xs text-rph-fg-muted">Hire income</dt>
-            <dd className="mt-0.5 font-semibold text-rph-fg-muted">Coming soon</dd>
+            <dt className="text-xs text-rph-fg-muted">Hire income (approved)</dt>
+            <dd className="mt-0.5 font-semibold text-rph-fg">{formatGbp(pnl.rentalIncomeGbp)}</dd>
           </div>
           <div>
             <dt className="text-xs text-rph-fg-muted">{pnl.isSold ? "Net P&L" : "Book position"}</dt>

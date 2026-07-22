@@ -15,6 +15,7 @@ import {
   type OwnershipEventType,
   type VehicleOwnershipEventRow,
 } from "@/lib/fleet/vehicles";
+import { sumApprovedHireIncomeGbp, type HireIncomeRow } from "@/lib/fleet/hire-income";
 import { computeVehiclePnl, type VehiclePnlBreakdown } from "@/lib/fleet/vehicle-pnl";
 import { createClient } from "@/lib/supabase/server";
 import { parseUkDate } from "@/lib/validation/driver-signup";
@@ -131,6 +132,32 @@ async function sumMaintenanceForVehicle(vehicleId: string): Promise<number> {
   return Math.round(total * 100) / 100;
 }
 
+async function loadHireIncomeRowsForVehicle(vehicleId: string): Promise<HireIncomeRow[]> {
+  const supabase = await createClient();
+  const { data: groups } = await supabase.from("vehicle_hire_groups").select("id").eq("vehicle_id", vehicleId);
+  const groupIds = (groups ?? []).map((g) => g.id as string);
+  if (!groupIds.length) return [];
+
+  const { data: rows, error } = await supabase
+    .from("vehicle_hire_payment_schedule")
+    .select("payment_status, approved_amount_gbp, base_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp)")
+    .in("hire_group_id", groupIds);
+  if (error) return [];
+
+  return (rows ?? []).map((row) => {
+    const discounts = (row as { vehicle_hire_schedule_discounts?: { amount_gbp: number }[] })
+      .vehicle_hire_schedule_discounts;
+    const discountTotalGbp = (discounts ?? []).reduce((sum, d) => sum + Number(d.amount_gbp), 0);
+    return {
+      paymentStatus: row.payment_status as string,
+      approvedAmountGbp:
+        row.approved_amount_gbp != null ? Number(row.approved_amount_gbp) : null,
+      baseAmountGbp: Number(row.base_amount_gbp),
+      discountTotalGbp,
+    };
+  });
+}
+
 export async function loadVehicleFinancialsAction(
   vehicleId: string,
 ): Promise<{ ok: true; data: VehicleFinancialsPageData } | { ok: false; error: string }> {
@@ -153,7 +180,7 @@ export async function loadVehicleFinancialsAction(
   if (vErr) return { ok: false, error: vErr.message };
   if (!vehicle) return { ok: false, error: "Vehicle not found." };
 
-  const [lookups, { data: events, error: eErr }, maintenanceTotalGbp] = await Promise.all([
+  const [lookups, { data: events, error: eErr }, maintenanceTotalGbp, hireIncomeRows] = await Promise.all([
     loadPaymentLookups(companyId),
     supabase
       .from("vehicle_ownership_events")
@@ -163,6 +190,7 @@ export async function loadVehicleFinancialsAction(
       .eq("vehicle_id", id)
       .order("occurred_on", { ascending: true }),
     sumMaintenanceForVehicle(id),
+    loadHireIncomeRowsForVehicle(id),
   ]);
 
   if (!lookups.ok) return { ok: false, error: lookups.error };
@@ -179,10 +207,12 @@ export async function loadVehicleFinancialsAction(
     if (mapped.event_type === "sale") sale = mapped;
   }
 
+  const rentalIncomeGbp = sumApprovedHireIncomeGbp(hireIncomeRows);
   const pnl = computeVehiclePnl({
     purchaseGbp: purchase?.amount_gbp ?? null,
     saleGbp: sale?.amount_gbp ?? null,
     maintenanceTotalGbp,
+    rentalIncomeGbp,
   });
 
   return {

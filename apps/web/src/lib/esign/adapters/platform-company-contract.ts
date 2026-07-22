@@ -41,7 +41,7 @@ export async function preparePlatformCompanyContractEnvelope(
 
   const { data: company, error: coErr } = await admin
     .from("companies")
-    .select("name, primary_contact_email, primary_contact_first_name, primary_contact_last_name")
+    .select("name, company_number, primary_contact_email, primary_contact_phone, primary_contact_first_name, primary_contact_last_name")
     .eq("id", companyId)
     .maybeSingle();
   if (coErr || !company?.primary_contact_email?.trim()) {
@@ -59,9 +59,19 @@ export async function preparePlatformCompanyContractEnvelope(
   const pdfDoc = buildContractPdfDocument({
     termsSnapshot: version.terms_snapshot as Record<string, unknown> | null,
     commercialSnapshot: version.commercial_snapshot as Record<string, unknown> | null,
-    legalSnapshot: version.legal_snapshot as Record<string, unknown> | null,
+    legalSnapshot: {
+      ...(version.legal_snapshot as Record<string, unknown> | null),
+      company_number:
+        (version.legal_snapshot as Record<string, unknown> | null)?.company_number ?? company.company_number,
+      primary_contact_email:
+        (version.legal_snapshot as Record<string, unknown> | null)?.primary_contact_email ??
+        company.primary_contact_email,
+      primary_contact_phone:
+        (version.legal_snapshot as Record<string, unknown> | null)?.primary_contact_phone ??
+        company.primary_contact_phone,
+    },
     companyName: company.name,
-    platformName: "RMS",
+    platformName: company.name ?? "RMS",
   });
   // Mode chosen on the designer page; start with both blocks until then.
   pdfDoc.signatureMode = "owner_and_recipient";

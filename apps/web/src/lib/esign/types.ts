@@ -26,6 +26,8 @@ export type EsignFieldLayoutItem = {
   w: number;
   h: number;
   label?: string;
+  /** When set, value is copied from the referenced field id at stamp time (per-page paraph). */
+  derivedFrom?: string;
 };
 
 export type EsignRecipientInput = {

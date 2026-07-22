@@ -6,7 +6,7 @@ import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-gua
 import { canManageSettings } from "@/lib/auth/rental-permissions";
 import {
   clampNotifyDays,
-  defaultNotificationSettings,
+  parseCompanyNotificationSettings,
   type CompanyNotificationSettings,
 } from "@/lib/settings/notification-settings";
 import { createClient } from "@/lib/supabase/server";
@@ -21,30 +21,16 @@ export async function loadCompanyNotificationSettingsAction(): Promise<
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("companies")
-    .select("notify_mot_days_before, notify_tax_days_before, notify_phv_licence_days_before")
+    .select("notify_mot_days_before, notify_tax_days_before, notify_phv_licence_days_before, notify_contract_expiry_days_before")
     .eq("id", companyId)
     .maybeSingle();
 
   if (error) return { ok: false, error: error.message };
 
-  const defaults = defaultNotificationSettings();
   return {
     ok: true,
     canManage: canManageSettings(profile),
-    settings: {
-      notify_mot_days_before:
-        typeof data?.notify_mot_days_before === "number"
-          ? data.notify_mot_days_before
-          : defaults.notify_mot_days_before,
-      notify_tax_days_before:
-        typeof data?.notify_tax_days_before === "number"
-          ? data.notify_tax_days_before
-          : defaults.notify_tax_days_before,
-      notify_phv_licence_days_before:
-        typeof data?.notify_phv_licence_days_before === "number"
-          ? data.notify_phv_licence_days_before
-          : defaults.notify_phv_licence_days_before,
-    },
+    settings: parseCompanyNotificationSettings(data ?? undefined),
   };
 }
 
@@ -52,6 +38,7 @@ export async function saveCompanyNotificationSettingsAction(input: {
   notify_mot_days_before: number;
   notify_tax_days_before: number;
   notify_phv_licence_days_before: number;
+  notify_contract_expiry_days_before: number;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const { profile } = await requireRentalCompanyArea();
   const writable = await assertRentalCompanyWritable(profile);
@@ -66,6 +53,7 @@ export async function saveCompanyNotificationSettingsAction(input: {
     notify_mot_days_before: clampNotifyDays(input.notify_mot_days_before),
     notify_tax_days_before: clampNotifyDays(input.notify_tax_days_before),
     notify_phv_licence_days_before: clampNotifyDays(input.notify_phv_licence_days_before),
+    notify_contract_expiry_days_before: clampNotifyDays(input.notify_contract_expiry_days_before),
   };
 
   const supabase = await createClient();

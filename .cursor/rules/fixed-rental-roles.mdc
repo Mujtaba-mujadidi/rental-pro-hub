@@ -22,6 +22,8 @@ Plus **subcompany scope** (`all` / selected) for non-owner/admin members.
 | `fleet.delete` | owner, admin |
 | `billing.pay` | owner, admin, finance |
 | `maintenance.read` | owner, admin, operations, finance, viewer |
+| `rentals.read` | owner, admin, operations, finance, viewer |
+| `rentals.write` | owner, admin, operations |
 
 When adding modules (claims, customer payments), map them onto these fixed roles — do not invent DIY company roles unless several paying customers block deals without them.
 
