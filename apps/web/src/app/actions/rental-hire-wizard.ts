@@ -33,6 +33,11 @@ import { deriveDriverHireSigningSummary, driverHireAccessLabel } from "@/lib/fle
 import { parseHireAccessSnapshot, type HireAccessDisplay } from "@/lib/fleet/hire-access-display";
 import { loadBundleAgreements } from "@/lib/esign/hire-signing-bundle";
 import {
+  normalizeDrivingLicence,
+  type HireWizardFormState,
+  type HireWizardStep,
+} from "@/lib/fleet/hire-wizard";
+import {
   assertVehicleAvailableForHire,
   releaseVehicleIfNoBlockingHire,
   syncVehicleStatusForHireGroup,
@@ -134,15 +139,7 @@ export async function listHireContractsAction(
   if (error) return { ok: false, error: error.message };
 
   const groupIds = (data ?? []).map((g) => g.id as string);
-  const agreementsByGroup = new Map<
-    string,
-    {
-      id?: string;
-      status?: string;
-      esign_envelope_id?: string | null;
-      esign_envelopes?: { status?: string } | null;
-    }[]
-  >();
+  const agreementsByGroup = new Map<string, HireAgreementEnvelopeSource[]>();
 
   if (groupIds.length) {
     try {
@@ -156,7 +153,7 @@ export async function listHireContractsAction(
       for (const a of agreementRows ?? []) {
         const groupId = a.hire_group_id as string;
         const list = agreementsByGroup.get(groupId) ?? [];
-        list.push(a);
+        list.push(a as HireAgreementEnvelopeSource);
         agreementsByGroup.set(groupId, list);
       }
     } catch {

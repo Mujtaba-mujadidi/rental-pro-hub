@@ -283,7 +283,10 @@ export async function prepareVehicleHireAgreementEnvelope(
   const group = (agreement as unknown as { vehicle_hire_groups?: Record<string, unknown> | null }).vehicle_hire_groups;
   if (!group?.id) return { ok: false, error: "Hire group not found." };
 
-  const loaded = await loadHireAgreementPdfInput(admin, agreement as Parameters<typeof loadHireAgreementPdfInput>[1]);
+  const loaded = await loadHireAgreementPdfInput(
+    admin,
+    agreement as unknown as Parameters<typeof loadHireAgreementPdfInput>[1],
+  );
   if (!loaded.ok) return loaded;
   const { pdfInput, companyId, driverEmail, driverName } = loaded;
 
@@ -380,9 +383,13 @@ export async function regenerateHireEnvelopePdfForSignatureMode(
     .maybeSingle();
   if (aErr || !agreement?.id) return { ok: false, error: aErr?.message ?? "Agreement not found." };
 
-  const loaded = await loadHireAgreementPdfInput(admin, agreement as Parameters<typeof loadHireAgreementPdfInput>[1], {
-    signatureMode: mode,
-  });
+  const loaded = await loadHireAgreementPdfInput(
+    admin,
+    agreement as unknown as Parameters<typeof loadHireAgreementPdfInput>[1],
+    {
+      signatureMode: mode,
+    },
+  );
   if (!loaded.ok) return loaded;
   const { pdfInput } = loaded;
 

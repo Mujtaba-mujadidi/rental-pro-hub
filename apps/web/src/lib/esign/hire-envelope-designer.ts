@@ -6,6 +6,7 @@ import {
   deriveHireEnvelopePreparationStatus,
   hireAgreementsToEnvelopeReadyRows,
   hireEnvelopePreparationLabel,
+  type HireAgreementEnvelopeSource,
   type HireEnvelopePreparationStatus,
 } from "@/lib/fleet/hire-envelope-readiness";
 import { sortHireBundleAgreements } from "@/lib/fleet/hire-signing-bundle";
@@ -62,7 +63,7 @@ export async function loadHireEnvelopeDesignerContext(
     )
     .eq("hire_group_id", hireGroupId);
 
-  const envelopeRows = hireAgreementsToEnvelopeReadyRows(agreements ?? []);
+  const envelopeRows = hireAgreementsToEnvelopeReadyRows((agreements ?? []) as HireAgreementEnvelopeSource[]);
   const envelopeByAgreement = new Map(envelopeRows.map((row) => [row.agreementId, row]));
 
   const sorted = sortHireBundleAgreements(

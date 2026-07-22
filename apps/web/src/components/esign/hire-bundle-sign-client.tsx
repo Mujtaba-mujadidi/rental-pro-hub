@@ -11,6 +11,7 @@ import {
 import { GuidedSigningViewer } from "@/components/esign/signing-viewer";
 import { hireBundleCurrentIndex } from "@/lib/fleet/hire-signing-bundle";
 import { hireSignedDocumentPdfUrl } from "@/lib/fleet/hire-signed-documents";
+import type { EsignFieldLayoutItem } from "@/lib/esign/types";
 import type { FieldValueMap } from "@/lib/esign/pdf-stamp";
 
 type AgreementState = {

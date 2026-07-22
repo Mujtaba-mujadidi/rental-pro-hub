@@ -4,6 +4,7 @@ import type { ContractLengthKind } from "@/lib/fleet/hire-types";
 
 export type HireAgreementEnvelopeSource = {
   id?: string;
+  status?: string;
   contract_length_kind?: ContractLengthKind | string;
   end_date?: string;
   esign_envelope_id?: string | null;

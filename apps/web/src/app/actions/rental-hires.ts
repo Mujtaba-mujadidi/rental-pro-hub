@@ -18,6 +18,11 @@ import {
 import { logHireGroupEvent, type HireGroupAuditRow } from "@/lib/fleet/hire-audit";
 import { clearHireGroupSigningBundle } from "@/lib/esign/hire-signing-bundle";
 import {
+  hireAgreementsToEnvelopeReadyRows,
+  pickPrepareEnvelopeId,
+  type HireAgreementEnvelopeSource,
+} from "@/lib/fleet/hire-envelope-readiness";
+import {
   HIRE_VEHICLE_BLOCKING_STATUSES,
   type ContractLengthKind,
   type HireGroupStatus,
@@ -466,10 +471,7 @@ export async function ensureHireGroupEnvelopesPreparedAction(
     )
     .eq("hire_group_id", group.id);
 
-  const { hireAgreementsToEnvelopeReadyRows, pickPrepareEnvelopeId } = await import(
-    "@/lib/fleet/hire-envelope-readiness"
-  );
-  const envelopeRows = hireAgreementsToEnvelopeReadyRows(refreshed ?? []);
+  const envelopeRows = hireAgreementsToEnvelopeReadyRows((refreshed ?? []) as HireAgreementEnvelopeSource[]);
   const firstEnvelopeId = pickPrepareEnvelopeId(envelopeRows) ?? envelopeIds[0];
   if (!firstEnvelopeId) {
     return { ok: false, error: "Could not open the e-sign designer for this contract." };
