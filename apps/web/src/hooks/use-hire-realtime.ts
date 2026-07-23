@@ -178,3 +178,53 @@ export function useDriverHireAccessRealtime(onRefresh: () => void, options?: Ref
     };
   }, [options?.enabled, debouncedRefresh]);
 }
+
+/** Reload hire payment sheet when schedule rows, discounts, or status events change. */
+export function useHirePaymentsRealtime(
+  hireGroupId: string | null | undefined,
+  onRefresh: () => void,
+  options?: RefreshOptions,
+) {
+  const debouncedRefresh = useDebouncedRefresh(onRefresh);
+
+  useEffect(() => {
+    if (options?.enabled === false || !hireGroupId) return;
+
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`hire-payments:${hireGroupId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "vehicle_hire_payment_schedule",
+          filter: `hire_group_id=eq.${hireGroupId}`,
+        },
+        debouncedRefresh,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "vehicle_hire_schedule_discounts",
+        },
+        debouncedRefresh,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "vehicle_hire_payment_status_events",
+        },
+        debouncedRefresh,
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [hireGroupId, options?.enabled, debouncedRefresh]);
+}

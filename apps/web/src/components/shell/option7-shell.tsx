@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { APP_NAME } from "@rph/shared";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { NotificationBell } from "@/components/shell/notification-bell";
 import { UserAccountMenu } from "@/components/shell/user-account-menu";
 
 const SIDEBAR_COLLAPSED_KEY = "rph-sidebar-collapsed-opt7";
@@ -27,6 +28,28 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
       return [{ label: "Home", href: "/rental" }, { label: "Subcompany", href: "/rental/subcompany" }];
     }
     if (pathname === "/rental/hires" || pathname.startsWith("/rental/hires/")) {
+      const parts = pathname.split("/").filter(Boolean);
+      if (parts.length >= 3) {
+        const groupId = parts[2];
+        const base: Crumb[] = [
+          { label: "Home", href: "/rental" },
+          { label: "Hires", href: "/rental/hires" },
+          { label: "Hire", href: `/rental/hires/${groupId}` },
+        ];
+        if (!parts[3]) return [...base, { label: "Dashboard" }];
+        const section = parts[3];
+        const sectionLabel =
+          section === "payments"
+            ? "Payments"
+            : section === "documents"
+              ? "Documents"
+              : section === "details"
+                ? "Details"
+                : section === "activity"
+                  ? "Activity"
+                  : section;
+        return [...base, { label: sectionLabel }];
+      }
       return [{ label: "Home", href: "/rental" }, { label: "Hires", href: "/rental/hires" }];
     }
     if (pathname.startsWith("/rental/esign/")) {
@@ -139,6 +162,15 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
   if (pathname === "/driver/hire-requests" || pathname.startsWith("/driver/hire-requests/")) {
     return [{ label: "Home", href: "/driver" }, { label: "Hire requests" }];
   }
+  if (pathname === "/driver/my-hire" || pathname.startsWith("/driver/my-hire/")) {
+    return [{ label: "Home", href: "/driver" }, { label: "My hire" }];
+  }
+  if (pathname === "/driver/notifications" || pathname.startsWith("/driver/notifications/")) {
+    return [{ label: "Home", href: "/driver" }, { label: "Notifications", href: "/driver/notifications" }];
+  }
+  if (pathname === "/driver/hire-history" || pathname.startsWith("/driver/hire-history/")) {
+    return [{ label: "Home", href: "/driver" }, { label: "Hire history" }];
+  }
   return [{ label: "Home", href: "/driver" }, { label: "Driver" }];
 }
 
@@ -198,18 +230,6 @@ function IconMenu({ className }: { className?: string }) {
   );
 }
 
-function IconBell({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"
-      />
-    </svg>
-  );
-}
-
 function Breadcrumbs({ items }: { items: Crumb[] }) {
   return (
     <nav aria-label="Breadcrumb" className="text-sm text-rph-fg-muted">
@@ -242,21 +262,32 @@ function Breadcrumbs({ items }: { items: Crumb[] }) {
 export function Option7Shell({
   variant,
   displayName,
+  userId,
   driverNavMode,
   driverLicenceBanner,
   driverPendingHireRequests = 0,
+  driverHasCurrentHire = false,
+  driverUnreadNotifications = 0,
   fleetTrackingEnabled = false,
+  rentalUnreadNotifications = 0,
   children,
 }: {
   variant: ShellVariant;
   displayName: string | null;
+  userId: string;
   driverNavMode?: DriverNavMode;
   /** Shown for drivers when licences must be reviewed (expiry / address). */
   driverLicenceBanner?: { title: string; bullets: string[] } | null;
   /** Pending hire access requests for driver nav badge. */
   driverPendingHireRequests?: number;
+  /** Show My hire nav when the driver has a reserved or active hire. */
+  driverHasCurrentHire?: boolean;
+  /** Unread platform notifications for drivers. */
+  driverUnreadNotifications?: number;
   /** Rental companies with Fleet Tracking (SmartCar Tracker) enabled by super-admin. */
   fleetTrackingEnabled?: boolean;
+  /** Unread platform notifications for rental staff. */
+  rentalUnreadNotifications?: number;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -395,6 +426,7 @@ export function Option7Shell({
         <NavLink
           href="/rental/notifications"
           active={pathname === "/rental/notifications" || pathname.startsWith("/rental/notifications/")}
+          badge={rentalUnreadNotifications}
           onNavigate={closeMobileNav}
         >
           Notifications
@@ -417,6 +449,23 @@ export function Option7Shell({
         >
           Hire requests
         </NavLink>
+        {driverHasCurrentHire ? (
+          <NavLink
+            href="/driver/my-hire"
+            active={pathname === "/driver/my-hire" || pathname.startsWith("/driver/my-hire/")}
+            onNavigate={closeMobileNav}
+          >
+            My hire
+          </NavLink>
+        ) : null}
+        <NavLink
+          href="/driver/notifications"
+          active={pathname === "/driver/notifications" || pathname.startsWith("/driver/notifications/")}
+          badge={driverUnreadNotifications}
+          onNavigate={closeMobileNav}
+        >
+          Notifications
+        </NavLink>
         <NavLink
           href="/driver/onboarding"
           active={pathname.startsWith("/driver/onboarding")}
@@ -437,6 +486,30 @@ export function Option7Shell({
           onNavigate={closeMobileNav}
         >
           Hire requests
+        </NavLink>
+        {driverHasCurrentHire ? (
+          <NavLink
+            href="/driver/my-hire"
+            active={pathname === "/driver/my-hire" || pathname.startsWith("/driver/my-hire/")}
+            onNavigate={closeMobileNav}
+          >
+            My hire
+          </NavLink>
+        ) : null}
+        <NavLink
+          href="/driver/notifications"
+          active={pathname === "/driver/notifications" || pathname.startsWith("/driver/notifications/")}
+          badge={driverUnreadNotifications}
+          onNavigate={closeMobileNav}
+        >
+          Notifications
+        </NavLink>
+        <NavLink
+          href="/driver/hire-history"
+          active={pathname === "/driver/hire-history" || pathname.startsWith("/driver/hire-history/")}
+          onNavigate={closeMobileNav}
+        >
+          Hire history
         </NavLink>
         <NavLink
           href="/driver/onboarding"
@@ -463,6 +536,19 @@ export function Option7Shell({
       : variant === "rental_company"
         ? { href: "/rental" as const, label: "Dashboard" as const }
         : { href: "/super-admin" as const, label: "Dashboard" as const };
+
+  const notificationsHref =
+    variant === "driver"
+      ? "/driver/notifications"
+      : variant === "rental_company"
+        ? "/rental/notifications"
+        : null;
+  const unreadNotifications =
+    variant === "driver"
+      ? driverUnreadNotifications
+      : variant === "rental_company"
+        ? rentalUnreadNotifications
+        : 0;
 
   return (
     <div className="flex min-h-dvh w-full min-w-0">
@@ -556,16 +642,13 @@ export function Option7Shell({
             </div>
 
             <div className="ml-auto flex min-w-0 items-center gap-0.5 sm:gap-1">
-              <button
-                type="button"
-                className="relative rounded-lg p-2 text-rph-fg-secondary hover:bg-rph-chrome"
-                aria-label="Notifications (coming soon)"
-              >
-                <IconBell className="h-5 w-5" />
-                <span className="absolute right-1 top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-rph-rail-soft px-0.5 text-[10px] font-bold leading-none text-white">
-                  1
-                </span>
-              </button>
+              {notificationsHref ? (
+                <NotificationBell
+                  notificationsHref={notificationsHref}
+                  initialUnreadCount={unreadNotifications}
+                  userId={userId}
+                />
+              ) : null}
               <ThemeToggle />
               <UserAccountMenu
                 displayName={displayName}

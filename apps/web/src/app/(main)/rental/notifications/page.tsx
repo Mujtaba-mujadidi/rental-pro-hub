@@ -1,6 +1,7 @@
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
-import { formatUkDateTime } from "@/lib/datetime/uk";
+import { formatPlatformNotification } from "@/lib/platform-notification-display";
 import { createClient } from "@/lib/supabase/server";
+import { RentalNotificationsClient } from "./rental-notifications-client";
 
 export default async function RentalNotificationsPage() {
   const { profile } = await requireRentalCompanyArea();
@@ -12,28 +13,21 @@ export default async function RentalNotificationsPage() {
     .order("created_at", { ascending: false })
     .limit(100);
 
+  const items = (rows ?? []).map((n) => ({
+    id: n.id as string,
+    type: n.type as string,
+    readAt: (n.read_at as string | null) ?? null,
+    createdAt: (n.created_at as string) ?? "",
+    display: formatPlatformNotification(n.type as string, (n.payload ?? {}) as Record<string, unknown>),
+  }));
+
   return (
     <div className="space-y-4">
       <h1 className="rph-h1">Notifications</h1>
-      <p className="rph-muted max-w-2xl text-sm">Recent events for your account (contract, payments, reviews).</p>
-      {!rows?.length ? (
-        <p className="text-sm text-slate-500 dark:text-slate-400">No notifications yet.</p>
-      ) : (
-        <ul className="divide-y divide-slate-200 rounded-xl border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
-          {rows.map((n) => (
-            <li key={n.id} className="p-4">
-              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{n.type.replace(/_/g, " ")}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                {n.created_at ? formatUkDateTime(n.created_at, "") : ""}
-                {n.read_at ? " · Read" : ""}
-              </p>
-              <pre className="mt-2 max-h-32 overflow-auto rounded bg-slate-50 p-2 text-xs dark:bg-slate-900/60">
-                {JSON.stringify(n.payload, null, 2)}
-              </pre>
-            </li>
-          ))}
-        </ul>
-      )}
+      <p className="rph-muted max-w-2xl text-sm">
+        Hire payments, contracts, and billing events. Open an item to mark it read and go to the relevant page.
+      </p>
+      <RentalNotificationsClient items={items} />
     </div>
   );
 }

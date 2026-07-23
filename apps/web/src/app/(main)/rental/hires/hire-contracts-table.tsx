@@ -9,7 +9,8 @@ import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components
 import { HireGroupAuditModal } from "@/components/fleet/hire-group-audit-modal";
 import { hireTableStatusToneClass, type HireTableStatusTone } from "@/lib/fleet/hire-contract-table-display";
 import { hireCancelConfirmCopy, hireRegenerateContractsConfirmCopy, type HireGroupAuditRow } from "@/lib/fleet/hire-audit";
-import { useCallback, useMemo, useState, useTransition } from "react";
+import Link from "next/link";
+import { Fragment, useCallback, useMemo, useState, useTransition } from "react";
 import { HireContractRowActionsMenu } from "./hire-contract-row-actions-menu";
 
 type Props = {
@@ -198,85 +199,116 @@ export function HireContractsTable({
 
       {actionError ? <p className="rph-alert-error text-sm">{actionError}</p> : null}
 
-      <div className="overflow-hidden rounded-xl border border-rph-border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-rph-border bg-rph-chrome/60 text-left text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">
-              {!vehicleScoped ? <th className="px-4 py-2.5">Vehicle</th> : null}
-              <th className="px-4 py-2.5">Driver</th>
-              <th className="px-4 py-2.5">Start</th>
-              <th className="px-4 py-2.5">Rent</th>
-              <th className="px-4 py-2.5">Status</th>
-              <th className="px-4 py-2.5">Driver access</th>
-              <th className="px-4 py-2.5">E-sign</th>
-              <th className="px-4 py-2.5 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-rph-border">
-            {!filtered.length ? (
-              <tr>
-                <td colSpan={vehicleScoped ? 7 : 8} className="px-4 py-8 text-center text-rph-fg-muted">
-                  No contracts found.
-                </td>
-              </tr>
-            ) : (
-              filtered.map((r) => (
-                <tr key={r.id} className="bg-rph-raised/30 hover:bg-rph-chrome/40">
-                  {!vehicleScoped ? (
-                    <td className="px-4 py-3">
-                      <span className="font-medium text-rph-fg">{r.vehicle_vrm ?? "—"}</span>
-                      {r.vehicle_label ? (
-                        <p className="text-xs text-rph-fg-muted">{r.vehicle_label}</p>
-                      ) : null}
-                    </td>
-                  ) : null}
-                  <td className="px-4 py-3 text-rph-fg-secondary">{r.driver_label ?? "—"}</td>
-                  <td className="px-4 py-3 text-rph-fg-secondary">
-                    {r.start_date ? formatUkDate(r.start_date) : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-rph-fg-secondary">
-                    {r.rent_amount_gbp > 0 ? `£${r.rent_amount_gbp.toFixed(2)} / ${r.rent_cadence}` : "—"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="rph-pill capitalize">{statusLabel(r)}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <WorkflowStatusPill label={r.driver_access_label} tone={r.driver_access_tone} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <WorkflowStatusPill label={r.esign_label} tone={r.esign_tone} />
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <HireContractRowActionsMenu
-                      row={r}
-                      canWrite={canWrite}
-                      disabled={tableBusy}
-                      onAudit={() => openAudit(r)}
-                      onContinue={() => onOpenDraft(r.id)}
-                      onPrepareForSignature={() => prepareForSignature(r)}
-                      onSendForSignature={() =>
-                        runAction(
-                          () =>
-                            sendHireGroupSigningBundleAction(r.id, { resend: Boolean(r.signing_bundle_sent_at) }),
-                          {
-                            title: r.signing_bundle_sent_at ? "Resending for signature…" : "Sending for signature…",
-                            detail: "Emailing the signing bundle to the hirer.",
-                          },
-                          {
-                            title: r.signing_bundle_sent_at ? "Signing email resent" : "Sent for signature",
-                            detail: "The hirer will receive an email with signing links.",
-                          },
-                        )
-                      }
-                      onRegenerateContracts={() => openRegenerateConfirm(r)}
-                      onCancel={() => openCancelConfirm(r)}
-                    />
-                  </td>
+      <div className="space-y-1">
+        <p className="text-xs text-rph-fg-muted md:hidden">Swipe sideways to see all columns and actions.</p>
+        <div className="-mx-4 overflow-x-auto overscroll-x-contain px-4 sm:mx-0 sm:px-0 [scrollbar-width:thin]">
+          <div className="min-w-[52rem] overflow-hidden rounded-xl border border-rph-border">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-rph-border bg-rph-chrome/60 text-left text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">
+                  {!vehicleScoped ? <th className="px-4 py-2.5">Vehicle</th> : null}
+                  <th className="px-4 py-2.5">Driver</th>
+                  <th className="px-4 py-2.5">Start</th>
+                  <th className="px-4 py-2.5">Rent</th>
+                  <th className="px-4 py-2.5">Status</th>
+                  <th className="px-4 py-2.5">Driver access</th>
+                  <th className="px-4 py-2.5">E-sign</th>
+                  <th className="sticky right-0 z-10 bg-rph-chrome/95 px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(0,0,0,0.25)] backdrop-blur-sm">
+                    Actions
+                  </th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              </thead>
+              <tbody className="divide-y divide-rph-border">
+                {!filtered.length ? (
+                  <tr>
+                    <td colSpan={vehicleScoped ? 7 : 8} className="px-4 py-8 text-center text-rph-fg-muted">
+                      No contracts found.
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map((r) => (
+                    <Fragment key={r.id}>
+                      <tr className="bg-rph-raised/30 hover:bg-rph-chrome/40">
+                        {!vehicleScoped ? (
+                          <td className="px-4 py-3">
+                            {r.status !== "draft" ? (
+                              <Link
+                                href={`/rental/hires/${r.id}`}
+                                className="font-medium text-rph-link hover:text-rph-link-hover"
+                              >
+                                {r.vehicle_vrm ?? "—"}
+                              </Link>
+                            ) : (
+                              <span className="font-medium text-rph-fg">{r.vehicle_vrm ?? "—"}</span>
+                            )}
+                            {r.vehicle_label ? (
+                              <p className="text-xs text-rph-fg-muted">{r.vehicle_label}</p>
+                            ) : null}
+                          </td>
+                        ) : null}
+                        <td className="px-4 py-3 text-rph-fg-secondary">{r.driver_label ?? "—"}</td>
+                        <td className="px-4 py-3 text-rph-fg-secondary">
+                          {r.start_date ? formatUkDate(r.start_date) : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-rph-fg-secondary">
+                          {r.rent_amount_gbp > 0 ? `£${r.rent_amount_gbp.toFixed(2)} / ${r.rent_cadence}` : "—"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="rph-pill capitalize">{statusLabel(r)}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <WorkflowStatusPill label={r.driver_access_label} tone={r.driver_access_tone} />
+                        </td>
+                        <td className="px-4 py-3">
+                          <WorkflowStatusPill label={r.esign_label} tone={r.esign_tone} />
+                        </td>
+                        <td className="sticky right-0 z-10 bg-rph-raised/95 px-4 py-3 text-right shadow-[-8px_0_12px_-8px_rgba(0,0,0,0.25)] backdrop-blur-sm">
+                          <HireContractRowActionsMenu
+                            row={r}
+                            canWrite={canWrite}
+                            disabled={tableBusy}
+                            onAudit={() => openAudit(r)}
+                            onContinue={() => onOpenDraft(r.id)}
+                            onPrepareForSignature={() => prepareForSignature(r)}
+                            onSendForSignature={() =>
+                              runAction(
+                                () =>
+                                  sendHireGroupSigningBundleAction(r.id, { resend: Boolean(r.signing_bundle_sent_at) }),
+                                {
+                                  title: r.signing_bundle_sent_at ? "Resending for signature…" : "Sending for signature…",
+                                  detail: "Emailing the signing bundle to the hirer.",
+                                },
+                                {
+                                  title: r.signing_bundle_sent_at ? "Signing email resent" : "Sent for signature",
+                                  detail: "The hirer will receive an email with signing links.",
+                                },
+                              )
+                            }
+                            onRegenerateContracts={() => openRegenerateConfirm(r)}
+                            onCancel={() => openCancelConfirm(r)}
+                          />
+                        </td>
+                      </tr>
+                      {r.can_view_signed_documents ? (
+                        <tr key={`${r.id}-mobile-docs`} className="bg-rph-raised/20 md:hidden">
+                          <td colSpan={vehicleScoped ? 7 : 8} className="px-4 py-2">
+                            <Link
+                              href={`/rental/hires/${r.id}/documents`}
+                              className="text-sm font-medium text-rph-link hover:text-rph-link-hover"
+                            >
+                              View signed document{r.signed_agreement_count === 1 ? "" : "s"}
+                              {r.agreement_count > 1 ? ` (${r.signed_agreement_count}/${r.agreement_count})` : ""}
+                            </Link>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       <HireGroupAuditModal

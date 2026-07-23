@@ -9,8 +9,8 @@ type Props = {
   title: string;
   subtitle: string;
   documents: HireSignedDocumentRow[];
-  backHref: string;
-  backLabel: string;
+  backHref?: string;
+  backLabel?: string;
 };
 
 function PdfLoadingOverlay({ label }: { label: string }) {
@@ -42,10 +42,12 @@ export function HireSignedDocumentsView({ title, subtitle, documents, backHref, 
     <div className="-m-4 flex min-h-0 flex-col md:-m-6">
       <div className="flex shrink-0 flex-wrap items-end justify-between gap-3 border-b border-rph-border bg-rph-raised px-4 py-3 md:px-6">
         <div className="min-w-0">
-          <Link href={backHref} className="text-sm font-medium text-rph-link hover:text-rph-link-hover">
-            ← {backLabel}
-          </Link>
-          <h1 className="mt-1 text-lg font-semibold text-rph-fg">{title}</h1>
+          {backHref && backLabel ? (
+            <Link href={backHref} className="text-sm font-medium text-rph-link hover:text-rph-link-hover">
+              ← {backLabel}
+            </Link>
+          ) : null}
+          <h1 className={`${backHref ? "mt-1" : ""} text-lg font-semibold text-rph-fg`}>{title}</h1>
           <p className="truncate text-sm text-rph-fg-muted">{subtitle}</p>
         </div>
         {selected ? (

@@ -4,6 +4,10 @@ export type PlatformNotificationType =
   | "contract_signed"
   | "payment_submitted"
   | "payment_validated"
+  | "hire_payment_submitted"
+  | "hire_payment_approved"
+  | "hire_payment_rejected"
+  | "hire_payment_amended"
   | "legal_change_applied"
   | "contract_change_requested"
   | "contract_change_review";
@@ -60,4 +64,38 @@ export async function notifyCompanyFinanceRoles(
   }
   const ids = (data ?? []).map((r) => r.user_id as string);
   await notifyUserIds(admin, ids, type, payload);
+}
+
+/** Notify rental staff who review driver-submitted hire payments. */
+export async function notifyCompanyHirePaymentReviewers(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  parentCompanyId: string,
+  type: Extract<PlatformNotificationType, "hire_payment_submitted">,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const { data, error } = await admin
+    .from("user_company_memberships")
+    .select("user_id")
+    .eq("parent_company_id", parentCompanyId)
+    .eq("status", "active")
+    .in("role", ["owner", "admin", "finance", "operations"]);
+  if (error) {
+    console.error("notifyCompanyHirePaymentReviewers", error.message);
+    return;
+  }
+  const ids = (data ?? []).map((r) => r.user_id as string);
+  await notifyUserIds(admin, ids, type, payload);
+}
+
+export async function notifyHireDriver(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  driverUserId: string | null | undefined,
+  type: Extract<
+    PlatformNotificationType,
+    "hire_payment_approved" | "hire_payment_rejected" | "hire_payment_amended"
+  >,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  if (!driverUserId) return;
+  await notifyUserIds(admin, [driverUserId], type, payload);
 }

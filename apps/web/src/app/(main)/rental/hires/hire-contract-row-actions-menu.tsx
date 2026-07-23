@@ -67,6 +67,12 @@ export function HireContractRowActionsMenu({
 
       <DropdownMenu.Portal>
         <DropdownMenu.Content side="bottom" align="end" sideOffset={6} collisionPadding={12} className={contentClass}>
+          {row.status !== "draft" ? (
+            <DropdownMenu.Item className={itemClass} asChild>
+              <Link href={`/rental/hires/${row.id}`}>Open hire workspace</Link>
+            </DropdownMenu.Item>
+          ) : null}
+
           <DropdownMenu.Item className={itemClass} onSelect={onAudit}>
             Audit trail
           </DropdownMenu.Item>

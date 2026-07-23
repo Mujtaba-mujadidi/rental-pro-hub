@@ -1,4 +1,5 @@
-import { vehicleStatusForHireGroup } from "@/lib/fleet/hire-lifecycle";
+import { vehicleStatusForHireGroup, allAgreementsSigned, isStartDateInFuture } from "@/lib/fleet/hire-lifecycle";
+import { ukTodayYmd } from "@/lib/datetime/uk";
 import { HIRE_VEHICLE_BLOCKING_STATUSES, type HireGroupStatus } from "@/lib/fleet/hire-types";
 import type { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -61,7 +62,36 @@ export async function releaseVehicleIfNoBlockingHire(
   }
 }
 
+/** Move a fully signed hire from `reserved` to `active` once the UK start date is reached. */
+async function promoteDueHireGroupToActive(admin: Admin, hireGroupId: string): Promise<void> {
+  const today = ukTodayYmd();
+  const { data: group } = await admin
+    .from("vehicle_hire_groups")
+    .select("id, status, start_date")
+    .eq("id", hireGroupId)
+    .maybeSingle();
+  if (!group?.id || group.status !== "reserved") return;
+  if (isStartDateInFuture(group.start_date as string, today)) return;
+
+  const { data: agreements } = await admin
+    .from("vehicle_hire_agreements")
+    .select("signed_at, status")
+    .eq("hire_group_id", hireGroupId);
+  const signedFlags = (agreements ?? []).map(
+    (a) => Boolean(a.signed_at) || a.status === "reserved" || a.status === "active",
+  );
+  if (!allAgreementsSigned(signedFlags)) return;
+
+  const now = new Date().toISOString();
+  await admin
+    .from("vehicle_hire_groups")
+    .update({ status: "active", activated_at: now })
+    .eq("id", hireGroupId);
+}
+
 export async function syncVehicleStatusForHireGroup(admin: Admin, hireGroupId: string): Promise<void> {
+  await promoteDueHireGroupToActive(admin, hireGroupId);
+
   const { data: group } = await admin
     .from("vehicle_hire_groups")
     .select("id, vehicle_id, status")

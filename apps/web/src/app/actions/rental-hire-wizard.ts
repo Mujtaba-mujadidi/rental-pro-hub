@@ -29,6 +29,7 @@ import { assertDriverLinkedToCompany } from "@/app/actions/rental-driver-links";
 import { loadDriverPreviewBundle } from "@/lib/admin/load-driver-preview";
 import { enrichHireAccessSnapshot, hireAccessSnapshotIsSparse, loadHireGroupAccessSnapshot } from "@/lib/fleet/hire-access-enrich";
 import { logHireGroupEvent } from "@/lib/fleet/hire-audit";
+import { shouldHideHireRequestFromInbox } from "@/lib/fleet/driver-hire-nav";
 import { deriveDriverHireSigningSummary, driverHireAccessLabel } from "@/lib/fleet/driver-hire-request-display";
 import { parseHireAccessSnapshot, type HireAccessDisplay } from "@/lib/fleet/hire-access-display";
 import { loadBundleAgreements } from "@/lib/esign/hire-signing-bundle";
@@ -1310,13 +1311,16 @@ export async function listDriverHireRequestsAction(): Promise<
       signedCount: 0,
     });
 
+    let hireGroupStatus: string | null = null;
+
     if (hireGroupId && row.status === "approved") {
       const { data: group } = await admin
         .from("vehicle_hire_groups")
-        .select("signing_bundle_sent_at, signing_bundle_expires_at")
+        .select("status, signing_bundle_sent_at, signing_bundle_expires_at")
         .eq("id", hireGroupId)
         .maybeSingle();
       if (group) {
+        hireGroupStatus = (group.status as string) ?? null;
         const agreements = group.signing_bundle_sent_at
           ? await loadBundleAgreements(admin, hireGroupId)
           : [];
@@ -1329,6 +1333,15 @@ export async function listDriverHireRequestsAction(): Promise<
           signedCount,
         });
       }
+    }
+
+    if (
+      shouldHideHireRequestFromInbox({
+        signingPhase: signing.phase,
+        hireGroupStatus,
+      })
+    ) {
+      continue;
     }
 
     rows.push({

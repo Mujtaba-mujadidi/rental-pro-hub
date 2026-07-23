@@ -9,6 +9,11 @@
 
 const LOCALE = "en-GB";
 
+/** Today's calendar date in UK (YYYY-MM-DD) for hire start / fleet status logic. */
+export function ukTodayYmd(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+}
+
 function parseInstant(value: string | Date): Date | null {
   const d = value instanceof Date ? value : new Date(value);
   return Number.isNaN(d.getTime()) ? null : d;

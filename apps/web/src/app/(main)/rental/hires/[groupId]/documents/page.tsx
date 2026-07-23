@@ -22,8 +22,6 @@ export default async function RentalHireSignedDocumentsPage({
       title="Signed hire agreements"
       subtitle={subtitle}
       documents={payload.documents}
-      backHref="/rental/hires"
-      backLabel="Hires"
     />
   );
 }

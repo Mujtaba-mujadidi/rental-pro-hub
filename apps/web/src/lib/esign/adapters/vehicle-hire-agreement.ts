@@ -6,11 +6,8 @@ import {
 } from "@/lib/esign/pdf-generate";
 import { ESIGN_BUCKET, ESIGN_RECIPIENT_ROLE, type EsignFieldLayoutItem } from "@/lib/esign/types";
 import { loadCompanyLogoForContractPdf } from "@/lib/companies/company-logo";
-import {
-  allAgreementsSigned,
-  hireGroupStatusAfterAllSigned,
-  vehicleStatusForHireGroup,
-} from "@/lib/fleet/hire-lifecycle";
+import { ukTodayYmd } from "@/lib/datetime/uk";
+import { allAgreementsSigned, hireGroupStatusAfterAllSigned, isStartDateInFuture, vehicleStatusForHireGroup } from "@/lib/fleet/hire-lifecycle";
 import { syncVehicleStatusForHireGroup } from "@/lib/fleet/sync-vehicle-hire-status";
 import { logHireGroupEvent } from "@/lib/fleet/hire-audit";
 import { touchHireGroupForEnvelopeRealtime, touchHireGroupRealtime } from "@/lib/esign/touch-hire-group-realtime";
@@ -418,18 +415,20 @@ export async function regenerateHireEnvelopePdfForSignatureMode(
 }
 
 async function refreshHireGroupAfterAgreementSigned(admin: Admin, hireGroupId: string): Promise<void> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = ukTodayYmd();
   const { data: group } = await admin
     .from("vehicle_hire_groups")
-    .select("id, vehicle_id, start_date, status, vehicle_hire_agreements(status, signed_at)")
+    .select("id, vehicle_id, start_date, status")
     .eq("id", hireGroupId)
     .maybeSingle();
   if (!group?.id) return;
 
-  const agreements = ((group as { vehicle_hire_agreements?: { status: string; signed_at: string | null }[] })
-    .vehicle_hire_agreements ?? []) as { status: string; signed_at: string | null }[];
+  const { data: agreements } = await admin
+    .from("vehicle_hire_agreements")
+    .select("signed_at, status")
+    .eq("hire_group_id", hireGroupId);
 
-  const signedFlags = agreements.map(
+  const signedFlags = (agreements ?? []).map(
     (a) => Boolean(a.signed_at) || a.status === "reserved" || a.status === "active",
   );
   if (!allAgreementsSigned(signedFlags)) return;
@@ -486,7 +485,7 @@ export async function onVehicleHireAgreementSigned(
     .maybeSingle();
 
   const now = new Date().toISOString();
-  const today = now.slice(0, 10);
+  const today = ukTodayYmd();
 
   const { data: agreement } = await admin
     .from("vehicle_hire_agreements")
