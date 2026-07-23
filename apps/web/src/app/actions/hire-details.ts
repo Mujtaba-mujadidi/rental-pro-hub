@@ -5,7 +5,8 @@ import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
 import { canReadRentals } from "@/lib/auth/rental-permissions";
 import { loadDriverPreviewBundle } from "@/lib/admin/load-driver-preview";
 import { driverCanAccessVehicleDocuments } from "@/lib/fleet/driver-hire-nav";
-import { CONTRACT_LENGTH_LABELS, type ContractLengthKind } from "@/lib/fleet/hire-access-display";
+import { CONTRACT_LENGTH_LABELS } from "@/lib/fleet/hire-access-display";
+import type { ContractLengthKind } from "@/lib/fleet/hire-types";
 import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
 import {
   REQUIRED_VEHICLE_DOC_TYPES,

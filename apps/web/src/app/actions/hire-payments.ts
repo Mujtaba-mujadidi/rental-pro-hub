@@ -725,9 +725,9 @@ export async function rejectHirePaymentRowAction(input: {
     .eq("id", input.scheduleRowId);
   if (updErr) return { ok: false, error: updErr.message };
 
-  const pendingAmount = state?.pendingSubmittedGbp ?? null;
+  const pendingAmount = state?.pendingSubmittedGbp;
   await notifyDriverHirePaymentOutcome(row.hire_group_id as string, "hire_payment_rejected", {
-    amountGbp: pendingAmount,
+    amountGbp: pendingAmount ?? undefined,
     comment,
   });
 
@@ -936,7 +936,11 @@ export async function loadHirePaymentRowEventsAction(
   if (error) return { ok: false, error: error.message };
   if (!row) return { ok: false, error: "Payment row not found." };
 
-  const group = row.vehicle_hire_groups as { driver_user_id: string | null } | null;
+  const groupRaw = row.vehicle_hire_groups as
+    | { driver_user_id: string | null }
+    | { driver_user_id: string | null }[]
+    | null;
+  const group = Array.isArray(groupRaw) ? (groupRaw[0] ?? null) : groupRaw;
   const isDriver = group?.driver_user_id === user.id;
   if (!isDriver) {
     const { profile } = await requireRentalCompanyArea();
