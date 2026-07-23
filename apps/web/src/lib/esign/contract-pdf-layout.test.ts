@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   CONTRACT_BODY_CLEARANCE_ABOVE_PARAPH,
   CONTRACT_MARGIN_BOTTOM,
+  CONTRACT_PARAPH_LABEL_FROM_TOP,
+  CONTRACT_PARAPH_SIG_FROM_TOP,
+  CONTRACT_PARAPH_SIG_H,
   CONTRACT_PARAPH_STRIP_H,
   contractContentBottomReserve,
   contractParaphStripBottomY,
@@ -27,6 +30,13 @@ describe("contract pdf paraph layout", () => {
     const reserve = contractContentBottomReserve();
     const stripTop = contractParaphStripTopY();
     expect(reserve - stripTop).toBeGreaterThanOrEqual(14);
+  });
+
+  it("places signature fields below printed paraph labels", () => {
+    expect(CONTRACT_PARAPH_SIG_FROM_TOP).toBeGreaterThan(CONTRACT_PARAPH_LABEL_FROM_TOP);
+    expect(CONTRACT_PARAPH_SIG_FROM_TOP + CONTRACT_PARAPH_SIG_H).toBeLessThanOrEqual(
+      CONTRACT_PARAPH_STRIP_H,
+    );
   });
 });
 

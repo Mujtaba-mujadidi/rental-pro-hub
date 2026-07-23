@@ -5,6 +5,12 @@ export const CONTRACT_MARGIN_TOP = 52;
 export const CONTRACT_MARGIN_BOTTOM = 56;
 export const CONTRACT_PARAPH_STRIP_H = 34;
 
+/** Label row at top of paraph strip (distance from strip top, points). */
+export const CONTRACT_PARAPH_LABEL_FROM_TOP = 8;
+/** Signature box starts below label row (distance from strip top, points). */
+export const CONTRACT_PARAPH_SIG_FROM_TOP = 14;
+export const CONTRACT_PARAPH_SIG_H = 18;
+
 /** Minimum vertical band reserved for the repeating letterhead (logo + contact). */
 export const CONTRACT_LETTERHEAD_MIN_H = 44;
 

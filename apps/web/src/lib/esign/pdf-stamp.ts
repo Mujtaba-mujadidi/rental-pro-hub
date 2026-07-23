@@ -40,7 +40,13 @@ export async function stampPdfWithFieldValues(
       const bytes = Buffer.from(base64, "base64");
       const isPng = entry.value.includes("image/png");
       const img = isPng ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
-      page.drawImage(img, { x, y, width: w, height: h });
+      const inset = Math.min(4, w * 0.04, h * 0.08);
+      page.drawImage(img, {
+        x: x + inset,
+        y: y + inset,
+        width: Math.max(1, w - inset * 2),
+        height: Math.max(1, h - inset * 2),
+      });
     } else {
       const text =
         field.type === "date"

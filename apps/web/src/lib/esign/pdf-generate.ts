@@ -13,6 +13,9 @@ import { formatUkDateLong } from "@/lib/datetime/uk";
 import {
   CONTRACT_LETTERHEAD_MIN_H,
   CONTRACT_MARGIN_TOP,
+  CONTRACT_PARAPH_LABEL_FROM_TOP,
+  CONTRACT_PARAPH_SIG_FROM_TOP,
+  CONTRACT_PARAPH_SIG_H,
   CONTRACT_PARAPH_STRIP_H,
   CONTRACT_PAGE_H,
   contractContentBottomReserve,
@@ -349,7 +352,7 @@ function drawPerPageSignatureParaphs(
       const ownerX = MARGIN_X + 8;
       const recipientX = MARGIN_X + colW + PARAPH_GAP + 8;
       const innerW = colW - 16;
-      const labelY = yBottom + CONTRACT_PARAPH_STRIP_H - 12;
+      const labelY = yBottom + CONTRACT_PARAPH_STRIP_H - CONTRACT_PARAPH_LABEL_FROM_TOP;
       page.drawText("OWNER / LESSOR", {
         x: ownerX,
         y: labelY,
@@ -364,12 +367,12 @@ function drawPerPageSignatureParaphs(
         font: fontBold,
         color: muted,
       });
-      const sigY = yBottom + 6;
+      const sigY = yBottom + CONTRACT_PARAPH_STRIP_H - CONTRACT_PARAPH_SIG_FROM_TOP - CONTRACT_PARAPH_SIG_H;
       page.drawRectangle({
         x: ownerX,
         y: sigY,
         width: innerW,
-        height: 18,
+        height: CONTRACT_PARAPH_SIG_H,
         borderColor: rule,
         borderWidth: 0.6,
         color: white,
@@ -378,7 +381,7 @@ function drawPerPageSignatureParaphs(
         x: recipientX,
         y: sigY,
         width: innerW,
-        height: 18,
+        height: CONTRACT_PARAPH_SIG_H,
         borderColor: rule,
         borderWidth: 0.6,
         color: white,
@@ -390,7 +393,12 @@ function drawPerPageSignatureParaphs(
         page: pageNum,
         derivedFrom: "owner_sig",
         label: "Owner paraph",
-        ...toNormRect(ownerX, stripTopFromTop + CONTRACT_PARAPH_STRIP_H - 24, innerW, 18),
+        ...toNormRect(
+          ownerX,
+          stripTopFromTop + CONTRACT_PARAPH_SIG_FROM_TOP,
+          innerW,
+          CONTRACT_PARAPH_SIG_H,
+        ),
       });
       derived.push({
         id: `recipient_sig_p${pageNum}`,
@@ -399,23 +407,28 @@ function drawPerPageSignatureParaphs(
         page: pageNum,
         derivedFrom: "recipient_sig",
         label: "Hirer paraph",
-        ...toNormRect(recipientX, stripTopFromTop + CONTRACT_PARAPH_STRIP_H - 24, innerW, 18),
+        ...toNormRect(
+          recipientX,
+          stripTopFromTop + CONTRACT_PARAPH_SIG_FROM_TOP,
+          innerW,
+          CONTRACT_PARAPH_SIG_H,
+        ),
       });
     } else {
       const innerW = Math.min(CONTENT_W - 16, 280);
       const x = MARGIN_X + 8;
       page.drawText("HIRER", {
         x,
-        y: yBottom + CONTRACT_PARAPH_STRIP_H - 12,
+        y: yBottom + CONTRACT_PARAPH_STRIP_H - CONTRACT_PARAPH_LABEL_FROM_TOP,
         size: 6.5,
         font: fontBold,
         color: muted,
       });
       page.drawRectangle({
         x,
-        y: yBottom + 6,
+        y: yBottom + CONTRACT_PARAPH_STRIP_H - CONTRACT_PARAPH_SIG_FROM_TOP - CONTRACT_PARAPH_SIG_H,
         width: innerW,
-        height: 18,
+        height: CONTRACT_PARAPH_SIG_H,
         borderColor: rule,
         borderWidth: 0.6,
         color: white,
@@ -427,7 +440,7 @@ function drawPerPageSignatureParaphs(
         page: pageNum,
         derivedFrom: "recipient_sig",
         label: "Hirer paraph",
-        ...toNormRect(x, stripTopFromTop + CONTRACT_PARAPH_STRIP_H - 24, innerW, 18),
+        ...toNormRect(x, stripTopFromTop + CONTRACT_PARAPH_SIG_FROM_TOP, innerW, CONTRACT_PARAPH_SIG_H),
       });
     }
   });
