@@ -1,4 +1,5 @@
 import DOMPurify from "isomorphic-dompurify";
+import type { PlatformLetterhead } from "@/lib/platform/letterhead";
 import type { ContractPdfCommercialRow, ContractPdfInput, ContractPdfParty } from "@/lib/esign/pdf-generate";
 
 function escapeHtml(s: string): string {
@@ -171,7 +172,14 @@ export function buildContractPdfDocument(input: {
   termsSnapshot: Record<string, unknown> | null | undefined;
   commercialSnapshot: Record<string, unknown> | null | undefined;
   legalSnapshot: Record<string, unknown> | null | undefined;
+  /** Customer trading name fallback for the Customer party block. */
   companyName?: string | null;
+  /**
+   * PDF letterhead operator (platform for platform agreements; rental company for hire agreements).
+   * When set, header contact lines come from here — not from the customer legal snapshot.
+   */
+  letterhead?: PlatformLetterhead | null;
+  /** @deprecated Prefer `letterhead.name` — kept for hire PDF builders that pass rental company name. */
   platformName?: string | null;
 }): ContractPdfInput {
   const ts = input.termsSnapshot && typeof input.termsSnapshot === "object" ? input.termsSnapshot : {};
@@ -186,12 +194,18 @@ export function buildContractPdfDocument(input: {
     input.companyName?.trim() ??
     "Customer";
 
-  const platformName = input.platformName?.trim() || "RMS";
-  const companyNumber =
-    snapshotString(input.legalSnapshot, "company_number") ??
-    snapshotString(input.legalSnapshot, "companies_house_number");
-  const contactEmail = snapshotString(input.legalSnapshot, "primary_contact_email");
-  const contactPhone = snapshotString(input.legalSnapshot, "primary_contact_phone");
+  const platformName =
+    input.letterhead?.name?.trim() || input.platformName?.trim() || "Rental Pro Hub";
+  const companyNumber = input.letterhead
+    ? input.letterhead.companyNumber
+    : snapshotString(input.legalSnapshot, "company_number") ??
+      snapshotString(input.legalSnapshot, "companies_house_number");
+  const contactEmail = input.letterhead
+    ? input.letterhead.contactEmail
+    : snapshotString(input.legalSnapshot, "primary_contact_email");
+  const contactPhone = input.letterhead
+    ? input.letterhead.contactPhone
+    : snapshotString(input.legalSnapshot, "primary_contact_phone");
 
   const parties: ContractPdfParty[] = [
     {

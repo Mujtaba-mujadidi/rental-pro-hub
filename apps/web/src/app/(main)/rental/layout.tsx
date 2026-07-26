@@ -2,11 +2,12 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import { getSessionUser } from "@/lib/auth/profile";
+import { resolveRequestPathnameForRedirect } from "@/lib/auth/resolve-request-pathname";
 import { getRentalSessionLifecycleCached, rentalPathRequiresRedirect } from "@/lib/auth/rental-lifecycle";
 
 const getPathname = cache(async () => {
   const h = await headers();
-  return h.get("x-pathname") ?? "/rental";
+  return resolveRequestPathnameForRedirect((name) => h.get(name));
 });
 
 /**
@@ -19,9 +20,11 @@ export default async function RentalAreaLayout({ children }: { children: React.R
 
   const life = await getRentalSessionLifecycleCached(user.id, user.email);
   const pathname = await getPathname();
-  const target = rentalPathRequiresRedirect(pathname, life);
-  if (target && target !== pathname) {
-    redirect(target);
+  if (pathname) {
+    const target = rentalPathRequiresRedirect(pathname, life);
+    if (target && target !== pathname) {
+      redirect(target);
+    }
   }
 
   return children;

@@ -29,11 +29,34 @@ function fieldLooksLikeSignerName(field: EsignFieldLayoutItem): boolean {
   return id.includes("name") || label.includes("name");
 }
 
+const GUIDED_SIGNING_TYPE_ORDER: Record<EsignFieldLayoutItem["type"], number> = {
+  signature: 0,
+  text: 1,
+  date: 2,
+};
+
+/** Guided walkthrough order: signature → name/text → date/time (then page position). */
+export function sortGuidedSigningFields(fields: EsignFieldLayoutItem[]): EsignFieldLayoutItem[] {
+  return [...fields].sort((a, b) => {
+    const typeOrder = GUIDED_SIGNING_TYPE_ORDER[a.type] - GUIDED_SIGNING_TYPE_ORDER[b.type];
+    if (typeOrder !== 0) return typeOrder;
+    return a.page - b.page || a.y - b.y || a.x - b.x;
+  });
+}
+
+export function fieldLooksLikeSignerNameField(field: EsignFieldLayoutItem): boolean {
+  return fieldLooksLikeSignerName(field);
+}
+
 /** Pre-fill hirer name and signing date/time before the guided walkthrough starts. */
 export function buildSignerPrefillValues(
   layout: EsignFieldLayoutItem[],
-  options?: { signerName?: string; signedAt?: Date },
+  options?: { signerName?: string; signedAt?: Date; forGuidedWalkthrough?: boolean },
 ): FieldValueMap {
+  if (options?.forGuidedWalkthrough) {
+    return {};
+  }
+
   const signedAt = options?.signedAt ?? new Date();
   const dateValue = stampValueFromEsignDateInput(toEsignDateTimeLocalInput(signedAt), signedAt);
   const values: FieldValueMap = {};

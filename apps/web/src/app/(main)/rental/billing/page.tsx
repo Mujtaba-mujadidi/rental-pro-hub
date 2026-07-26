@@ -9,16 +9,17 @@ export default async function RentalBillingPage() {
   const companyId = profile.company_id ?? "";
   const supabase = await createClient();
 
-  const { data: invoices } = await supabase
-    .from("invoices")
-    .select(
-      "id, invoice_number, status, total, currency, due_date, billing_period_start, billing_period_end, payment_validation_status",
-    )
-    .eq("parent_company_id", companyId)
-    .order("created_at", { ascending: false })
-    .limit(50);
-
-  const { data: scheds } = await supabase.from("billing_schedules").select("id").eq("parent_company_id", companyId);
+  const [{ data: invoices }, { data: scheds }] = await Promise.all([
+    supabase
+      .from("invoices")
+      .select(
+        "id, invoice_number, status, total, currency, due_date, billing_period_start, billing_period_end, payment_validation_status",
+      )
+      .eq("parent_company_id", companyId)
+      .order("created_at", { ascending: false })
+      .limit(50),
+    supabase.from("billing_schedules").select("id").eq("parent_company_id", companyId),
+  ]);
   const scheduleIds = (scheds ?? []).map((s) => s.id);
   const { data: items } =
     scheduleIds.length > 0

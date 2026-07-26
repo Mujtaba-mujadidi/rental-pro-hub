@@ -17,14 +17,17 @@ import {
 } from "@/lib/fleet/vehicles";
 import { sumApprovedHireIncomeGbp, type HireIncomeRow } from "@/lib/fleet/hire-income";
 import { computeVehiclePnl, type VehiclePnlBreakdown } from "@/lib/fleet/vehicle-pnl";
+import { revalidateVehicleWorkspaceCache } from "@/lib/fleet/vehicle-workspace-cache";
 import { createClient } from "@/lib/supabase/server";
 import { parseUkDate } from "@/lib/validation/driver-signup";
 import { ensureDefaultPaymentMethodsAction } from "@/app/actions/rental-payment-settings";
 
 function revalidateFinancials(vehicleId: string) {
+  revalidateVehicleWorkspaceCache(vehicleId);
   revalidatePath(`/rental/vehicles/${vehicleId}`);
   revalidatePath(`/rental/vehicles/${vehicleId}/financials`);
   revalidatePath("/rental/vehicles");
+  revalidatePath(`/rental/vehicles/${vehicleId}`, "layout");
 }
 
 function parseAmount(raw: string | number): { ok: true; value: number } | { ok: false; error: string } {

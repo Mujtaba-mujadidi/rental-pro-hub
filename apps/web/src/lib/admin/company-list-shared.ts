@@ -15,6 +15,12 @@ export type AdminCompanyListRow = {
   contractStatus: string | null;
   /** company_contracts.status when linked (draft, active, …). */
   agreementContractStatus: string | null;
+  /** Open agreement change request for this company (renewal in progress). */
+  openChangeRequestId: string | null;
+  /** E-sign envelope linked to the open change request, when prepared. */
+  openChangeEsignEnvelopeId: string | null;
+  /** In-prep platform agreement envelope (designer / regenerate), if any. */
+  platformEsignEnvelopeId: string | null;
   createdAt: string;
   hasLogo: boolean;
   inviteLastSentAt: string | null;

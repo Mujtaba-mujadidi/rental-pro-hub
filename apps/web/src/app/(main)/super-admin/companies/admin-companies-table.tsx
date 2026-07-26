@@ -10,16 +10,16 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  applyLatestCompanyContractChangeAction,
   reactivateCompanyAction,
   sendCompanyPrimaryInviteAction,
   sendPrimaryContactPasswordResetAction,
   startCompanyOffboardingAction,
 } from "@/app/actions/admin-companies";
 import { prepareCompanyContractForEsignAction } from "@/app/actions/contract-signature";
-import { getCompanyPendingEsignEnvelopeAction, getCompanySignedEsignEnvelopeAction, resendEsignEnvelopeAction } from "@/app/actions/esign";
+import { getCompanyPendingEsignEnvelopeAction, getCompanySignedEsignEnvelopeAction, regeneratePlatformCompanyContractPdfAction, resendEsignEnvelopeAction } from "@/app/actions/esign";
 import { getAdminCompaniesPageAction, getAdminCompanyDetailAction, getPrimaryContactSignedInAction } from "@/app/actions/admin-companies-list";
 import { AdminCompanyDetailDialog } from "@/app/(main)/super-admin/companies/admin-company-detail-dialog";
 import type { AdminCompanyDetailPayload } from "@/lib/admin/company-list-shared";
@@ -246,7 +246,6 @@ export function AdminCompaniesTable({
   const [loading, setLoading] = useState(true);
   const [inviteBusyId, setInviteBusyId] = useState<string | null>(null);
   const [lifecycleBusyId, setLifecycleBusyId] = useState<string | null>(null);
-  const [contractBusyId, setContractBusyId] = useState<string | null>(null);
   const [eSignBusyId, setESignBusyId] = useState<string | null>(null);
   const [eSignOverlay, setESignOverlay] = useState<{ title: string; detail: string } | null>(null);
   const [actionOverlay, setActionOverlay] = useState<ActionStatusOverlayState | null>(null);
@@ -670,9 +669,8 @@ export function AdminCompaniesTable({
           const r = info.row.original;
           const inviteBusy = inviteBusyId === r.id;
           const lifecycleBusy = lifecycleBusyId === r.id;
-          const contractBusy = contractBusyId === r.id;
           const eSignBusy = eSignBusyId === r.id;
-          const busy = inviteBusy || lifecycleBusy || contractBusy || eSignBusy;
+          const busy = inviteBusy || lifecycleBusy || eSignBusy;
           const lifecycleActive = r.deletionPhase === "active";
           const primarySignedIn = resolvePrimarySignedIn(r);
           return (
@@ -721,35 +719,81 @@ export function AdminCompaniesTable({
                     Last invite: {formatInviteSent(r.inviteLastSentAt)}
                   </DropdownMenu.Item>
                   {r.agreementContractStatus === "draft" && lifecycleActive ? (
-                    <DropdownMenu.Item
-                      className={rowActionItemClass}
-                      disabled={busy}
-                      onSelect={() => {
-                        setInviteFeedback(null);
-                        setESignBusyId(r.id);
-                        setESignOverlay({
-                          title: "Preparing e-signature",
-                          detail: "Generating the contract PDF and opening the designer…",
-                        });
-                        void (async () => {
-                          const res = await prepareCompanyContractForEsignAction(r.id);
-                          if (!res.ok) {
-                            setESignBusyId(null);
-                            setESignOverlay(null);
-                            setInviteFeedback(res.error);
-                            return;
-                          }
-                          router.push(`/super-admin/esign/${res.envelopeId}`);
-                          // Keep overlay until navigation; clear shortly after push
-                          window.setTimeout(() => {
-                            setESignBusyId(null);
-                            setESignOverlay(null);
-                          }, 800);
-                        })();
-                      }}
-                    >
-                      {eSignBusy ? "Preparing…" : "Prepare contract for e-sign"}
-                    </DropdownMenu.Item>
+                    r.platformEsignEnvelopeId ? (
+                      <>
+                        <DropdownMenu.Item className={rowActionItemClass} asChild>
+                          <Link href={`/super-admin/esign/${r.platformEsignEnvelopeId}`}>
+                            Open e-sign designer
+                          </Link>
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item
+                          className={rowActionItemClass}
+                          disabled={busy}
+                          onSelect={() => {
+                            setInviteFeedback(null);
+                            setActionOverlay({
+                              phase: "pending",
+                              title: "Regenerating contract…",
+                              detail: "Rebuilding the unsigned agreement PDF from the latest data.",
+                            });
+                            void (async () => {
+                              const res = await regeneratePlatformCompanyContractPdfAction(r.platformEsignEnvelopeId!);
+                              if (!res.ok) {
+                                finishActionOverlay({
+                                  phase: "error",
+                                  title: "Could not regenerate contract",
+                                  detail: res.error,
+                                });
+                                return;
+                              }
+                              finishActionOverlay(
+                                {
+                                  phase: "success",
+                                  title: "Contract regenerated",
+                                  detail: "Owner signature was cleared — review placement and sign again before sending.",
+                                },
+                                true,
+                              );
+                            })();
+                          }}
+                        >
+                          Regenerate contract PDF
+                        </DropdownMenu.Item>
+                      </>
+                    ) : (
+                      <DropdownMenu.Item
+                        className={rowActionItemClass}
+                        disabled={busy}
+                        onSelect={() => {
+                          setInviteFeedback(null);
+                          setESignBusyId(r.id);
+                          setESignOverlay({
+                            title: r.openChangeRequestId ? "Preparing renewal e-signature" : "Preparing e-signature",
+                            detail: "Generating the contract PDF and opening the designer…",
+                          });
+                          void (async () => {
+                            const res = await prepareCompanyContractForEsignAction(r.id);
+                            if (!res.ok) {
+                              setESignBusyId(null);
+                              setESignOverlay(null);
+                              setInviteFeedback(res.error);
+                              return;
+                            }
+                            router.push(`/super-admin/esign/${res.envelopeId}`);
+                            window.setTimeout(() => {
+                              setESignBusyId(null);
+                              setESignOverlay(null);
+                            }, 800);
+                          })();
+                        }}
+                      >
+                        {eSignBusy
+                          ? "Preparing…"
+                          : r.openChangeRequestId
+                            ? "Prepare renewal for e-sign"
+                            : "Prepare contract for e-sign"}
+                      </DropdownMenu.Item>
+                    )
                   ) : null}
                   {r.agreementContractStatus === "sent_for_signature" && lifecycleActive ? (
                     <>
@@ -850,43 +894,6 @@ export function AdminCompaniesTable({
                       }}
                     >
                       {eSignBusy ? "Opening…" : "View signed contract"}
-                    </DropdownMenu.Item>
-                  ) : null}
-                  {r.contractStatus === "pending_renewal" && lifecycleActive ? (
-                    <DropdownMenu.Item
-                      className={rowActionItemClass}
-                      disabled={busy}
-                      onSelect={() => {
-                        setInviteFeedback(null);
-                        setContractBusyId(r.id);
-                        setActionOverlay({
-                          phase: "pending",
-                          title: "Applying contract change…",
-                          detail: "Updating the company agreement. Please wait.",
-                        });
-                        void (async () => {
-                          const res = await applyLatestCompanyContractChangeAction(r.id);
-                          setContractBusyId(null);
-                          if (!res.ok) {
-                            finishActionOverlay({
-                              phase: "error",
-                              title: "Could not apply contract change",
-                              detail: res.error,
-                            });
-                            return;
-                          }
-                          finishActionOverlay(
-                            {
-                              phase: "success",
-                              title: "Contract updated",
-                              detail: `Contract change applied for ${r.name || "company"}.`,
-                            },
-                            true,
-                          );
-                        })();
-                      }}
-                    >
-                      {contractBusy ? "Applying…" : "Mark contract signed"}
                     </DropdownMenu.Item>
                   ) : null}
                   {primarySignedIn === null && r.primaryContactUserId ? (
@@ -1007,7 +1014,7 @@ export function AdminCompaniesTable({
         },
       },
     ],
-    [inviteBusyId, lifecycleBusyId, contractBusyId, eSignBusyId, onListChange, doPrimaryInvite, doPasswordReset, finishActionOverlay, ensurePrimarySignedInStatus, resolvePrimarySignedIn, signedInLoadingUserId],
+    [inviteBusyId, lifecycleBusyId, eSignBusyId, onListChange, doPrimaryInvite, doPasswordReset, finishActionOverlay, ensurePrimarySignedInStatus, resolvePrimarySignedIn, signedInLoadingUserId],
   );
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));

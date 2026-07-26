@@ -9,7 +9,7 @@ import {
 import { SignatureFieldInput } from "@/components/esign/signature-field-input";
 import { usePdfPages } from "@/components/esign/use-pdf-pages";
 import type { EsignFieldLayoutItem, EsignFieldType } from "@/lib/esign/types";
-import { signableFieldLayout, buildSignerPrefillValues } from "@/lib/esign/field-values";
+import { signableFieldLayout, buildSignerPrefillValues, sortGuidedSigningFields, fieldLooksLikeSignerNameField } from "@/lib/esign/field-values";
 import type { FieldValueMap } from "@/lib/esign/pdf-stamp";
 import {
   parseEsignDateTimeInput,
@@ -42,7 +42,7 @@ const FIELD_STYLES: Record<
 };
 
 function sortFields(fields: EsignFieldLayoutItem[]) {
-  return [...fields].sort((a, b) => a.page - b.page || a.y - b.y || a.x - b.x);
+  return sortGuidedSigningFields(fields);
 }
 
 function isFilled(field: EsignFieldLayoutItem, values: FieldValueMap) {
@@ -124,7 +124,7 @@ export function GuidedSigningViewer({
     setStepIndex(0);
     setDraft("");
     setSaveForFuture(false);
-    setValues(buildSignerPrefillValues(fields, { signerName: prefillSignerName }));
+    setValues(buildSignerPrefillValues(fields, { signerName: prefillSignerName, forGuidedWalkthrough: true }));
   }, [sessionKey, fields, prefillSignerName]);
 
   const { pageCount, ready: pdfReady } = usePdfPages(pdfUrl, "sign-page-", {
@@ -146,12 +146,19 @@ export function GuidedSigningViewer({
       const existing = values[current.id]?.value;
       const parsed = existing ? parseEsignDateTimeInput(existing) : null;
       setDraft(toEsignDateTimeLocalInput(parsed ?? new Date()));
+    } else if (
+      current.type === "text" &&
+      fieldLooksLikeSignerNameField(current) &&
+      prefillSignerName?.trim() &&
+      !values[current.id]?.value
+    ) {
+      setDraft(prefillSignerName.trim());
     } else {
       setDraft(values[current.id]?.value ?? "");
     }
     const t = window.setTimeout(() => scrollToField(current.id), 80);
     return () => window.clearTimeout(t);
-  }, [current, scrollToField, values]);
+  }, [current, scrollToField, values, prefillSignerName]);
 
   function submitAll(finalValues: FieldValueMap) {
     const sig = firstSignatureValue(finalValues, ordered);
@@ -436,6 +443,7 @@ export function EsignSignClient({
   fields,
   initiallyVerified,
   alreadySigned,
+  prefillSignerName,
 }: {
   token: string;
   envelopeId: string;
@@ -443,6 +451,7 @@ export function EsignSignClient({
   fields: EsignFieldLayoutItem[];
   initiallyVerified: boolean;
   alreadySigned: boolean;
+  prefillSignerName?: string;
 }) {
   const [verified, setVerified] = useState(initiallyVerified);
   const [otp, setOtp] = useState("");
@@ -529,6 +538,7 @@ export function EsignSignClient({
       pending={pending}
       error={error}
       savedSignatureDataUrl={savedSig}
+      prefillSignerName={prefillSignerName}
       onSubmit={(values, options) => {
         setError(null);
         startTransition(() => {

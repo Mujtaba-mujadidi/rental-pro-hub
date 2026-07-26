@@ -19,6 +19,7 @@ import {
 } from "@/lib/fleet/maintenance";
 import { buildMaintenanceExcelTemplate, parseMaintenanceExcel } from "@/lib/fleet/maintenance-excel";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { revalidateVehicleWorkspaceCache } from "@/lib/fleet/vehicle-workspace-cache";
 import { createClient } from "@/lib/supabase/server";
 import { parseUkDate } from "@/lib/validation/driver-signup";
 import { ensureDefaultPaymentMethodsAction } from "@/app/actions/rental-payment-settings";
@@ -26,9 +27,11 @@ import { ensureDefaultPaymentMethodsAction } from "@/app/actions/rental-payment-
 const IMPORT_MAX_ROWS = 500;
 
 function revalidateMaintenance(vehicleId: string) {
+  revalidateVehicleWorkspaceCache(vehicleId);
   revalidatePath(`/rental/vehicles/${vehicleId}`);
   revalidatePath(`/rental/vehicles/${vehicleId}/maintenance`);
   revalidatePath(`/rental/vehicles/${vehicleId}/details`);
+  revalidatePath(`/rental/vehicles/${vehicleId}`, "layout");
 }
 
 function parseOptionalMiles(raw: string | null | undefined): { ok: true; value: number | null } | { ok: false; error: string } {

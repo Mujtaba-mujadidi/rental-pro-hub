@@ -1,17 +1,23 @@
 import { notFound, redirect } from "next/navigation";
 import { requireSuperAdmin } from "@/lib/auth/profile";
+import { superAdminEsignDesignerBack } from "@/lib/admin/contract-change-display";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { EsignDesignerClient } from "@/components/esign/esign-clients";
 import type { EsignFieldLayoutItem } from "@/lib/esign/types";
 
 export default async function SuperAdminEsignDesignerPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ envelopeId: string }>;
+  searchParams: Promise<{ from?: string }>;
 }) {
   const { user, profile } = await requireSuperAdmin();
   const { envelopeId } = await params;
+  const { from } = await searchParams;
   if (!envelopeId?.trim()) notFound();
+
+  const { backHref, backLabel } = superAdminEsignDesignerBack(from);
 
   let admin: ReturnType<typeof createSupabaseAdminClient>;
   try {
@@ -23,7 +29,7 @@ export default async function SuperAdminEsignDesignerPage({
   const { data: env, error } = await admin
     .from("esign_envelopes")
     .select(
-      "id, title, status, field_layout, unsigned_pdf_path, signed_pdf_path, completed_at, owner_signed_at, requires_owner_signature",
+      "id, title, status, context_type, field_layout, unsigned_pdf_path, signed_pdf_path, completed_at, owner_signed_at, requires_owner_signature",
     )
     .eq("id", envelopeId)
     .maybeSingle();
@@ -52,6 +58,9 @@ export default async function SuperAdminEsignDesignerPage({
       requiresOwnerSignature={env.requires_owner_signature !== false}
       modeConfigured={fields.length > 0}
       defaultOwnerName={defaultOwnerName}
+      backHref={backHref}
+      backLabel={backLabel}
+      allowRegeneratePdf={env.context_type === "platform_company_contract"}
     />
   );
 }

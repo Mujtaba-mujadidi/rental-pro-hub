@@ -55,5 +55,7 @@ export async function markPlatformNotificationReadAction(
     .eq("id", id)
     .eq("user_id", user.id);
   if (error) return { ok: false, error: error.message };
+  const { revalidateUnreadNotificationCount } = await import("@/lib/platform-notifications-read-cache");
+  revalidateUnreadNotificationCount(user.id);
   return { ok: true };
 }

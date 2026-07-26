@@ -80,7 +80,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ envelopeId: str
 
     const { data: env } = await admin
       .from("esign_envelopes")
-      .select("unsigned_pdf_path, signed_pdf_path, field_layout, field_values, status")
+      .select("unsigned_pdf_path, signed_pdf_path, field_layout, field_values, status, owner_signed_at")
       .eq("id", envelopeId)
       .maybeSingle();
 
@@ -127,6 +127,28 @@ export async function GET(req: Request, ctx: { params: Promise<{ envelopeId: str
     if (variant === "current") {
       const layout = (env.field_layout ?? []) as EsignFieldLayoutItem[];
       const values = parseFieldValues(env.field_values);
+      const ownerSignedAt = env.owner_signed_at as string | null | undefined;
+      const partialPath = env.signed_pdf_path as string | undefined;
+      const status = env.status as string;
+
+      // After owner signs we store a stamped partial PDF — prefer that over re-stamping field_values
+      // (field ids can drift after layout/PDF regenerate).
+      if (ownerSignedAt && partialPath && status !== "completed") {
+        const { data: partialData, error: partialErr } = await admin.storage
+          .from(ESIGN_BUCKET)
+          .download(partialPath);
+        if (!partialErr && partialData) {
+          const partialBuf = await partialData.arrayBuffer();
+          return new NextResponse(partialBuf, {
+            headers: {
+              "Content-Type": "application/pdf",
+              "Content-Disposition": 'inline; filename="contract-current.pdf"',
+              "Cache-Control": "private, no-store",
+            },
+          });
+        }
+      }
+
       const unsigned = await downloadUnsignedPdf(admin, envelopeId);
       if (!unsigned) return NextResponse.json({ error: "PDF not found" }, { status: 404 });
       try {

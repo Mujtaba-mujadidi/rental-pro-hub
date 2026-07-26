@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { cache } from "react";
-import { getCachedCompanyGate } from "@/lib/auth/company-gate-cache";
+import { getRentalCompanyGateCached } from "@/lib/auth/company-gate-cache";
 import { getAppProfile } from "@/lib/auth/profile";
+import { resolveRentalContractAccess } from "@/lib/auth/rental-contract-access";
 import { isSuperAdminEmail } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 
@@ -15,13 +16,21 @@ export type RentalSessionLifecycle =
       /** True when parent `company_contracts.status` is `active` (signed / legacy bootstrap). */
       contractActive: boolean;
       onboardingComplete: boolean;
+      /** Legal detail amendment approved; renewal signature still outstanding. */
+      renewalSignaturePending: boolean;
+      fleetTrackingEnabled: boolean;
+      registeredAddressLine1: string | null;
+      registeredAddressLine2: string | null;
+      registeredTown: string | null;
+      registeredCounty: string | null;
+      registeredPostcode: string | null;
     };
 
 async function loadRentalSessionLifecycleFromCompany(
   companyId: string,
 ): Promise<RentalSessionLifecycle> {
   try {
-    const gate = await getCachedCompanyGate(companyId);
+    const gate = await getRentalCompanyGateCached(companyId);
     return {
       kind: "rental",
       companyId,
@@ -29,25 +38,56 @@ async function loadRentalSessionLifecycleFromCompany(
       deletionPhase: gate.deletionPhase,
       contractActive: gate.contractActive,
       onboardingComplete: gate.onboardingComplete,
+      renewalSignaturePending: gate.renewalSignaturePending,
+      fleetTrackingEnabled: gate.fleetTrackingEnabled,
+      registeredAddressLine1: gate.registeredAddressLine1,
+      registeredAddressLine2: gate.registeredAddressLine2,
+      registeredTown: gate.registeredTown,
+      registeredCounty: gate.registeredCounty,
+      registeredPostcode: gate.registeredPostcode,
     };
   } catch {
     // Service role / cache unavailable — fall back to user-scoped client.
     const supabase = await createClient();
-    const [{ data: co }, { data: cc, error: ccErr }] = await Promise.all([
+    const [{ data: co }, { data: cc, error: ccErr }, { data: pendingAmendment }] = await Promise.all([
       supabase
         .from("companies")
-        .select("name, deletion_phase, rental_onboarding_completed_at")
+        .select(
+          "name, deletion_phase, rental_onboarding_completed_at, contract_status, fleet_tracking_enabled, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode",
+        )
         .eq("id", companyId)
         .maybeSingle(),
       supabase.from("company_contracts").select("status").eq("parent_company_id", companyId).maybeSingle(),
+      supabase
+        .from("company_contract_change_requests")
+        .select("id")
+        .eq("parent_company_id", companyId)
+        .eq("status", "pending_signature")
+        .in("review_status", ["awaiting_signature", "approved"])
+        .limit(1)
+        .maybeSingle(),
     ]);
+    const onboardingComplete = !!co?.rental_onboarding_completed_at;
+    const access = resolveRentalContractAccess({
+      contractStatus: ccErr ? null : ((cc?.status as string | undefined) ?? null),
+      companyContractStatus: (co?.contract_status as string | undefined) ?? null,
+      onboardingComplete,
+      hasPendingAmendmentSignature: Boolean(pendingAmendment?.id),
+    });
     return {
       kind: "rental",
       companyId,
       companyName: (co?.name as string | null | undefined)?.trim() || null,
       deletionPhase: (co?.deletion_phase as string) ?? "active",
-      contractActive: !ccErr && (cc?.status as string | undefined) === "active",
-      onboardingComplete: !!co?.rental_onboarding_completed_at,
+      contractActive: access.contractActive,
+      onboardingComplete,
+      renewalSignaturePending: access.renewalSignaturePending,
+      fleetTrackingEnabled: Boolean(co?.fleet_tracking_enabled),
+      registeredAddressLine1: (co?.registered_address_line1 as string | null) ?? null,
+      registeredAddressLine2: (co?.registered_address_line2 as string | null) ?? null,
+      registeredTown: (co?.registered_town as string | null) ?? null,
+      registeredCounty: (co?.registered_county as string | null) ?? null,
+      registeredPostcode: (co?.registered_postcode as string | null) ?? null,
     };
   }
 }
@@ -128,11 +168,6 @@ export function rentalPathRequiresRedirect(pathname: string, ctx: RentalSessionL
   if (!ctx.contractActive) {
     if (pathname === "/rental/awaiting-contract" || pathname.startsWith("/rental/awaiting-contract/")) return null;
     return "/rental/awaiting-contract";
-  }
-
-  if (pathname === "/rental/awaiting-contract" || pathname.startsWith("/rental/awaiting-contract/")) {
-    if (!ctx.onboardingComplete) return "/rental/onboarding";
-    return "/rental";
   }
 
   if (!ctx.onboardingComplete) {

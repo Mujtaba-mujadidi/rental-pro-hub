@@ -1,6 +1,7 @@
 import { appendEsignAudit } from "@/lib/esign/audit";
 import { generateAccessToken, generateOtp, hashSecret, safeEqualHash } from "@/lib/esign/crypto";
 import { sendEsignMail } from "@/lib/esign/mail";
+import { buildTransactionalEmailHtml } from "@/lib/email/transactional-layout";
 import { stampPdfWithFieldValues, type FieldValueMap } from "@/lib/esign/pdf-stamp";
 import { expandDerivedFieldValues } from "@/lib/esign/field-values";
 import {
@@ -340,10 +341,6 @@ export async function sendEnvelope(
   return { ok: true };
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
 /** Issue a fresh signing link + OTP and email each recipient. */
 async function issueSigningCredentialsAndNotify(
   admin: Admin,
@@ -385,16 +382,81 @@ async function issueSigningCredentialsAndNotify(
         "",
         "We collect your email, signature image, IP address, and device information for contract records under UK GDPR (performance of a contract). See the privacy notice on the signing page.",
       ].join("\n"),
-      html: `<p>You have been asked to sign: <strong>${escapeHtml(title)}</strong></p>
-<p><a href="${link}">Open signing page</a></p>
-<p>Your access code (OTP): <strong>${otp}</strong></p>
-<p>The code expires in 24 hours.</p>
-<p style="font-size:12px;color:#555">We collect your email, signature, IP address, and device information for contract records under UK GDPR. A privacy notice is shown before you sign.</p>`,
+      html: buildTransactionalEmailHtml({
+        paragraphs: [
+          `You have been asked to sign: ${title}.`,
+          "Open the signing page below, then enter your one-time access code when prompted.",
+        ],
+        cta: { label: "Open signing page", href: link },
+        otp: { code: otp },
+        footer:
+          "We collect your email, signature, IP address, and device information for contract records under UK GDPR. A privacy notice is shown before you sign.",
+      }),
     });
     if (!mail.ok) return { ok: false, error: mail.error };
   }
 
   return { ok: true };
+}
+
+/** Issue a signing path for a logged-in user whose email matches the envelope recipient. */
+export async function issueInAppRecipientSigningLink(
+  admin: Admin,
+  envelopeId: string,
+  sessionEmail: string,
+): Promise<{ ok: true; signPath: string } | { ok: false; error: string }> {
+  const trimmedId = envelopeId.trim();
+  const email = sessionEmail.trim().toLowerCase();
+  if (!trimmedId || !email) return { ok: false, error: "Missing signing context." };
+
+  const { data: env, error: envErr } = await admin
+    .from("esign_envelopes")
+    .select("id, status")
+    .eq("id", trimmedId)
+    .maybeSingle();
+  if (envErr || !env?.id) return { ok: false, error: envErr?.message ?? "Contract not found." };
+  if (env.status !== "sent" && env.status !== "viewed") {
+    return { ok: false, error: "This contract is not ready for your signature yet." };
+  }
+
+  const { data: recipients, error: rErr } = await admin
+    .from("esign_recipients")
+    .select("id, email, signed_at")
+    .eq("envelope_id", trimmedId);
+  if (rErr || !recipients?.length) {
+    return { ok: false, error: rErr?.message ?? "Recipient not found." };
+  }
+
+  const recipient = recipients.find((r) => (r.email as string)?.trim().toLowerCase() === email);
+  if (!recipient?.id) {
+    return {
+      ok: false,
+      error:
+        "Your login email is not the signatory for this contract. Use the email link sent to the signatory, or ask your administrator to update the signatory.",
+    };
+  }
+  if (recipient.signed_at) return { ok: false, error: "You have already signed this contract." };
+
+  const token = generateAccessToken();
+  const otp = generateOtp();
+  const otpExpires = new Date();
+  otpExpires.setHours(otpExpires.getHours() + 24);
+  const now = new Date().toISOString();
+
+  const { error: upRec } = await admin
+    .from("esign_recipients")
+    .update({
+      access_token_hash: hashSecret(token),
+      otp_hash: hashSecret(otp),
+      otp_expires_at: otpExpires.toISOString(),
+      otp_attempts: 0,
+      verified_at: now,
+      signed_at: null,
+    })
+    .eq("id", recipient.id);
+  if (upRec) return { ok: false, error: upRec.message };
+
+  return { ok: true, signPath: `/sign/${token}` };
 }
 
 /** Resend signing email with a new link and OTP while awaiting the recipient. */

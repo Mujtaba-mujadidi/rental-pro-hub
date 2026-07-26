@@ -1,125 +1,299 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireRentalCompanyArea, requireSuperAdmin } from "@/lib/auth/profile";
+import { requireRentalCompanyArea, requireSuperAdmin, type AppProfile } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
 import { canRequestContractChange } from "@/lib/auth/rental-permissions";
+import {
+  assertContractChangeHasDisplayChanges,
+  assertContractChangeHasSubstantiveChanges,
+  assertContractChangeIsFormattingOnly,
+  contractChangeRequestRowFromParsed,
+  parseContractChangeFormData,
+} from "@/lib/companies/contract-change-form";
+import type { ContractChangeFieldSnapshot } from "@/lib/companies/contract-change-diff";
+import {
+  companyDetailsUpdateFromSnapshot,
+  primarySubcompanyMirrorFromSnapshot,
+} from "@/lib/companies/company-details-update";
 import { notifyCompanyFinanceRoles, notifySuperAdmins } from "@/lib/platform-notifications";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-export type RequestContractChangeResult = { ok: true } | { ok: false; error: string };
+export type ContractChangeActionResult = { ok: true; draftId?: string } | { ok: false; error: string };
 export type ApplyContractChangeResult = { ok: true } | { ok: false; error: string };
 
-function nullIfEmpty(v: FormDataEntryValue | null): string | null {
-  if (v == null) return null;
-  const s = String(v).trim();
-  return s === "" ? null : s;
-}
+const COMPANY_SNAPSHOT_COLUMNS =
+  "name, legal_name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode, country, primary_contact_first_name, primary_contact_last_name, primary_contact_dob, primary_contact_phone, primary_contact_email, notes";
 
-export async function requestRentalCompanyContractChangeAction(
-  formData: FormData,
-): Promise<RequestContractChangeResult> {
-  const { profile } = await requireRentalCompanyArea();
+async function loadChangeContext(profile: AppProfile) {
   const frozen = await assertRentalCompanyWritable(profile);
-  if (!frozen.ok) return { ok: false, error: frozen.error };
+  if (!frozen.ok) return { ok: false as const, error: frozen.error };
   const parentCompanyId = profile.company_id?.trim();
-  if (!parentCompanyId) return { ok: false, error: "Missing rental company context." };
-
+  if (!parentCompanyId) return { ok: false as const, error: "Missing rental company context." };
   if (!canRequestContractChange(profile)) {
-    return { ok: false, error: "Only company owners and admins can request legal or contract changes." };
-  }
-
-  const name = nullIfEmpty(formData.get("name"));
-  const firstName = nullIfEmpty(formData.get("primary_contact_first_name"));
-  const lastName = nullIfEmpty(formData.get("primary_contact_last_name"));
-  const contactEmail = nullIfEmpty(formData.get("primary_contact_email"));
-  const contactPhone = nullIfEmpty(formData.get("primary_contact_phone"));
-  const dobRaw = nullIfEmpty(formData.get("primary_contact_dob"));
-
-  if (!name) return { ok: false, error: "Company name is required." };
-  if (!firstName) return { ok: false, error: "Primary contact first name is required." };
-  if (!lastName) return { ok: false, error: "Primary contact last name is required." };
-  if (!contactEmail) return { ok: false, error: "Primary contact email is required." };
-  if (!contactPhone) return { ok: false, error: "Primary contact phone is required." };
-  if (!dobRaw) return { ok: false, error: "Primary contact date of birth is required." };
-
-  let dob: string;
-  try {
-    const d = new Date(dobRaw);
-    if (Number.isNaN(d.getTime())) return { ok: false, error: "Invalid date of birth." };
-    dob = d.toISOString().slice(0, 10);
-  } catch {
-    return { ok: false, error: "Invalid date of birth." };
+    return {
+      ok: false as const,
+      error: "Only company owners and admins can request legal or contract changes.",
+    };
   }
 
   let admin: ReturnType<typeof createSupabaseAdminClient>;
   try {
     admin = createSupabaseAdminClient();
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Server configuration error." };
+    return { ok: false as const, error: e instanceof Error ? e.message : "Server configuration error." };
   }
 
-  const { data: pending } = await admin
+  const { data: currentCompany, error: companyErr } = await admin
+    .from("companies")
+    .select(COMPANY_SNAPSHOT_COLUMNS)
+    .eq("id", parentCompanyId)
+    .maybeSingle();
+  if (companyErr || !currentCompany) {
+    return { ok: false as const, error: companyErr?.message ?? "Company not found." };
+  }
+
+  return {
+    ok: true as const,
+    admin,
+    parentCompanyId,
+    currentCompany: currentCompany as ContractChangeFieldSnapshot,
+    profileId: profile.id,
+  };
+}
+
+function revalidateContractChangePaths() {
+  revalidatePath("/rental");
+  revalidatePath("/rental/contract");
+  revalidatePath("/super-admin/companies");
+  revalidatePath("/super-admin/contract-changes");
+}
+
+/** Save or update a server-side draft (does not notify super admin). */
+export async function saveRentalContractChangeDraftAction(formData: FormData): Promise<ContractChangeActionResult> {
+  const { profile } = await requireRentalCompanyArea();
+  const ctx = await loadChangeContext(profile);
+  if (!ctx.ok) return ctx;
+
+  const parsed = parseContractChangeFormData(formData);
+  if (!parsed.ok) return parsed;
+
+  const changeCheck = assertContractChangeHasSubstantiveChanges(ctx.currentCompany, parsed.data.proposed);
+  if (!changeCheck.ok) return changeCheck;
+
+  const { data: submitted } = await ctx.admin
     .from("company_contract_change_requests")
     .select("id")
-    .eq("parent_company_id", parentCompanyId)
+    .eq("parent_company_id", ctx.parentCompanyId)
     .eq("status", "pending_signature")
     .neq("review_status", "rejected")
-    .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (pending?.id) {
+  if (submitted?.id) {
+    return { ok: false, error: "A contract change is already with platform staff. You cannot edit until it is completed or rejected." };
+  }
+
+  const row = contractChangeRequestRowFromParsed(
+    ctx.parentCompanyId,
+    ctx.profileId,
+    parsed.data,
+    "draft",
+    "draft",
+  );
+
+  const { data: existingDraft } = await ctx.admin
+    .from("company_contract_change_requests")
+    .select("id")
+    .eq("parent_company_id", ctx.parentCompanyId)
+    .eq("status", "draft")
+    .maybeSingle();
+
+  if (existingDraft?.id) {
+    const { error } = await ctx.admin.from("company_contract_change_requests").update(row).eq("id", existingDraft.id);
+    if (error) return { ok: false, error: error.message };
+    revalidateContractChangePaths();
+    return { ok: true, draftId: existingDraft.id };
+  }
+
+  const { data: inserted, error: insertErr } = await ctx.admin
+    .from("company_contract_change_requests")
+    .insert(row)
+    .select("id")
+    .single();
+  if (insertErr) return { ok: false, error: insertErr.message };
+
+  revalidateContractChangePaths();
+  return { ok: true, draftId: inserted.id };
+}
+
+/** Submit a saved draft (or current form) for super-admin review. */
+export async function submitRentalContractChangeDraftAction(formData: FormData): Promise<ContractChangeActionResult> {
+  const { profile } = await requireRentalCompanyArea();
+  const ctx = await loadChangeContext(profile);
+  if (!ctx.ok) return ctx;
+
+  const parsed = parseContractChangeFormData(formData);
+  if (!parsed.ok) return parsed;
+
+  const changeCheck = assertContractChangeHasSubstantiveChanges(ctx.currentCompany, parsed.data.proposed);
+  if (!changeCheck.ok) return changeCheck;
+
+  const { data: submitted } = await ctx.admin
+    .from("company_contract_change_requests")
+    .select("id")
+    .eq("parent_company_id", ctx.parentCompanyId)
+    .eq("status", "pending_signature")
+    .neq("review_status", "rejected")
+    .limit(1)
+    .maybeSingle();
+  if (submitted?.id) {
     return { ok: false, error: "A contract change is already in progress." };
   }
 
-  const transitionRaw = nullIfEmpty(formData.get("transition_type")) ?? "detail_change";
-  const transition_type = transitionRaw === "new_legal_entity" ? "new_legal_entity" : "detail_change";
+  const row = contractChangeRequestRowFromParsed(
+    ctx.parentCompanyId,
+    ctx.profileId,
+    parsed.data,
+    "pending_signature",
+    "pending_review",
+  );
 
-  const postcodeRaw = nullIfEmpty(formData.get("registered_postcode"));
-  const registeredPostcode = postcodeRaw ? postcodeRaw.trim().toUpperCase().replace(/\s+/g, "") : null;
+  const { data: existingDraft } = await ctx.admin
+    .from("company_contract_change_requests")
+    .select("id")
+    .eq("parent_company_id", ctx.parentCompanyId)
+    .eq("status", "draft")
+    .maybeSingle();
 
-  const { error: insertErr } = await admin.from("company_contract_change_requests").insert({
-    parent_company_id: parentCompanyId,
-    requested_by: profile.id,
-    status: "pending_signature",
-    review_status: "pending_review",
-    transition_type,
-    proposed_name: name,
-    proposed_legal_name: nullIfEmpty(formData.get("legal_name")),
-    proposed_company_number: nullIfEmpty(formData.get("company_number")),
-    proposed_registered_address_line1: nullIfEmpty(formData.get("registered_address_line1")),
-    proposed_registered_address_line2: nullIfEmpty(formData.get("registered_address_line2")),
-    proposed_registered_town: nullIfEmpty(formData.get("registered_town")),
-    proposed_registered_county: nullIfEmpty(formData.get("registered_county")),
-    proposed_registered_postcode: registeredPostcode,
-    proposed_country: nullIfEmpty(formData.get("country")) ?? "GB",
-    proposed_primary_contact_first_name: firstName,
-    proposed_primary_contact_last_name: lastName,
-    proposed_primary_contact_dob: dob,
-    proposed_primary_contact_phone: contactPhone,
-    proposed_primary_contact_email: contactEmail,
-    proposed_notes: nullIfEmpty(formData.get("notes")),
-    signatory_name: nullIfEmpty(formData.get("signatory_name")),
-    signatory_email: nullIfEmpty(formData.get("signatory_email")),
-    signatory_title: nullIfEmpty(formData.get("signatory_title")),
-  });
-  if (insertErr) return { ok: false, error: insertErr.message };
+  let changeId: string;
+  if (existingDraft?.id) {
+    const { error } = await ctx.admin.from("company_contract_change_requests").update(row).eq("id", existingDraft.id);
+    if (error) return { ok: false, error: error.message };
+    changeId = existingDraft.id;
+  } else {
+    const { data: inserted, error: insertErr } = await ctx.admin
+      .from("company_contract_change_requests")
+      .insert(row)
+      .select("id")
+      .single();
+    if (insertErr || !inserted?.id) return { ok: false, error: insertErr?.message ?? "Could not create request." };
+    changeId = inserted.id;
+  }
 
-  await notifySuperAdmins(admin, "contract_change_requested", {
-    parent_company_id: parentCompanyId,
-    transition_type,
-    requested_by: profile.id,
-  });
-
-  const { error: upErr } = await admin
+  const { error: upErr } = await ctx.admin
     .from("companies")
     .update({ contract_status: "pending_renewal" })
-    .eq("id", parentCompanyId);
-  if (upErr) return { ok: false, error: upErr.message };
+    .eq("id", ctx.parentCompanyId);
+  if (upErr) {
+    await ctx.admin
+      .from("company_contract_change_requests")
+      .update({ status: "draft", review_status: "draft" })
+      .eq("id", changeId);
+    return { ok: false, error: upErr.message };
+  }
 
-  revalidatePath("/rental");
-  revalidatePath("/super-admin/companies");
+  await notifySuperAdmins(ctx.admin, "contract_change_requested", {
+    parent_company_id: ctx.parentCompanyId,
+    transition_type: parsed.data.transition_type,
+    requested_by: ctx.profileId,
+    change_id: changeId,
+  });
+
+  revalidateContractChangePaths();
+  return { ok: true, draftId: changeId };
+}
+
+/** Save formatting-only legal detail tweaks directly — no contract renewal. */
+export async function saveRentalCompanyFormattingDetailsAction(
+  formData: FormData,
+): Promise<ContractChangeActionResult> {
+  const { profile } = await requireRentalCompanyArea();
+  const ctx = await loadChangeContext(profile);
+  if (!ctx.ok) return ctx;
+
+  const parsed = parseContractChangeFormData(formData);
+  if (!parsed.ok) return parsed;
+  if (parsed.data.transition_type !== "detail_change") {
+    return {
+      ok: false,
+      error: "Replacing your legal entity always requires a new platform agreement. Switch to that option and submit for review.",
+    };
+  }
+
+  const formattingCheck = assertContractChangeIsFormattingOnly(
+    ctx.currentCompany,
+    parsed.data.proposedForDiff,
+  );
+  if (!formattingCheck.ok) return formattingCheck;
+
+  const { data: submitted } = await ctx.admin
+    .from("company_contract_change_requests")
+    .select("id")
+    .eq("parent_company_id", ctx.parentCompanyId)
+    .eq("status", "pending_signature")
+    .neq("review_status", "rejected")
+    .limit(1)
+    .maybeSingle();
+  if (submitted?.id) {
+    return {
+      ok: false,
+      error: "A contract change is already with platform staff. Wait until it is completed or rejected before updating details.",
+    };
+  }
+
+  const companyUpdate = companyDetailsUpdateFromSnapshot(parsed.data.proposed);
+  const { error: companyErr } = await ctx.admin
+    .from("companies")
+    .update(companyUpdate)
+    .eq("id", ctx.parentCompanyId);
+  if (companyErr) return { ok: false, error: companyErr.message };
+
+  const { data: primarySubcompany } = await ctx.admin
+    .from("subcompanies")
+    .select("id")
+    .eq("parent_company_id", ctx.parentCompanyId)
+    .eq("is_primary", true)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (primarySubcompany?.id) {
+    const mirror = primarySubcompanyMirrorFromSnapshot(parsed.data.proposed);
+    const { error: subErr } = await ctx.admin.from("subcompanies").update(mirror).eq("id", primarySubcompany.id);
+    if (subErr) return { ok: false, error: subErr.message };
+  }
+
+  await ctx.admin
+    .from("company_contract_change_requests")
+    .delete()
+    .eq("parent_company_id", ctx.parentCompanyId)
+    .eq("status", "draft");
+
+  revalidateContractChangePaths();
   return { ok: true };
+}
+
+export async function discardRentalContractChangeDraftAction(): Promise<ContractChangeActionResult> {
+  const { profile } = await requireRentalCompanyArea();
+  const ctx = await loadChangeContext(profile);
+  if (!ctx.ok) return ctx;
+
+  const { error } = await ctx.admin
+    .from("company_contract_change_requests")
+    .delete()
+    .eq("parent_company_id", ctx.parentCompanyId)
+    .eq("status", "draft");
+  if (error) return { ok: false, error: error.message };
+
+  revalidateContractChangePaths();
+  return { ok: true };
+}
+
+/** @deprecated Use saveRentalContractChangeDraftAction + submitRentalContractChangeDraftAction */
+export async function requestRentalCompanyContractChangeAction(formData: FormData): Promise<ContractChangeActionResult> {
+  const save = await saveRentalContractChangeDraftAction(formData);
+  if (!save.ok) return save;
+  return submitRentalContractChangeDraftAction(formData);
 }
 
 export async function applySignedCompanyContractChangeAction(
@@ -154,7 +328,6 @@ export async function applySignedCompanyContractChangeAction(
     });
   }
 
-  revalidatePath("/rental");
-  revalidatePath("/super-admin/companies");
+  revalidateContractChangePaths();
   return { ok: true };
 }

@@ -1,5 +1,6 @@
 import { formatUkDate } from "@/lib/datetime/uk";
 import { sendEsignMail } from "@/lib/esign/mail";
+import { buildTransactionalEmailHtml, escapeHtml } from "@/lib/email/transactional-layout";
 
 export type HireSigningBundleEmailAgreement = {
   lengthLabel: string;
@@ -19,14 +20,6 @@ export type HireSigningBundleEmailInput = {
   signingUrl: string;
   otp: string;
 };
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
 
 export async function sendHireSigningBundleEmail(
   input: HireSigningBundleEmailInput,
@@ -63,39 +56,32 @@ export async function sendHireSigningBundleEmail(
     "We collect your email, signature image, IP address, and device information for contract records under UK GDPR.",
   ].join("\n");
 
-  const agreementRows = input.agreements
-    .map(
-      (a) =>
-        `<tr><td style="padding:6px 0;color:#64748b">${escapeHtml(a.lengthLabel)}</td><td style="padding:6px 0">Ends ${escapeHtml(formatUkDate(a.endDate))}</td></tr>`,
-    )
-    .join("");
+  const tableRows = [
+    { label: "Vehicle", value: `<strong>${escapeHtml(vrm)}</strong> — ${escapeHtml(input.vehicleLabel)}` },
+    { label: "Start", value: escapeHtml(formatUkDate(input.startDate)) },
+    { label: "Rent", value: escapeHtml(input.rentLabel) },
+    ...input.agreements.map((a) => ({
+      label: a.lengthLabel,
+      value: `Ends ${escapeHtml(formatUkDate(a.endDate))}`,
+    })),
+  ];
 
-  const html = `
-    <div style="font-family:system-ui,sans-serif;max-width:560px;color:#0f172a">
-      <p>Hello ${escapeHtml(driverName)},</p>
-      <p><strong>${escapeHtml(companyName)}</strong> has sent you ${
+  const html = buildTransactionalEmailHtml({
+    greeting: driverName,
+    paragraphs: [
+      `${companyName} has sent you ${
         unsignedCount === 1
-          ? `a vehicle hire agreement to sign for <strong>${escapeHtml(vrm)}</strong>.`
-          : `<strong>${unsignedCount}</strong> vehicle hire agreements to sign for <strong>${escapeHtml(vrm)}</strong>.`
-      }</p>
-      <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:14px">
-        <tr><td style="padding:6px 0;color:#64748b">Vehicle</td><td style="padding:6px 0"><strong>${escapeHtml(vrm)}</strong> — ${escapeHtml(input.vehicleLabel)}</td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Start</td><td style="padding:6px 0">${escapeHtml(formatUkDate(input.startDate))}</td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Rent</td><td style="padding:6px 0">${escapeHtml(input.rentLabel)}</td></tr>
-      </table>
-      ${
-        input.agreements.length
-          ? `<p style="font-size:14px;font-weight:600;margin:0 0 8px">${unsignedCount > 1 ? "Agreements to sign" : "Agreement"}</p>
-      <table style="width:100%;border-collapse:collapse;margin:0 0 16px;font-size:14px">${agreementRows}</table>`
-          : ""
-      }
-      <p style="color:#475569;font-size:14px">You will ${unsignedCount > 1 ? "sign each agreement in order on one page" : "review and sign the agreement on the signing page"}.</p>
-      <p><a href="${escapeHtml(input.signingUrl)}" style="display:inline-block;background:#0f4c5c;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Open signing page</a></p>
-      <p style="font-size:14px">Your access code (OTP): <strong style="letter-spacing:0.08em">${escapeHtml(input.otp)}</strong></p>
-      <p style="font-size:13px;color:#64748b">The code expires in 24 hours. Do not share this email.</p>
-      <p style="font-size:12px;color:#64748b;margin-top:20px">We collect your email, signature image, IP address, and device information for contract records under UK GDPR.</p>
-    </div>
-  `;
+          ? `a vehicle hire agreement to sign for ${vrm}.`
+          : `${unsignedCount} vehicle hire agreements to sign for ${vrm}.`
+      }`,
+      unsignedCount > 1
+        ? "You will sign each agreement in order on one page."
+        : "Review and sign the agreement on the signing page.",
+    ],
+    tableRows,
+    cta: { label: "Open signing page", href: input.signingUrl },
+    otp: { code: input.otp },
+  });
 
   try {
     await sendEsignMail({ to: input.to, subject, text, html });

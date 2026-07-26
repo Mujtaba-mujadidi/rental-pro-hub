@@ -1,49 +1,20 @@
-import { createClient } from "@/lib/supabase/server";
+import Link from "next/link";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
-import { canRequestContractChange } from "@/lib/auth/rental-permissions";
-import { RentalContractDetailsCard } from "./rental-contract-details-card";
+import { createClient } from "@/lib/supabase/server";
+import { rentalContractCopy } from "@/lib/rental-contract-copy";
 import { RentalDisplayNameSetting } from "./rental-display-name-setting";
 
 export default async function RentalCompanyHomePage() {
   const { profile } = await requireRentalCompanyArea();
   const user = await getSessionUser();
   const supabase = await createClient();
+  const companyId = profile.company_id ?? "";
+
   const { data: company } = await supabase
     .from("companies")
-    .select(
-      "id, name, legal_name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode, country, primary_contact_first_name, primary_contact_last_name, primary_contact_dob, primary_contact_phone, primary_contact_email, notes, contract_status, contract_version",
-    )
-    .eq("id", profile.company_id ?? "")
+    .select("name")
+    .eq("id", companyId)
     .maybeSingle();
-  const { data: pendingChange } = await supabase
-    .from("company_contract_change_requests")
-    .select("id, created_at, review_status, transition_type")
-    .eq("parent_company_id", profile.company_id ?? "")
-    .eq("status", "pending_signature")
-    .neq("review_status", "rejected")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const { data: contractRow } = await supabase
-    .from("company_contracts")
-    .select("current_version_id")
-    .eq("parent_company_id", profile.company_id ?? "")
-    .maybeSingle();
-
-  let termsSnapshot: Record<string, unknown> | null = null;
-  const cvId = contractRow?.current_version_id;
-  if (cvId) {
-    const { data: verRow } = await supabase
-      .from("company_contract_versions")
-      .select("terms_snapshot")
-      .eq("id", cvId)
-      .maybeSingle();
-    const raw = verRow?.terms_snapshot;
-    if (raw && typeof raw === "object" && !Array.isArray(raw) && Object.keys(raw as object).length > 0) {
-      termsSnapshot = raw as Record<string, unknown>;
-    }
-  }
 
   const personalLabel =
     profile.display_name?.trim() || user?.email?.split("@")[0]?.trim() || "User";
@@ -61,21 +32,23 @@ export default async function RentalCompanyHomePage() {
         ) : null}
       </p>
       <RentalDisplayNameSetting initialName={profile.display_name ?? ""} />
-      <p className="rph-muted text-sm max-w-2xl">
+      <p className="rph-muted max-w-2xl text-sm">
         Your account is active. Manage fleet under{" "}
-        <a href="/rental/vehicles" className="font-medium text-rph-rail underline-offset-2 hover:underline dark:text-rph-rail-soft">
+        <Link
+          href="/rental/vehicles"
+          className="font-medium text-rph-link underline-offset-2 hover:text-rph-link-hover hover:underline"
+        >
           Vehicles
-        </a>
-        .
+        </Link>
+        . View your platform agreement or request a legal amendment on the{" "}
+        <Link
+          href="/rental/contract"
+          className="font-medium text-rph-link underline-offset-2 hover:text-rph-link-hover hover:underline"
+        >
+          {rentalContractCopy.platformAgreementNav}
+        </Link>{" "}
+        page.
       </p>
-      {company ? (
-        <RentalContractDetailsCard
-          company={company}
-          termsSnapshot={termsSnapshot}
-          hasPendingChange={!!pendingChange?.id || company.contract_status === "pending_renewal"}
-          canRequestContractChange={canRequestContractChange(profile)}
-        />
-      ) : null}
     </div>
   );
 }

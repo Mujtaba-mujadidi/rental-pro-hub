@@ -1,27 +1,27 @@
-import { createClient } from "@/lib/supabase/server";
+import { requireSuperAdmin } from "@/lib/auth/profile";
+import { ADMIN_AGREEMENT_CHANGE_REQUESTS_NAV } from "@/lib/admin/contract-change-display";
+import { fetchAdminContractChangeQueue } from "@/lib/admin/contract-change-requests-query";
 import { ContractChangesClient } from "./contract-changes-client";
 
 export default async function ContractChangesPage() {
-  const supabase = await createClient();
-  const { data: rows } = await supabase
-    .from("company_contract_change_requests")
-    .select(
-      "id, parent_company_id, status, review_status, transition_type, created_at, proposed_name, proposed_legal_name",
-    )
-    .eq("status", "pending_signature")
-    .order("created_at", { ascending: false })
-    .limit(100);
+  await requireSuperAdmin();
+
+  const result = await fetchAdminContractChangeQueue();
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="rph-h1">Contract changes</h1>
+        <h1 className="rph-h1">{ADMIN_AGREEMENT_CHANGE_REQUESTS_NAV}</h1>
         <p className="rph-muted mt-2 max-w-3xl text-sm">
-          Review rental requests first. For in-place legal updates, move to awaiting signature then apply. New legal entity
-          requests are completed with the dedicated action (migrates memberships).
+          Review rental company agreement change requests, approve when correct, then prepare the renewal contract and
+          send it for e-signature. Company records update automatically when the rental company signs.
         </p>
       </div>
-      <ContractChangesClient rows={(rows ?? []) as never} />
+      {!result.ok ? (
+        <p className="rph-alert-error text-sm">Could not load contract change requests: {result.error}</p>
+      ) : (
+        <ContractChangesClient openRequests={result.openRequests} stuckRenewals={result.stuckRenewals} />
+      )}
     </div>
   );
 }

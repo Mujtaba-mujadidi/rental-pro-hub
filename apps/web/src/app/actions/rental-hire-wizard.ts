@@ -128,14 +128,20 @@ export async function listHireContractsAction(
   if (!companyId) return { ok: false, error: "No active company." };
 
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const vehicleFilter = vehicleId?.trim();
+
+  let groupsQuery = supabase
     .from("vehicle_hire_groups")
     .select(
       "id, vehicle_id, status, wizard_step, driver_access_status, start_date, rent_amount_gbp, rent_cadence, driver_licence_number, driver_email, updated_at, signing_bundle_sent_at, vehicles(vrm, make, model)",
     )
-    .eq("parent_company_id", companyId)
-    .order("updated_at", { ascending: false })
-    .limit(200);
+    .eq("parent_company_id", companyId);
+
+  if (vehicleFilter) {
+    groupsQuery = groupsQuery.eq("vehicle_id", vehicleFilter);
+  }
+
+  const { data, error } = await groupsQuery.order("updated_at", { ascending: false }).limit(vehicleFilter ? 100 : 200);
 
   if (error) return { ok: false, error: error.message };
 
@@ -162,11 +168,9 @@ export async function listHireContractsAction(
     }
   }
 
-  const vehicleFilter = vehicleId?.trim();
   const term = search.trim().toLowerCase();
   const rows: HireContractTableRow[] = [];
   for (const g of data ?? []) {
-    if (vehicleFilter && (g.vehicle_id as string | null) !== vehicleFilter) continue;
     const vehicle = (g as { vehicles?: { vrm?: string; make?: string; model?: string } | null }).vehicles;
     const vrm = vehicle?.vrm ?? null;
     const vehicleLabel = vehicle ? [vehicle.make, vehicle.model].filter(Boolean).join(" ") : null;

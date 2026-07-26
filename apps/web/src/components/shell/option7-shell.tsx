@@ -6,7 +6,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { APP_NAME } from "@rph/shared";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { NotificationBell } from "@/components/shell/notification-bell";
+import { RentalCompanyPageHeader } from "@/components/shell/rental-company-page-header";
+import { RentalRenewalSignatureBanner } from "@/components/shell/rental-renewal-signature-banner";
 import { UserAccountMenu } from "@/components/shell/user-account-menu";
+import { rentalContractCopy } from "@/lib/rental-contract-copy";
+import { ADMIN_AGREEMENT_CHANGE_REQUESTS_NAV } from "@/lib/admin/contract-change-display";
 
 const SIDEBAR_COLLAPSED_KEY = "rph-sidebar-collapsed-opt7";
 
@@ -102,6 +106,12 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
     if (pathname === "/rental/billing" || pathname.startsWith("/rental/billing/")) {
       return [{ label: "Home", href: "/rental" }, { label: "Billing", href: "/rental/billing" }];
     }
+    if (pathname === "/rental/contract" || pathname.startsWith("/rental/contract/")) {
+      return [
+        { label: "Home", href: "/rental" },
+        { label: rentalContractCopy.platformAgreementNav, href: "/rental/contract" },
+      ];
+    }
     if (pathname === "/rental/notifications" || pathname.startsWith("/rental/notifications/")) {
       return [{ label: "Home", href: "/rental" }, { label: "Notifications", href: "/rental/notifications" }];
     }
@@ -134,7 +144,7 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
       return [{ label: "Home", href: "/super-admin" }, { label: "Billing", href: "/super-admin/billing" }];
     }
     if (pathname === "/super-admin/contract-changes" || pathname.startsWith("/super-admin/contract-changes/")) {
-      return [{ label: "Home", href: "/super-admin" }, { label: "Contract changes", href: "/super-admin/contract-changes" }];
+      return [{ label: "Home", href: "/super-admin" }, { label: ADMIN_AGREEMENT_CHANGE_REQUESTS_NAV, href: "/super-admin/contract-changes" }];
     }
     if (pathname === "/super-admin/settings/contract-terms") {
       return [
@@ -270,6 +280,8 @@ export function Option7Shell({
   driverUnreadNotifications = 0,
   fleetTrackingEnabled = false,
   rentalUnreadNotifications = 0,
+  rentalRenewalBanner = null,
+  rentalCompanyHeader = null,
   children,
 }: {
   variant: ShellVariant;
@@ -278,6 +290,10 @@ export function Option7Shell({
   driverNavMode?: DriverNavMode;
   /** Shown for drivers when licences must be reviewed (expiry / address). */
   driverLicenceBanner?: { title: string; bullets: string[] } | null;
+  /** Pending renewal contract signature for established rental tenants. */
+  rentalRenewalBanner?: { signReady: boolean; signBlockedReason: string | null } | null;
+  /** Parent company name and registered address shown below breadcrumbs on rental pages. */
+  rentalCompanyHeader?: { name: string; address: string | null } | null;
   /** Pending hire access requests for driver nav badge. */
   driverPendingHireRequests?: number;
   /** Show My hire nav when the driver has a reserved or active hire. */
@@ -357,7 +373,7 @@ export function Option7Shell({
           active={pathname === "/super-admin/contract-changes" || pathname.startsWith("/super-admin/contract-changes/")}
           onNavigate={closeMobileNav}
         >
-          Contract changes
+          {ADMIN_AGREEMENT_CHANGE_REQUESTS_NAV}
         </NavLink>
         <NavLink
           href="/super-admin/settings/contract-terms"
@@ -422,6 +438,13 @@ export function Option7Shell({
           onNavigate={closeMobileNav}
         >
           Billing
+        </NavLink>
+        <NavLink
+          href="/rental/contract"
+          active={pathname === "/rental/contract" || pathname.startsWith("/rental/contract/")}
+          onNavigate={closeMobileNav}
+        >
+          {rentalContractCopy.platformAgreementNav}
         </NavLink>
         <NavLink
           href="/rental/notifications"
@@ -660,6 +683,14 @@ export function Option7Shell({
 
           <div className="border-t border-rph-border bg-rph-chrome px-4 py-2">
             <Breadcrumbs items={crumbs} />
+            {variant === "rental_company" && rentalCompanyHeader ? (
+              <div className="mt-2">
+                <RentalCompanyPageHeader
+                  name={rentalCompanyHeader.name}
+                  address={rentalCompanyHeader.address}
+                />
+              </div>
+            ) : null}
           </div>
         </header>
 
@@ -685,6 +716,12 @@ export function Option7Shell({
                   Update licences →
                 </Link>
               </div>
+            ) : null}
+            {variant === "rental_company" && rentalRenewalBanner ? (
+              <RentalRenewalSignatureBanner
+                signReady={rentalRenewalBanner.signReady}
+                signBlockedReason={rentalRenewalBanner.signBlockedReason}
+              />
             ) : null}
             <div className="rph-panel w-full min-w-0 max-w-none p-3 sm:p-4">
               {children}

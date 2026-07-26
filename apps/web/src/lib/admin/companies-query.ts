@@ -1,4 +1,5 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { loadOpenAgreementChangeEsignByCompanyIds, resolveCanonicalPlatformEsignEnvelopeIds } from "@/lib/esign/open-agreement-change-esign";
 import type { AdminCompanyListRow } from "@/lib/admin/company-list-shared";
 
 export type CompanyListStatusFilter = "all" | "active" | "inactive" | "pending";
@@ -84,8 +85,11 @@ function mapRow(
     offboarding_ends_at?: string | null;
   },
   agreementById: Map<string, string>,
+  openChangeById: Map<string, { changeRequestId: string; envelopeId: string | null }>,
+  canonicalEsignById: Map<string, string>,
 ): AdminCompanyListRow {
   const uid = r.primary_contact_user_id?.trim() || null;
+  const openChange = openChangeById.get(r.id);
   return {
     id: r.id,
     name: r.name ?? "",
@@ -100,6 +104,9 @@ function mapRow(
     status: r.status ?? "active",
     contractStatus: r.contract_status,
     agreementContractStatus: agreementById.get(r.id) || null,
+    openChangeRequestId: openChange?.changeRequestId ?? null,
+    openChangeEsignEnvelopeId: openChange?.envelopeId ?? null,
+    platformEsignEnvelopeId: canonicalEsignById.get(r.id) ?? null,
     createdAt: r.created_at ?? "",
     hasLogo: r.logo_storage_path != null && r.logo_storage_path.length > 0,
     inviteLastSentAt: r.invite_last_sent_at,
@@ -186,7 +193,23 @@ export async function fetchCompaniesPage(params: FetchCompaniesPageParams): Prom
     raw.map((row) => row.id),
   );
 
-  const rows = raw.map((row) => mapRow(row, agreementById));
+  const openChangeRaw = await loadOpenAgreementChangeEsignByCompanyIds(
+    admin,
+    raw.map((row) => row.id),
+  );
+  const openChangeById = new Map(
+    [...openChangeRaw.entries()].map(([companyId, change]) => [
+      companyId,
+      { changeRequestId: change.changeRequestId, envelopeId: change.envelopeId },
+    ]),
+  );
+
+  const canonicalEsignById = await resolveCanonicalPlatformEsignEnvelopeIds(
+    admin,
+    raw.map((row) => row.id),
+  );
+
+  const rows = raw.map((row) => mapRow(row, agreementById, openChangeById, canonicalEsignById));
 
   return { ok: true, rows, total: count ?? 0 };
 }

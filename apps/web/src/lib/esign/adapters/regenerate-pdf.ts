@@ -1,6 +1,8 @@
-import { buildContractPdfDocument } from "@/lib/esign/contract-document-text";
+import {
+  attachPlatformLogoToContractPdf,
+  buildPlatformCompanyContractPdfDocument,
+} from "@/lib/esign/platform-contract-pdf";
 import { createProfessionalContractPdf } from "@/lib/esign/pdf-generate";
-import { loadCompanyLogoForContractPdf } from "@/lib/companies/company-logo";
 import { ESIGN_BUCKET, type EsignFieldLayoutItem } from "@/lib/esign/types";
 import type { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -49,12 +51,11 @@ export async function regenerateEnvelopePdfForSignatureMode(
     companyName = company?.name ?? null;
   }
 
-  const pdfDoc = buildContractPdfDocument({
+  const pdfDoc = buildPlatformCompanyContractPdfDocument({
     termsSnapshot: version.terms_snapshot as Record<string, unknown> | null,
     commercialSnapshot: version.commercial_snapshot as Record<string, unknown> | null,
     legalSnapshot: version.legal_snapshot as Record<string, unknown> | null,
-    companyName,
-    platformName: "RMS",
+    customerCompanyName: companyName,
   });
   pdfDoc.signatureMode = mode;
   if (mode === "recipient_only") {
@@ -65,13 +66,7 @@ export async function regenerateEnvelopePdfForSignatureMode(
     );
   }
 
-  if (parentId) {
-    const logo = await loadCompanyLogoForContractPdf(admin, parentId);
-    if (logo) {
-      pdfDoc.logoBytes = logo.bytes;
-      pdfDoc.logoContentType = logo.contentType;
-    }
-  }
+  await attachPlatformLogoToContractPdf(pdfDoc);
 
   const rendered = await createProfessionalContractPdf(pdfDoc);
   const path = (env.unsigned_pdf_path as string) || `${envelopeId}/unsigned.pdf`;
@@ -79,12 +74,12 @@ export async function regenerateEnvelopePdfForSignatureMode(
     contentType: "application/pdf",
     upsert: true,
   });
-  if (upErr) return { ok: false, error: `PDF update failed: ${upErr.message}` };
+  if (upErr) return { ok: false, error: upErr.message };
 
   await admin
     .from("esign_envelopes")
     .update({
-      unsigned_pdf_path: path,
+      field_layout: rendered.suggestedFields,
       suggested_field_layout: rendered.suggestedFields,
     })
     .eq("id", envelopeId);

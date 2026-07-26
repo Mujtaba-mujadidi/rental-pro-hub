@@ -9,6 +9,7 @@ import {
   applyOwnerSignatureQuickAction,
   configureEsignSignatureModeAction,
   getOwnerSavedSignatureAction,
+  regeneratePlatformCompanyContractPdfAction,
   resendEsignEnvelopeAction,
   saveEsignFieldLayoutAction,
   sendEsignEnvelopeAction,
@@ -34,6 +35,7 @@ const superAdminDesignerActions: EsignDesignerActions = {
   getOwnerSavedSignature: getOwnerSavedSignatureAction,
   applyOwnerSignatureQuick: applyOwnerSignatureQuickAction,
   configureSignatureMode: configureEsignSignatureModeAction,
+  refreshContractPdf: regeneratePlatformCompanyContractPdfAction,
 };
 
 export { EsignSignClient } from "@/components/esign/signing-viewer";
@@ -140,6 +142,7 @@ export function EsignDesignerClient({
   ownerAndRecipientTitle = "Owner + recipient",
   ownerAndRecipientDescription = "You sign first (saved signature reused when available), then send to the customer.",
   hireBundleContext = null,
+  allowRegeneratePdf = false,
 }: {
   envelopeId: string;
   title: string;
@@ -161,6 +164,8 @@ export function EsignDesignerClient({
   ownerAndRecipientDescription?: string;
   /** Hire groups: which agreement in a multi-contract bundle is being prepared. */
   hireBundleContext?: HireEnvelopeDesignerContext | null;
+  /** Platform company agreements: allow rebuilding unsigned PDF before send. */
+  allowRegeneratePdf?: boolean;
 }) {
   const router = useRouter();
   const [fields, setFields] = useState(initialFields);
@@ -169,6 +174,7 @@ export function EsignDesignerClient({
     Boolean(modeConfigured || initialFields.length > 0 || ownerSigned),
   );
   const [ownerDone, setOwnerDone] = useState(Boolean(ownerSigned));
+  const showStampedPreview = ownerDone || Boolean(ownerSigned);
   const [savedSig, setSavedSig] = useState<string | null>(null);
   const [savedSigChecked, setSavedSigChecked] = useState(false);
   const [ownerStep, setOwnerStep] = useState(false);
@@ -193,11 +199,11 @@ export function EsignDesignerClient({
       : title;
   const canRefreshPdf =
     Boolean(designerActions.refreshContractPdf) &&
-    Boolean(hireBundleContext) &&
+    (Boolean(hireBundleContext) || allowRegeneratePdf) &&
     !isCompleted &&
     status !== "sent" &&
     status !== "viewed" &&
-    !ownerDone;
+    (allowRegeneratePdf || !ownerDone);
 
   function regeneratePdf() {
     if (!designerActions.refreshContractPdf) return;
@@ -209,6 +215,8 @@ export function EsignDesignerClient({
           setModeError(res.error);
           return;
         }
+        setOwnerDone(false);
+        setFields([]);
         setPdfCacheKey(Date.now());
         router.refresh();
       })();
@@ -218,6 +226,10 @@ export function EsignDesignerClient({
   useEffect(() => {
     setFields(initialFields);
   }, [initialFields]);
+
+  useEffect(() => {
+    setOwnerDone(Boolean(ownerSigned));
+  }, [ownerSigned]);
 
   useEffect(() => {
     setRequiresOwner(requiresOwnerSignature === true);
@@ -642,7 +654,7 @@ export function EsignDesignerClient({
       {modeError ? <p className="mx-4 mt-2 text-sm text-red-600 md:mx-6">{modeError}</p> : null}
       <div className="relative min-h-0 flex-1 p-3 md:p-4">
         <PdfFieldDesigner
-          pdfUrl={ownerDone ? currentPdfUrl : unsignedPdfUrl}
+          pdfUrl={showStampedPreview ? currentPdfUrl : unsignedPdfUrl}
           initialFields={fields}
           disabled={!canEditLayout}
           canSend={canSendToRecipient}

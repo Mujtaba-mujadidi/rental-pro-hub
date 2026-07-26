@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSignerPrefillValues, expandDerivedFieldValues, signableFieldLayout } from "@/lib/esign/field-values";
+import { buildSignerPrefillValues, expandDerivedFieldValues, signableFieldLayout, sortGuidedSigningFields } from "@/lib/esign/field-values";
 import type { EsignFieldLayoutItem } from "@/lib/esign/types";
 
 const field = (
@@ -39,6 +39,18 @@ describe("expandDerivedFieldValues", () => {
   });
 });
 
+describe("sortGuidedSigningFields", () => {
+  it("orders signature, then name, then date regardless of PDF position", () => {
+    const layout = [
+      field({ id: "recipient_date", type: "date", y: 0.1 }),
+      field({ id: "recipient_name", type: "text", label: "Recipient full name", y: 0.2 }),
+      field({ id: "recipient_sig", type: "signature", y: 0.3 }),
+    ];
+    const ordered = sortGuidedSigningFields(layout);
+    expect(ordered.map((f) => f.id)).toEqual(["recipient_sig", "recipient_name", "recipient_date"]);
+  });
+});
+
 describe("buildSignerPrefillValues", () => {
   it("prefills recipient name and date fields", () => {
     const layout = [
@@ -53,5 +65,19 @@ describe("buildSignerPrefillValues", () => {
     expect(values.recipient_name?.value).toBe("Jane Driver");
     expect(values.recipient_date?.value).toMatch(/22\/07\/2026/);
     expect(values.recipient_sig).toBeUndefined();
+  });
+
+  it("returns empty values for guided walkthrough so each step is shown", () => {
+    const layout = [
+      field({ id: "recipient_sig", type: "signature" }),
+      field({ id: "recipient_name", type: "text", label: "Recipient full name" }),
+      field({ id: "recipient_date", type: "date", label: "Date signed" }),
+    ];
+    const values = buildSignerPrefillValues(layout, {
+      signerName: "Jane Driver",
+      signedAt: new Date("2026-07-22T14:30:00"),
+      forGuidedWalkthrough: true,
+    });
+    expect(values).toEqual({});
   });
 });

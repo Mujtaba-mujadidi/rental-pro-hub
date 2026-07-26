@@ -61,6 +61,8 @@ export type FormModalShellProps = {
   /** Show expand / restore control for large forms (e.g. terms editor). */
   allowMaximize?: boolean;
   onMaximizedChange?: (maximized: boolean) => void;
+  /** Shown on the loading overlay while `pending` is true. */
+  pendingMessage?: string;
 };
 
 /**
@@ -96,6 +98,7 @@ export function FormModalShell({
   onCancelStartFresh,
   allowMaximize = false,
   onMaximizedChange,
+  pendingMessage = "Saving…",
 }: FormModalShellProps) {
   const [maximized, setMaximized] = useState(false);
 
@@ -213,6 +216,21 @@ export function FormModalShell({
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-zinc-200 px-6 py-4 dark:border-zinc-700 sm:px-10">
             {footer}
           </div>
+
+          {pending ? (
+            <div
+              className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-xl bg-white/85 backdrop-blur-[1px] dark:bg-zinc-950/85"
+              role="status"
+              aria-live="polite"
+              aria-busy="true"
+            >
+              <span
+                className="h-10 w-10 animate-spin rounded-full border-[3px] border-slate-200 border-t-rph-rail dark:border-slate-600 dark:border-t-sky-400"
+                aria-hidden
+              />
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{pendingMessage}</p>
+            </div>
+          ) : null}
         </div>
       </div>
 

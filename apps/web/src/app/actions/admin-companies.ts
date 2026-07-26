@@ -29,8 +29,6 @@ export type RegisterCompanyResult =
 
 export type SendCompanyInviteResult = { ok: true } | { ok: false; error: string };
 export type DeleteCompanyResult = { ok: true } | { ok: false; error: string };
-export type ApplyContractChangeResult = { ok: true } | { ok: false; error: string };
-
 function isNextRedirectError(e: unknown): boolean {
   if (typeof e !== "object" || e === null || !("digest" in e)) return false;
   const d = (e as { digest: unknown }).digest;
@@ -954,58 +952,3 @@ export async function forceDeleteOffboardedCompanyAction(companyId: string): Pro
 
 /** @deprecated Use forceDeleteOffboardedCompanyAction */
 export const purgeOffboardedCompanyNowAction = forceDeleteOffboardedCompanyAction;
-
-export async function applyLatestCompanyContractChangeAction(
-  companyId: string,
-): Promise<ApplyContractChangeResult> {
-  try {
-    const { user } = await requireSuperAdmin();
-    const trimmed = companyId?.trim();
-    if (!trimmed) return { ok: false, error: "Missing company." };
-
-    let admin: ReturnType<typeof createSupabaseAdminClient>;
-    try {
-      admin = createSupabaseAdminClient();
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : "Server configuration error." };
-    }
-
-    const { data: pending, error: pendingErr } = await admin
-      .from("company_contract_change_requests")
-      .select("id, transition_type, review_status")
-      .eq("parent_company_id", trimmed)
-      .eq("status", "pending_signature")
-      .in("review_status", ["awaiting_signature", "approved"])
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (pendingErr) return { ok: false, error: pendingErr.message };
-    if (!pending?.id) {
-      return {
-        ok: false,
-        error:
-          "No reviewed contract change ready to apply. Approve the request on Contract changes first, or wait for e-sign completion.",
-      };
-    }
-    if (pending.transition_type === "new_legal_entity") {
-      return {
-        ok: false,
-        error: "This request is a new legal entity transition. Complete it from Contract changes, not Apply here.",
-      };
-    }
-
-    const { error: rpcErr } = await admin.rpc("apply_company_contract_change", {
-      p_change_id: pending.id,
-      p_signed_by: user.id,
-    });
-    if (rpcErr) return { ok: false, error: rpcErr.message };
-
-    revalidateCompanyGate(trimmed);
-    revalidatePath("/super-admin/companies");
-    revalidatePath("/rental");
-    return { ok: true };
-  } catch (e) {
-    if (isNextRedirectError(e)) throw e;
-    return { ok: false, error: e instanceof Error ? e.message : "Unexpected error applying contract change." };
-  }
-}

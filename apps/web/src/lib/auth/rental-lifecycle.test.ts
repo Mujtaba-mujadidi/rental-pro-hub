@@ -8,6 +8,13 @@ const rental = (overrides: Partial<Extract<RentalSessionLifecycle, { kind: "rent
   deletionPhase: "active",
   contractActive: true,
   onboardingComplete: true,
+  renewalSignaturePending: false,
+  fleetTrackingEnabled: false,
+  registeredAddressLine1: null,
+  registeredAddressLine2: null,
+  registeredTown: null,
+  registeredCounty: null,
+  registeredPostcode: null,
   ...overrides,
 });
 
@@ -35,10 +42,16 @@ describe("rentalPathRequiresRedirect", () => {
     expect(rentalPathRequiresRedirect("/rental/awaiting-contract", ctx)).toBeNull();
   });
 
-  it("leaves awaiting-contract when contract becomes active", () => {
-    expect(
-      rentalPathRequiresRedirect("/rental/awaiting-contract", rental({ onboardingComplete: true })),
-    ).toBe("/rental");
+  it("allows awaiting-contract while contract inactive", () => {
+    const ctx = rental({ contractActive: false });
+    expect(rentalPathRequiresRedirect("/rental/awaiting-contract", ctx)).toBeNull();
+  });
+
+  it("does not auto-redirect away from awaiting-contract when contract is active", () => {
+    expect(rentalPathRequiresRedirect("/rental/awaiting-contract", rental({ onboardingComplete: true }))).toBeNull();
+  });
+
+  it("still routes incomplete onboarding away from awaiting-contract", () => {
     expect(
       rentalPathRequiresRedirect("/rental/awaiting-contract", rental({ onboardingComplete: false })),
     ).toBe("/rental/onboarding");
@@ -53,5 +66,11 @@ describe("rentalPathRequiresRedirect", () => {
 
   it("allows normal rental paths when fully active", () => {
     expect(rentalPathRequiresRedirect("/rental/vehicles", rental())).toBeNull();
+  });
+
+  it("allows dashboard access while amendment renewal signature is pending", () => {
+    const ctx = rental({ contractActive: true, renewalSignaturePending: true });
+    expect(rentalPathRequiresRedirect("/rental", ctx)).toBeNull();
+    expect(rentalPathRequiresRedirect("/rental/vehicles", ctx)).toBeNull();
   });
 });

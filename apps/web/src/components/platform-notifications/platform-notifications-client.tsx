@@ -4,7 +4,6 @@ import { markPlatformNotificationReadAction } from "@/app/actions/platform-notif
 import { formatUkDateTime } from "@/lib/datetime/uk";
 import type { PlatformNotificationDisplay } from "@/lib/platform-notification-display";
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
 
 type Item = {
   id: string;
@@ -16,14 +15,14 @@ type Item = {
 
 export function PlatformNotificationsClient({ items }: { items: Item[] }) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
 
   function open(item: Item) {
-    startTransition(async () => {
-      if (!item.readAt) await markPlatformNotificationReadAction(item.id);
-      if (item.display.href) router.push(item.display.href);
-      else router.refresh();
-    });
+    if (item.display.href) router.push(item.display.href);
+    else router.refresh();
+
+    if (!item.readAt) {
+      void markPlatformNotificationReadAction(item.id);
+    }
   }
 
   if (!items.length) {
@@ -36,7 +35,6 @@ export function PlatformNotificationsClient({ items }: { items: Item[] }) {
         <li key={item.id}>
           <button
             type="button"
-            disabled={pending}
             onClick={() => open(item)}
             className={`rph-card w-full p-4 text-left transition-colors hover:bg-rph-chrome/40 ${
               item.readAt ? "opacity-80" : "ring-1 ring-rph-rail/20"

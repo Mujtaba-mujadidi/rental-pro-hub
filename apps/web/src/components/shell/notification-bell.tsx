@@ -78,10 +78,14 @@ export function NotificationBell({ notificationsHref, initialUnreadCount, userId
   const syncNotifications = useCallback(() => {
     void refreshUnreadCount();
     if (openRef.current) loadRecent();
-    router.refresh();
-  }, [loadRecent, refreshUnreadCount, router]);
+  }, [loadRecent, refreshUnreadCount]);
 
-  usePlatformNotificationsRealtime(userId, syncNotifications);
+  const pollNotifications = useCallback(() => {
+    void refreshUnreadCount();
+    if (openRef.current) loadRecent();
+  }, [loadRecent, refreshUnreadCount]);
+
+  usePlatformNotificationsRealtime(userId, syncNotifications, { onPoll: pollNotifications });
 
   useEffect(() => {
     void refreshUnreadCount();
@@ -95,16 +99,14 @@ export function NotificationBell({ notificationsHref, initialUnreadCount, userId
   }, [open, loadRecent, refreshUnreadCount]);
 
   function openNotification(item: NotificationItem) {
-    startTransition(async () => {
-      if (!item.readAt) {
-        await markPlatformNotificationReadAction(item.id);
-        setUnreadCount((count) => Math.max(0, count - 1));
-      }
-      setOpen(false);
-      if (item.display.href) router.push(item.display.href);
-      else router.push(notificationsHref);
-      router.refresh();
-    });
+    setOpen(false);
+    if (item.display.href) router.push(item.display.href);
+    else router.push(notificationsHref);
+
+    if (!item.readAt) {
+      setUnreadCount((count) => Math.max(0, count - 1));
+      void markPlatformNotificationReadAction(item.id);
+    }
   }
 
   return (

@@ -1,11 +1,11 @@
 import { redirect } from "next/navigation";
 import { cache } from "react";
-import { getCachedCompanyGate } from "@/lib/auth/company-gate-cache";
+import { getRentalCompanyGateCached } from "@/lib/auth/company-gate-cache";
 import { createClient } from "@/lib/supabase/server";
 
 const getCompanyOnboardingFlags = cache(async (companyId: string) => {
   try {
-    const gate = await getCachedCompanyGate(companyId);
+    const gate = await getRentalCompanyGateCached(companyId);
     return { complete: gate.onboardingComplete };
   } catch {
     const supabase = await createClient();

@@ -41,4 +41,23 @@ describe("formatPlatformNotification", () => {
     expect(display.body).toContain("£200.00");
     expect(display.body).toContain("Bank fee correction");
   });
+
+  it("formats contract change rejection notifications", () => {
+    const display = formatPlatformNotification("contract_change_review", {
+      decision: "rejected",
+      comment: "Please correct the registered address.",
+    });
+    expect(display.title).toContain("rejected");
+    expect(display.body).toContain("Please correct the registered address.");
+    expect(display.href).toBe("/rental/contract");
+  });
+
+  it("formats contract change approval notifications", () => {
+    const display = formatPlatformNotification("contract_change_review", {
+      decision: "approved_awaiting_signature",
+    });
+    expect(display.title).toContain("approved");
+    expect(display.body).toContain("Sign the updated platform agreement");
+    expect(display.actionLabel).toBe("Review and sign");
+  });
 });

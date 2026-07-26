@@ -95,14 +95,8 @@ export type AppProfile = {
 export const getSessionUser = cache(async () => {
   const supabase = await createClient();
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-  if (!error && user?.id) return user;
-
-  // Prefer JWT claims (local/JWKS verify) when Auth server is unreachable.
-  const { data: claimsData } = await supabase.auth.getClaims();
+  // Prefer local JWT verification — avoids a Supabase Auth round-trip on every navigation.
+  const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
   const claims = claimsData?.claims as
     | {
         sub?: string;
@@ -113,7 +107,7 @@ export const getSessionUser = cache(async () => {
       }
     | undefined;
 
-  if (claims?.sub) {
+  if (!claimsError && claims?.sub) {
     return {
       id: claims.sub,
       email: claims.email,
@@ -122,9 +116,14 @@ export const getSessionUser = cache(async () => {
       app_metadata: claims.app_metadata ?? {},
       aud: "authenticated",
       created_at: "",
-      // Minimal User shape for profile helpers; sensitive actions still call getUser when needed.
     } as User;
   }
+
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+  if (!error && user?.id) return user;
 
   return null;
 });

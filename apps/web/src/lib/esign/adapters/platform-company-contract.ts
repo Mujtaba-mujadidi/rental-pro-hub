@@ -1,8 +1,12 @@
-import { buildContractPdfDocument } from "@/lib/esign/contract-document-text";
+import { finalizeContractChangeAfterEsign } from "@/lib/esign/contract-change-renewal";
+import { buildPlatformCompanyContractPdfDocument, attachPlatformLogoToContractPdf } from "@/lib/esign/platform-contract-pdf";
+import {
+  findOpenAgreementChangeEsignForCompany,
+  resolveLiveChangeRequestEnvelopeId,
+} from "@/lib/esign/open-agreement-change-esign";
 import { ESIGN_RECIPIENT_ROLE } from "@/lib/esign/types";
 import { createEnvelopeFromPdf } from "@/lib/esign/envelope";
 import { createProfessionalContractPdf } from "@/lib/esign/pdf-generate";
-import { loadCompanyLogoForContractPdf } from "@/lib/companies/company-logo";
 import { revalidateCompanyGate } from "@/lib/auth/company-gate-cache";
 import type { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { notifyCompanyFinanceRoles } from "@/lib/platform-notifications";
@@ -12,13 +16,17 @@ type Admin = ReturnType<typeof createSupabaseAdminClient>;
 export const PLATFORM_COMPANY_CONTRACT_CONTEXT = "platform_company_contract" as const;
 
 /**
- * Create an e-sign envelope for a rental company's platform agreement (current contract version).
- * Returns envelopeId for the designer UI.
+ * Build a new platform agreement envelope from `company_contracts.current_version_id`.
+ * Callers handling agreement-change renewals should use this directly after the draft version exists.
  */
-export async function preparePlatformCompanyContractEnvelope(
+export async function buildPlatformContractEnvelopeFromCurrentVersion(
   admin: Admin,
   companyId: string,
   createdBy?: string | null,
+  options?: {
+    signatoryEmail?: string | null;
+    signatoryName?: string | null;
+  },
 ): Promise<{ ok: true; envelopeId: string } | { ok: false; error: string }> {
   const { data: contract, error: cErr } = await admin
     .from("company_contracts")
@@ -44,9 +52,18 @@ export async function preparePlatformCompanyContractEnvelope(
     .select("name, company_number, primary_contact_email, primary_contact_phone, primary_contact_first_name, primary_contact_last_name")
     .eq("id", companyId)
     .maybeSingle();
-  if (coErr || !company?.primary_contact_email?.trim()) {
-    return { ok: false, error: coErr?.message ?? "Company primary contact email is required." };
+  if (coErr || !company) {
+    return { ok: false, error: coErr?.message ?? "Company not found." };
   }
+  const signatoryEmail =
+    options?.signatoryEmail?.trim() || company.primary_contact_email?.trim() || "";
+  if (!signatoryEmail) {
+    return { ok: false, error: "Company primary contact email is required." };
+  }
+  const signatoryName =
+    options?.signatoryName?.trim() ||
+    [company.primary_contact_first_name, company.primary_contact_last_name].filter(Boolean).join(" ").trim() ||
+    null;
 
   // Void prior open envelopes for this contract
   await admin
@@ -56,7 +73,7 @@ export async function preparePlatformCompanyContractEnvelope(
     .eq("context_id", contract.id)
     .in("status", ["draft", "awaiting_placement", "owner_signed", "sent", "viewed"]);
 
-  const pdfDoc = buildContractPdfDocument({
+  const pdfDoc = buildPlatformCompanyContractPdfDocument({
     termsSnapshot: version.terms_snapshot as Record<string, unknown> | null,
     commercialSnapshot: version.commercial_snapshot as Record<string, unknown> | null,
     legalSnapshot: {
@@ -70,22 +87,16 @@ export async function preparePlatformCompanyContractEnvelope(
         (version.legal_snapshot as Record<string, unknown> | null)?.primary_contact_phone ??
         company.primary_contact_phone,
     },
-    companyName: company.name,
-    platformName: company.name ?? "RMS",
+    customerCompanyName: company.name,
   });
   // Mode chosen on the designer page; start with both blocks until then.
   pdfDoc.signatureMode = "owner_and_recipient";
 
-  const logo = await loadCompanyLogoForContractPdf(admin, companyId);
-  if (logo) {
-    pdfDoc.logoBytes = logo.bytes;
-    pdfDoc.logoContentType = logo.contentType;
-  }
+  await attachPlatformLogoToContractPdf(pdfDoc);
 
   const rendered = await createProfessionalContractPdf(pdfDoc);
   const pdfBytes = rendered.bytes;
   const title = pdfDoc.title;
-  const name = [company.primary_contact_first_name, company.primary_contact_last_name].filter(Boolean).join(" ").trim();
 
   const created = await createEnvelopeFromPdf(admin, {
     contextType: PLATFORM_COMPANY_CONTRACT_CONTEXT,
@@ -97,8 +108,8 @@ export async function preparePlatformCompanyContractEnvelope(
     requiresOwnerSignature: true,
     recipients: [
       {
-        email: company.primary_contact_email.trim(),
-        name: name || null,
+        email: signatoryEmail,
+        name: signatoryName,
         role: ESIGN_RECIPIENT_ROLE,
       },
     ],
@@ -114,8 +125,8 @@ export async function preparePlatformCompanyContractEnvelope(
     provider: "rms_esign",
     provider_submission_id: created.envelopeId,
     status: "draft",
-    signatory_email: company.primary_contact_email.trim(),
-    signatory_name: name || null,
+    signatory_email: signatoryEmail,
+    signatory_name: signatoryName,
     metadata: { envelope_id: created.envelopeId },
     audit_trail: [{ at: now, event: "esign_envelope_created", envelope_id: created.envelopeId }],
   });
@@ -123,6 +134,48 @@ export async function preparePlatformCompanyContractEnvelope(
   await admin.from("company_contracts").update({ status: "draft" }).eq("id", contract.id);
 
   return { ok: true, envelopeId: created.envelopeId };
+}
+
+/**
+ * Prepare platform agreement e-sign for a company.
+ * When an agreement change renewal is open, reuses that envelope instead of creating a second contract.
+ */
+export async function preparePlatformCompanyContractEnvelope(
+  admin: Admin,
+  companyId: string,
+  createdBy?: string | null,
+  options?: {
+    signatoryEmail?: string | null;
+    signatoryName?: string | null;
+  },
+): Promise<{ ok: true; envelopeId: string } | { ok: false; error: string }> {
+  const openChange = await findOpenAgreementChangeEsignForCompany(admin, companyId);
+  if (openChange) {
+    if (openChange.reviewStatus === "pending_review") {
+      return {
+        ok: false,
+        error:
+          "An agreement change request is awaiting review. Approve it under Agreement change requests before preparing a contract.",
+      };
+    }
+
+    const liveEnvelopeId = await resolveLiveChangeRequestEnvelopeId(admin, openChange.envelopeId);
+    if (liveEnvelopeId) {
+      return { ok: true, envelopeId: liveEnvelopeId };
+    }
+
+    if (!createdBy) {
+      return {
+        ok: false,
+        error: "An agreement change renewal is in progress. Use Agreement change requests to prepare the contract.",
+      };
+    }
+
+    const { prepareContractChangeRenewalEsign } = await import("@/lib/esign/contract-change-renewal");
+    return prepareContractChangeRenewalEsign(admin, openChange.changeRequestId, createdBy);
+  }
+
+  return buildPlatformContractEnvelopeFromCurrentVersion(admin, companyId, createdBy, options);
 }
 
 /** After owner signs: record platform countersignature timestamp (contract still not active). */
@@ -162,6 +215,9 @@ export async function onPlatformCompanyContractSigned(
     .maybeSingle();
   if (!contract?.id) return;
 
+  const parentId = (contract.parent_company_id as string) || envelope.parent_company_id;
+  let linkedChangeRequestId: string | null = null;
+
   await admin
     .from("contract_signature_requests")
     .update({
@@ -176,6 +232,11 @@ export async function onPlatformCompanyContractSigned(
       .select("signed_pdf_path")
       .eq("id", envelope.id)
       .maybeSingle();
+    const { data: versionRow } = await admin
+      .from("company_contract_versions")
+      .select("change_request_id")
+      .eq("id", contract.current_version_id)
+      .maybeSingle();
     await admin
       .from("company_contract_versions")
       .update({
@@ -185,6 +246,18 @@ export async function onPlatformCompanyContractSigned(
         rendered_pdf_storage_path: envRow?.signed_pdf_path ?? null,
       })
       .eq("id", contract.current_version_id);
+
+    if (versionRow?.change_request_id) {
+      linkedChangeRequestId = versionRow.change_request_id as string;
+      await finalizeContractChangeAfterEsign(admin, linkedChangeRequestId, null);
+      if (parentId) {
+        await notifyCompanyFinanceRoles(admin, parentId, "legal_change_applied", {
+          change_id: linkedChangeRequestId,
+          envelope_id: envelope.id,
+          href: "/rental/contract",
+        });
+      }
+    }
   }
 
   await admin
@@ -192,13 +265,15 @@ export async function onPlatformCompanyContractSigned(
     .update({ status: "active", contract_signed_at: now })
     .eq("id", contractId);
 
-  const parentId = (contract.parent_company_id as string) || envelope.parent_company_id;
   if (parentId) {
     revalidateCompanyGate(parentId);
-    await notifyCompanyFinanceRoles(admin, parentId, "contract_signed", {
-      contract_id: contractId,
-      envelope_id: envelope.id,
-    });
+    if (!linkedChangeRequestId) {
+      await notifyCompanyFinanceRoles(admin, parentId, "contract_signed", {
+        contract_id: contractId,
+        envelope_id: envelope.id,
+        href: "/rental/contract",
+      });
+    }
     const { trySendPendingPrimaryInviteAfterContractSigned } = await import("@/app/actions/admin-companies");
     await trySendPendingPrimaryInviteAfterContractSigned(admin, parentId);
   }

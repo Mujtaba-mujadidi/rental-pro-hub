@@ -9,6 +9,11 @@ import {
 import { dispatchEnvelopeCompleted, dispatchEnvelopeOwnerSigned } from "@/lib/esign/adapters/dispatch-envelope-hooks";
 import { regenerateEnvelopePdfForSignatureMode } from "@/lib/esign/adapters/regenerate-pdf";
 import {
+  discardPlatformEnvelopePartialPdf,
+  syncOpenChangeRequestEnvelopeLink,
+  voidOtherOpenPlatformEnvelopes,
+} from "@/lib/esign/open-agreement-change-esign";
+import {
   completeOwnerSigning,
   completeSigning,
   findRecipientByAccessToken,
@@ -225,6 +230,59 @@ export async function configureEsignSignatureModeAction(
     fields,
     pdfRegenerated,
   };
+}
+
+/** Rebuild the unsigned platform company agreement PDF (e.g. after letterhead fixes). */
+export async function regeneratePlatformCompanyContractPdfAction(
+  envelopeId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireSuperAdmin();
+  const admin = createSupabaseAdminClient();
+  const id = envelopeId?.trim();
+  if (!id) return { ok: false, error: "Missing envelope." };
+
+  const { data: env, error } = await admin
+    .from("esign_envelopes")
+    .select("id, context_type, status, owner_signed_at, requires_owner_signature, parent_company_id, signed_pdf_path")
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !env?.id) return { ok: false, error: error?.message ?? "Envelope not found." };
+  if (env.context_type !== "platform_company_contract") {
+    return { ok: false, error: "This action only applies to platform company agreements." };
+  }
+  if (env.status === "sent" || env.status === "viewed" || env.status === "completed") {
+    return { ok: false, error: "Cannot regenerate PDF after the contract has been sent or signed." };
+  }
+
+  const parentCompanyId = (env.parent_company_id as string | null)?.trim() || null;
+  if (parentCompanyId) {
+    await voidOtherOpenPlatformEnvelopes(admin, parentCompanyId, id);
+    await syncOpenChangeRequestEnvelopeLink(admin, parentCompanyId, id);
+  }
+  await discardPlatformEnvelopePartialPdf(admin, id, env.signed_pdf_path as string | null);
+
+  const mode = env.requires_owner_signature === false ? "recipient_only" : "owner_and_recipient";
+  const regenerated = await regenerateEnvelopePdfForSignatureMode(admin, id, mode);
+  if (!regenerated.ok) return regenerated;
+
+  const { error: upErr } = await admin
+    .from("esign_envelopes")
+    .update({
+      field_layout: regenerated.suggestedFields,
+      suggested_field_layout: regenerated.suggestedFields,
+      field_values: {},
+      owner_signed_at: null,
+      owner_signed_by: null,
+      signed_pdf_path: null,
+      status: "awaiting_placement",
+    })
+    .eq("id", id);
+  if (upErr) return { ok: false, error: upErr.message };
+
+  revalidatePath(`/super-admin/esign/${id}`);
+  revalidatePath("/super-admin/companies");
+  revalidatePath("/super-admin/contract-changes");
+  return { ok: true };
 }
 
 /** Apply owner signature (saved or newly drawn) onto auto-placed owner fields and mark owner signed. */

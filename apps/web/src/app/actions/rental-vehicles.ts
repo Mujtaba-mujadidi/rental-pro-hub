@@ -20,12 +20,18 @@ import {
 import { prepareVehicleDocumentPdf } from "@/lib/fleet/vehicle-document-pdf";
 import { getVehicleWorkspaceShell } from "@/lib/fleet/load-vehicle-workspace-shell";
 import {
+  getCachedVehicleSwitcherList,
+  revalidateVehicleWorkspaceCache,
+} from "@/lib/fleet/vehicle-workspace-cache";
+import type { VehicleSwitcherOption } from "@/lib/fleet/vehicle-workspace-cache";
+
+export type { VehicleSwitcherOption } from "@/lib/fleet/vehicle-workspace-cache";
+import {
   parseCompanyNotificationSettings,
   type CompanyNotificationSettings,
 } from "@/lib/settings/notification-settings";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { reconcileBlockingHireVehicleStatusesForCompany } from "@/lib/fleet/sync-vehicle-hire-status";
 
 async function loadCompanyNotifySettings(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -43,9 +49,10 @@ async function loadCompanyNotifySettings(
 
 export type VehicleActionResult = { ok: true; id?: string } | { ok: false; error: string };
 
-function revalidateVehiclePaths(vehicleId?: string) {
+function revalidateVehiclePaths(vehicleId?: string, parentCompanyId?: string | null) {
   revalidatePath("/rental/vehicles");
   if (vehicleId) {
+    revalidateVehicleWorkspaceCache(vehicleId, parentCompanyId);
     revalidatePath(`/rental/vehicles/${vehicleId}`);
     revalidatePath(`/rental/vehicles/${vehicleId}`, "layout");
   }
@@ -192,7 +199,7 @@ export async function createVehicleAction(formData: FormData): Promise<VehicleAc
     return { ok: false, error: error.message };
   }
 
-  revalidateVehiclePaths(data.id);
+  revalidateVehiclePaths(data.id, parentCompanyId);
   return { ok: true, id: data.id };
 }
 
@@ -236,7 +243,7 @@ export async function updateVehicleAction(vehicleId: string, formData: FormData)
     return { ok: false, error: error.message };
   }
 
-  revalidateVehiclePaths(id);
+  revalidateVehiclePaths(id, parentCompanyId);
   return { ok: true, id };
 }
 
@@ -291,7 +298,7 @@ export async function transferVehicleAction(
     .eq("parent_company_id", parentCompanyId);
   if (uErr) return { ok: false, error: uErr.message };
 
-  revalidateVehiclePaths(id);
+  revalidateVehiclePaths(id, parentCompanyId);
   return { ok: true, id };
 }
 
@@ -311,7 +318,7 @@ export async function deleteVehicleAction(vehicleId: string): Promise<VehicleAct
   const { error } = await supabase.from("vehicles").delete().eq("id", id).eq("parent_company_id", parentCompanyId);
   if (error) return { ok: false, error: error.message };
 
-  revalidateVehiclePaths(id);
+  revalidateVehiclePaths(id, parentCompanyId);
   return { ok: true, id };
 }
 
@@ -439,7 +446,7 @@ export async function uploadVehicleDocumentAction(formData: FormData): Promise<V
       .eq("parent_company_id", parentCompanyId);
   }
 
-  revalidateVehiclePaths(vehicleId);
+  revalidateVehiclePaths(vehicleId, parentCompanyId);
   return { ok: true, id: vehicleId };
 }
 
@@ -471,7 +478,7 @@ export async function deleteVehicleDocumentAction(documentId: string): Promise<V
 
   await supabase.storage.from("vehicle-documents").remove([doc.file_path]);
 
-  revalidateVehiclePaths(doc.vehicle_id);
+  revalidateVehiclePaths(doc.vehicle_id, parentCompanyId);
   return { ok: true, id: doc.vehicle_id };
 }
 
@@ -522,48 +529,23 @@ export type VehiclesPageData = {
   canDelete: boolean;
 };
 
-export type VehicleSwitcherOption = {
-  id: string;
-  vrm: string;
-  make: string;
-  model: string;
-  status: VehicleStatus;
-};
-
 /** Slim fleet list for the vehicle workspace switcher. */
 export async function loadVehicleSwitcherList(): Promise<VehicleSwitcherOption[] | { error: string }> {
   const { profile } = await requireRentalCompanyArea();
   const parentCompanyId = profile.company_id?.trim();
   if (!parentCompanyId) return { error: "No active company." };
 
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("vehicles")
-    .select("id, vrm, make, model, status")
-    .eq("parent_company_id", parentCompanyId)
-    .order("vrm", { ascending: true });
-  if (error) return { error: error.message };
-
-  return (data ?? []).map((v) => ({
-    id: v.id,
-    vrm: v.vrm,
-    make: v.make,
-    model: v.model,
-    status: v.status as VehicleStatus,
-  }));
+  try {
+    return await getCachedVehicleSwitcherList(parentCompanyId);
+  } catch {
+    return { error: "Could not load fleet list." };
+  }
 }
 
 export async function loadVehiclesPageData(): Promise<VehiclesPageData | { error: string }> {
   const { profile } = await requireRentalCompanyArea();
   const parentCompanyId = profile.company_id?.trim();
   if (!parentCompanyId) return { error: "No active company." };
-
-  try {
-    const admin = createSupabaseAdminClient();
-    await reconcileBlockingHireVehicleStatusesForCompany(admin, parentCompanyId);
-  } catch {
-    /* fleet status repair is best-effort */
-  }
 
   const supabase = await createClient();
   const [

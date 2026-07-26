@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { findRecipientByAccessToken } from "@/lib/esign/envelope";
+import { resolveEsignRecipientPrefillName, syncPlatformContractRecipientName } from "@/lib/esign/recipient-prefill";
 import { EsignSignClient } from "@/components/esign/signing-viewer";
 import { fieldsForRole } from "@/lib/esign/roles";
 import { ESIGN_RECIPIENT_ROLE, type EsignFieldLayoutItem } from "@/lib/esign/types";
@@ -54,6 +55,13 @@ export default async function PublicSignPage({ params }: { params: Promise<{ tok
     ? fieldsForRole(env.field_layout as EsignFieldLayoutItem[], ESIGN_RECIPIENT_ROLE)
     : [];
 
+  const prefillSignerName =
+    (await resolveEsignRecipientPrefillName(admin, env.id as string, found.recipient)) ?? undefined;
+
+  if (prefillSignerName && !found.recipient.name) {
+    await syncPlatformContractRecipientName(admin, env.id as string, prefillSignerName);
+  }
+
   return (
     <EsignSignClient
       token={token.trim()}
@@ -62,6 +70,7 @@ export default async function PublicSignPage({ params }: { params: Promise<{ tok
       fields={fields}
       initiallyVerified={!!found.recipient.verified_at}
       alreadySigned={!!found.recipient.signed_at || env.status === "completed"}
+      prefillSignerName={prefillSignerName}
     />
   );
 }
