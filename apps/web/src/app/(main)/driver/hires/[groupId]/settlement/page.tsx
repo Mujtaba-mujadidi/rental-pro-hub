@@ -1,6 +1,6 @@
 "use client";
 
-import { loadDriverHireSettlementAction } from "@/app/actions/rental-hire-termination";
+import { loadDriverHireSettlementAction, type DriverHireSettlementView } from "@/app/actions/rental-hire-termination";
 import { formatGbp } from "@/lib/fleet/maintenance";
 import { settlementBalanceLabel } from "@/lib/fleet/hire-termination-summary";
 import { formatUkDateTime } from "@/lib/datetime/uk";
@@ -11,11 +11,7 @@ export default function DriverHireSettlementPage() {
   const { shell } = useDriverHireWorkspace();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<Awaited<
-    ReturnType<typeof loadDriverHireSettlementAction>
-  > extends { ok: true; data: infer D }
-    ? D
-    : never | null>(null);
+  const [data, setData] = useState<DriverHireSettlementView | null>(null);
 
   const reload = useCallback(() => {
     startTransition(async () => {

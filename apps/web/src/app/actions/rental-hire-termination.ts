@@ -1,6 +1,6 @@
 "use server";
 
-import { loadHirePaymentsPageAction } from "@/app/actions/hire-payments";
+import { loadHirePaymentsPageAction, type HirePaymentPageRow } from "@/app/actions/hire-payments";
 import { revalidatePath } from "next/cache";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
@@ -113,11 +113,7 @@ async function revalidateHireTermination(hireGroupId: string) {
   await revalidateVehicleFinancialsForHireGroup(id);
 }
 
-function mapPaymentRows(
-  rows: Awaited<ReturnType<typeof loadHirePaymentsPageAction>> extends { ok: true; data: { rows: infer R } }
-    ? R
-    : never,
-): HirePaymentScheduleRowInput[] {
+function mapPaymentRows(rows: HirePaymentPageRow[]): HirePaymentScheduleRowInput[] {
   return rows.map((row) => ({
     id: row.id,
     periodStart: row.periodStart,

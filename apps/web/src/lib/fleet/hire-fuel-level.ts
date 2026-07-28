@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 export function clampHireFuelLevelPercent(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.min(100, Math.max(0, Math.round(value)));
@@ -12,6 +14,6 @@ export function formatHireFuelLevelPercent(value: number | null | undefined): st
   return `${value}%`;
 }
 
-export function hireFuelLevelSliderStyle(percent: number): { "--fuel-pct": string } {
-  return { "--fuel-pct": `${clampHireFuelLevelPercent(percent)}%` };
+export function hireFuelLevelSliderStyle(percent: number): CSSProperties {
+  return { "--fuel-pct": `${clampHireFuelLevelPercent(percent)}%` } as CSSProperties;
 }

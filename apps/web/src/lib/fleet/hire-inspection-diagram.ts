@@ -39,7 +39,7 @@ export const HIRE_INSPECTION_PANELS: readonly HireInspectionPanel[] = catalog.pa
   id: panel.id,
   label: panel.label,
   category: panel.category,
-  pins: panel.pins,
+  pins: panel.pins as unknown as HireInspectionPanel["pins"],
   hits: (panel.hits ?? []) as HireInspectionDiagramHit[],
 }));
 
