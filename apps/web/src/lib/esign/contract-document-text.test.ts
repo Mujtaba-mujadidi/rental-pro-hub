@@ -30,6 +30,26 @@ describe("buildContractPdfDocument letterhead", () => {
     expect(doc.contactPhone).toBe("+44 20 0000 0000");
     expect(doc.parties.find((p) => p.roleLabel === "Customer")?.name).toContain("Oxus");
   });
+
+  it("falls back to combined address field in customer party lines", () => {
+    const doc = buildContractPdfDocument({
+      termsSnapshot: { title: "Platform services agreement", body: "Terms." },
+      commercialSnapshot: {},
+      legalSnapshot: {
+        name: "Oxus Cars Ltd",
+        address: "1 High Street, London, E1 2AB",
+      },
+      letterhead: {
+        name: "Rental Pro Hub",
+        companyNumber: "111",
+        contactEmail: "ops@rph.test",
+        contactPhone: null,
+      },
+    });
+
+    const customer = doc.parties.find((p) => p.roleLabel === "Customer");
+    expect(customer?.lines.some((line) => line.includes("1 High Street"))).toBe(true);
+  });
 });
 
 describe("buildPlatformCompanyContractPdfDocument", () => {

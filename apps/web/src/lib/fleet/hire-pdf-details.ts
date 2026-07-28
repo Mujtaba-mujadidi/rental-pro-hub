@@ -78,6 +78,11 @@ export function buildHirePdfDetails(input: {
   rentCadence: RentCadence;
   rentAmountGbp: number;
   depositGbp: number | null;
+  lessor?: {
+    legalName: string;
+    address: string | null;
+    companyNumber?: string | null;
+  };
 }): { hireDetails: ContractPdfHireDetails; hireRunningHeader: ContractPdfHireRunningHeader } {
   const driverAddress = formatDriverPostalAddress(input.driver) || "—";
   const phvNumber = displayOrDash(input.driver.phv_licence_number);
@@ -132,6 +137,14 @@ export function buildHirePdfDetails(input: {
       },
     ],
   };
+
+  if (input.lessor) {
+    hireDetails.lessor = [
+      { label: "Legal name", value: displayOrDash(input.lessor.legalName) },
+      { label: "Address", value: input.lessor.address?.trim() || "—" },
+      { label: "Company number", value: displayOrDash(input.lessor.companyNumber) },
+    ];
+  }
 
   const hireRunningHeader: ContractPdfHireRunningHeader = {
     vrm: displayOrDash(input.vehicle.vrm),

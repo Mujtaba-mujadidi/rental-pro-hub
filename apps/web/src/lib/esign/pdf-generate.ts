@@ -41,6 +41,7 @@ export type ContractPdfDetailRow = {
 };
 
 export type ContractPdfHireDetails = {
+  lessor?: ContractPdfDetailRow[];
   driver: ContractPdfDetailRow[];
   vehicle: ContractPdfDetailRow[];
   rental: ContractPdfDetailRow[];
@@ -75,6 +76,7 @@ export type ContractPdfInput = {
   companyNumber?: string | null;
   contactEmail?: string | null;
   contactPhone?: string | null;
+  contactAddress?: string | null;
   hireDetails?: ContractPdfHireDetails;
   hireRunningHeader?: ContractPdfHireRunningHeader;
 };
@@ -136,6 +138,7 @@ type LetterheadConfig = {
   companyNumber: string | null;
   contactEmail: string | null;
   contactPhone: string | null;
+  contactAddress: string | null;
   documentLabel: string | null;
   logo: { image: PDFImage; width: number; height: number } | null;
 };
@@ -187,10 +190,25 @@ function drawLetterhead(ctx: DrawCtx): number {
     phone: lh.contactPhone,
   });
   let contactLines = 0;
+  const addressLine = lh.contactAddress?.trim() ?? "";
+  let cy = nameY - 13;
+  if (addressLine) {
+    const wrappedAddress = wrapText(addressLine, ctx.font, 7.5, Math.max(textMaxW, 180));
+    contactLines += Math.min(wrappedAddress.length, 2);
+    for (const line of wrappedAddress.slice(0, 2)) {
+      ctx.page.drawText(line, {
+        x: textX,
+        y: cy,
+        size: 7.5,
+        font: ctx.font,
+        color: muted,
+      });
+      cy -= 10;
+    }
+  }
   if (contactLine) {
     const wrapped = wrapText(contactLine, ctx.font, 7.5, Math.max(textMaxW, 180));
-    contactLines = wrapped.length;
-    let cy = nameY - 13;
+    contactLines += wrapped.length;
     for (const line of wrapped.slice(0, 2)) {
       ctx.page.drawText(line, {
         x: textX,
@@ -776,6 +794,7 @@ function estimateFourColumnSectionHeight(rowCount: number): number {
 /** Stacked sections: driver, vehicle, then rental — each with a 4-column key|value grid. */
 function drawHireDetailsCompact(ctx: DrawCtx, details: ContractPdfHireDetails): void {
   const estH =
+    (details.lessor?.length ? estimateFourColumnSectionHeight(details.lessor.length) + HIRE_DETAILS_SECTION_GAP : 0) +
     estimateFourColumnSectionHeight(details.driver.length) +
     HIRE_DETAILS_SECTION_GAP +
     estimateFourColumnSectionHeight(details.vehicle.length) +
@@ -785,6 +804,11 @@ function drawHireDetailsCompact(ctx: DrawCtx, details: ContractPdfHireDetails): 
   ensureSpace(ctx, estH);
 
   let y = ctx.y;
+  if (details.lessor?.length) {
+    y = drawColumnSectionHeadingAt(ctx, "Lessor details", MARGIN_X, CONTENT_W, y);
+    y = drawFourColumnSectionRowsAt(ctx, details.lessor, y);
+    y -= HIRE_DETAILS_SECTION_GAP;
+  }
   y = drawColumnSectionHeadingAt(ctx, "Driver details", MARGIN_X, CONTENT_W, y);
   y = drawFourColumnSectionRowsAt(ctx, details.driver, y);
 
@@ -1123,6 +1147,7 @@ export async function createProfessionalContractPdf(
     companyNumber: input.companyNumber?.trim() || null,
     contactEmail: input.contactEmail?.trim() || null,
     contactPhone: input.contactPhone?.trim() || null,
+    contactAddress: input.contactAddress?.trim() || null,
     documentLabel: input.documentLabel?.trim() || "Platform services agreement",
     logo: embeddedLogo,
   };

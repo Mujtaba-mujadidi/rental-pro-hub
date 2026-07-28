@@ -6,6 +6,7 @@ import {
 } from "@/lib/esign/pdf-generate";
 import { ESIGN_BUCKET, ESIGN_RECIPIENT_ROLE, type EsignFieldLayoutItem } from "@/lib/esign/types";
 import { loadCompanyLogoForContractPdf } from "@/lib/companies/company-logo";
+import { formatRegisteredCompanyAddress } from "@/lib/companies/registered-address";
 import { ukTodayYmd } from "@/lib/datetime/uk";
 import { allAgreementsSigned, hireGroupStatusAfterAllSigned, isStartDateInFuture, vehicleStatusForHireGroup } from "@/lib/fleet/hire-lifecycle";
 import { syncVehicleStatusForHireGroup } from "@/lib/fleet/sync-vehicle-hire-status";
@@ -73,6 +74,39 @@ const HIRE_AGREEMENT_GROUP_SELECT =
 const HIRE_DRIVER_PROFILE_SELECT =
   "first_name, last_name, account_email, date_of_birth, phone, address_line1, address_line2, address_town, address_county, address_postcode, driving_licence_number, driving_licence_expiry, phv_licence_number";
 
+async function resolveHireLessorAddress(
+  admin: Admin,
+  group: Record<string, unknown>,
+  legalSnap: Record<string, unknown>,
+): Promise<string | null> {
+  const fromSnapshot = typeof legalSnap.address === "string" ? legalSnap.address.trim() : "";
+  if (fromSnapshot) return fromSnapshot;
+
+  const subcompanyId = (group.subcompany_id as string | null) ?? null;
+  if (subcompanyId) {
+    const { data: sub } = await admin
+      .from("subcompanies")
+      .select(
+        "registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode",
+      )
+      .eq("id", subcompanyId)
+      .maybeSingle();
+    const formatted = formatRegisteredCompanyAddress(sub ?? {});
+    if (formatted) return formatted;
+  }
+
+  const companyId = (group.parent_company_id as string | null) ?? null;
+  if (!companyId) return null;
+  const { data: company } = await admin
+    .from("companies")
+    .select(
+      "registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode",
+    )
+    .eq("id", companyId)
+    .maybeSingle();
+  return formatRegisteredCompanyAddress(company ?? {});
+}
+
 async function loadHireAgreementPdfInput(
   admin: Admin,
   agreement: {
@@ -133,7 +167,7 @@ async function loadHireAgreementPdfInput(
 
   const legalSnap = (group.subcompany_legal_snapshot ?? {}) as Record<string, unknown>;
   const subcompanyLegalName = (legalSnap.legal_name as string) || company?.name || "Lessor";
-  const subcompanyAddress = (legalSnap.address as string) || null;
+  const subcompanyAddress = await resolveHireLessorAddress(admin, group, legalSnap);
   const companyNumber = ((legalSnap.company_number as string) || company?.company_number || "").trim() || null;
   const contactEmail = (company?.primary_contact_email as string | null)?.trim() || null;
   const contactPhone = (company?.primary_contact_phone as string | null)?.trim() || null;
@@ -234,6 +268,11 @@ export function buildHireAgreementPdfInput(input: {
     rentCadence: input.rentCadence,
     rentAmountGbp: input.rentAmountGbp,
     depositGbp: input.depositGbp,
+    lessor: {
+      legalName: input.subcompanyLegalName,
+      address: input.subcompanyAddress,
+      companyNumber: input.companyNumber,
+    },
   });
 
   return {
@@ -253,6 +292,7 @@ export function buildHireAgreementPdfInput(input: {
     companyNumber: input.companyNumber,
     contactEmail: input.contactEmail,
     contactPhone: input.contactPhone,
+    contactAddress: input.subcompanyAddress,
     acceptanceText:
       "By signing, the hirer confirms they have read and agree to this vehicle hire agreement, permission letter, and terms and conditions above.",
     signatureMode: input.signatureMode ?? "owner_and_recipient",

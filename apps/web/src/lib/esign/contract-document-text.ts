@@ -133,7 +133,12 @@ function legalPartyLines(legal: Record<string, unknown> | null | undefined): str
     snapshotString(legal, "registered_postcode"),
     snapshotString(legal, "country"),
   ].filter(Boolean);
-  if (address.length) lines.push(address.join(", "));
+  if (address.length) {
+    lines.push(address.join(", "));
+  } else {
+    const combined = snapshotString(legal, "address");
+    if (combined) lines.push(combined);
+  }
   const contact = [
     snapshotString(legal, "primary_contact_name"),
     snapshotString(legal, "primary_contact_email"),
