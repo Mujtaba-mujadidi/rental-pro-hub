@@ -19,7 +19,7 @@ export function HireWorkspaceTopBar({ hires }: { hires: HireSwitcherOption[] }) 
   const pathname = usePathname();
   const router = useRouter();
   const section = parseHireWorkspaceSection(pathname, shell.hireGroupId);
-  const items = hireWorkspaceNav(shell.hireGroupId);
+  const items = hireWorkspaceNav(shell.hireGroupId, shell.status);
 
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");

@@ -1,6 +1,7 @@
 import {
   deriveHirePaymentDisplayStatus,
   hirePaymentDisplayStatusMeta,
+  type HirePaymentDisplayOptions,
   type HirePaymentDisplayStatus,
 } from "@/lib/fleet/hire-payment-display";
 import type { HirePaymentStatus } from "@/lib/fleet/hire-types";
@@ -64,12 +65,18 @@ function rowInput(row: HirePaymentAnalyticsRow) {
     paidGbp: row.paidGbp,
     netDueGbp: row.netDueGbp,
     accrued: row.accrued,
+    periodStart: row.periodStart,
     periodEnd: row.periodEnd,
+    pendingSubmittedGbp: row.pendingSubmittedGbp,
   };
 }
 
-function displayStatus(row: HirePaymentAnalyticsRow, todayYmd: string): HirePaymentDisplayStatus {
-  return deriveHirePaymentDisplayStatus(rowInput(row), todayYmd);
+function displayStatus(
+  row: HirePaymentAnalyticsRow,
+  todayYmd: string,
+  displayOptions?: HirePaymentDisplayOptions,
+): HirePaymentDisplayStatus {
+  return deriveHirePaymentDisplayStatus(rowInput(row), todayYmd, displayOptions);
 }
 
 /** Whole calendar days from start (inclusive) to end (inclusive) in YYYY-MM-DD. */
@@ -88,6 +95,7 @@ export function hireDaysOnHire(startDateYmd: string, todayYmd: string): number {
 export function analyzeHirePaymentHealth(
   rows: HirePaymentAnalyticsRow[],
   todayYmd: string,
+  displayOptions?: HirePaymentDisplayOptions,
 ): HirePaymentHealthSummary {
   let eligiblePeriodCount = 0;
   let onTimeCount = 0;
@@ -97,7 +105,7 @@ export function analyzeHirePaymentHealth(
   let rejectedCount = 0;
 
   for (const row of rows) {
-    const status = displayStatus(row, todayYmd);
+    const status = displayStatus(row, todayYmd, displayOptions);
     if (status === "pending_approval") pendingApprovalCount += 1;
     if (status === "rejected") rejectedCount += 1;
     if (status === "overdue") {
@@ -149,11 +157,12 @@ export function analyzeHirePaymentHealth(
 export function buildHirePaymentAttentionItems(
   rows: HirePaymentAnalyticsRow[],
   todayYmd: string,
+  displayOptions?: HirePaymentDisplayOptions,
 ): HirePaymentAttentionItem[] {
   const items: HirePaymentAttentionItem[] = [];
 
   for (const row of rows) {
-    const status = displayStatus(row, todayYmd);
+    const status = displayStatus(row, todayYmd, displayOptions);
     if (status === "overdue") {
       items.push({
         kind: "overdue",
@@ -197,9 +206,10 @@ export function buildHirePaymentAttentionItems(
 export function buildHirePaymentChartPoints(
   rows: HirePaymentAnalyticsRow[],
   todayYmd: string,
+  displayOptions?: HirePaymentDisplayOptions,
 ): HirePaymentChartPoint[] {
   return rows.map((row) => {
-    const display = displayStatus(row, todayYmd);
+    const display = displayStatus(row, todayYmd, displayOptions);
     return {
       rowId: row.id,
       label: row.rowKind === "deposit" ? "Deposit" : row.periodLabel,
@@ -220,15 +230,18 @@ export function summarizeHireContractProgress(
   let periodsEndedCount = 0;
 
   for (const row of rows) {
+    if (row.rowKind !== "rent") continue;
     if (row.periodEnd < todayYmd) periodsEndedCount += 1;
     if (row.balanceGbp <= 0) periodsPaidCount += 1;
   }
+
+  const rentRows = rows.filter((row) => row.rowKind === "rent");
 
   return {
     daysOnHire: hireDaysOnHire(startDateYmd, todayYmd),
     periodsPaidCount,
     periodsEndedCount,
-    periodsTotalCount: rows.length,
+    periodsTotalCount: rentRows.length,
   };
 }
 

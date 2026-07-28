@@ -1,66 +1,41 @@
 "use server";
 
 import { getSessionUser } from "@/lib/auth/profile";
-import { formatUkDate } from "@/lib/datetime/uk";
+import { formatUkDate, formatUkDateTimeSeconds } from "@/lib/datetime/uk";
 import {
   formatRentLabel,
   parseHireAccessSnapshot,
-  type HireAccessDisplay,
 } from "@/lib/fleet/hire-access-display";
-import { HIRE_ACCESS_VEHICLE_SELECT } from "@/lib/fleet/hire-access-vehicle-fields";
+import {
+  formatDriverHireContractStartLabel,
+  resolveDriverHireCompanyName,
+  resolveDriverHireVehicleDisplay,
+  type DriverHireDisplayLookups,
+} from "@/lib/fleet/driver-hire-display";
 import {
   DRIVER_CURRENT_HIRE_STATUSES,
   DRIVER_HIRE_HISTORY_STATUSES,
+  DRIVER_HIRE_WORKSPACE_STATUSES,
   driverHireStatusLabel,
 } from "@/lib/fleet/driver-hire-nav";
+import type {
+  DriverHireHistoryRow,
+  DriverHireWorkspaceShell,
+  DriverMyHirePaymentRow,
+  DriverMyHireRentalDetails,
+  DriverMyHireShellRow,
+} from "@/lib/fleet/driver-hire-types";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 const MY_HIRE_SHELL_SELECT =
-  `id, status, start_date, rent_cadence, rent_amount_gbp, activated_at, ended_at, vehicles(${HIRE_ACCESS_VEHICLE_SELECT}), companies(name)`;
+  "id, status, start_date, rent_cadence, rent_amount_gbp, activated_at, ended_at, terminated_at, vehicle_id, parent_company_id, subcompany_id";
 
 const MY_HIRE_RENTAL_SELECT =
-  `id, status, start_date, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, draft_snapshot, activated_at, ended_at, companies(name), vehicles(${HIRE_ACCESS_VEHICLE_SELECT}), subcompanies(legal_name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode), company_hire_terms_versions(title, body, version_label), vehicle_hire_agreements(contract_length_kind, end_date, status, signed_at)`;
+  `id, status, start_date, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, draft_snapshot, activated_at, ended_at, vehicle_id, parent_company_id, subcompany_id, company_hire_terms_versions(title, body, version_label), vehicle_hire_agreements(contract_length_kind, end_date, status, signed_at)`;
 
-export type DriverMyHireShellRow = {
-  hireGroupId: string;
-  status: string;
-  statusLabel: string;
-  companyName: string;
-  vehicleVrm: string;
-  vehicleMakeModel: string;
-  startDateLabel: string;
-  rentLabel: string | null;
-  activatedAtLabel: string | null;
-};
-
-export type DriverMyHireRentalDetails = HireAccessDisplay & {
-  hireGroupId: string;
-  status: string;
-  statusLabel: string;
-  agreementLines: string[];
-};
-
-export type DriverMyHirePaymentRow = {
-  id: string;
-  periodStartLabel: string;
-  periodEndLabel: string;
-  amountLabel: string;
-  rowKind: string;
-  paymentStatus: string;
-  paymentStatusLabel: string;
-};
-
-export type DriverHireHistoryRow = {
-  hireGroupId: string;
-  status: string;
-  statusLabel: string;
-  companyName: string;
-  vehicleVrm: string;
-  vehicleMakeModel: string;
-  startDateLabel: string;
-  endDateLabel: string | null;
-  signedAgreementCount: number;
-};
+const HIRE_HISTORY_SELECT =
+  "id, status, start_date, activated_at, ended_at, terminated_at, vehicle_id, parent_company_id, subcompany_id, vehicle_hire_agreements(signed_at)";
 
 const PAYMENT_STATUS_LABELS: Record<string, string> = {
   not_received: "Not received",
@@ -91,23 +66,103 @@ async function assertDriverOwnsHireGroup(
   return { ok: true };
 }
 
-function mapShellRow(row: Record<string, unknown>): DriverMyHireShellRow {
-  const vehicle = (row.vehicles ?? null) as { vrm?: string; make?: string; model?: string } | null;
-  const company = (row.companies ?? null) as { name?: string } | null;
+async function requireDriverAdminClient():
+  Promise<{ admin: ReturnType<typeof createSupabaseAdminClient> } | { error: string }> {
+  try {
+    return { admin: createSupabaseAdminClient() };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Server error." };
+  }
+}
+
+type DriverHireLookupRow = {
+  vehicle_id: string | null;
+  parent_company_id: string;
+  subcompany_id: string | null;
+};
+
+async function loadDriverHireDisplayLookups(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  rows: DriverHireLookupRow[],
+): Promise<DriverHireDisplayLookups> {
+  const vehicleIds = [
+    ...new Set(rows.map((row) => row.vehicle_id).filter((id): id is string => Boolean(id))),
+  ];
+  const subcompanyIds = [
+    ...new Set(rows.map((row) => row.subcompany_id).filter((id): id is string => Boolean(id))),
+  ];
+  const companyIds = [...new Set(rows.map((row) => row.parent_company_id).filter(Boolean))];
+
+  const [vehiclesRes, subcompaniesRes, companiesRes] = await Promise.all([
+    vehicleIds.length
+      ? admin.from("vehicles").select("id, vrm, make, model").in("id", vehicleIds)
+      : Promise.resolve({ data: [] as { id: string; vrm?: string; make?: string; model?: string }[] }),
+    subcompanyIds.length
+      ? admin
+          .from("subcompanies")
+          .select("id, legal_name, companies(name)")
+          .in("id", subcompanyIds)
+      : Promise.resolve({
+          data: [] as { id: string; legal_name?: string; companies?: { name?: string } | null }[],
+        }),
+    companyIds.length
+      ? admin.from("companies").select("id, name").in("id", companyIds)
+      : Promise.resolve({ data: [] as { id: string; name?: string }[] }),
+  ]);
+
+  const vehiclesById = new Map(
+    (vehiclesRes.data ?? []).map((vehicle) => [
+      vehicle.id,
+      { vrm: vehicle.vrm, make: vehicle.make, model: vehicle.model },
+    ]),
+  );
+  const subcompaniesById = new Map(
+    (subcompaniesRes.data ?? []).map((subcompany) => {
+      const linkedCompany = subcompany.companies as { name?: string } | null;
+      return [
+        subcompany.id,
+        {
+          legalName: subcompany.legal_name,
+          companyName: linkedCompany?.name ?? null,
+        },
+      ];
+    }),
+  );
+  const companiesById = new Map(
+    (companiesRes.data ?? []).map((company) => [company.id, { name: company.name }]),
+  );
+
+  return { vehiclesById, subcompaniesById, companiesById };
+}
+
+function mapShellRow(
+  row: Record<string, unknown>,
+  lookups: DriverHireDisplayLookups,
+): DriverMyHireShellRow {
   const status = String(row.status ?? "");
   const startDate = typeof row.start_date === "string" ? row.start_date : null;
-  const activatedAt = typeof row.activated_at === "string" ? row.activated_at : null;
+  const vehicleId = (row.vehicle_id as string | null) ?? null;
+  const parentCompanyId = String(row.parent_company_id ?? "");
+  const subcompanyId = (row.subcompany_id as string | null) ?? null;
+  const vehicle = resolveDriverHireVehicleDisplay(vehicleId, lookups);
 
   return {
     hireGroupId: row.id as string,
     status,
     statusLabel: driverHireStatusLabel(status),
-    companyName: company?.name?.trim() || "Rental company",
-    vehicleVrm: vehicle?.vrm?.trim() || "—",
-    vehicleMakeModel: [vehicle?.make, vehicle?.model].filter(Boolean).join(" ").trim() || "—",
-    startDateLabel: startDate ? formatUkDate(startDate) : "—",
+    companyName: resolveDriverHireCompanyName({
+      parentCompanyId,
+      subcompanyId,
+      lookups,
+    }),
+    vehicleVrm: vehicle.vehicleVrm,
+    vehicleMakeModel: vehicle.vehicleMakeModel,
+    startDateLabel: formatDriverHireContractStartLabel(startDate),
     rentLabel: formatRentLabel(row.rent_amount_gbp, row.rent_cadence),
-    activatedAtLabel: activatedAt ? formatUkDate(activatedAt.slice(0, 10)) : null,
+    activatedAtLabel:
+      typeof row.activated_at === "string" && row.activated_at
+        ? formatUkDateTimeSeconds(row.activated_at)
+        : null,
   };
 }
 
@@ -141,7 +196,20 @@ export async function loadDriverMyHireShellAction(): Promise<
     .order("start_date", { ascending: false });
   if (error) return { ok: false, error: error.message };
 
-  return { ok: true, rows: (data ?? []).map((row) => mapShellRow(row as Record<string, unknown>)) };
+  const adminRes = await requireDriverAdminClient();
+  if ("error" in adminRes) return { ok: false, error: adminRes.error };
+
+  const lookupRows = (data ?? []).map((row) => ({
+    vehicle_id: (row.vehicle_id as string | null) ?? null,
+    parent_company_id: String(row.parent_company_id ?? ""),
+    subcompany_id: (row.subcompany_id as string | null) ?? null,
+  }));
+  const lookups = await loadDriverHireDisplayLookups(adminRes.admin, lookupRows);
+
+  return {
+    ok: true,
+    rows: (data ?? []).map((row) => mapShellRow(row as Record<string, unknown>, lookups)),
+  };
 }
 
 /** Full rental details — fetched only when the driver expands that section. */
@@ -166,9 +234,25 @@ export async function loadDriverMyHireRentalDetailsAction(
   if (error) return { ok: false, error: error.message };
   if (!data) return { ok: false, error: "Hire not found." };
 
+  const adminRes = await requireDriverAdminClient();
+  if ("error" in adminRes) return { ok: false, error: adminRes.error };
+
   const row = data as Record<string, unknown>;
   const status = String(row.status ?? "");
   const display = parseHireAccessSnapshot(row, "Rental company", null);
+  const lookups = await loadDriverHireDisplayLookups(adminRes.admin, [
+    {
+      vehicle_id: (row.vehicle_id as string | null) ?? null,
+      parent_company_id: String(row.parent_company_id ?? ""),
+      subcompany_id: (row.subcompany_id as string | null) ?? null,
+    },
+  ]);
+  const vehicle = resolveDriverHireVehicleDisplay((row.vehicle_id as string | null) ?? null, lookups);
+  const companyName = resolveDriverHireCompanyName({
+    parentCompanyId: String(row.parent_company_id ?? ""),
+    subcompanyId: (row.subcompany_id as string | null) ?? null,
+    lookups,
+  });
   const agreements = (row.vehicle_hire_agreements ?? null) as
     | { contract_length_kind?: string; end_date?: string | null; signed_at?: string | null }[]
     | null;
@@ -177,6 +261,9 @@ export async function loadDriverMyHireRentalDetailsAction(
     ok: true,
     details: {
       ...display,
+      companyName,
+      vehicleVrm: vehicle.vehicleVrm,
+      vehicleMakeModel: vehicle.vehicleMakeModel,
       hireGroupId: id,
       status,
       statusLabel: driverHireStatusLabel(status),
@@ -233,9 +320,7 @@ export async function loadDriverHireHistoryAction(): Promise<
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("vehicle_hire_groups")
-    .select(
-      `id, status, start_date, ended_at, terminated_at, vehicles(vrm, make, model), companies(name), vehicle_hire_agreements(signed_at)`,
-    )
+    .select(HIRE_HISTORY_SELECT)
     .eq("driver_user_id", auth.userId)
     .in("status", [...DRIVER_HIRE_HISTORY_STATUSES])
     .order("ended_at", { ascending: false, nullsFirst: false })
@@ -243,9 +328,17 @@ export async function loadDriverHireHistoryAction(): Promise<
     .limit(50);
   if (error) return { ok: false, error: error.message };
 
+  const adminRes = await requireDriverAdminClient();
+  if ("error" in adminRes) return { ok: false, error: adminRes.error };
+
+  const lookupRows = (data ?? []).map((row) => ({
+    vehicle_id: (row.vehicle_id as string | null) ?? null,
+    parent_company_id: String(row.parent_company_id ?? ""),
+    subcompany_id: (row.subcompany_id as string | null) ?? null,
+  }));
+  const lookups = await loadDriverHireDisplayLookups(adminRes.admin, lookupRows);
+
   const rows: DriverHireHistoryRow[] = (data ?? []).map((row) => {
-    const vehicle = (row.vehicles ?? null) as { vrm?: string; make?: string; model?: string } | null;
-    const company = (row.companies ?? null) as { name?: string } | null;
     const status = String(row.status ?? "");
     const startDate = typeof row.start_date === "string" ? row.start_date : null;
     const endedAt =
@@ -254,19 +347,90 @@ export async function loadDriverHireHistoryAction(): Promise<
       null;
     const agreements = (row.vehicle_hire_agreements ?? null) as { signed_at?: string | null }[] | null;
     const signedAgreementCount = agreements?.filter((a) => a.signed_at).length ?? 0;
+    const vehicleId = (row.vehicle_id as string | null) ?? null;
+    const parentCompanyId = String(row.parent_company_id ?? "");
+    const subcompanyId = (row.subcompany_id as string | null) ?? null;
+    const vehicle = resolveDriverHireVehicleDisplay(vehicleId, lookups);
 
     return {
       hireGroupId: row.id as string,
       status,
       statusLabel: driverHireStatusLabel(status),
-      companyName: company?.name?.trim() || "Rental company",
-      vehicleVrm: vehicle?.vrm?.trim() || "—",
-      vehicleMakeModel: [vehicle?.make, vehicle?.model].filter(Boolean).join(" ").trim() || "—",
-      startDateLabel: startDate ? formatUkDate(startDate) : "—",
+      companyName: resolveDriverHireCompanyName({
+        parentCompanyId,
+        subcompanyId,
+        lookups,
+      }),
+      vehicleVrm: vehicle.vehicleVrm,
+      vehicleMakeModel: vehicle.vehicleMakeModel,
+      startDateLabel: formatDriverHireContractStartLabel(startDate),
       endDateLabel: endedAt ? formatUkDate(endedAt.slice(0, 10)) : null,
+      terminatedAtLabel:
+        typeof row.terminated_at === "string" && row.terminated_at
+          ? formatUkDateTimeSeconds(row.terminated_at)
+          : endedAt
+            ? formatUkDateTimeSeconds(endedAt)
+            : null,
       signedAgreementCount,
     };
   });
 
   return { ok: true, rows };
+}
+
+/** Shell for a single driver hire workspace (current or past). */
+export async function loadDriverHireWorkspaceShellAction(
+  hireGroupId: string,
+): Promise<{ ok: true; shell: DriverHireWorkspaceShell } | { ok: false; error: string }> {
+  const auth = await requireDriverUserId();
+  if ("error" in auth) return { ok: false, error: auth.error };
+
+  const id = hireGroupId.trim();
+  if (!id) return { ok: false, error: "Hire not found." };
+
+  const owned = await assertDriverOwnsHireGroup(id, auth.userId);
+  if (!owned.ok) return { ok: false, error: owned.error };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("vehicle_hire_groups")
+    .select(MY_HIRE_SHELL_SELECT)
+    .eq("id", id)
+    .in("status", [...DRIVER_HIRE_WORKSPACE_STATUSES])
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!data) return { ok: false, error: "Hire not found." };
+
+  const adminRes = await requireDriverAdminClient();
+  if ("error" in adminRes) return { ok: false, error: adminRes.error };
+
+  const lookups = await loadDriverHireDisplayLookups(adminRes.admin, [
+    {
+      vehicle_id: (data.vehicle_id as string | null) ?? null,
+      parent_company_id: String(data.parent_company_id ?? ""),
+      subcompany_id: (data.subcompany_id as string | null) ?? null,
+    },
+  ]);
+  const row = mapShellRow(data as Record<string, unknown>, lookups);
+  const terminatedAt =
+    typeof (data as { terminated_at?: string | null }).terminated_at === "string"
+      ? (data as { terminated_at: string }).terminated_at
+      : typeof (data as { ended_at?: string | null }).ended_at === "string"
+        ? (data as { ended_at: string }).ended_at
+        : null;
+
+  return {
+    ok: true,
+    shell: {
+      hireGroupId: row.hireGroupId,
+      status: row.status,
+      statusLabel: row.statusLabel,
+      companyName: row.companyName,
+      vehicleVrm: row.vehicleVrm,
+      vehicleMakeModel: row.vehicleMakeModel,
+      startDateLabel: row.startDateLabel,
+      rentLabel: row.rentLabel,
+      terminatedAtLabel: terminatedAt ? formatUkDateTimeSeconds(terminatedAt) : null,
+    },
+  };
 }

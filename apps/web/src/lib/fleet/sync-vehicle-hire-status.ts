@@ -1,5 +1,4 @@
-import { vehicleStatusForHireGroup, allAgreementsSigned, isStartDateInFuture } from "@/lib/fleet/hire-lifecycle";
-import { ukTodayYmd } from "@/lib/datetime/uk";
+import { vehicleStatusForHireGroup, allAgreementsSigned } from "@/lib/fleet/hire-lifecycle";
 import { HIRE_VEHICLE_BLOCKING_STATUSES, type HireGroupStatus } from "@/lib/fleet/hire-types";
 import type { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -57,21 +56,28 @@ export async function releaseVehicleIfNoBlockingHire(
   if (conflict) return;
 
   const { data: vehicle } = await admin.from("vehicles").select("status").eq("id", vehicleId).maybeSingle();
-  if (vehicle?.status === "reserved") {
+  if (vehicle?.status === "reserved" || vehicle?.status === "on_rent") {
     await admin.from("vehicles").update({ status: "available" }).eq("id", vehicleId);
   }
 }
 
-/** Move a fully signed hire from `reserved` to `active` once the UK start date is reached. */
-async function promoteDueHireGroupToActive(admin: Admin, hireGroupId: string): Promise<void> {
-  const today = ukTodayYmd();
+/** Move a fully signed hire from `reserved` to `active` once checkout inspection is completed. */
+async function promoteCheckedOutHireGroupToActive(admin: Admin, hireGroupId: string): Promise<void> {
   const { data: group } = await admin
     .from("vehicle_hire_groups")
     .select("id, status, start_date")
     .eq("id", hireGroupId)
     .maybeSingle();
   if (!group?.id || group.status !== "reserved") return;
-  if (isStartDateInFuture(group.start_date as string, today)) return;
+
+  const { data: checkout } = await admin
+    .from("vehicle_hire_inspections")
+    .select("id")
+    .eq("hire_group_id", hireGroupId)
+    .eq("kind", "checkout")
+    .eq("status", "completed")
+    .maybeSingle();
+  if (!checkout?.id) return;
 
   const { data: agreements } = await admin
     .from("vehicle_hire_agreements")
@@ -90,7 +96,7 @@ async function promoteDueHireGroupToActive(admin: Admin, hireGroupId: string): P
 }
 
 export async function syncVehicleStatusForHireGroup(admin: Admin, hireGroupId: string): Promise<void> {
-  await promoteDueHireGroupToActive(admin, hireGroupId);
+  await promoteCheckedOutHireGroupToActive(admin, hireGroupId);
 
   const { data: group } = await admin
     .from("vehicle_hire_groups")

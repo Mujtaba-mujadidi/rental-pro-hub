@@ -19,6 +19,15 @@ export const HIRE_GROUP_EVENT_TYPES = [
   "hire_pdfs_refreshed",
   "hire_signing_bundle_sent",
   "hire_signing_bundle_resent",
+  "checkout_started",
+  "checkout_completed",
+  "checkin_started",
+  "checkin_completed",
+  "hire_terminated",
+  "deposit_disposition_resolved",
+  "deposit_refund_recorded",
+  "settlement_refund_recorded",
+  "settlement_discount_recorded",
 ] as const;
 
 export type HireGroupEventType = (typeof HIRE_GROUP_EVENT_TYPES)[number];

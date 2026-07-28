@@ -44,6 +44,13 @@ import {
   syncVehicleStatusForHireGroup,
   vehicleIdsBlockedByInProgressHires,
 } from "@/lib/fleet/sync-vehicle-hire-status";
+import { mapHireInspectionCompletionByGroup } from "@/lib/fleet/hire-inspection-status";
+import {
+  canStartCheckin,
+  canStartCheckout,
+  canTerminateHire,
+  isCheckoutDue,
+} from "@/lib/fleet/hire-lifecycle-attention";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -52,6 +59,7 @@ export type HireContractTableRow = {
   vehicle_id: string | null;
   status: string;
   wizard_step: number;
+  terminated_at: string | null;
   driver_access_status: string;
   driver_access_label: string;
   driver_access_tone: HireTableStatus["tone"];
@@ -61,6 +69,7 @@ export type HireContractTableRow = {
   vehicle_label: string | null;
   driver_label: string | null;
   start_date: string | null;
+  activated_at: string | null;
   rent_amount_gbp: number;
   rent_cadence: string;
   updated_at: string;
@@ -74,6 +83,13 @@ export type HireContractTableRow = {
   can_regenerate_contracts: boolean;
   signed_agreement_count: number;
   can_view_signed_documents: boolean;
+  checkout_completed: boolean;
+  checkin_completed: boolean;
+  lifecycle_label: string | null;
+  lifecycle_tone: HireTableStatus["tone"];
+  can_checkout: boolean;
+  can_terminate: boolean;
+  can_checkin: boolean;
 };
 
 export type HireDraftPayload = {
@@ -133,7 +149,7 @@ export async function listHireContractsAction(
   let groupsQuery = supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, vehicle_id, status, wizard_step, driver_access_status, start_date, rent_amount_gbp, rent_cadence, driver_licence_number, driver_email, updated_at, signing_bundle_sent_at, vehicles(vrm, make, model)",
+      "id, vehicle_id, status, wizard_step, driver_access_status, start_date, activated_at, rent_amount_gbp, rent_cadence, driver_licence_number, driver_email, updated_at, signing_bundle_sent_at, terminated_at, vehicles(vrm, make, model)",
     )
     .eq("parent_company_id", companyId);
 
@@ -147,21 +163,37 @@ export async function listHireContractsAction(
 
   const groupIds = (data ?? []).map((g) => g.id as string);
   const agreementsByGroup = new Map<string, HireAgreementEnvelopeSource[]>();
+  const inspectionByGroup = new Map<string, { checkoutCompleted: boolean; checkinCompleted: boolean }>();
 
   if (groupIds.length) {
     try {
       const admin = createSupabaseAdminClient();
-      const { data: agreementRows } = await admin
-        .from("vehicle_hire_agreements")
-        .select(
-          "id, hire_group_id, contract_length_kind, end_date, esign_envelope_id, status, esign_envelopes(id, status, field_layout, requires_owner_signature, owner_signed_at, esign_recipients(signed_at))",
-        )
-        .in("hire_group_id", groupIds);
+      const [{ data: agreementRows }, { data: inspectionRows }] = await Promise.all([
+        admin
+          .from("vehicle_hire_agreements")
+          .select(
+            "id, hire_group_id, contract_length_kind, end_date, esign_envelope_id, status, esign_envelopes(id, status, field_layout, requires_owner_signature, owner_signed_at, esign_recipients(signed_at))",
+          )
+          .in("hire_group_id", groupIds),
+        admin
+          .from("vehicle_hire_inspections")
+          .select("hire_group_id, kind, status")
+          .in("hire_group_id", groupIds),
+      ]);
       for (const a of agreementRows ?? []) {
         const groupId = a.hire_group_id as string;
         const list = agreementsByGroup.get(groupId) ?? [];
         list.push(a as HireAgreementEnvelopeSource);
         agreementsByGroup.set(groupId, list);
+      }
+      for (const [groupId, completion] of mapHireInspectionCompletionByGroup(
+        (inspectionRows ?? []).map((row) => ({
+          hire_group_id: row.hire_group_id as string,
+          kind: row.kind as string,
+          status: row.status as string,
+        })),
+      )) {
+        inspectionByGroup.set(groupId, completion);
       }
     } catch {
       /* fall back to empty agreement lists */
@@ -213,10 +245,34 @@ export async function listHireContractsAction(
       signingBundleSentAt: (g.signing_bundle_sent_at as string | null) ?? null,
       allAgreementsSigned,
     });
+    const inspection = inspectionByGroup.get(g.id as string) ?? {
+      checkoutCompleted: false,
+      checkinCompleted: false,
+    };
+    const status = g.status as string;
+    let lifecycleLabel: string | null = null;
+    let lifecycleTone: HireTableStatus["tone"] = "neutral";
+    if (isCheckoutDue({ status, checkoutCompleted: inspection.checkoutCompleted })) {
+      lifecycleLabel = "Awaiting checkout";
+      lifecycleTone = "warning";
+    } else if (canTerminateHire(status)) {
+      lifecycleLabel = "On rent";
+      lifecycleTone = "success";
+    } else if (
+      canStartCheckin({
+        status,
+        checkoutCompleted: inspection.checkoutCompleted,
+        checkinCompleted: inspection.checkinCompleted,
+      })
+    ) {
+      lifecycleLabel = "Awaiting check-in";
+      lifecycleTone = "warning";
+    }
     rows.push({
       id: g.id as string,
       vehicle_id: (g.vehicle_id as string | null) ?? null,
       status: g.status as string,
+      terminated_at: (g.terminated_at as string | null) ?? null,
       wizard_step: Number(g.wizard_step ?? 1),
       driver_access_status: (g.driver_access_status as string) ?? "not_requested",
       driver_access_label: driverAccess.label,
@@ -227,6 +283,7 @@ export async function listHireContractsAction(
       vehicle_label: vehicleLabel,
       driver_label: driverLabel,
       start_date: (g.start_date as string | null) ?? null,
+      activated_at: (g.activated_at as string | null) ?? null,
       rent_amount_gbp: Number(g.rent_amount_gbp ?? 0),
       rent_cadence: (g.rent_cadence as string) ?? "weekly",
       updated_at: g.updated_at as string,
@@ -240,6 +297,20 @@ export async function listHireContractsAction(
       can_regenerate_contracts: canRegenerateContracts,
       signed_agreement_count: signedAgreementCount,
       can_view_signed_documents: signedAgreementCount > 0,
+      checkout_completed: inspection.checkoutCompleted,
+      checkin_completed: inspection.checkinCompleted,
+      lifecycle_label: lifecycleLabel,
+      lifecycle_tone: lifecycleTone,
+      can_checkout: canStartCheckout({
+        status,
+        checkoutCompleted: inspection.checkoutCompleted,
+      }),
+      can_terminate: canTerminateHire(status),
+      can_checkin: canStartCheckin({
+        status,
+        checkoutCompleted: inspection.checkoutCompleted,
+        checkinCompleted: inspection.checkinCompleted,
+      }),
     });
   }
 

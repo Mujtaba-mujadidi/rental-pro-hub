@@ -190,7 +190,7 @@ export function VehicleFinancialsView({
         <div>
           <h1 className="rph-h1">Financials</h1>
           <p className="rph-muted mt-1 text-sm">
-            Purchase and sale for capital P&L. Maintenance costs are included; hire income is not yet.
+            Purchase and sale for capital P&L, plus operating costs and hire income from ended contracts.
           </p>
         </div>
         {initial.canWrite && !isSold ? (
@@ -231,8 +231,32 @@ export function VehicleFinancialsView({
             <dd className="mt-0.5 font-semibold text-rph-fg">{formatGbp(pnl.maintenanceTotalGbp)}</dd>
           </div>
           <div>
-            <dt className="text-xs text-rph-fg-muted">Hire income (approved)</dt>
+            <dt className="text-xs text-rph-fg-muted">Hire income (net)</dt>
             <dd className="mt-0.5 font-semibold text-rph-fg">{formatGbp(pnl.rentalIncomeGbp)}</dd>
+            {pnl.rentalGrossIncomeGbp > pnl.rentalIncomeGbp ? (
+              <p className="rph-meta mt-1 text-[10px]">
+                Accrued rent approved {formatGbp(pnl.rentalGrossIncomeGbp)}
+                {pnl.rentalCollectionsGbp > 0.005
+                  ? ` · ${formatGbp(pnl.rentalCollectionsGbp)} settlement collected`
+                  : ""}
+                {pnl.rentalPrepaidExcludedGbp > 0.005
+                  ? ` · ${formatGbp(pnl.rentalPrepaidExcludedGbp)} prepaid after contract end excluded`
+                  : ""}
+                {pnl.rentalRefundsGbp > 0.005
+                  ? ` · ${formatGbp(pnl.rentalRefundsGbp)} refunded to driver`
+                  : ""}
+                {pnl.rentalWriteOffsGbp > 0.005
+                  ? ` · ${formatGbp(pnl.rentalWriteOffsGbp)} settlement written off`
+                  : ""}
+                {pnl.rentalDepositRetentionGbp > 0.005
+                  ? ` · ${formatGbp(pnl.rentalDepositRetentionGbp)} deposit retained`
+                  : ""}
+              </p>
+            ) : pnl.rentalDepositRetentionGbp > 0.005 ? (
+              <p className="rph-meta mt-1 text-[10px]">
+                Includes {formatGbp(pnl.rentalDepositRetentionGbp)} deposit retained after contract end
+              </p>
+            ) : null}
           </div>
           <div>
             <dt className="text-xs text-rph-fg-muted">{pnl.isSold ? "Net P&L" : "Book position"}</dt>
@@ -251,7 +275,13 @@ export function VehicleFinancialsView({
             </div>
           ) : null}
         </dl>
-        <p className="rph-meta mt-3 text-xs">Operating P&amp;L excludes hire income until the rentals module ships.</p>
+        <p className="rph-meta mt-3 text-xs">
+          Hire income is in-contract rent collected on the schedule (or earned at contract end),
+          plus settlement collections only when rent was not already on the schedule, plus deposit
+          retained after staff resolve the deposit (forfeit or partial refund), minus settlement
+          write-offs. Prepaid rent after contract end and settlement refunds are shown separately and
+          do not reduce earned rent.
+        </p>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

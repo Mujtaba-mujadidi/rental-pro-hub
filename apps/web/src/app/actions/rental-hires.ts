@@ -10,6 +10,7 @@ import {
   vehicleStatusForHireGroup,
 } from "@/lib/fleet/hire-lifecycle";
 import { persistHireTimesheetForGroup } from "@/lib/fleet/persist-hire-timesheet";
+import { revalidateVehicleFinancialsForHireGroup } from "@/app/actions/rental-vehicle-financials";
 import {
   assertVehicleAvailableForHire,
   releaseVehicleIfNoBlockingHire,
@@ -270,37 +271,16 @@ export async function getActiveHireForVehicle(
 export async function terminateHireOnTransfer(
   vehicleId: string,
   _transferId: string,
-  reason: string,
+  _reason: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Subcompany transfer must run the full termination + settlement pipeline before ending a hire.
   const active = await getActiveHireForVehicle(vehicleId);
   if (!active) return { ok: true };
-
-  const supabase = await createClient();
-  const now = new Date().toISOString();
-  const { error: gErr } = await supabase
-    .from("vehicle_hire_groups")
-    .update({
-      status: "terminated",
-      terminated_at: now,
-      termination_reason: reason.trim() || "Vehicle subcompany transfer",
-      ended_at: now,
-    })
-    .eq("id", active.id);
-  if (gErr) return { ok: false, error: gErr.message };
-
-  await supabase
-    .from("vehicle_hire_agreements")
-    .update({ status: "terminated" })
-    .eq("hire_group_id", active.id)
-    .in("status", ["pending_signature", "reserved", "active"]);
-
-  const nextVehicleStatus = vehicleStatusForHireGroup("terminated");
-  if (nextVehicleStatus) {
-    await supabase.from("vehicles").update({ status: nextVehicleStatus }).eq("id", vehicleId);
-  }
-
-  revalidateVehicleRentals(vehicleId);
-  return { ok: true };
+  return {
+    ok: false,
+    error:
+      "Ending a hire on subcompany transfer requires the full contract termination flow (settlement, deposit, and documents).",
+  };
 }
 
 export async function generateHireTimesheetForGroup(

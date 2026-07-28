@@ -5,7 +5,13 @@ import {
   submitDriverHirePaymentAction,
   type HirePaymentsPageData,
 } from "@/app/actions/hire-payments";
+import { HireEndedContractScheduleBanner } from "@/components/fleet/hire-payments/hire-ended-contract-schedule-banner";
 import { HirePaymentComposer } from "@/components/fleet/hire-payments/hire-payment-composer";
+import { HirePaymentSummaryCards } from "@/components/fleet/hire-payments/hire-payment-summary-cards";
+import { HireSettlementBalancePaymentsTable } from "@/components/fleet/hire-payments/hire-settlement-balance-payments-table";
+import { HireTerminationSummaryCard } from "@/components/fleet/hire-payments/hire-termination-summary-card";
+import { HireDepositPendingBanner } from "@/components/fleet/hire-dashboard/hire-deposit-pending-banner";
+import { HireWorkspaceBalanceBanner } from "@/components/fleet/hire-dashboard/hire-workspace-balance-banner";
 import { HirePaymentScheduleTable } from "@/components/fleet/hire-payments/hire-payment-schedule-table";
 import { useHirePaymentsRealtime } from "@/hooks/use-hire-realtime";
 import { useCallback, useEffect, useState, useTransition } from "react";
@@ -43,6 +49,52 @@ export function DriverHirePaymentsSection({ hireGroupId }: { hireGroupId: string
 
   return (
     <div className="space-y-4">
+      {data.contractEndedAtLabel ? (
+        <HireEndedContractScheduleBanner
+          contractEndedAtLabel={data.contractEndedAtLabel}
+          hasPostEndPrepaidPayments={data.hasPostEndPrepaidPayments}
+          settlementSettled={data.settlementBalance?.settled === true}
+        />
+      ) : null}
+
+      <HirePaymentSummaryCards
+        summary={data.summary}
+        compact
+        contractEnded={Boolean(data.contractEndedYmd)}
+      />
+
+      <HireWorkspaceBalanceBanner
+        hireGroupId={hireGroupId}
+        rentBalanceGbp={data.summary.balanceGbp}
+        rentCreditGbp={data.summary.creditGbp}
+        settlementBalance={data.settlementBalance}
+        audience="driver"
+        contractEnded={Boolean(data.contractEndedYmd)}
+        depositPendingReview={data.depositPendingReview}
+        depositGbp={data.depositGbp ?? 0}
+        depositDispositionLabel={data.depositDispositionLabel}
+      />
+
+      <HireDepositPendingBanner
+        hireGroupId={hireGroupId}
+        closure={{
+          depositPendingReview: data.depositPendingReview,
+          depositGbp: data.depositGbp ?? 0,
+          rentSettlementSettled: data.settlementBalance?.settled === true,
+        }}
+        audience="driver"
+      />
+
+      <HireSettlementBalancePaymentsTable payments={data.settlementBalancePayments} />
+
+      {data.terminationSummary ? (
+        <HireTerminationSummaryCard
+          summary={data.terminationSummary}
+          depositDispositionLabel={data.depositDispositionLabel}
+          settlementResolutionLabel={data.settlementResolutionLabel}
+        />
+      ) : null}
+
       {data.canSubmitPayment ? (
         <div className="flex justify-end">
           <HirePaymentComposer
@@ -75,6 +127,10 @@ export function DriverHirePaymentsSection({ hireGroupId }: { hireGroupId: string
         canApprove={false}
         canApplyDiscount={false}
         highlightedRowIds={highlightedRowIds}
+        contractEndedYmd={data.contractEndedYmd}
+        settlementSettled={data.settlementBalance?.settled === true}
+        audience="driver"
+        readOnly={data.scheduleReadOnly}
         onRefresh={reload}
       />
     </div>

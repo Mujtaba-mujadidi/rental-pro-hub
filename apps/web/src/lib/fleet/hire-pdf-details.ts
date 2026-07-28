@@ -10,6 +10,10 @@ import type { ContractLengthKind, RentCadence } from "@/lib/fleet/hire-types";
 export const HIRE_PDF_DEFAULT_START_TIME = "09:00";
 export const HIRE_PDF_DEFAULT_END_TIME = "17:00";
 
+export function formatHireContractStartLabel(startDate: string | null | undefined): string {
+  return formatUkDateAtTime(startDate, HIRE_PDF_DEFAULT_START_TIME);
+}
+
 export type HirePdfDriverSource = {
   first_name?: string | null;
   last_name?: string | null;
@@ -107,7 +111,7 @@ export function buildHirePdfDetails(input: {
     rental: [
       {
         label: "Hire start date and time",
-        value: formatUkDateAtTime(input.startDate, HIRE_PDF_DEFAULT_START_TIME),
+        value: formatHireContractStartLabel(input.startDate),
       },
       {
         label: "Hire end date and time",
@@ -134,7 +138,7 @@ export function buildHirePdfDetails(input: {
     hirer: input.driverName,
     hirerAddress: driverAddress,
     phvLicenceNumber: phvNumber,
-    hireStartDate: formatUkDateAtTime(input.startDate, HIRE_PDF_DEFAULT_START_TIME),
+    hireStartDate: formatHireContractStartLabel(input.startDate),
   };
 
   return { hireDetails, hireRunningHeader };

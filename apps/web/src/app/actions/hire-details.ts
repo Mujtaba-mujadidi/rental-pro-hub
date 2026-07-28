@@ -5,7 +5,13 @@ import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
 import { canReadRentals } from "@/lib/auth/rental-permissions";
 import { loadDriverPreviewBundle } from "@/lib/admin/load-driver-preview";
 import { driverCanAccessVehicleDocuments } from "@/lib/fleet/driver-hire-nav";
+import {
+  canCompanyAccessHireDriverDocuments,
+  driverDocumentsRetentionWarning,
+} from "@/lib/fleet/hire-document-retention";
+import { ukTodayYmd } from "@/lib/datetime/uk";
 import { CONTRACT_LENGTH_LABELS } from "@/lib/fleet/hire-access-display";
+import { formatHireContractStartLabel } from "@/lib/fleet/hire-pdf-details";
 import type { ContractLengthKind } from "@/lib/fleet/hire-types";
 import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
 import {
@@ -45,6 +51,13 @@ export type HireDetailsRentalCard = {
   agreements: HireDetailsRentalAgreement[];
 };
 
+export type HireDetailsCompanyCard = {
+  companyName: string;
+  legalName: string | null;
+  companyNumber: string | null;
+  address: string | null;
+};
+
 export type HireDetailsVehicleCard = {
   vrm: string;
   make: string;
@@ -81,6 +94,7 @@ export type HireDetailsImportantDates = {
 
 export type HireDetailsPayload = {
   hireGroupId: string;
+  company: HireDetailsCompanyCard;
   rental: HireDetailsRentalCard;
   vehicle: HireDetailsVehicleCard;
   importantDates: HireDetailsImportantDates;
@@ -89,6 +103,10 @@ export type HireDetailsPayload = {
   vehicleDocumentsAccessible: boolean;
   hirer: HireDetailsHirerCard | null;
   hirerDocuments: HireDetailsDocumentItem[];
+  /** False when driver document retention has expired for ended hires. */
+  hirerDocumentsAccessible: boolean;
+  driverDocumentsRetentionWarning: string | null;
+  driverDocumentsRetainUntilLabel: string | null;
 };
 
 function formatAddress(parts: (string | null | undefined)[]): string | null {
@@ -313,7 +331,7 @@ function buildRentalCard(input: {
 
   return {
     companyName: input.companyName,
-    startDateLabel: formatUkDate(input.startDate),
+    startDateLabel: formatHireContractStartLabel(input.startDate),
     activatedAtLabel: input.activatedAt ? formatUkDateTime(input.activatedAt) : null,
     endedAtLabel: input.endedAt ? formatUkDateTime(input.endedAt) : null,
     rentAmountLabel: formatRentAmount(input.rentAmountGbp),
@@ -397,6 +415,54 @@ function buildImportantDates(input: {
   return { vehicle, hirer };
 }
 
+async function loadCompanyCardForHire(input: {
+  parentCompanyId: string;
+  subcompanyId: string | null;
+  embeddedCompanyName: string | null;
+  admin: ReturnType<typeof createSupabaseAdminClient> | null;
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  forDriver: boolean;
+}): Promise<HireDetailsCompanyCard> {
+  let companyName = input.embeddedCompanyName?.trim() || "Rental company";
+  let legalName: string | null = null;
+  let companyNumber: string | null = null;
+  let address: string | null = null;
+
+  const client = input.forDriver && input.admin ? input.admin : input.supabase;
+
+  if (input.subcompanyId) {
+    const { data: subcompany } = await client
+      .from("subcompanies")
+      .select(
+        "legal_name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode, companies(name)",
+      )
+      .eq("id", input.subcompanyId)
+      .maybeSingle();
+    if (subcompany) {
+      legalName = (subcompany.legal_name as string | null)?.trim() || null;
+      companyNumber = (subcompany.company_number as string | null)?.trim() || null;
+      address = formatAddress([
+        subcompany.registered_address_line1 as string | null,
+        subcompany.registered_address_line2 as string | null,
+        subcompany.registered_town as string | null,
+        subcompany.registered_county as string | null,
+        subcompany.registered_postcode as string | null,
+      ]);
+      const linkedCompany = subcompany.companies as { name?: string } | null;
+      if (linkedCompany?.name?.trim()) companyName = linkedCompany.name.trim();
+    }
+  } else {
+    const { data: company } = await client
+      .from("companies")
+      .select("name")
+      .eq("id", input.parentCompanyId)
+      .maybeSingle();
+    if (company?.name?.trim()) companyName = company.name.trim();
+  }
+
+  return { companyName, legalName, companyNumber, address };
+}
+
 async function buildHireDetails(
   hireGroupId: string,
   options: { includeHirer: boolean; driverUserId?: string },
@@ -405,7 +471,7 @@ async function buildHireDetails(
   const { data: group, error } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      `id, status, parent_company_id, driver_user_id, vehicle_id, start_date, activated_at, ended_at, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, companies(name), vehicles(vrm, make, model, colour, fuel_type, seats, cc, mot_expiry, tax_expiry, phv_licence_no, phv_licence_expiry, service_due_at), vehicle_hire_agreements(id, contract_length_kind, end_date, status, signed_at, esign_envelope_id)`,
+      `id, status, parent_company_id, subcompany_id, driver_user_id, vehicle_id, start_date, activated_at, ended_at, terminated_at, driver_documents_retain_until, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, companies(name), vehicles(vrm, make, model, colour, fuel_type, seats, cc, mot_expiry, tax_expiry, phv_licence_no, phv_licence_expiry, service_due_at), vehicle_hire_agreements(id, contract_length_kind, end_date, status, signed_at, esign_envelope_id)`,
     )
     .eq("id", hireGroupId.trim())
     .maybeSingle();
@@ -454,6 +520,10 @@ async function buildHireDetails(
   let vehicleDocumentsAccessible = true;
   let hirer: HireDetailsHirerCard | null = null;
   let hirerDocuments: HireDetailsDocumentItem[] = [];
+  let hirerDocumentsAccessible = true;
+  let driverDocumentsRetentionWarningMessage: string | null = null;
+  const retainUntilYmd = (group.driver_documents_retain_until as string | null) ?? null;
+  const todayYmd = ukTodayYmd();
 
   if (options.driverUserId) {
     vehicleDocumentsAccessible = driverCanAccessVehicleDocuments(hireStatus);
@@ -465,6 +535,16 @@ async function buildHireDetails(
   }
 
   if (options.includeHirer && group.driver_user_id) {
+    hirerDocumentsAccessible = canCompanyAccessHireDriverDocuments(retainUntilYmd, todayYmd);
+    const retentionWarning = retainUntilYmd
+      ? driverDocumentsRetentionWarning(retainUntilYmd, todayYmd)
+      : null;
+    driverDocumentsRetentionWarningMessage = retentionWarning?.message ?? null;
+
+    if (!hirerDocumentsAccessible) {
+      hirer = null;
+      hirerDocuments = [];
+    } else {
     if (!admin) {
       try {
         admin = createSupabaseAdminClient();
@@ -483,6 +563,7 @@ async function buildHireDetails(
     const hirerBundle = await loadHirerDocuments(admin, group.driver_user_id as string);
     hirer = hirerBundle.hirer;
     hirerDocuments = hirerBundle.documents;
+    }
   }
 
   const importantDates = buildImportantDates({
@@ -491,11 +572,22 @@ async function buildHireDetails(
     hirerPhvExpiryLabel: hirer?.phvLicenceExpiryLabel ?? null,
   });
 
+  const companyCard = await loadCompanyCardForHire({
+    parentCompanyId: group.parent_company_id as string,
+    subcompanyId: (group.subcompany_id as string | null) ?? null,
+    embeddedCompanyName: company?.name?.trim() || null,
+    admin,
+    supabase,
+    forDriver: Boolean(options.driverUserId),
+  });
+
   const rental = buildRentalCard({
-    companyName: options.driverUserId ? company?.name?.trim() || null : null,
+    companyName: options.driverUserId ? companyCard.companyName : null,
     startDate: group.start_date as string | undefined,
     activatedAt: group.activated_at as string | null | undefined,
-    endedAt: group.ended_at as string | null | undefined,
+    endedAt:
+      (group.terminated_at as string | null | undefined) ??
+      (group.ended_at as string | null | undefined),
     rentAmountGbp: group.rent_amount_gbp,
     rentCadence: group.rent_cadence,
     includeDeposit: Boolean(group.include_deposit),
@@ -508,6 +600,7 @@ async function buildHireDetails(
     ok: true,
     data: {
       hireGroupId: group.id as string,
+      company: companyCard,
       rental,
       vehicle: {
         vrm: vehicle.vrm?.trim() || "—",
@@ -527,6 +620,9 @@ async function buildHireDetails(
       vehicleDocumentsAccessible,
       hirer,
       hirerDocuments,
+      hirerDocumentsAccessible,
+      driverDocumentsRetentionWarning: driverDocumentsRetentionWarningMessage,
+      driverDocumentsRetainUntilLabel: retainUntilYmd ? formatUkDate(retainUntilYmd) : null,
     },
   };
 }

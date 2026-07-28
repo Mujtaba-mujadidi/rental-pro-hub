@@ -39,7 +39,7 @@ export function allAgreementsSigned(signedFlags: boolean[]): boolean {
 export function vehicleStatusForHireGroup(status: HireGroupStatus): VehicleStatus | null {
   if (status === "draft" || status === "pending_signature" || status === "reserved") return "reserved";
   if (status === "active") return "on_rent";
-  if (status === "completed" || status === "terminated" || status === "cancelled") return "available";
+  if (status === "completed" || status === "cancelled" || status === "terminated") return "available";
   return null;
 }
 
@@ -48,10 +48,10 @@ export function isStartDateInFuture(startDate: string, todayIso: string): boolea
   return startDate > todayIso;
 }
 
-/** Resolve group status after all contracts signed. */
+/** Resolve group status after all contracts signed. Checkout must complete before active. */
 export function hireGroupStatusAfterAllSigned(
-  startDate: string,
-  todayIso: string,
-): "reserved" | "active" {
-  return isStartDateInFuture(startDate, todayIso) ? "reserved" : "active";
+  _startDate: string,
+  _todayIso: string,
+): "reserved" {
+  return "reserved";
 }

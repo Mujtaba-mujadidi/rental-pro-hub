@@ -1,0 +1,135 @@
+	/* svg root css [START] */
+	:root {
+		--white: white;
+	}
+
+	.icst0 {
+		fill: var(--white);
+		stroke-width: 0.5px;
+		stroke: black;
+	}
+
+	.icst9 {
+		stroke-width: 2.5px;
+	}
+
+	.icst1 {
+		fill: #221F1F;
+	}
+
+	.icst2 {
+		display: none;
+		fill: #221F1F;
+	}
+
+	.icst3 {
+		fill: var(--white);
+		fill-opacity: 0;
+	}
+
+	.icst4 {
+		fill: #231F20;
+	}
+
+	.icst5 {
+		    font-family: arial;
+    font-weight: bold;
+	}
+
+	.icst6 {
+		font-size: 32.0027px;
+	}
+ 
+	/* Main div css */
+
+	.diagram-box {
+		width: 900px;
+		/*  Main div width */
+		height: auto;
+		/*  Main div height */
+		position: relative;
+		margin: 0 auto;
+	}
+
+
+	/* svg all clickable link pointer */
+
+	svg>a {
+		cursor: pointer;
+	}
+
+
+	/* svg all path background color css */
+
+
+
+
+
+
+	/* svg all path hover background color css */
+
+	svg a:hover g[id] {
+
+
+		--white: #7bd6ef;
+
+
+	}
+
+	 
+	/* svg all text css */
+ 
+
+	/* tooltip css code [START]  */
+
+
+	#tooltip {
+		position: absolute;
+		width: auto;
+		max-width: 250px;
+		background: #000;
+		color: #fff;
+		text-align: center;
+		border-radius: 6px;
+		padding: 7px;
+		z-index: 9999;
+		white-space: nowrap;
+		pointer-events: none;
+		background: #1E293B;
+		width: max-content;
+		/* Premium dark blue */
+
+	}
+
+	/* Default: tooltip mouse*/
+	#tooltip::after {
+		content: "";
+		position: absolute;
+		top: 50%;
+		right: 100%;
+		margin-top: -5px;
+		border-width: 5px;
+		border-style: solid;
+		border-color: transparent #1E293B transparent transparent;
+	}
+
+	/* Right edge tooltip mouse */
+	#tooltip.left-side::after {
+		left: 100%;
+		right: auto;
+		border-color: transparent transparent transparent #1E293B;
+	}
+
+	.textcl {
+		display: none;
+	}
+
+	@media screen and (max-width: 899px) {
+		.diagram-box {
+			width: 100%;
+		}
+	}
+
+	/* tooltip css code [END]  */
+
+	/* svg css [END] */

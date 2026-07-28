@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { deriveHirePaymentDisplayStatus } from "@/lib/fleet/hire-payment-display";
+import {
+  deriveHirePaymentDisplayStatus,
+  hirePaymentDisplayStatusMeta,
+} from "@/lib/fleet/hire-payment-display";
 
 const base = {
   paymentStatus: "not_received" as const,
@@ -7,8 +10,20 @@ const base = {
   paidGbp: 0,
   netDueGbp: 100,
   accrued: true,
+  periodStart: "2026-07-07",
   periodEnd: "2026-07-14",
 };
+
+const postEndPrepaid = {
+  ...base,
+  periodStart: "2026-08-01",
+  periodEnd: "2026-08-07",
+  accrued: false,
+  paidGbp: 100,
+  paymentStatus: "approved" as const,
+};
+
+const endedOptions = { contractEndedYmd: "2026-07-20" };
 
 describe("deriveHirePaymentDisplayStatus", () => {
   it("returns overdue when accrued period has ended with balance", () => {
@@ -55,18 +70,79 @@ describe("deriveHirePaymentDisplayStatus", () => {
     ).toBe("cleared");
   });
 
-  it("returns pending approval and rejected from workflow status", () => {
+  it("returns pending approval from workflow status", () => {
     expect(
       deriveHirePaymentDisplayStatus({ ...base, paymentStatus: "pending_approval" }, "2026-07-10"),
     ).toBe("pending_approval");
+  });
+
+  it("returns rejected only after the period has started", () => {
     expect(
       deriveHirePaymentDisplayStatus({ ...base, paymentStatus: "rejected" }, "2026-07-10"),
     ).toBe("rejected");
     expect(
       deriveHirePaymentDisplayStatus(
-        { ...base, paymentStatus: "rejected", pendingSubmittedGbp: 100 },
-        "2026-07-10",
+        {
+          ...base,
+          paymentStatus: "rejected",
+          accrued: false,
+          periodStart: "2026-07-28",
+          periodEnd: "2026-08-02",
+        },
+        "2026-07-27",
       ),
-    ).toBe("rejected");
+    ).toBe("upcoming");
+  });
+
+  it("marks post-termination future periods as waived or refunded", () => {
+    expect(
+      deriveHirePaymentDisplayStatus(
+        { ...base, periodStart: "2026-08-01", periodEnd: "2026-08-07", accrued: false },
+        "2026-07-27",
+        endedOptions,
+      ),
+    ).toBe("waived");
+    expect(deriveHirePaymentDisplayStatus(postEndPrepaid, "2026-07-27", endedOptions)).toBe(
+      "refunded",
+    );
+  });
+
+  it("shows pending approval for post-end prepaid awaiting staff review", () => {
+    expect(
+      deriveHirePaymentDisplayStatus(
+        {
+          ...postEndPrepaid,
+          paymentStatus: "pending_approval",
+          paidGbp: 0,
+          pendingSubmittedGbp: 100,
+        },
+        "2026-07-27",
+        endedOptions,
+      ),
+    ).toBe("pending_approval");
+  });
+
+  it("marks post-end prepaid as settled once final settlement is cleared", () => {
+    expect(
+      deriveHirePaymentDisplayStatus(postEndPrepaid, "2026-07-27", {
+        ...endedOptions,
+        settlementSettled: true,
+      }),
+    ).toBe("prepaid_settled");
+  });
+});
+
+describe("hirePaymentDisplayStatusMeta", () => {
+  it("uses audience-specific labels for prepaid refund due", () => {
+    expect(hirePaymentDisplayStatusMeta("refunded", { audience: "driver" }).label).toBe(
+      "Refund expected",
+    );
+    expect(hirePaymentDisplayStatusMeta("refunded", { audience: "staff" }).label).toBe(
+      "Prepaid — refund due",
+    );
+  });
+
+  it("labels settled prepaid rows consistently", () => {
+    expect(hirePaymentDisplayStatusMeta("prepaid_settled").label).toBe("Settled");
   });
 });

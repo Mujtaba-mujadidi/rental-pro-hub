@@ -39,4 +39,5 @@ export const HIRE_VEHICLE_BLOCKING_STATUSES: readonly HireGroupStatus[] = [
   "pending_signature",
   "reserved",
   "active",
+  "terminated",
 ];

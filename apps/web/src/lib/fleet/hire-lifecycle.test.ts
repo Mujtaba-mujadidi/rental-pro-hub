@@ -49,12 +49,8 @@ describe("vehicleStatusForHireGroup", () => {
 });
 
 describe("hireGroupStatusAfterAllSigned", () => {
-  it("reserved when future start", () => {
+  it("always reserved until checkout completes", () => {
     expect(hireGroupStatusAfterAllSigned("2026-08-01", "2026-07-22")).toBe("reserved");
-    expect(isStartDateInFuture("2026-08-01", "2026-07-22")).toBe(true);
-  });
-
-  it("active when start today or past", () => {
-    expect(hireGroupStatusAfterAllSigned("2026-07-22", "2026-07-22")).toBe("active");
+    expect(hireGroupStatusAfterAllSigned("2026-07-22", "2026-07-22")).toBe("reserved");
   });
 });

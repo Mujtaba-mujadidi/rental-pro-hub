@@ -26,6 +26,7 @@ export function HirePaymentRowActions({
   canRecordOnRow,
   canApprove,
   canApplyDiscount,
+  readOnly = false,
   onRefresh,
   onError,
 }: {
@@ -33,6 +34,7 @@ export function HirePaymentRowActions({
   canRecordOnRow: boolean;
   canApprove: boolean;
   canApplyDiscount: boolean;
+  readOnly?: boolean;
   onRefresh: () => void;
   onError: (message: string) => void;
 }) {
@@ -43,19 +45,42 @@ export function HirePaymentRowActions({
   const [historyOpen, setHistoryOpen] = useState(false);
 
   const canMarkPaid =
+    !readOnly &&
     canRecordOnRow &&
     row.balanceGbp > 0 &&
     row.paymentStatus !== "pending_approval" &&
     (row.paymentStatus === "not_received" || row.paymentStatus === "rejected");
 
   const canDiscount =
+    !readOnly &&
     canApplyDiscount &&
     row.balanceGbp > 0 &&
     row.paymentStatus !== "pending_approval" &&
     row.paymentStatus !== "approved";
 
-  const canApproveRow = canApprove && row.paymentStatus === "pending_approval";
-  const canAmendRow = canApprove && row.paymentStatus === "approved";
+  const canApproveRow = !readOnly && canApprove && row.paymentStatus === "pending_approval";
+  const canAmendRow = !readOnly && canApprove && row.paymentStatus === "approved";
+
+  if (readOnly) {
+    return (
+      <>
+        <button
+          type="button"
+          className={triggerClass}
+          onClick={() => setHistoryOpen(true)}
+          aria-label="Payment history"
+        >
+          History
+        </button>
+        <HirePaymentRowHistoryModal
+          scheduleRowId={row.id}
+          periodLabel={row.periodLabel}
+          open={historyOpen}
+          onClose={() => setHistoryOpen(false)}
+        />
+      </>
+    );
+  }
 
   function recordRow() {
     startTransition(async () => {

@@ -16,10 +16,12 @@ const HEALTH_META: Record<
 export function HireDashboardPaymentHealth({
   health,
   balanceGbp,
+  creditGbp = 0,
   audience = "staff",
 }: {
   health: HirePaymentHealthSummary;
   balanceGbp: number;
+  creditGbp?: number;
   audience?: "staff" | "driver";
 }) {
   const meta = HEALTH_META[health.level];
@@ -53,6 +55,12 @@ export function HireDashboardPaymentHealth({
           <dt className="text-rph-fg-muted">{audience === "driver" ? "Balance due" : "Arrears (to date)"}</dt>
           <dd className="mt-0.5 font-semibold tabular-nums text-rph-fg">{formatGbp(balanceGbp)}</dd>
         </div>
+        {creditGbp > 0 ? (
+          <div>
+            <dt className="text-rph-fg-muted">Credit / overpayment</dt>
+            <dd className="mt-0.5 font-semibold tabular-nums text-rph-fg">{formatGbp(creditGbp)}</dd>
+          </div>
+        ) : null}
         <div>
           <dt className="text-rph-fg-muted">Overdue</dt>
           <dd className="mt-0.5 font-semibold tabular-nums text-rph-fg">

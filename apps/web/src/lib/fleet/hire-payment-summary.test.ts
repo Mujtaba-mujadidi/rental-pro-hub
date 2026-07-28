@@ -58,15 +58,17 @@ const rows: HirePaymentScheduleRowInput[] = [
 ];
 
 describe("hire-payment-summary", () => {
-  it("excludes future periods from total due", () => {
+  it("excludes deposit and future periods from rent totals", () => {
     const summary = summarizeHirePayments(rows, "2026-07-10");
-    // deposit 500 + w1 net 200 (paid) + w2 net 250 = 950 due, 200 paid
-    expect(summary.totalDueGbp).toBe(950);
+    // w1 gross 250, discount 50, net 200 (paid) + w2 net 250 accrued = 450 net, 500 gross
+    expect(summary.rentGrossAccruedGbp).toBe(500);
+    expect(summary.totalDueGbp).toBe(450);
     expect(summary.totalPaidGbp).toBe(200);
-    expect(summary.balanceGbp).toBe(750);
+    expect(summary.balanceGbp).toBe(250);
     expect(summary.scheduleBalanceGbp).toBe(1000);
     expect(summary.totalDiscountGbp).toBe(50);
-    expect(summary.nextDue?.rowId).toBe("dep");
+    expect(summary.contractTotalGbp).toBe(700);
+    expect(summary.nextDue?.rowId).toBe("w2");
   });
 
   it("marks rows accrued when period has started", () => {

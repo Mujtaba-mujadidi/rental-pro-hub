@@ -10,7 +10,12 @@ export type HirePaymentDisplayStatus =
   | "overdue"
   | "due"
   | "upcoming"
-  | "cleared";
+  | "cleared"
+  | "waived"
+  | "refunded"
+  | "prepaid_settled";
+
+export type HirePaymentDisplayAudience = "driver" | "staff";
 
 export type HirePaymentDisplayStatusMeta = {
   label: string;
@@ -26,9 +31,15 @@ export const HIRE_PAYMENT_DISPLAY_STATUSES: readonly HirePaymentDisplayStatus[] 
   "due",
   "upcoming",
   "cleared",
+  "waived",
+  "refunded",
+  "prepaid_settled",
 ] as const;
 
-export const HIRE_PAYMENT_DISPLAY_STATUS_META: Record<HirePaymentDisplayStatus, HirePaymentDisplayStatusMeta> = {
+const HIRE_PAYMENT_DISPLAY_STATUS_META_BASE: Record<
+  Exclude<HirePaymentDisplayStatus, "refunded">,
+  HirePaymentDisplayStatusMeta
+> = {
   paid: { label: "Paid", tone: "success" },
   partially_paid: { label: "Partially paid", tone: "warning" },
   pending_approval: { label: "Pending approval", tone: "pending" },
@@ -37,6 +48,8 @@ export const HIRE_PAYMENT_DISPLAY_STATUS_META: Record<HirePaymentDisplayStatus, 
   due: { label: "Due", tone: "warning" },
   upcoming: { label: "Upcoming", tone: "neutral" },
   cleared: { label: "Cleared", tone: "success" },
+  waived: { label: "Waived — contract ended", tone: "neutral" },
+  prepaid_settled: { label: "Settled", tone: "neutral" },
 };
 
 export type HirePaymentDisplayStatusInput = {
@@ -45,18 +58,47 @@ export type HirePaymentDisplayStatusInput = {
   paidGbp: number;
   netDueGbp: number;
   accrued: boolean;
+  periodStart: string;
   periodEnd: string;
   pendingSubmittedGbp?: number | null;
 };
+
+export type HirePaymentDisplayOptions = {
+  /** Last day of the hire (YYYY-MM-DD) when the contract has ended. */
+  contractEndedYmd?: string | null;
+  /** Final settlement balance has been cleared on the hire record. */
+  settlementSettled?: boolean;
+  audience?: HirePaymentDisplayAudience;
+};
+
+function isPostEndPrepaidRow(
+  row: HirePaymentDisplayStatusInput,
+  contractEndedYmd: string | null,
+): boolean {
+  if (!contractEndedYmd || row.periodStart <= contractEndedYmd) return false;
+  return row.paidGbp > 0.005 || row.paymentStatus === "approved";
+}
 
 /** Derive a human-readable row status from workflow state, balance, and dates. */
 export function deriveHirePaymentDisplayStatus(
   row: HirePaymentDisplayStatusInput,
   todayYmd: string,
+  options?: HirePaymentDisplayOptions,
 ): HirePaymentDisplayStatus {
+  const contractEndedYmd = options?.contractEndedYmd?.trim() || null;
+  if (contractEndedYmd && row.periodStart > contractEndedYmd) {
+    if (row.paymentStatus === "pending_approval") return "pending_approval";
+    if (row.pendingSubmittedGbp != null && row.pendingSubmittedGbp > 0) return "pending_approval";
+    if (isPostEndPrepaidRow(row, contractEndedYmd)) {
+      return options?.settlementSettled ? "prepaid_settled" : "refunded";
+    }
+    return "waived";
+  }
+
   if (row.paymentStatus === "pending_approval") return "pending_approval";
-  if (row.paymentStatus === "rejected") return "rejected";
   if (row.pendingSubmittedGbp != null && row.pendingSubmittedGbp > 0) return "pending_approval";
+  // Rejected early submissions on future periods are not actionable until the period starts.
+  if (row.paymentStatus === "rejected" && row.accrued) return "rejected";
 
   if (row.balanceGbp <= 0) {
     if (row.netDueGbp <= 0) return "cleared";
@@ -69,13 +111,23 @@ export function deriveHirePaymentDisplayStatus(
   return "due";
 }
 
-export function hirePaymentDisplayStatusMeta(status: HirePaymentDisplayStatus): HirePaymentDisplayStatusMeta {
-  return HIRE_PAYMENT_DISPLAY_STATUS_META[status];
+export function hirePaymentDisplayStatusMeta(
+  status: HirePaymentDisplayStatus,
+  options?: Pick<HirePaymentDisplayOptions, "audience">,
+): HirePaymentDisplayStatusMeta {
+  if (status === "refunded") {
+    return options?.audience === "staff"
+      ? { label: "Prepaid — refund due", tone: "warning" }
+      : { label: "Refund expected", tone: "success" };
+  }
+  return HIRE_PAYMENT_DISPLAY_STATUS_META_BASE[status];
 }
 
 export function hirePaymentDisplayStatusLabel(
   row: HirePaymentDisplayStatusInput,
   todayYmd: string,
+  options?: HirePaymentDisplayOptions,
 ): string {
-  return hirePaymentDisplayStatusMeta(deriveHirePaymentDisplayStatus(row, todayYmd)).label;
+  const status = deriveHirePaymentDisplayStatus(row, todayYmd, options);
+  return hirePaymentDisplayStatusMeta(status, options).label;
 }

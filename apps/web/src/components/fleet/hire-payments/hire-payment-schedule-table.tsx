@@ -8,25 +8,23 @@ import {
   deriveHirePaymentDisplayStatus,
   HIRE_PAYMENT_DISPLAY_STATUSES,
   hirePaymentDisplayStatusMeta,
+  type HirePaymentDisplayAudience,
+  type HirePaymentDisplayOptions,
   type HirePaymentDisplayStatus,
 } from "@/lib/fleet/hire-payment-display";
 import { formatGbp } from "@/lib/fleet/maintenance";
 import { useMemo, useState } from "react";
-
-const STATUS_FILTER_OPTIONS: { value: "all" | HirePaymentDisplayStatus; label: string }[] = [
-  { value: "all", label: "All statuses" },
-  ...HIRE_PAYMENT_DISPLAY_STATUSES.map((status) => ({
-    value: status,
-    label: hirePaymentDisplayStatusMeta(status).label,
-  })),
-];
 
 function periodCell(row: HirePaymentPageRow): string {
   if (row.rowKind === "deposit") return "Deposit";
   return `${formatUkDate(row.periodStart)} – ${formatUkDate(row.periodEnd)}`;
 }
 
-function rowDisplayStatus(row: HirePaymentPageRow, todayYmd: string): HirePaymentDisplayStatus {
+function rowDisplayStatus(
+  row: HirePaymentPageRow,
+  todayYmd: string,
+  displayOptions: HirePaymentDisplayOptions,
+): HirePaymentDisplayStatus {
   return deriveHirePaymentDisplayStatus(
     {
       paymentStatus: row.paymentStatus,
@@ -35,9 +33,11 @@ function rowDisplayStatus(row: HirePaymentPageRow, todayYmd: string): HirePaymen
       netDueGbp: row.netDueGbp,
       accrued: row.accrued,
       periodEnd: row.periodEnd,
+      periodStart: row.periodStart,
       pendingSubmittedGbp: row.pendingSubmittedGbp,
     },
     todayYmd,
+    displayOptions,
   );
 }
 
@@ -47,6 +47,10 @@ export function HirePaymentScheduleTable({
   canApprove,
   canApplyDiscount,
   highlightedRowIds,
+  contractEndedYmd,
+  settlementSettled = false,
+  audience = "staff",
+  readOnly = false,
   onRefresh,
 }: {
   rows: HirePaymentPageRow[];
@@ -54,12 +58,30 @@ export function HirePaymentScheduleTable({
   canApprove: boolean;
   canApplyDiscount: boolean;
   highlightedRowIds?: string[];
+  contractEndedYmd?: string | null;
+  settlementSettled?: boolean;
+  audience?: HirePaymentDisplayAudience;
+  readOnly?: boolean;
   onRefresh: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | HirePaymentDisplayStatus>("all");
   const [rowError, setRowError] = useState<string | null>(null);
   const todayYmd = ukTodayYmd();
+  const displayOptions = useMemo(
+    () => ({ contractEndedYmd, settlementSettled, audience }),
+    [audience, contractEndedYmd, settlementSettled],
+  );
+  const statusFilterOptions = useMemo(
+    () => [
+      { value: "all" as const, label: "All statuses" },
+      ...HIRE_PAYMENT_DISPLAY_STATUSES.map((status) => ({
+        value: status,
+        label: hirePaymentDisplayStatusMeta(status, { audience }).label,
+      })),
+    ],
+    [audience],
+  );
 
   const highlightSet = useMemo(() => new Set(highlightedRowIds ?? []), [highlightedRowIds]);
 
@@ -68,12 +90,12 @@ export function HirePaymentScheduleTable({
     return rows
       .filter((row) => {
         if (statusFilter === "all") return true;
-        return rowDisplayStatus(row, todayYmd) === statusFilter;
+        return rowDisplayStatus(row, todayYmd, displayOptions) === statusFilter;
       })
       .filter((row) => {
         if (!term) return true;
-        const displayStatus = rowDisplayStatus(row, todayYmd);
-        const statusMeta = hirePaymentDisplayStatusMeta(displayStatus);
+        const displayStatus = rowDisplayStatus(row, todayYmd, displayOptions);
+        const statusMeta = hirePaymentDisplayStatusMeta(displayStatus, { audience });
         const hay = [
           periodCell(row),
           row.rowKind,
@@ -92,7 +114,7 @@ export function HirePaymentScheduleTable({
         if (a.periodStart !== b.periodStart) return a.periodStart.localeCompare(b.periodStart);
         return a.sortOrder - b.sortOrder;
       });
-  }, [rows, search, statusFilter, todayYmd]);
+  }, [audience, displayOptions, rows, search, statusFilter, todayYmd]);
 
   return (
     <div className="space-y-3">
@@ -113,7 +135,7 @@ export function HirePaymentScheduleTable({
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
           >
-            {STATUS_FILTER_OPTIONS.map((opt) => (
+            {statusFilterOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>
@@ -121,6 +143,12 @@ export function HirePaymentScheduleTable({
           </select>
         </label>
       </div>
+
+      {readOnly ? (
+        <p className="rph-muted text-sm">
+          Contract ended — schedule is read-only. Open History on a row to view payment audit.
+        </p>
+      ) : null}
 
       {rowError ? <p className="rph-alert-error text-sm">{rowError}</p> : null}
 
@@ -135,7 +163,7 @@ export function HirePaymentScheduleTable({
                 <th className="px-4 py-2.5">Paid</th>
                 <th className="px-4 py-2.5">Balance</th>
                 <th className="px-4 py-2.5">Status</th>
-                <th className="px-4 py-2.5 text-right">Actions</th>
+                <th className="px-4 py-2.5 text-right">{readOnly ? "History" : "Actions"}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-rph-border">
@@ -148,8 +176,8 @@ export function HirePaymentScheduleTable({
               ) : (
                 filtered.map((row) => {
                   const highlighted = highlightSet.has(row.id);
-                  const displayStatus = rowDisplayStatus(row, todayYmd);
-                  const statusMeta = hirePaymentDisplayStatusMeta(displayStatus);
+                  const displayStatus = rowDisplayStatus(row, todayYmd, displayOptions);
+                  const statusMeta = hirePaymentDisplayStatusMeta(displayStatus, { audience });
                   return (
                     <tr
                       key={row.id}
@@ -206,6 +234,7 @@ export function HirePaymentScheduleTable({
                             canRecordOnRow={canRecordOnRow}
                             canApprove={canApprove}
                             canApplyDiscount={canApplyDiscount}
+                            readOnly={readOnly}
                             onRefresh={onRefresh}
                             onError={setRowError}
                           />

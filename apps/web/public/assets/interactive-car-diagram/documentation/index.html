@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Documentation | Interactive Car Diagram</title>
+    <meta name="description" content="Interactive Car Diagram." />
+    <!-- Needed For Mobile Devices -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=0">
+    <!-- Google Font Family -->
+    <link href="https://fonts.googleapis.com/css?family=Poppins:400,500,600&display=swap" rel="stylesheet">
+    <!-- Favicon -->
+    <link href="assets/img/favicon.png" rel="shortcut icon" type="image/png">
+    <!-- PrismJS CSS -->
+    <link href="assets/css/prism.css" rel="stylesheet">
+    <!-- Bootstrap Min CSS -->
+    <link href="assets/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Documentation CSS -->
+    <link href="assets/css/documentation.css" rel="stylesheet">
+</head>
+
+<body>
+    <header>
+        <div class="top">
+            <div class="container">
+                <a href="./" class="logo"></a>
+            </div>
+        </div>
+        <div class="bottom">
+            <div class="container">
+                <nav class="navbar">
+                    <div class="navbar-toggler" data-toggle="collapse" data-target="#navbar">
+                        <div class="animated-icon">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
+                    </div>
+                    <div class="collapse navbar-collapse" id="navbar">
+                        <ul>
+                            <li><a href="#overview" class="active scroll-move">Overview</a></li>
+                            <li><a href="#including_files" class="scroll-move">Including Files</a></li>
+                            <li><a href="#html" class="scroll-move">HTML</a></li>
+                            <li><a href="#example_usage" class="scroll-move">Example Usage</a></li>
+                            <li><a href="#options" class="scroll-move">Options</a></li>
+                        </ul>
+                    </div>
+                </nav>
+                <div class="clearfix"></div>
+            </div>
+        </div>
+    </header>
+    <section id="overview">
+        <div class="container">
+            <h2>Interactive Car Diagram</h2>
+            <div class="alert alert-success mb-0">Thank you for purchasing this plugin.<br>If you have any questions, you can contact us via "<a href="mailto:freelancertajulrasel@gmail.com">freelancertajulrasel@gmail.com</a>" e-mail address or via the contact form <a href="https://freelancertajulrasel.com/about"
+                    target="_blank" rel="nofollow">here</a>.</div>
+        </div>
+    </section>
+    <section id="including_files">
+        <div class="container">
+            <h2>Including Files</h2>
+            <p class="mb-1">These are required files you need to import in your page so the Car Diagram can work.</p>
+            <div class="content">
+
+                <pre><code class="language-html"> &lt;link href="assets/css/cardiagram.css" rel="stylesheet"&gt;
+
+ &lt;script src="assets/js/cardiagram.js"&gt;&lt;/script&gt;</code></pre>
+                <p>It's not required, but I recommend placing the CSS files in <code>&lt;head&gt;</code> and the JavaScript files and initialization code in the footer of your site (before the closing <code>&lt;/body&gt;</code> tag). Also if you already
+                    have jquery.js on your site, don’t include it a second time.</p>
+            </div>
+        </div>
+    </section>
+    <section id="html">
+        <div class="container">
+            <h3>HTML</h3>
+            <div class="content">
+                <p>You need to add HTML codes between <code>&lt;body&gt;</code> <code>&lt;/body&gt;</code>.</p>
+                <pre><code class="language-html">&lt;div class="digram-box"&gt;.....................&lt;/div&gt;</code></pre>
+            </div>
+        </div>
+    </section>
+
+
+
+
+
+    <section id="example_usage">
+        <div class="container">
+            <h3>Example Usage</h3>
+            <div class="content">
+                <pre><code class="language-html">&lt;html&gt;
+&lt;meta charset="UTF-8"&gt;
+&lt;title&gt;Interactive Car Diagram&lt;/title&gt;
+&lt;meta name="description" content="Interactive Car Diagram." /&gt;
+&lt;!-- Needed For Mobile Devices --&gt;
+&lt;meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=0"&gt;
+								
+&lt;head&gt;
+&lt;!-- *** [START] REQUIRED CSS file *** --&gt;</code>
+<code class="highlight language-html">&lt;link href="assets/css/cardiagram.css" rel="stylesheet"&gt;</code>
+<code class="language-html">&lt;!-- *** [END] REQUIRED CSS file *** --&gt;
+&lt;/head&gt;
+&lt;body&gt;
+
+
+
+
+ &lt;!-- *** [START] REQUIRED HTML *** --&gt;</code>
+ <code class="highlight language-html">
+  &LT;!-- *** [START] REQUIRED DIV *** --&GT;
+    &LT;div class="digram-box"&GT;
+        &LT;!-- ** [START] tooltip div ** --&GT;
+        &LT;div id="tooltip" display="none" style="position: absolute; display: none;"&GT;&LT;/div&GT;
+        &LT;!-- ** [End] tooltip div ** --&GT;
+
+        &LT;!-- ** [START] svg ** --&GT;
+        &LT;svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" width="100%" height="100%" viewBox="0 0 400 300" style="enable-background:new 0 0 400 300;" xml:space="preserve"&GT;
+			 
+			&LT;g&GT;
+				&LT;path class="st0" d="M296.13,112.08c0,0,20.27-6.97,36.39-7.61l10.38,1.31h19.88c0,0,1.29-0.64,1.5,1.17v8.75
+	   c0,0-0.43,1.91-1.71,1.88c-1.29-0.04-4.62,0.04-4.62,0.04" /&GT;
+				&LT;path class="st0" d="M297.03,188.23c0,0,20.27,6.97,36.39,7.61l10.38-1.31h19.88c0,0,1.29,0.64,1.5-1.17v-8.75
+	   c0,0-0.43-1.91-1.71-1.88c-1.29,0.04-4.62-0.04-4.62-0.04" /&GT;
+			&LT;/g&GT; &LT;g&GT;
+
+				&LT;!---FRONT_BUMPER--&GT;
+				&LT;a xlink:href="#" onmousemove="showTooltip(evt, 'FRONT BUMPER');" onmouseout="hideTooltip();"&GT;
+
+					&LT;path id="FRONT_BUMPER" class="st8 maplink"
+						d="M56.14,189.5v-80h1v-2.67h-1.9c-15.67,1.83-14.17,10.67-14.17,10.67l-0.04,65    c1.87,10.33,15.52,10.81,16.77,10.83v-3.83H56.14z" /&GT;
+
+
+				&LT;/a&GT;
+			 ................
+
+				&LT;!---FRONT_PASSENGER_PANEL--&GT;
+				&LT;a xlink:href="#" onmousemove="showTooltip(evt, 'FRONT PASSENGER PANEL');" onmouseout="hideTooltip();"&GT;
+
+
+					&LT;path id="FRONT_PASSENGER_PANEL" class="st8 maplink" d="M154.12,182.16c-1.12-1.03-2.13-2.15-3.03-3.34c1.64,2.73,3.52,5.24,5.52,6.74l-17.36,1.84l-33.55,1
+	   c4.35,2.39,9.84,4.28,16.84,5.31h35.45v-8.35C157.4,185.52,155.91,184.33,154.12,182.16z" /&GT;
+				&LT;/a&GT;
+
+				&LT;!---FRONT_PASSENGER_BODY_PANEL--&GT;
+				&LT;a xlink:href="#" onmousemove="showTooltip(evt, 'FRONT PASSENGER BODY PANEL');"
+					onmouseout="hideTooltip();"&GT;
+ &LT;path id="FRONT_PASSENGER_BODY_PANEL" class="st8 maplink" d="M289.04,186.22c-0.38,0.15-0.77,0.28-1.16,0.41l0.08,0.04c0,0-0.91,0.39-3.43,0.87
+	   c-1.98,0.43-3.79,0.64-5.12,0.75c-4.96,0.57-12.51,1.07-23.75,1.05c-0.1,0-0.2,0-0.3-0.01l-20.22,0.02
+	   c-5.24,0.03-10.38,0.03-15.34,0.01l-13.42,0.01h-0.05c0,0-4.56-0.09-10.75-0.26c-17.18-0.29-28.69-0.71-28.69-0.71
+	   c-1.12-0.21-2.17-0.49-3.18-0.8c-0.76-0.1-1.31-0.2-1.6-0.3c0,0,0.12-0.04,0.34-0.12c-1.54-0.56-2.95-1.23-4.26-2
+	   c0,0.01-0.01,0.01-0.01,0.02c-0.05,0.08-0.11,0.14-0.2,0.16v8.35h99.88c0,0,32.79-1.26,39.86-6.31c0,0,0.52-0.17,1.27-0.64
+	   L289.04,186.22z" /&GT;
+				&LT;/a&GT;
+			&LT;/g&GT;
+		&LT;/svg&GT;
+        &LT;!-- ** [END] svg ** --&GT;
+    &LT;/div&GT;
+	
+    &LT;!-- *** [END] REQUIRED DIV *** --&GT;
+
+</code>
+ 
+&lt;!-- *** [START] REQUIRED JS file *** --&gt;
+ <code class="highlight language-html">&lt;script src="assets/js/cardiagram.js"&gt;&lt;/script&gt;</code>
+ &lt;!-- *** [END] REQUIRED JS file *** --&gt;
+ 
+<code class="language-html">
+&lt;/body&gt;
+&lt;/html&gt;</code>
+
+</pre>
+            </div>
+        </div>
+    </section>
+
+
+
+
+    <section id="options">
+        <div class="container">
+            <h3>Options</h3>
+
+            <img src="assets/img/ex1.jpg" alt="" style="    width: 100%;">
+            <p>Change link and title</p>
+            <pre>&LT;a xlink:href="<code class="highlight language-html"> website link </code>" onmousemove="showTooltip(evt, '<code class="highlight "> Title </code>');" onmouseout="hideTooltip();"&GT; </pre>
+            <p>Eaxample</p>
+            <pre><code class=" language-html">&LT;a xlink:href="https://website.com" onmousemove="showTooltip(evt, 'Website Title');" onmouseout="hideTooltip();"&GT; </code></pre>
+
+            <h3>Extra Options</h3>
+            <p>click link open newtab</p>
+            <pre>
+&LT;!---FRONT_BUMPER--&GT;
+&LT;a xlink:href="#" onmousemove="showTooltip(evt, 'FRONT BUMPER');" onmouseout="hideTooltip();"  <code class="highlight language-html">target="_blank"</code> &GT;</pre>
+
+        </div>
+
+    </section>
+    <footer>
+        <div class="container">© 2024 Interactive Car Diagram. Made by <a href="https://freelancertajulrasel.com/about" target="_blank" rel="nofollow">freelancertajulrasel</a></div>
+    </footer>
+    <!-- jQuery Min JS -->
+    <script src="assets/js/jquery-1.9.0.min.js"></script>
+    <!-- Bootstrap Min JS -->
+    <script src="assets/js/bootstrap.min.js"></script>
+    <!-- PrismJS Min JS -->
+    <script src="assets/js/prism.js"></script>
+    <!-- Documentation JS -->
+    <script src="assets/js/documentation.js"></script>
+</body>
+
+</html>

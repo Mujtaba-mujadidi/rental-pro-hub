@@ -6,6 +6,10 @@ import { HireDashboardDriverLifecycleCards } from "@/components/fleet/hire-dashb
 import { HireDashboardPaymentChart } from "@/components/fleet/hire-dashboard/hire-dashboard-payment-chart";
 import { HireDashboardPaymentHealth } from "@/components/fleet/hire-dashboard/hire-dashboard-payment-health";
 import { HireDashboardRecentActivity } from "@/components/fleet/hire-dashboard/hire-dashboard-recent-activity";
+import { HireDepositPendingBanner } from "@/components/fleet/hire-dashboard/hire-deposit-pending-banner";
+import { HireWorkspaceBalanceBanner } from "@/components/fleet/hire-dashboard/hire-workspace-balance-banner";
+import { HireEndedContractScheduleBanner } from "@/components/fleet/hire-payments/hire-ended-contract-schedule-banner";
+import { HireLifecycleAttentionList } from "@/components/fleet/hire-dashboard/hire-lifecycle-attention-list";
 import { HirePaymentSummaryCards } from "@/components/fleet/hire-payments/hire-payment-summary-cards";
 import { useHirePaymentsRealtime } from "@/hooks/use-hire-realtime";
 import { useCallback, useEffect, useState, useTransition } from "react";
@@ -60,15 +64,49 @@ export function DriverHireDashboardSection({
         audience="driver"
       />
 
+      <HireWorkspaceBalanceBanner
+        hireGroupId={hireGroupId}
+        rentBalanceGbp={data.summary.balanceGbp}
+        rentCreditGbp={data.summary.creditGbp}
+        settlementBalance={data.settlementBalance}
+        audience="driver"
+        contractEnded={Boolean(data.contractEndedYmd)}
+        depositPendingReview={data.depositPendingReview}
+        depositGbp={data.depositGbp ?? 0}
+        depositDispositionLabel={data.depositDispositionLabel}
+        scheduleDepositStatusLabel={data.lifecycle.depositStatusLabel}
+      />
+
+      <HireDepositPendingBanner
+        hireGroupId={hireGroupId}
+        closure={data.financialClosure}
+        audience="driver"
+      />
+
+      {data.contractEndedAtLabel ? (
+        <HireEndedContractScheduleBanner
+          contractEndedAtLabel={data.contractEndedAtLabel}
+          hasPostEndPrepaidPayments={data.hasPostEndPrepaidPayments}
+          settlementSettled={data.settlementBalance?.settled === true}
+        />
+      ) : null}
+
       <HireDashboardDriverLifecycleCards
         lifecycle={data.lifecycle}
         hireStatusLabel={hireStatusLabel}
         startDateLabel={startDateLabel}
         rentLabel={rentLabel}
         nextDue={data.summary.nextDue}
+        contractEnded={Boolean(data.contractEndedYmd)}
       />
 
-      <HirePaymentSummaryCards summary={data.summary} compact />
+      <HirePaymentSummaryCards
+        summary={data.summary}
+        compact
+        contractEnded={Boolean(data.contractEndedYmd)}
+      />
+
+      <HireLifecycleAttentionList items={data.lifecycleAttentionItems} />
 
       <HireDashboardAttentionList
         items={data.attentionItems}

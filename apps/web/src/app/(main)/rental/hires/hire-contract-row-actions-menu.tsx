@@ -73,6 +73,18 @@ export function HireContractRowActionsMenu({
             </DropdownMenu.Item>
           ) : null}
 
+          {row.can_checkout ? (
+            <DropdownMenu.Item className={itemClass} asChild>
+              <Link href={`/rental/hires/${row.id}/checkout`}>Vehicle checkout</Link>
+            </DropdownMenu.Item>
+          ) : null}
+
+          {row.can_checkin ? (
+            <DropdownMenu.Item className={itemClass} asChild>
+              <Link href={`/rental/hires/${row.id}/checkin`}>Vehicle check-in</Link>
+            </DropdownMenu.Item>
+          ) : null}
+
           <DropdownMenu.Item className={itemClass} onSelect={onAudit}>
             Audit trail
           </DropdownMenu.Item>

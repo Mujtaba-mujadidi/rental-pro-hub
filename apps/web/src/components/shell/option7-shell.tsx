@@ -51,7 +51,11 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
                 ? "Details"
                 : section === "activity"
                   ? "Activity"
-                  : section;
+                  : section === "checkout"
+                    ? "Checkout"
+                    : section === "checkin"
+                      ? "Check-in"
+                      : section.charAt(0).toUpperCase() + section.slice(1);
         return [...base, { label: sectionLabel }];
       }
       return [{ label: "Home", href: "/rental" }, { label: "Hires", href: "/rental/hires" }];
@@ -105,6 +109,9 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
     }
     if (pathname === "/rental/billing" || pathname.startsWith("/rental/billing/")) {
       return [{ label: "Home", href: "/rental" }, { label: "Billing", href: "/rental/billing" }];
+    }
+    if (pathname === "/rental/balances" || pathname.startsWith("/rental/balances/")) {
+      return [{ label: "Home", href: "/rental" }, { label: "Balances", href: "/rental/balances" }];
     }
     if (pathname === "/rental/contract" || pathname.startsWith("/rental/contract/")) {
       return [
@@ -180,6 +187,25 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
   }
   if (pathname === "/driver/hire-history" || pathname.startsWith("/driver/hire-history/")) {
     return [{ label: "Home", href: "/driver" }, { label: "Hire history" }];
+  }
+  const driverHireWorkspaceMatch = pathname.match(/^\/driver\/hires\/([^/]+)(?:\/(.*))?$/);
+  if (driverHireWorkspaceMatch) {
+    const section = driverHireWorkspaceMatch[2]?.split("/")[0];
+    const sectionLabels: Record<string, string> = {
+      payments: "Payments",
+      details: "Details",
+      checkout: "Checkout",
+      checkin: "Check-in",
+      settlement: "Settlement",
+    };
+    const crumbs: { label: string; href?: string }[] = [
+      { label: "Home", href: "/driver" },
+      { label: "Hire history", href: "/driver/hire-history" },
+    ];
+    if (section && sectionLabels[section]) {
+      crumbs.push({ label: sectionLabels[section] });
+    }
+    return crumbs;
   }
   return [{ label: "Home", href: "/driver" }, { label: "Driver" }];
 }
@@ -415,6 +441,13 @@ export function Option7Shell({
           onNavigate={closeMobileNav}
         >
           Hires
+        </NavLink>
+        <NavLink
+          href="/rental/balances"
+          active={pathname === "/rental/balances" || pathname.startsWith("/rental/balances/")}
+          onNavigate={closeMobileNav}
+        >
+          Balances
         </NavLink>
         {fleetTrackingEnabled ? (
           <NavLink

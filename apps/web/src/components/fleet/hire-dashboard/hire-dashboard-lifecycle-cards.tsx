@@ -32,13 +32,19 @@ export function HireDashboardLifecycleCards({
           {formatGbp(lifecycle.contractPaidGbp)} / {formatGbp(lifecycle.contractTotalGbp)}
         </p>
         <p className="rph-meta mt-1 text-xs">
-          {lifecycle.periodsPaidCount} of {lifecycle.periodsTotalCount} periods settled
+          {lifecycle.periodsPaidCount} of {lifecycle.periodsTotalCount} rent periods settled
         </p>
       </div>
       <div className="rph-card p-4">
         <p className="text-xs font-medium text-rph-fg-muted">Deposit & documents</p>
         <p className="mt-1 font-semibold text-rph-fg">{lifecycle.depositStatusLabel}</p>
-        <p className="rph-meta mt-1 text-xs">{lifecycle.documentsStatusLabel}</p>
+        <p className="rph-meta mt-1 text-xs">
+          {lifecycle.financialClosure.financiallyClosed
+            ? "Hire accounts closed"
+            : lifecycle.financialClosure.depositPendingReview
+              ? "Deposit decision still open"
+              : lifecycle.documentsStatusLabel}
+        </p>
       </div>
     </section>
   );

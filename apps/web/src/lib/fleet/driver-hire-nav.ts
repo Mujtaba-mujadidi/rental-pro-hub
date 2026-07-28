@@ -16,6 +16,21 @@ export const DRIVER_HIRE_HISTORY_STATUSES = [
 
 export type DriverHireHistoryStatus = (typeof DRIVER_HIRE_HISTORY_STATUSES)[number];
 
+/** Hires the driver can open in the full workspace (current and past). */
+export const DRIVER_HIRE_WORKSPACE_STATUSES = [
+  "reserved",
+  "active",
+  "terminated",
+  "completed",
+  "cancelled",
+] as const satisfies readonly HireGroupStatus[];
+
+export type DriverHireWorkspaceStatus = (typeof DRIVER_HIRE_WORKSPACE_STATUSES)[number];
+
+export function isDriverHireWorkspaceStatus(status: string): status is DriverHireWorkspaceStatus {
+  return (DRIVER_HIRE_WORKSPACE_STATUSES as readonly string[]).includes(status);
+}
+
 export function isDriverCurrentHireStatus(status: string): status is DriverCurrentHireStatus {
   return (DRIVER_CURRENT_HIRE_STATUSES as readonly string[]).includes(status);
 }
@@ -24,9 +39,9 @@ export function isDriverHireHistoryStatus(status: string): status is DriverHireH
   return (DRIVER_HIRE_HISTORY_STATUSES as readonly string[]).includes(status);
 }
 
-/** Drivers may view/download vehicle compliance documents only during an ongoing hire. */
-export function driverCanAccessVehicleDocuments(hireStatus: string): boolean {
-  return isDriverCurrentHireStatus(hireStatus);
+/** Vehicle compliance documents (MOT, logbook, PHV) are staff-only — never shown to drivers. */
+export function driverCanAccessVehicleDocuments(_hireStatus: string): boolean {
+  return false;
 }
 
 const DRIVER_HIRE_STATUS_LABELS: Record<string, string> = {

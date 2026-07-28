@@ -17,7 +17,17 @@ import {
   type HirePaymentHealthSummary,
   type HireContractProgress,
 } from "@/lib/fleet/hire-payment-analytics";
+import { buildHireLifecycleAttentionItems } from "@/lib/fleet/hire-lifecycle-attention";
+import {
+  hireDepositStatusLabel,
+  summarizeHireFinancialClosure,
+  type HireFinancialClosureState,
+} from "@/lib/fleet/hire-financial-closure";
+import { hireInspectionCompletionFromRows } from "@/lib/fleet/hire-inspection-status";
+import type { HireLifecycleAttentionItem } from "@/lib/fleet/hire-lifecycle-attention";
 import type { HirePaymentSummary } from "@/lib/fleet/hire-payment-summary";
+import type { HirePaymentDisplayOptions } from "@/lib/fleet/hire-payment-display";
+import type { HireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
 import { createClient } from "@/lib/supabase/server";
 
 export type HireDashboardRecentEvent = {
@@ -32,15 +42,29 @@ export type HireDashboardLifecycle = HireContractProgress & {
   documentsStatusLabel: string;
   contractPaidGbp: number;
   contractTotalGbp: number;
+  financialClosure: HireFinancialClosureState;
 };
 
 export type HireDashboardData = {
   summary: HirePaymentSummary;
   health: HirePaymentHealthSummary;
   attentionItems: HirePaymentAttentionItem[];
+  lifecycleAttentionItems: HireLifecycleAttentionItem[];
   chartPoints: HirePaymentChartPoint[];
   lifecycle: HireDashboardLifecycle;
   recentEvents: HireDashboardRecentEvent[];
+  includeDeposit: boolean;
+  canTerminate: boolean;
+  settlementBalance: HireWorkspaceSettlementBalance | null;
+  hasPostEndPrepaidPayments: boolean;
+  contractEndedYmd: string | null;
+  contractEndedAtLabel: string | null;
+  driverDocumentsRetainUntilLabel: string | null;
+  driverDocumentsRetentionWarning: string | null;
+  depositPendingReview: boolean;
+  depositGbp: number | null;
+  depositDispositionLabel: string | null;
+  financialClosure: HireFinancialClosureState;
 };
 
 function toAnalyticsRows(rows: HirePaymentPageRow[]): HirePaymentAnalyticsRow[] {
@@ -57,6 +81,17 @@ function toAnalyticsRows(rows: HirePaymentPageRow[]): HirePaymentAnalyticsRow[] 
     paymentStatus: row.paymentStatus,
     pendingSubmittedGbp: row.pendingSubmittedGbp,
   }));
+}
+
+function paymentDisplayOptions(
+  page: { contractEndedYmd: string | null; settlementBalance: HireWorkspaceSettlementBalance | null },
+  audience: "driver" | "staff",
+): HirePaymentDisplayOptions {
+  return {
+    contractEndedYmd: page.contractEndedYmd,
+    settlementSettled: page.settlementBalance?.settled === true,
+    audience,
+  };
 }
 
 function documentsStatusFromAgreements(
@@ -84,10 +119,30 @@ export async function loadHireDashboardAction(
 
   const { data: group } = await supabase
     .from("vehicle_hire_groups")
-    .select("start_date")
+    .select("start_date, status, include_deposit")
     .eq("id", hireGroupId.trim())
     .maybeSingle();
   const startDate = (group?.start_date as string | null) ?? today;
+  const hireStatus = (group?.status as string | null) ?? "";
+
+  const { data: inspectionRows } = await supabase
+    .from("vehicle_hire_inspections")
+    .select("kind, status")
+    .eq("hire_group_id", hireGroupId.trim());
+  const inspection = hireInspectionCompletionFromRows(
+    (inspectionRows ?? []).map((row) => ({
+      kind: row.kind as string,
+      status: row.status as string,
+    })),
+  );
+  const lifecycleAttentionItems = buildHireLifecycleAttentionItems({
+    hireGroupId: hireGroupId.trim(),
+    status: hireStatus,
+    checkoutCompleted: inspection.checkoutCompleted,
+    checkinCompleted: inspection.checkinCompleted,
+    depositPendingReview: page.data.depositPendingReview,
+    depositGbp: page.data.depositGbp,
+  });
 
   const { data: agreements } = await supabase
     .from("vehicle_hire_agreements")
@@ -95,6 +150,7 @@ export async function loadHireDashboardAction(
     .eq("hire_group_id", hireGroupId.trim());
 
   const analyticsRows = toAnalyticsRows(page.data.rows);
+  const displayOptions = paymentDisplayOptions(page.data, "staff");
   const rowIds = analyticsRows.map((r) => r.id);
   const rowLabelById = new Map(analyticsRows.map((r) => [r.id, r.periodLabel]));
 
@@ -163,22 +219,47 @@ export async function loadHireDashboardAction(
     .slice(0, 8);
 
   const progress = summarizeHireContractProgress(analyticsRows, startDate, today);
+  const financialClosure = summarizeHireFinancialClosure({
+    settlementBalance: page.data.settlementBalance,
+    depositDisposition: page.data.depositDisposition,
+    depositGbp: page.data.depositGbp,
+  });
+  const scheduleDepositStatusLabel = depositStatusLabel(analyticsRows, today);
 
   return {
     ok: true,
     data: {
       summary: page.data.summary,
-      health: analyzeHirePaymentHealth(analyticsRows, today),
-      attentionItems: buildHirePaymentAttentionItems(analyticsRows, today),
-      chartPoints: buildHirePaymentChartPoints(analyticsRows, today),
+      health: analyzeHirePaymentHealth(analyticsRows, today, displayOptions),
+      attentionItems: buildHirePaymentAttentionItems(analyticsRows, today, displayOptions),
+      lifecycleAttentionItems,
+      chartPoints: buildHirePaymentChartPoints(analyticsRows, today, displayOptions),
       lifecycle: {
         ...progress,
-        depositStatusLabel: depositStatusLabel(analyticsRows, today),
+        depositStatusLabel: hireDepositStatusLabel({
+          depositPendingReview: page.data.depositPendingReview,
+          depositGbp: page.data.depositGbp ?? 0,
+          depositDispositionLabel: page.data.depositDispositionLabel,
+          scheduleDepositPaidLabel: scheduleDepositStatusLabel,
+        }),
         documentsStatusLabel: documentsStatusFromAgreements(agreements ?? []),
         contractPaidGbp: page.data.summary.totalPaidGbp,
         contractTotalGbp: page.data.summary.contractTotalGbp,
+        financialClosure,
       },
       recentEvents,
+      includeDeposit: Boolean(group?.include_deposit),
+      canTerminate: hireStatus === "active",
+      settlementBalance: page.data.settlementBalance,
+      hasPostEndPrepaidPayments: page.data.hasPostEndPrepaidPayments,
+      contractEndedYmd: page.data.contractEndedYmd,
+      contractEndedAtLabel: page.data.contractEndedAtLabel,
+      driverDocumentsRetainUntilLabel: page.data.driverDocumentsRetainUntilLabel,
+      driverDocumentsRetentionWarning: page.data.driverDocumentsRetentionWarning,
+      depositPendingReview: page.data.depositPendingReview,
+      depositGbp: page.data.depositGbp,
+      depositDispositionLabel: page.data.depositDispositionLabel,
+      financialClosure,
     },
   };
 }
@@ -197,14 +278,34 @@ async function buildDriverDashboardData(
 
   const { data: group } = await supabase
     .from("vehicle_hire_groups")
-    .select("start_date")
+    .select("start_date, status")
     .eq("id", hireGroupId.trim())
     .eq("driver_user_id", user.id)
     .maybeSingle();
   if (!group) return { ok: false, error: "Hire not found." };
 
   const startDate = (group.start_date as string | null) ?? today;
+  const hireStatus = (group.status as string | null) ?? "";
+
+  const { data: inspectionRows } = await supabase
+    .from("vehicle_hire_inspections")
+    .select("kind, status")
+    .eq("hire_group_id", hireGroupId.trim());
+  const inspection = hireInspectionCompletionFromRows(
+    (inspectionRows ?? []).map((row) => ({
+      kind: row.kind as string,
+      status: row.status as string,
+    })),
+  );
+  const lifecycleAttentionItems = buildHireLifecycleAttentionItems({
+    hireGroupId: hireGroupId.trim(),
+    status: hireStatus,
+    checkoutCompleted: inspection.checkoutCompleted,
+    checkinCompleted: inspection.checkinCompleted,
+    audience: "driver",
+  });
   const analyticsRows = toAnalyticsRows(page.data.rows);
+  const displayOptions = paymentDisplayOptions(page.data, "driver");
   const rowIds = analyticsRows.map((r) => r.id);
   const rowLabelById = new Map(analyticsRows.map((r) => [r.id, r.periodLabel]));
 
@@ -256,22 +357,47 @@ async function buildDriverDashboardData(
   });
 
   const progress = summarizeHireContractProgress(analyticsRows, startDate, today);
+  const financialClosure = summarizeHireFinancialClosure({
+    settlementBalance: page.data.settlementBalance,
+    depositDisposition: page.data.depositDisposition,
+    depositGbp: page.data.depositGbp,
+  });
+  const scheduleDepositStatusLabel = depositStatusLabel(analyticsRows, today);
 
   return {
     ok: true,
     data: {
       summary: page.data.summary,
-      health: analyzeHirePaymentHealth(analyticsRows, today),
-      attentionItems: buildHirePaymentAttentionItems(analyticsRows, today),
-      chartPoints: buildHirePaymentChartPoints(analyticsRows, today),
+      health: analyzeHirePaymentHealth(analyticsRows, today, displayOptions),
+      attentionItems: buildHirePaymentAttentionItems(analyticsRows, today, displayOptions),
+      lifecycleAttentionItems,
+      chartPoints: buildHirePaymentChartPoints(analyticsRows, today, displayOptions),
       lifecycle: {
         ...progress,
-        depositStatusLabel: depositStatusLabel(analyticsRows, today),
+        depositStatusLabel: hireDepositStatusLabel({
+          depositPendingReview: page.data.depositPendingReview,
+          depositGbp: page.data.depositGbp ?? 0,
+          depositDispositionLabel: page.data.depositDispositionLabel,
+          scheduleDepositPaidLabel: scheduleDepositStatusLabel,
+        }),
         documentsStatusLabel: "—",
         contractPaidGbp: page.data.summary.totalPaidGbp,
         contractTotalGbp: page.data.summary.contractTotalGbp,
+        financialClosure,
       },
       recentEvents,
+      includeDeposit: false,
+      canTerminate: false,
+      settlementBalance: page.data.settlementBalance,
+      hasPostEndPrepaidPayments: page.data.hasPostEndPrepaidPayments,
+      contractEndedYmd: page.data.contractEndedYmd,
+      contractEndedAtLabel: page.data.contractEndedAtLabel,
+      driverDocumentsRetainUntilLabel: page.data.driverDocumentsRetainUntilLabel,
+      driverDocumentsRetentionWarning: page.data.driverDocumentsRetentionWarning,
+      depositPendingReview: page.data.depositPendingReview,
+      depositGbp: page.data.depositGbp,
+      depositDispositionLabel: page.data.depositDispositionLabel,
+      financialClosure,
     },
   };
 }

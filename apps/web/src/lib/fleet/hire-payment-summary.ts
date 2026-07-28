@@ -17,12 +17,21 @@ export type HirePaymentScheduleRowInput = {
 };
 
 export type HirePaymentSummary = {
+  /** Gross rent on accrued periods (base amounts, before discounts). */
+  rentGrossAccruedGbp: number;
   totalDueGbp: number;
   totalPaidGbp: number;
+  /** Outstanding arrears on accrued rent periods (never negative). */
   balanceGbp: number;
-  /** Outstanding balance across the full payment sheet (includes future periods). */
+  /** Driver credit from rent overpayment / prepaid future rent (never negative). */
+  creditGbp: number;
+  /** Signed accrued balance: positive = driver owes, negative = credit. */
+  signedAccruedBalanceGbp: number;
+  /** Outstanding balance across the full payment sheet (includes deposit and future periods). */
   scheduleBalanceGbp: number;
+  /** Discounts on accrued rent periods only. */
   totalDiscountGbp: number;
+  /** Full contract rent after discounts (rent rows only, excludes deposit). */
   contractTotalGbp: number;
   nextDue: { rowId: string; amountGbp: number; periodStart: string; periodEnd: string } | null;
 };
@@ -44,11 +53,11 @@ export function sortHirePaymentRows(rows: HirePaymentScheduleRowInput[]): HirePa
   });
 }
 
-/** Approved amount counts as paid even when a later submission was rejected or is pending. */
+/** Approved amount counts toward paid; may exceed net due (overpayment on row). */
 export function hirePaymentRowPaidGbp(row: HirePaymentScheduleRowInput): number {
   const net = netRowAmountGbp(row.baseAmountGbp, row.discountTotalGbp);
   if (row.approvedAmountGbp != null && row.approvedAmountGbp >= 0) {
-    return Math.min(net, Math.round(row.approvedAmountGbp * 100) / 100);
+    return Math.round(row.approvedAmountGbp * 100) / 100;
   }
   if (row.paymentStatus === "approved") return net;
   return 0;
@@ -59,7 +68,7 @@ export function hirePaymentRowNetDueGbp(row: HirePaymentScheduleRowInput): numbe
 }
 
 export function hirePaymentRowBalanceGbp(row: HirePaymentScheduleRowInput): number {
-  return Math.max(0, Math.round((hirePaymentRowNetDueGbp(row) - hirePaymentRowPaidGbp(row)) * 100) / 100);
+  return Math.round((hirePaymentRowNetDueGbp(row) - hirePaymentRowPaidGbp(row)) * 100) / 100;
 }
 
 /** Accrued = period has started (UK calendar day). Future rent periods are excluded from total due. */
@@ -81,14 +90,16 @@ export function enrichHirePaymentRows(
 }
 
 /**
- * Headline totals for staff/driver payment UI.
- * Total due = accrued net minus approved payments (not the full contract to end date).
+ * Headline rent totals for staff/driver payment UI.
+ * Deposit rows are excluded — use the schedule table for deposit status.
+ * Accrued rent = periods started on or before today (or contract end when ended).
  */
 export function summarizeHirePayments(
   rows: HirePaymentScheduleRowInput[],
   todayYmd: string,
 ): HirePaymentSummary {
   const enriched = enrichHirePaymentRows(rows, todayYmd);
+  let rentGrossAccruedGbp = 0;
   let totalDueGbp = 0;
   let totalPaidGbp = 0;
   let scheduleBalanceGbp = 0;
@@ -97,12 +108,17 @@ export function summarizeHirePayments(
   let nextDue: HirePaymentSummary["nextDue"] = null;
 
   for (const row of enriched) {
-    totalDiscountGbp += row.discountTotalGbp;
-    contractTotalGbp += row.netDueGbp;
     if (row.balanceGbp > 0 && row.paymentStatus !== "pending_approval") {
       scheduleBalanceGbp += row.balanceGbp;
     }
+
+    if (row.rowKind !== "rent") continue;
+
+    contractTotalGbp += row.netDueGbp;
     if (!row.accrued) continue;
+
+    rentGrossAccruedGbp += row.baseAmountGbp;
+    totalDiscountGbp += row.discountTotalGbp;
     totalDueGbp += row.netDueGbp;
     totalPaidGbp += row.paidGbp;
     if (row.balanceGbp > 0 && !nextDue) {
@@ -115,12 +131,17 @@ export function summarizeHirePayments(
     }
   }
 
-  const balanceGbp = Math.max(0, Math.round((totalDueGbp - totalPaidGbp) * 100) / 100);
+  const signedAccruedBalanceGbp = Math.round((totalDueGbp - totalPaidGbp) * 100) / 100;
+  const balanceGbp = Math.max(0, signedAccruedBalanceGbp);
+  const creditGbp = Math.max(0, -signedAccruedBalanceGbp);
 
   return {
+    rentGrossAccruedGbp: Math.round(rentGrossAccruedGbp * 100) / 100,
     totalDueGbp: Math.round(totalDueGbp * 100) / 100,
     totalPaidGbp: Math.round(totalPaidGbp * 100) / 100,
     balanceGbp,
+    creditGbp,
+    signedAccruedBalanceGbp,
     scheduleBalanceGbp: Math.round(scheduleBalanceGbp * 100) / 100,
     totalDiscountGbp: Math.round(totalDiscountGbp * 100) / 100,
     contractTotalGbp: Math.round(contractTotalGbp * 100) / 100,

@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  HireDetailsCompanyCard,
   HireDetailsDocumentItem,
   HireDetailsHirerCard,
   HireDetailsImportantDateRow,
@@ -125,16 +126,46 @@ function DocumentsList({
   );
 }
 
-function RentalCard({ rental, onError }: { rental: HireDetailsRentalCard; onError?: (message: string) => void }) {
+function CompanyDetailsCard({ company }: { company: HireDetailsCompanyCard }) {
   return (
     <section className={cardClass}>
-      <h2 className={sectionTitleClass}>Rental</h2>
-      {rental.companyName ? (
+      <h2 className={sectionTitleClass}>Rental company</h2>
+      <div className="mt-2 space-y-1.5">
+        <DetailBlock label="Company" value={company.companyName} />
+        {company.legalName ? <DetailBlock label="Legal entity" value={company.legalName} /> : null}
+        {company.companyNumber ? <DetailBlock label="Company number" value={company.companyNumber} /> : null}
+        {company.address ? <DetailBlock label="Address" value={company.address} /> : null}
+      </div>
+    </section>
+  );
+}
+
+function RentalCard({
+  rental,
+  company,
+  onError,
+}: {
+  rental: HireDetailsRentalCard;
+  company?: HireDetailsCompanyCard;
+  onError?: (message: string) => void;
+}) {
+  return (
+    <section className={cardClass}>
+      <h2 className={sectionTitleClass}>{company ? "Hire summary" : "Rental"}</h2>
+
+      {company ? (
+        <div className="mt-2 space-y-1.5 border-b border-rph-border/80 pb-2.5">
+          <DetailBlock label="Company" value={company.companyName} />
+          {company.legalName ? <DetailBlock label="Legal entity" value={company.legalName} /> : null}
+          {company.companyNumber ? <DetailBlock label="Company number" value={company.companyNumber} /> : null}
+          {company.address ? <DetailBlock label="Address" value={company.address} /> : null}
+        </div>
+      ) : rental.companyName ? (
         <p className="rph-meta mt-1 text-xs">{rental.companyName}</p>
       ) : null}
 
-      <div className="mt-2 space-y-1.5">
-        <DetailRow label="Start date" value={rental.startDateLabel} />
+      <div className={`mt-2 space-y-1.5 ${company ? "pt-0.5" : ""}`}>
+        <DetailRow label="Hire start date and time" value={rental.startDateLabel} />
         {rental.activatedAtLabel ? <DetailRow label="On rent since" value={rental.activatedAtLabel} /> : null}
         {rental.endedAtLabel ? <DetailRow label="Ended" value={rental.endedAtLabel} /> : null}
         <DetailRow label="Rent" value={rental.rentAmountLabel} />
@@ -181,12 +212,14 @@ function VehicleDetailsCard({
   dates,
   documents,
   vehicleDocumentsAccessible = true,
+  showDocuments = true,
   onError,
 }: {
   vehicle: HireDetailsVehicleCard;
   dates: HireDetailsImportantDateRow[];
   documents: HireDetailsDocumentItem[];
   vehicleDocumentsAccessible?: boolean;
+  showDocuments?: boolean;
   onError?: (message: string) => void;
 }) {
   return (
@@ -208,17 +241,19 @@ function VehicleDetailsCard({
         </div>
       ) : null}
 
-      <div className={`${subsectionClass} mt-auto`}>
-        <DocumentsList
-          documents={documents}
-          onError={onError}
-          inaccessibleMessage={
-            vehicleDocumentsAccessible
-              ? null
-              : "Vehicle documents are only available while your hire is active. Signed hire agreements remain available separately."
-          }
-        />
-      </div>
+      {showDocuments ? (
+        <div className={`${subsectionClass} mt-auto`}>
+          <DocumentsList
+            documents={documents}
+            onError={onError}
+            inaccessibleMessage={
+              vehicleDocumentsAccessible
+                ? null
+                : "Vehicle documents are only available while your hire is active. Signed hire agreements remain available separately."
+            }
+          />
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -265,7 +300,20 @@ function StaffDetailsLayout({ data }: { data: HireDetailsPayload }) {
   return (
     <div className="space-y-3">
       {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
+      {data.driverDocumentsRetentionWarning ? (
+        <p
+          className={
+            data.hirerDocumentsAccessible ? "rph-alert-warning text-sm" : "rph-alert-error text-sm"
+          }
+        >
+          {data.driverDocumentsRetentionWarning}
+          {data.driverDocumentsRetainUntilLabel
+            ? ` Access until ${data.driverDocumentsRetainUntilLabel}.`
+            : null}
+        </p>
+      ) : null}
       <div className="grid gap-3 xl:grid-cols-3">
+        <CompanyDetailsCard company={data.company} />
         <RentalCard rental={data.rental} onError={setError} />
         <VehicleDetailsCard
           vehicle={data.vehicle}
@@ -282,7 +330,11 @@ function StaffDetailsLayout({ data }: { data: HireDetailsPayload }) {
           />
         ) : (
           <section className={`${cardClass} items-center justify-center`}>
-            <p className="text-xs text-rph-fg-muted">No hirer linked to this hire.</p>
+            <p className="text-xs text-rph-fg-muted">
+              {data.hirerDocumentsAccessible
+                ? "No hirer linked to this hire."
+                : "Driver document access for this hire has expired."}
+            </p>
           </section>
         )}
       </div>
@@ -296,17 +348,16 @@ function DriverDetailsLayout({ data }: { data: HireDetailsPayload }) {
   return (
     <div className="space-y-3">
       {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
-      <div className="grid gap-3 xl:grid-cols-3">
-        <RentalCard rental={data.rental} onError={setError} />
-        <div className="xl:col-span-2">
-          <VehicleDetailsCard
-            vehicle={data.vehicle}
-            dates={data.importantDates.vehicle}
-            documents={data.vehicleDocuments}
-            vehicleDocumentsAccessible={data.vehicleDocumentsAccessible}
-            onError={setError}
-          />
-        </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <RentalCard rental={data.rental} company={data.company} onError={setError} />
+        <VehicleDetailsCard
+          vehicle={data.vehicle}
+          dates={data.importantDates.vehicle}
+          documents={data.vehicleDocuments}
+          vehicleDocumentsAccessible={data.vehicleDocumentsAccessible}
+          showDocuments={false}
+          onError={setError}
+        />
       </div>
     </div>
   );

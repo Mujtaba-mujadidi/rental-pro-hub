@@ -112,17 +112,38 @@ describe("hire-payment-analytics", () => {
     expect(items.some((i) => i.kind === "pending_approval")).toBe(true);
   });
 
+  it("ignores rejected payments on periods that have not started yet", () => {
+    const futureRejected: HirePaymentAnalyticsRow = {
+      ...rows[2]!,
+      id: "w4",
+      periodStart: "2026-08-27",
+      periodEnd: "2026-09-02",
+      periodLabel: "27 Aug – 2 Sept 2026",
+      paymentStatus: "rejected",
+      accrued: false,
+    };
+    const health = analyzeHirePaymentHealth([futureRejected], "2026-07-27");
+    expect(health.level).toBe("on_track");
+    expect(health.rejectedCount).toBe(0);
+    const items = buildHirePaymentAttentionItems([futureRejected], "2026-07-27");
+    expect(items.some((i) => i.kind === "rejected")).toBe(false);
+    expect(buildHirePaymentChartPoints([futureRejected], "2026-07-27")[0]?.displayStatus).toBe(
+      "upcoming",
+    );
+  });
+
   it("builds chart points with display status", () => {
     const points = buildHirePaymentChartPoints(rows, "2026-07-20");
     expect(points.find((p) => p.rowId === "w2")?.displayStatus).toBe("overdue");
     expect(points.find((p) => p.rowId === "w3")?.displayStatus).toBe("upcoming");
   });
 
-  it("summarizes contract progress", () => {
+  it("summarizes contract progress for rent periods only", () => {
     const progress = summarizeHireContractProgress(rows, "2026-07-01", "2026-07-20");
     expect(progress.daysOnHire).toBe(20);
-    expect(progress.periodsEndedCount).toBe(3);
-    expect(progress.periodsTotalCount).toBe(4);
+    expect(progress.periodsEndedCount).toBe(2);
+    expect(progress.periodsTotalCount).toBe(3);
+    expect(progress.periodsPaidCount).toBe(1);
   });
 
   it("labels deposit status", () => {

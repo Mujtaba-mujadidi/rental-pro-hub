@@ -4,10 +4,12 @@ import {
   loadDriverMyHirePaymentScheduleAction,
   loadDriverMyHireRentalDetailsAction,
   loadDriverMyHireShellAction,
-  type DriverMyHirePaymentRow,
-  type DriverMyHireRentalDetails,
-  type DriverMyHireShellRow,
 } from "@/app/actions/driver-hires";
+import type {
+  DriverMyHirePaymentRow,
+  DriverMyHireRentalDetails,
+  DriverMyHireShellRow,
+} from "@/lib/fleet/driver-hire-types";
 import {
   createContext,
   useCallback,

@@ -1,6 +1,8 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateRentScheduleRows, withDepositRow } from "@/lib/fleet/hire-payment-schedule";
 import type { RentCadence } from "@/lib/fleet/hire-types";
-import type { SupabaseClient } from "@supabase/supabase-js";
+
+const BLOCKING_PAYMENT_STATUSES = new Set(["approved", "pending_approval"]);
 
 export async function persistHireTimesheetForGroup(
   db: SupabaseClient,
@@ -15,6 +17,24 @@ export async function persistHireTimesheetForGroup(
     .maybeSingle();
   if (gErr) return { ok: false, error: gErr.message };
   if (!group) return { ok: false, error: "Hire group not found." };
+
+  const { data: existingRows, error: existingErr } = await db
+    .from("vehicle_hire_payment_schedule")
+    .select("payment_status, approved_amount_gbp")
+    .eq("hire_group_id", hireGroupId);
+  if (existingErr) return { ok: false, error: existingErr.message };
+
+  const hasRecordedPayments = (existingRows ?? []).some((row) => {
+    const status = String(row.payment_status ?? "");
+    if (BLOCKING_PAYMENT_STATUSES.has(status)) return true;
+    return Number(row.approved_amount_gbp ?? 0) > 0.005;
+  });
+  if (hasRecordedPayments) {
+    return {
+      ok: false,
+      error: "Cannot regenerate the payment schedule while payments have been recorded or are awaiting approval.",
+    };
+  }
 
   const g = group as {
     start_date: string;

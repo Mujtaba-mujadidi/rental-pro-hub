@@ -10,6 +10,7 @@ import { useDriverHireAccessRealtime } from "@/hooks/use-hire-realtime";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { driverHireWorkspaceHref } from "@/lib/fleet/driver-hire-workspace-nav";
 
 type DriverHireTab = "overview" | "details" | "payments";
 
@@ -67,7 +68,12 @@ function MyHireCard({ hireGroupId }: { hireGroupId: string }) {
             {summary.vehicleVrm} · {summary.vehicleMakeModel}
           </p>
         </div>
-        <StatusPill label={summary.statusLabel} status={summary.status} />
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusPill label={summary.statusLabel} status={summary.status} />
+          <Link href={driverHireWorkspaceHref(hireGroupId)} className="rph-btn-primary h-9 px-3 text-xs">
+            Open hire
+          </Link>
+        </div>
       </div>
 
       <nav

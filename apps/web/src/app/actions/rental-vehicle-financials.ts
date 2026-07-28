@@ -15,7 +15,19 @@ import {
   type OwnershipEventType,
   type VehicleOwnershipEventRow,
 } from "@/lib/fleet/vehicles";
-import { sumApprovedHireIncomeGbp, type HireIncomeRow } from "@/lib/fleet/hire-income";
+import {
+  computeVehicleHireIncomeGbp,
+  hireContractEndYmd,
+  type HireIncomeGroupContext,
+  type VehicleHireIncomeScheduleRow,
+} from "@/lib/fleet/hire-income";
+import {
+  buildPaymentRowEventStateMap,
+  resolveHirePaymentWorkflowStatus,
+} from "@/lib/fleet/hire-payment-workflow";
+import type { HireTerminationRentBillingMode } from "@/lib/fleet/hire-termination-billing";
+import type { HirePaymentStatus, RentCadence } from "@/lib/fleet/hire-types";
+import { ukTodayYmd } from "@/lib/datetime/uk";
 import { computeVehiclePnl, type VehiclePnlBreakdown } from "@/lib/fleet/vehicle-pnl";
 import { revalidateVehicleWorkspaceCache } from "@/lib/fleet/vehicle-workspace-cache";
 import { createClient } from "@/lib/supabase/server";
@@ -28,6 +40,15 @@ function revalidateFinancials(vehicleId: string) {
   revalidatePath(`/rental/vehicles/${vehicleId}/financials`);
   revalidatePath("/rental/vehicles");
   revalidatePath(`/rental/vehicles/${vehicleId}`, "layout");
+}
+
+export async function revalidateVehicleFinancialsForHireGroup(hireGroupId: string): Promise<void> {
+  const id = hireGroupId.trim();
+  if (!id) return;
+  const supabase = await createClient();
+  const { data } = await supabase.from("vehicle_hire_groups").select("vehicle_id").eq("id", id).maybeSingle();
+  const vehicleId = (data?.vehicle_id as string | null) ?? null;
+  if (vehicleId) revalidateFinancials(vehicleId);
 }
 
 function parseAmount(raw: string | number): { ok: true; value: number } | { ok: false; error: string } {
@@ -120,6 +141,143 @@ function mapEventRow(
   };
 }
 
+function parseRentBillingMode(raw: unknown): HireTerminationRentBillingMode {
+  return raw === "actual" ? "actual" : "end_of_period";
+}
+
+type HireGroupIncomeSource = {
+  id: string;
+  status: string;
+  terminated_at: string | null;
+  ended_at: string | null;
+  settlement_discount_gbp: number | string | null;
+  rent_cadence?: string | null;
+  termination_settlement?: unknown;
+  deposit_disposition?: string | null;
+  deposit_refund_amount_gbp?: number | string | null;
+};
+
+function parseTerminationDepositGbp(raw: unknown): number {
+  if (!raw || typeof raw !== "object") return 0;
+  const depositGbp = (raw as { depositGbp?: number }).depositGbp;
+  return Number.isFinite(depositGbp) ? Number(depositGbp) : 0;
+}
+
+function parseTerminationSignedRentBalanceGbp(raw: unknown): number | null {
+  if (!raw || typeof raw !== "object") return null;
+  const signed = (raw as { signedRentBalanceGbp?: number }).signedRentBalanceGbp;
+  return Number.isFinite(signed) ? Number(signed) : null;
+}
+
+function buildGroupContextByGroupId(groups: readonly HireGroupIncomeSource[]): Map<string, HireIncomeGroupContext> {
+  return new Map(
+    groups.map((group) => {
+      const terminationSettlement = group.termination_settlement as { rentBillingMode?: string } | null;
+      return [
+        group.id,
+        {
+          contractEndedYmd: hireContractEndYmd({
+            status: String(group.status ?? ""),
+            terminatedAt: group.terminated_at,
+            endedAt: group.ended_at,
+          }),
+          rentCadence: (group.rent_cadence as RentCadence) ?? "weekly",
+          rentBillingMode: parseRentBillingMode(terminationSettlement?.rentBillingMode),
+          settlementWriteOffGbp: Number(group.settlement_discount_gbp ?? 0),
+          depositDisposition: (group.deposit_disposition as string | null) ?? null,
+          depositRefundAmountGbp:
+            group.deposit_refund_amount_gbp != null
+              ? Number(group.deposit_refund_amount_gbp)
+              : null,
+          depositGbp: parseTerminationDepositGbp(group.termination_settlement),
+          signedRentBalanceGbp: parseTerminationSignedRentBalanceGbp(group.termination_settlement),
+        },
+      ];
+    }),
+  );
+}
+
+function mapScheduleIncomeRow(
+  row: {
+    id: string;
+    hire_group_id: string;
+    period_start: string;
+    period_end: string;
+    row_kind: string;
+    payment_status: string;
+    approved_amount_gbp: number | null;
+    base_amount_gbp: number;
+    vehicle_hire_schedule_discounts?: { amount_gbp: number }[];
+  },
+  eventStateByRow: Map<string, { latestToStatus: string | null; pendingSubmittedGbp: number | null }>,
+  todayYmd: string,
+): VehicleHireIncomeScheduleRow {
+  const discounts = row.vehicle_hire_schedule_discounts;
+  const discountTotalGbp = (discounts ?? []).reduce((sum, d) => sum + Number(d.amount_gbp), 0);
+  const storedStatus = row.payment_status as HirePaymentStatus;
+  const eventState = eventStateByRow.get(row.id);
+  const paymentStatus = resolveHirePaymentWorkflowStatus(
+    storedStatus,
+    eventState?.latestToStatus ?? null,
+    { periodStartYmd: row.period_start, todayYmd },
+  );
+  return {
+    hireGroupId: row.hire_group_id,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    rowKind: row.row_kind,
+    paymentStatus,
+    approvedAmountGbp: row.approved_amount_gbp != null ? Number(row.approved_amount_gbp) : null,
+    baseAmountGbp: Number(row.base_amount_gbp),
+    discountTotalGbp,
+  };
+}
+
+async function loadPaymentStatusEventsForRows(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  rowIds: string[],
+) {
+  if (!rowIds.length) return new Map<string, { latestToStatus: string | null; pendingSubmittedGbp: number | null }>();
+
+  const { data, error } = await supabase
+    .from("vehicle_hire_payment_status_events")
+    .select("schedule_row_id, to_status, amendment_payload, created_at")
+    .in("schedule_row_id", rowIds)
+    .eq("event_kind", "status_change")
+    .order("created_at", { ascending: false });
+  if (error) return new Map();
+
+  return buildPaymentRowEventStateMap(
+    (data ?? []).map((event) => ({
+      schedule_row_id: event.schedule_row_id as string,
+      to_status: (event.to_status as string | null) ?? null,
+      amendment_payload: event.amendment_payload,
+    })),
+  );
+}
+
+type DbScheduleIncomeRow = {
+  id: string;
+  hire_group_id: string;
+  period_start: string;
+  period_end: string;
+  row_kind: string;
+  payment_status: string;
+  approved_amount_gbp: number | null;
+  base_amount_gbp: number;
+  vehicle_hire_schedule_discounts?: { amount_gbp: number }[];
+};
+
+async function mapScheduleIncomeRows(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  rows: readonly DbScheduleIncomeRow[],
+  todayYmd: string,
+): Promise<VehicleHireIncomeScheduleRow[]> {
+  const rowIds = rows.map((row) => row.id);
+  const eventStateByRow = await loadPaymentStatusEventsForRows(supabase, rowIds);
+  return rows.map((row) => mapScheduleIncomeRow(row, eventStateByRow, todayYmd));
+}
+
 async function sumMaintenanceForVehicle(vehicleId: string): Promise<number> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -135,30 +293,184 @@ async function sumMaintenanceForVehicle(vehicleId: string): Promise<number> {
   return Math.round(total * 100) / 100;
 }
 
-async function loadHireIncomeRowsForVehicle(vehicleId: string): Promise<HireIncomeRow[]> {
+async function loadVehicleHireIncomeContext(vehicleId: string): Promise<
+  | {
+      ok: true;
+      scheduleRows: VehicleHireIncomeScheduleRow[];
+      balancePayments: { amountGbp: number; direction: string | null }[];
+      groupContextByGroupId: Map<string, HireIncomeGroupContext>;
+    }
+  | { ok: false; error: string }
+> {
   const supabase = await createClient();
-  const { data: groups } = await supabase.from("vehicle_hire_groups").select("id").eq("vehicle_id", vehicleId);
+  const { data: groups, error: groupsErr } = await supabase
+    .from("vehicle_hire_groups")
+    .select(
+      "id, status, terminated_at, ended_at, settlement_discount_gbp, rent_cadence, termination_settlement, deposit_disposition, deposit_refund_amount_gbp",
+    )
+    .eq("vehicle_id", vehicleId);
+  if (groupsErr) return { ok: false, error: groupsErr.message };
+
   const groupIds = (groups ?? []).map((g) => g.id as string);
-  if (!groupIds.length) return [];
-
-  const { data: rows, error } = await supabase
-    .from("vehicle_hire_payment_schedule")
-    .select("payment_status, approved_amount_gbp, base_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp)")
-    .in("hire_group_id", groupIds);
-  if (error) return [];
-
-  return (rows ?? []).map((row) => {
-    const discounts = (row as { vehicle_hire_schedule_discounts?: { amount_gbp: number }[] })
-      .vehicle_hire_schedule_discounts;
-    const discountTotalGbp = (discounts ?? []).reduce((sum, d) => sum + Number(d.amount_gbp), 0);
+  const groupContextByGroupId = buildGroupContextByGroupId(
+    (groups ?? []).map((group) => ({
+      id: group.id as string,
+      status: String(group.status ?? ""),
+      terminated_at: (group.terminated_at as string | null) ?? null,
+      ended_at: (group.ended_at as string | null) ?? null,
+      settlement_discount_gbp: group.settlement_discount_gbp,
+      rent_cadence: group.rent_cadence as string | null,
+      termination_settlement: group.termination_settlement,
+      deposit_disposition: group.deposit_disposition as string | null,
+      deposit_refund_amount_gbp: group.deposit_refund_amount_gbp,
+    })),
+  );
+  if (!groupIds.length) {
     return {
-      paymentStatus: row.payment_status as string,
-      approvedAmountGbp:
-        row.approved_amount_gbp != null ? Number(row.approved_amount_gbp) : null,
-      baseAmountGbp: Number(row.base_amount_gbp),
-      discountTotalGbp,
+      ok: true,
+      scheduleRows: [],
+      balancePayments: [],
+      groupContextByGroupId,
     };
-  });
+  }
+
+  const todayYmd = ukTodayYmd();
+  const [{ data: rows, error }, { data: balanceRows, error: balanceErr }] = await Promise.all([
+    supabase
+      .from("vehicle_hire_payment_schedule")
+      .select(
+        "id, hire_group_id, period_start, period_end, row_kind, payment_status, approved_amount_gbp, base_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp)",
+      )
+      .in("hire_group_id", groupIds),
+    supabase
+      .from("vehicle_hire_balance_payments")
+      .select("amount_gbp, direction")
+      .in("hire_group_id", groupIds),
+  ]);
+  if (error) return { ok: false, error: error.message };
+  if (balanceErr) return { ok: false, error: balanceErr.message };
+
+  const scheduleRows = await mapScheduleIncomeRows(
+    supabase,
+    (rows ?? []) as DbScheduleIncomeRow[],
+    todayYmd,
+  );
+
+  const balancePayments = (balanceRows ?? []).map((payment) => ({
+    amountGbp: Number(payment.amount_gbp ?? 0),
+    direction: (payment.direction as string | null) ?? null,
+  }));
+
+  return { ok: true, scheduleRows, balancePayments, groupContextByGroupId };
+}
+
+async function loadFleetHireIncomeByVehicleId(
+  vehicleIds: string[],
+): Promise<
+  | {
+      ok: true;
+      incomeByVehicleId: Map<
+        string,
+        ReturnType<typeof computeVehicleHireIncomeGbp>
+      >;
+    }
+  | { ok: false; error: string }
+> {
+  if (!vehicleIds.length) return { ok: true, incomeByVehicleId: new Map() };
+
+  const supabase = await createClient();
+  const todayYmd = ukTodayYmd();
+  const { data: groups, error: groupsErr } = await supabase
+    .from("vehicle_hire_groups")
+    .select(
+      "id, vehicle_id, status, terminated_at, ended_at, settlement_discount_gbp, rent_cadence, termination_settlement, deposit_disposition, deposit_refund_amount_gbp",
+    )
+    .in("vehicle_id", vehicleIds);
+  if (groupsErr) return { ok: false, error: groupsErr.message };
+
+  const groupIds = (groups ?? []).map((g) => g.id as string);
+  const groupsByVehicleId = new Map<string, typeof groups>();
+  for (const group of groups ?? []) {
+    const vehicleId = group.vehicle_id as string;
+    const list = groupsByVehicleId.get(vehicleId) ?? [];
+    list.push(group);
+    groupsByVehicleId.set(vehicleId, list);
+  }
+
+  if (!groupIds.length) return { ok: true, incomeByVehicleId: new Map() };
+
+  const [{ data: rows, error }, { data: balanceRows, error: balanceErr }] = await Promise.all([
+    supabase
+      .from("vehicle_hire_payment_schedule")
+      .select(
+        "id, hire_group_id, period_start, period_end, row_kind, payment_status, approved_amount_gbp, base_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp)",
+      )
+      .in("hire_group_id", groupIds),
+    supabase
+      .from("vehicle_hire_balance_payments")
+      .select("hire_group_id, amount_gbp, direction")
+      .in("hire_group_id", groupIds),
+  ]);
+  if (error) return { ok: false, error: error.message };
+  if (balanceErr) return { ok: false, error: balanceErr.message };
+
+  const mappedScheduleRows = await mapScheduleIncomeRows(
+    supabase,
+    (rows ?? []) as DbScheduleIncomeRow[],
+    todayYmd,
+  );
+  const scheduleByGroupId = new Map<string, VehicleHireIncomeScheduleRow[]>();
+  for (let index = 0; index < (rows ?? []).length; index += 1) {
+    const hireGroupId = (rows ?? [])[index]!.hire_group_id as string;
+    const mapped = mappedScheduleRows[index]!;
+    const list = scheduleByGroupId.get(hireGroupId) ?? [];
+    list.push(mapped);
+    scheduleByGroupId.set(hireGroupId, list);
+  }
+
+  const paymentsByGroupId = new Map<string, { amountGbp: number; direction: string | null }[]>();
+  for (const payment of balanceRows ?? []) {
+    const hireGroupId = payment.hire_group_id as string;
+    const list = paymentsByGroupId.get(hireGroupId) ?? [];
+    list.push({
+      amountGbp: Number(payment.amount_gbp ?? 0),
+      direction: (payment.direction as string | null) ?? null,
+    });
+    paymentsByGroupId.set(hireGroupId, list);
+  }
+
+  const incomeByVehicleId = new Map<string, ReturnType<typeof computeVehicleHireIncomeGbp>>();
+  for (const vehicleId of vehicleIds) {
+    const vehicleGroups = groupsByVehicleId.get(vehicleId) ?? [];
+    const groupContextByGroupId = buildGroupContextByGroupId(
+      vehicleGroups.map((group) => ({
+        id: group.id as string,
+        status: String(group.status ?? ""),
+        terminated_at: (group.terminated_at as string | null) ?? null,
+        ended_at: (group.ended_at as string | null) ?? null,
+        settlement_discount_gbp: group.settlement_discount_gbp,
+        rent_cadence: group.rent_cadence as string | null,
+        termination_settlement: group.termination_settlement,
+        deposit_disposition: group.deposit_disposition as string | null,
+        deposit_refund_amount_gbp: group.deposit_refund_amount_gbp,
+      })),
+    );
+    const scheduleRows = vehicleGroups.flatMap((group) => scheduleByGroupId.get(group.id as string) ?? []);
+    const balancePayments = vehicleGroups.flatMap(
+      (group) => paymentsByGroupId.get(group.id as string) ?? [],
+    );
+    incomeByVehicleId.set(
+      vehicleId,
+      computeVehicleHireIncomeGbp({
+        scheduleRows,
+        balancePayments,
+        groupContextByGroupId,
+        todayYmd,
+      }),
+    );
+  }
+
+  return { ok: true, incomeByVehicleId };
 }
 
 export async function loadVehicleFinancialsAction(
@@ -183,7 +495,7 @@ export async function loadVehicleFinancialsAction(
   if (vErr) return { ok: false, error: vErr.message };
   if (!vehicle) return { ok: false, error: "Vehicle not found." };
 
-  const [lookups, { data: events, error: eErr }, maintenanceTotalGbp, hireIncomeRows] = await Promise.all([
+  const [lookups, { data: events, error: eErr }, maintenanceTotalGbp, hireIncomeContext] = await Promise.all([
     loadPaymentLookups(companyId),
     supabase
       .from("vehicle_ownership_events")
@@ -193,11 +505,12 @@ export async function loadVehicleFinancialsAction(
       .eq("vehicle_id", id)
       .order("occurred_on", { ascending: true }),
     sumMaintenanceForVehicle(id),
-    loadHireIncomeRowsForVehicle(id),
+    loadVehicleHireIncomeContext(id),
   ]);
 
   if (!lookups.ok) return { ok: false, error: lookups.error };
   if (eErr) return { ok: false, error: eErr.message };
+  if (!hireIncomeContext.ok) return { ok: false, error: hireIncomeContext.error };
 
   const methodName = new Map(lookups.methods.map((m) => [m.id, m.name]));
   const accountName = new Map(lookups.accounts.map((a) => [a.id, a.name]));
@@ -210,12 +523,23 @@ export async function loadVehicleFinancialsAction(
     if (mapped.event_type === "sale") sale = mapped;
   }
 
-  const rentalIncomeGbp = sumApprovedHireIncomeGbp(hireIncomeRows);
+  const hireIncome = computeVehicleHireIncomeGbp({
+    scheduleRows: hireIncomeContext.scheduleRows,
+    balancePayments: hireIncomeContext.balancePayments,
+    groupContextByGroupId: hireIncomeContext.groupContextByGroupId,
+    todayYmd: ukTodayYmd(),
+  });
   const pnl = computeVehiclePnl({
     purchaseGbp: purchase?.amount_gbp ?? null,
     saleGbp: sale?.amount_gbp ?? null,
     maintenanceTotalGbp,
-    rentalIncomeGbp,
+    rentalIncomeGbp: hireIncome.netIncomeGbp,
+    rentalGrossIncomeGbp: hireIncome.grossApprovedGbp,
+    rentalRefundsGbp: hireIncome.refundsToDriverGbp,
+    rentalPrepaidExcludedGbp: hireIncome.postEndPrepaidExcludedGbp,
+    rentalCollectionsGbp: hireIncome.collectionsFromDriverGbp,
+    rentalWriteOffsGbp: hireIncome.settlementWriteOffsGbp,
+    rentalDepositRetentionGbp: hireIncome.depositRetentionGbp,
   });
 
   return {
@@ -281,11 +605,26 @@ export async function loadFleetPnlSummariesAction(
     maintByVehicle.set(row.vehicle_id, (maintByVehicle.get(row.vehicle_id) ?? 0) + amount);
   }
 
+  const hireIncomeResult = await loadFleetHireIncomeByVehicleId(ids);
+  if (!hireIncomeResult.ok) return hireIncomeResult;
+
   const summaries: FleetVehiclePnlSummary[] = ids.map((vehicleId) => {
     const purchaseGbp = purchaseByVehicle.get(vehicleId) ?? null;
     const saleGbp = saleByVehicle.get(vehicleId) ?? null;
     const maintenanceTotalGbp = Math.round((maintByVehicle.get(vehicleId) ?? 0) * 100) / 100;
-    const pnl = computeVehiclePnl({ purchaseGbp, saleGbp, maintenanceTotalGbp });
+    const hireIncome = hireIncomeResult.incomeByVehicleId.get(vehicleId);
+    const pnl = computeVehiclePnl({
+      purchaseGbp,
+      saleGbp,
+      maintenanceTotalGbp,
+      rentalIncomeGbp: hireIncome?.netIncomeGbp ?? 0,
+      rentalGrossIncomeGbp: hireIncome?.grossApprovedGbp ?? 0,
+      rentalRefundsGbp: hireIncome?.refundsToDriverGbp ?? 0,
+      rentalPrepaidExcludedGbp: hireIncome?.postEndPrepaidExcludedGbp ?? 0,
+      rentalCollectionsGbp: hireIncome?.collectionsFromDriverGbp ?? 0,
+      rentalWriteOffsGbp: hireIncome?.settlementWriteOffsGbp ?? 0,
+      rentalDepositRetentionGbp: hireIncome?.depositRetentionGbp ?? 0,
+    });
     return {
       vehicleId,
       purchaseGbp,

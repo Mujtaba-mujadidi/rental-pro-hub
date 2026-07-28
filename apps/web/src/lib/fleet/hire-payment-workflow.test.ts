@@ -111,6 +111,19 @@ describe("resolveHirePaymentWorkflowStatus", () => {
     expect(resolveHirePaymentWorkflowStatus("rejected", null)).toBe("rejected");
     expect(resolveHirePaymentWorkflowStatus("not_received", null)).toBe("not_received");
   });
+
+  it("ignores rejected workflow on periods that have not started yet", () => {
+    const context = { periodStartYmd: "2026-08-27", todayYmd: "2026-07-27" };
+    expect(resolveHirePaymentWorkflowStatus("pending_approval", "rejected", context)).toBe(
+      "not_received",
+    );
+    expect(resolveHirePaymentWorkflowStatus("rejected", null, context)).toBe("not_received");
+    expect(resolveHirePaymentWorkflowStatus("rejected", "rejected", context)).toBe("not_received");
+    expect(resolveHirePaymentWorkflowStatus("rejected", null, {
+      periodStartYmd: "2026-07-27",
+      todayYmd: "2026-07-27",
+    })).toBe("rejected");
+  });
 });
 
 describe("driverCanSubmitPayment", () => {

@@ -434,12 +434,11 @@ async function refreshHireGroupAfterAgreementSigned(admin: Admin, hireGroupId: s
   if (!allAgreementsSigned(signedFlags)) return;
 
   const nextStatus = hireGroupStatusAfterAllSigned(group.start_date as string, today);
-  const now = new Date().toISOString();
   await admin
     .from("vehicle_hire_groups")
     .update({
       status: nextStatus,
-      activated_at: nextStatus === "active" ? now : null,
+      activated_at: null,
     })
     .eq("id", hireGroupId);
 

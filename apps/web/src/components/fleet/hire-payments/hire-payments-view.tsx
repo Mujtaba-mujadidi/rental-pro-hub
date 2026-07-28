@@ -8,6 +8,13 @@ import {
 import { HirePaymentComposer } from "@/components/fleet/hire-payments/hire-payment-composer";
 import { HirePaymentScheduleTable } from "@/components/fleet/hire-payments/hire-payment-schedule-table";
 import { HirePaymentSummaryCards } from "@/components/fleet/hire-payments/hire-payment-summary-cards";
+import { HireEndedContractScheduleBanner } from "@/components/fleet/hire-payments/hire-ended-contract-schedule-banner";
+import { HireDepositDispositionResolveCard } from "@/components/fleet/hire-payments/hire-deposit-disposition-resolve-card";
+import { HireSettlementBalancePaymentCard } from "@/components/fleet/hire-payments/hire-settlement-balance-payment-card";
+import { HireSettlementBalancePaymentsTable } from "@/components/fleet/hire-payments/hire-settlement-balance-payments-table";
+import { HireTerminationSummaryCard } from "@/components/fleet/hire-payments/hire-termination-summary-card";
+import { HireDepositPendingBanner } from "@/components/fleet/hire-dashboard/hire-deposit-pending-banner";
+import { HireWorkspaceBalanceBanner } from "@/components/fleet/hire-dashboard/hire-workspace-balance-banner";
 import { useHirePaymentsRealtime } from "@/hooks/use-hire-realtime";
 import { useCallback, useEffect, useState, useTransition } from "react";
 
@@ -61,8 +68,9 @@ export function HirePaymentsView({
         <div className="min-w-0">
           <h1 className="rph-h1">Payments</h1>
           <p className="rph-muted mt-1 text-sm">
-            Record and approve rent payments for this hire. Total due is calculated to date, not the full
-            contract.
+            {data.scheduleReadOnly
+              ? "Contract ended — view balances and payment history below."
+              : "Record and approve rent payments for this hire. Total due is calculated to date, not the full contract."}
           </p>
         </div>
         {data.canSubmitPayment ? (
@@ -91,7 +99,72 @@ export function HirePaymentsView({
         ) : null}
       </div>
 
-      <HirePaymentSummaryCards summary={data.summary} showDiscountTotal compact />
+      <HireWorkspaceBalanceBanner
+        hireGroupId={hireGroupId}
+        rentBalanceGbp={data.summary.balanceGbp}
+        rentCreditGbp={data.summary.creditGbp}
+        settlementBalance={data.settlementBalance}
+        contractEnded={Boolean(data.contractEndedYmd)}
+        depositPendingReview={data.depositPendingReview}
+        depositGbp={data.depositGbp ?? 0}
+        depositDispositionLabel={data.depositDispositionLabel}
+      />
+
+      <HireDepositPendingBanner
+        hireGroupId={hireGroupId}
+        closure={{
+          depositPendingReview: data.depositPendingReview,
+          depositGbp: data.depositGbp ?? 0,
+          rentSettlementSettled: data.settlementBalance?.settled === true,
+        }}
+      />
+
+      {data.depositPendingReview && data.terminationSummary && data.depositGbp != null && data.depositGbp > 0 ? (
+        <HireDepositDispositionResolveCard
+          hireGroupId={hireGroupId}
+          terminationSummary={data.terminationSummary}
+          currentSignedSettlementGbp={data.currentSignedSettlementGbp}
+          onSuccess={reload}
+        />
+      ) : null}
+
+      {data.canRecordSettlementPayment && data.settlementBalance && !data.settlementBalance.settled ? (
+        <HireSettlementBalancePaymentCard
+          hireGroupId={hireGroupId}
+          settlementBalance={data.settlementBalance}
+          paymentAccounts={data.settlementPaymentAccounts}
+          defaultPaymentAccountId={data.defaultSettlementPaymentAccountId}
+          onSuccess={reload}
+        />
+      ) : null}
+
+      <HireSettlementBalancePaymentsTable payments={data.settlementBalancePayments} />
+
+      {data.terminationSummary ? (
+        <HireTerminationSummaryCard
+          summary={data.terminationSummary}
+          depositDispositionLabel={data.depositDispositionLabel}
+          settlementResolutionLabel={data.settlementResolutionLabel}
+        />
+      ) : null}
+
+      {data.contractEndedAtLabel ? (
+        <HireEndedContractScheduleBanner
+          contractEndedAtLabel={data.contractEndedAtLabel}
+          hasPostEndPrepaidPayments={data.hasPostEndPrepaidPayments}
+          settlementSettled={data.settlementBalance?.settled === true}
+          driverDocumentsRetainUntilLabel={data.driverDocumentsRetainUntilLabel}
+          driverDocumentsRetentionWarning={data.driverDocumentsRetentionWarning}
+          showDocumentRetention
+        />
+      ) : null}
+
+      <HirePaymentSummaryCards
+        summary={data.summary}
+        showDiscountTotal
+        compact
+        contractEnded={Boolean(data.contractEndedYmd)}
+      />
 
       <HirePaymentScheduleTable
         rows={data.rows}
@@ -99,6 +172,10 @@ export function HirePaymentsView({
         canApprove={data.canApprovePayments}
         canApplyDiscount={data.canApplyDiscount}
         highlightedRowIds={highlightedRowIds}
+        contractEndedYmd={data.contractEndedYmd}
+        settlementSettled={data.settlementBalance?.settled === true}
+        audience="staff"
+        readOnly={data.scheduleReadOnly}
         onRefresh={reload}
       />
     </div>

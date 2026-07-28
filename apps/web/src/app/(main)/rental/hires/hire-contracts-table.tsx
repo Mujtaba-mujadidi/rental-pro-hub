@@ -1,6 +1,6 @@
 "use client";
 
-import { formatUkDate } from "@/lib/datetime/uk";
+import { formatUkDate, formatUkDateTimeSeconds } from "@/lib/datetime/uk";
 import type { HireContractTableRow } from "@/app/actions/rental-hire-wizard";
 import { cancelHireGroupAction, ensureHireGroupEnvelopesPreparedAction, loadHireGroupAuditTrailAction, regenerateHireGroupContractsAction } from "@/app/actions/rental-hires";
 import { sendHireGroupSigningBundleAction } from "@/app/actions/rental-hire-signing";
@@ -27,6 +27,17 @@ type Props = {
 function statusLabel(row: HireContractTableRow): string {
   if (row.status === "draft") return `Draft · step ${row.wizard_step}`;
   return row.status.replace(/_/g, " ");
+}
+
+function startLabel(row: HireContractTableRow): string {
+  if (row.activated_at) return formatUkDateTimeSeconds(row.activated_at);
+  if (row.start_date) return `Scheduled ${formatUkDate(row.start_date)}`;
+  return "—";
+}
+
+function endLabel(row: HireContractTableRow): string {
+  if (row.terminated_at) return formatUkDateTimeSeconds(row.terminated_at);
+  return "—";
 }
 
 function WorkflowStatusPill({ label, tone }: { label: string; tone: HireTableStatusTone }) {
@@ -208,11 +219,13 @@ export function HireContractsTable({
                 <tr className="border-b border-rph-border bg-rph-chrome/60 text-left text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">
                   {!vehicleScoped ? <th className="px-4 py-2.5">Vehicle</th> : null}
                   <th className="px-4 py-2.5">Driver</th>
-                  <th className="px-4 py-2.5">Start</th>
+                  <th className="px-4 py-2.5">Started</th>
+                  <th className="px-4 py-2.5">Ended</th>
                   <th className="px-4 py-2.5">Rent</th>
                   <th className="px-4 py-2.5">Status</th>
                   <th className="px-4 py-2.5">Driver access</th>
                   <th className="px-4 py-2.5">E-sign</th>
+                  <th className="px-4 py-2.5">Workflow</th>
                   <th className="sticky right-0 z-10 bg-rph-chrome/95 px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(0,0,0,0.25)] backdrop-blur-sm">
                     Actions
                   </th>
@@ -221,7 +234,7 @@ export function HireContractsTable({
               <tbody className="divide-y divide-rph-border">
                 {!filtered.length ? (
                   <tr>
-                    <td colSpan={vehicleScoped ? 7 : 8} className="px-4 py-8 text-center text-rph-fg-muted">
+                    <td colSpan={vehicleScoped ? 9 : 10} className="px-4 py-8 text-center text-rph-fg-muted">
                       No contracts found.
                     </td>
                   </tr>
@@ -247,9 +260,8 @@ export function HireContractsTable({
                           </td>
                         ) : null}
                         <td className="px-4 py-3 text-rph-fg-secondary">{r.driver_label ?? "—"}</td>
-                        <td className="px-4 py-3 text-rph-fg-secondary">
-                          {r.start_date ? formatUkDate(r.start_date) : "—"}
-                        </td>
+                        <td className="px-4 py-3 text-rph-fg-secondary">{startLabel(r)}</td>
+                        <td className="px-4 py-3 text-rph-fg-secondary">{endLabel(r)}</td>
                         <td className="px-4 py-3 text-rph-fg-secondary">
                           {r.rent_amount_gbp > 0 ? `£${r.rent_amount_gbp.toFixed(2)} / ${r.rent_cadence}` : "—"}
                         </td>
@@ -261,6 +273,13 @@ export function HireContractsTable({
                         </td>
                         <td className="px-4 py-3">
                           <WorkflowStatusPill label={r.esign_label} tone={r.esign_tone} />
+                        </td>
+                        <td className="px-4 py-3">
+                          {r.lifecycle_label ? (
+                            <WorkflowStatusPill label={r.lifecycle_label} tone={r.lifecycle_tone} />
+                          ) : (
+                            <span className="text-rph-fg-muted">—</span>
+                          )}
                         </td>
                         <td className="sticky right-0 z-10 bg-rph-raised/95 px-4 py-3 text-right shadow-[-8px_0_12px_-8px_rgba(0,0,0,0.25)] backdrop-blur-sm">
                           <HireContractRowActionsMenu
@@ -291,7 +310,7 @@ export function HireContractsTable({
                       </tr>
                       {r.can_view_signed_documents ? (
                         <tr key={`${r.id}-mobile-docs`} className="bg-rph-raised/20 md:hidden">
-                          <td colSpan={vehicleScoped ? 7 : 8} className="px-4 py-2">
+                          <td colSpan={vehicleScoped ? 9 : 10} className="px-4 py-2">
                             <Link
                               href={`/rental/hires/${r.id}/documents`}
                               className="text-sm font-medium text-rph-link hover:text-rph-link-hover"

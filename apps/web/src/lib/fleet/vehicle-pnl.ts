@@ -5,6 +5,12 @@ export type VehiclePnlInput = {
   saleGbp: number | null;
   maintenanceTotalGbp: number;
   rentalIncomeGbp?: number | null;
+  rentalGrossIncomeGbp?: number | null;
+  rentalRefundsGbp?: number | null;
+  rentalPrepaidExcludedGbp?: number | null;
+  rentalCollectionsGbp?: number | null;
+  rentalWriteOffsGbp?: number | null;
+  rentalDepositRetentionGbp?: number | null;
   pcnTotalGbp?: number | null;
   claimsNetGbp?: number | null;
 };
@@ -15,6 +21,12 @@ export type VehiclePnlBreakdown = {
   capitalGainGbp: number | null;
   maintenanceTotalGbp: number;
   rentalIncomeGbp: number;
+  rentalGrossIncomeGbp: number;
+  rentalRefundsGbp: number;
+  rentalPrepaidExcludedGbp: number;
+  rentalCollectionsGbp: number;
+  rentalWriteOffsGbp: number;
+  rentalDepositRetentionGbp: number;
   pcnTotalGbp: number;
   claimsNetGbp: number;
   operatingCostGbp: number;
@@ -44,6 +56,12 @@ export function computeVehiclePnl(input: VehiclePnlInput): VehiclePnlBreakdown {
   const saleGbp = input.saleGbp != null && Number.isFinite(input.saleGbp) ? roundGbp(input.saleGbp) : null;
   const maintenanceTotalGbp = roundGbp(Math.max(0, nz(input.maintenanceTotalGbp)));
   const rentalIncomeGbp = roundGbp(Math.max(0, nz(input.rentalIncomeGbp)));
+  const rentalGrossIncomeGbp = roundGbp(Math.max(0, nz(input.rentalGrossIncomeGbp ?? input.rentalIncomeGbp)));
+  const rentalRefundsGbp = roundGbp(Math.max(0, nz(input.rentalRefundsGbp)));
+  const rentalPrepaidExcludedGbp = roundGbp(Math.max(0, nz(input.rentalPrepaidExcludedGbp)));
+  const rentalCollectionsGbp = roundGbp(Math.max(0, nz(input.rentalCollectionsGbp)));
+  const rentalWriteOffsGbp = roundGbp(Math.max(0, nz(input.rentalWriteOffsGbp)));
+  const rentalDepositRetentionGbp = roundGbp(Math.max(0, nz(input.rentalDepositRetentionGbp)));
   const pcnTotalGbp = roundGbp(Math.max(0, nz(input.pcnTotalGbp)));
   const claimsNetGbp = roundGbp(nz(input.claimsNetGbp));
 
@@ -72,6 +90,12 @@ export function computeVehiclePnl(input: VehiclePnlInput): VehiclePnlBreakdown {
     capitalGainGbp,
     maintenanceTotalGbp,
     rentalIncomeGbp,
+    rentalGrossIncomeGbp,
+    rentalRefundsGbp,
+    rentalPrepaidExcludedGbp,
+    rentalCollectionsGbp,
+    rentalWriteOffsGbp,
+    rentalDepositRetentionGbp,
     pcnTotalGbp,
     claimsNetGbp,
     operatingCostGbp,
