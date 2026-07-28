@@ -4,6 +4,7 @@ import { getRentalCompanyGateCached } from "@/lib/auth/company-gate-cache";
 import { getAppProfile } from "@/lib/auth/profile";
 import { resolveRentalContractAccess } from "@/lib/auth/rental-contract-access";
 import { isSuperAdminEmail } from "@/lib/auth/roles";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export type RentalSessionLifecycle =
@@ -25,6 +26,52 @@ export type RentalSessionLifecycle =
       registeredCounty: string | null;
       registeredPostcode: string | null;
     };
+
+/** Fresh contract gate (no cross-request cache) — used for redirects so stale cache cannot flash awaiting-contract. */
+export const loadRentalContractAccessFresh = cache(async (companyId: string) => {
+  const id = companyId.trim();
+  const admin = createSupabaseAdminClient();
+  const [{ data: co }, { data: cc, error: ccErr }, { data: pendingAmendment }] = await Promise.all([
+    admin
+      .from("companies")
+      .select("rental_onboarding_completed_at, contract_status")
+      .eq("id", id)
+      .maybeSingle(),
+    admin.from("company_contracts").select("status").eq("parent_company_id", id).maybeSingle(),
+    admin
+      .from("company_contract_change_requests")
+      .select("id")
+      .eq("parent_company_id", id)
+      .eq("status", "pending_signature")
+      .in("review_status", ["awaiting_signature", "approved"])
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  const onboardingComplete = !!co?.rental_onboarding_completed_at;
+  const access = resolveRentalContractAccess({
+    contractStatus: ccErr ? null : ((cc?.status as string | undefined) ?? null),
+    companyContractStatus: (co?.contract_status as string | undefined) ?? null,
+    onboardingComplete,
+    hasPendingAmendmentSignature: Boolean(pendingAmendment?.id),
+  });
+  return {
+    onboardingComplete,
+    contractActive: access.contractActive,
+    renewalSignaturePending: access.renewalSignaturePending,
+  };
+});
+
+function mergeFreshContractAccess(
+  life: Extract<RentalSessionLifecycle, { kind: "rental" }>,
+  fresh: Awaited<ReturnType<typeof loadRentalContractAccessFresh>>,
+): Extract<RentalSessionLifecycle, { kind: "rental" }> {
+  return {
+    ...life,
+    contractActive: fresh.contractActive,
+    renewalSignaturePending: fresh.renewalSignaturePending,
+    onboardingComplete: fresh.onboardingComplete,
+  };
+}
 
 async function loadRentalSessionLifecycleFromCompany(
   companyId: string,
@@ -127,7 +174,10 @@ export async function getRentalSessionLifecycle(
     return { kind: "not_rental" };
   }
 
-  return loadRentalSessionLifecycleFromCompany(activeParent);
+  const life = await loadRentalSessionLifecycleFromCompany(activeParent);
+  if (life.kind !== "rental") return life;
+  const fresh = await loadRentalContractAccessFresh(activeParent);
+  return mergeFreshContractAccess(life, fresh);
 }
 
 /**
@@ -144,7 +194,10 @@ export const getRentalSessionLifecycleCached = cache(async (userId: string, emai
     return { kind: "not_rental" } as const;
   }
 
-  return loadRentalSessionLifecycleFromCompany(profile.company_id);
+  const life = await loadRentalSessionLifecycleFromCompany(profile.company_id);
+  if (life.kind !== "rental") return life;
+  const fresh = await loadRentalContractAccessFresh(profile.company_id);
+  return mergeFreshContractAccess(life, fresh);
 });
 
 /**
@@ -168,6 +221,13 @@ export function rentalPathRequiresRedirect(pathname: string, ctx: RentalSessionL
   if (!ctx.contractActive) {
     if (pathname === "/rental/awaiting-contract" || pathname.startsWith("/rental/awaiting-contract/")) return null;
     return "/rental/awaiting-contract";
+  }
+
+  const onAwaitingContract =
+    pathname === "/rental/awaiting-contract" || pathname.startsWith("/rental/awaiting-contract/");
+  if (onAwaitingContract) {
+    if (!ctx.onboardingComplete) return "/rental/onboarding";
+    return "/rental";
   }
 
   if (!ctx.onboardingComplete) {

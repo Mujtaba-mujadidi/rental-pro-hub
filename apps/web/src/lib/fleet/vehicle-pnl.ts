@@ -11,6 +11,7 @@ export type VehiclePnlInput = {
   rentalCollectionsGbp?: number | null;
   rentalWriteOffsGbp?: number | null;
   rentalDepositRetentionGbp?: number | null;
+  driverChargeIncomeGbp?: number | null;
   pcnTotalGbp?: number | null;
   claimsNetGbp?: number | null;
 };
@@ -27,6 +28,7 @@ export type VehiclePnlBreakdown = {
   rentalCollectionsGbp: number;
   rentalWriteOffsGbp: number;
   rentalDepositRetentionGbp: number;
+  driverChargeIncomeGbp: number;
   pcnTotalGbp: number;
   claimsNetGbp: number;
   operatingCostGbp: number;
@@ -62,6 +64,7 @@ export function computeVehiclePnl(input: VehiclePnlInput): VehiclePnlBreakdown {
   const rentalCollectionsGbp = roundGbp(Math.max(0, nz(input.rentalCollectionsGbp)));
   const rentalWriteOffsGbp = roundGbp(Math.max(0, nz(input.rentalWriteOffsGbp)));
   const rentalDepositRetentionGbp = roundGbp(Math.max(0, nz(input.rentalDepositRetentionGbp)));
+  const driverChargeIncomeGbp = roundGbp(Math.max(0, nz(input.driverChargeIncomeGbp)));
   const pcnTotalGbp = roundGbp(Math.max(0, nz(input.pcnTotalGbp)));
   const claimsNetGbp = roundGbp(nz(input.claimsNetGbp));
 
@@ -96,6 +99,7 @@ export function computeVehiclePnl(input: VehiclePnlInput): VehiclePnlBreakdown {
     rentalCollectionsGbp,
     rentalWriteOffsGbp,
     rentalDepositRetentionGbp,
+    driverChargeIncomeGbp,
     pcnTotalGbp,
     claimsNetGbp,
     operatingCostGbp,

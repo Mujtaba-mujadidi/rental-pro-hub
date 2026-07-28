@@ -5,16 +5,20 @@ import {
   completeHireCheckoutAction,
   loadDriverHireInspectionAction,
   loadHireInspectionAction,
+  loadHireInspectionPaymentAccountsAction,
   loadHireInspectionTrackerOdometerAction,
   saveHireInspectionDraftAction,
   syncHireInspectionMediaDraftAction,
+  type HireInspectionPaymentAccountOption,
   type HireInspectionPayload,
 } from "@/app/actions/hire-inspections";
 import { FormModalStepProgress } from "@/components/forms/form-modal-step-progress";
 import { HireInspectionCompletedView } from "@/components/fleet/hire-inspection/hire-inspection-completed-view";
 import { HireInspectionPhotosSection } from "@/components/fleet/hire-inspection/hire-inspection-photos-section";
 import { HireInspectionReadingsSection } from "@/components/fleet/hire-inspection/hire-inspection-readings-section";
+import { HireInspectionReviewSection } from "@/components/fleet/hire-inspection/hire-inspection-review-section";
 import { VehicleDamageDiagram } from "@/components/fleet/hire-inspection/vehicle-damage-diagram";
+import type { VehicleDamageDiagramEntry } from "@/components/fleet/hire-inspection/vehicle-damage-diagram";
 import {
   EMPTY_HIRE_INSPECTION_ACCESSORIES,
   type HireInspectionAccessories,
@@ -25,8 +29,10 @@ import {
   draftDamageToSaveInput,
   mapInspectionDamagesToDraft,
   newLocalDamageId,
+  seedCheckinDamagesFromCheckout,
   type HireInspectionDraftDamage,
 } from "@/lib/fleet/hire-inspection-draft-damages";
+import type { HireInspectionDamageChargeResolution } from "@/lib/fleet/hire-inspection-damage-charges";
 import {
   buildMediaDraftFormData,
   createDraftMediaFromFiles,
@@ -46,11 +52,10 @@ import {
   type HireDamageType,
   type HireInspectionKind,
 } from "@/lib/fleet/vehicle-damage-panels";
-import { formatHireFuelLevelPercent } from "@/lib/fleet/hire-fuel-level";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 
-const STEP_LABELS = ["Vehicle", "Damage", "Photos", "Review"];
+const STEP_LABELS = ["Vehicle", "Damage", "Photos", "Summary"];
 
 function HireInspectionWizardLoader({ label }: { label: string }) {
   return (
@@ -148,12 +153,7 @@ function HireInspectionDamageForm({
           onChange={(e) => onDamageNotesChange(e.target.value)}
         />
       </label>
-      {kind === "checkin" && hasCheckoutBaseline ? (
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={linkPreExisting} onChange={(e) => onLinkPreExistingChange(e.target.checked)} />
-          Mark as pre-existing (same as checkout)
-        </label>
-      ) : null}
+
       <div className="flex flex-wrap gap-2">
         <button type="button" className="rph-btn-primary text-sm" onClick={onSave} disabled={pending}>
           {selectedDamageId ? "Update damage" : "Add damage"}
@@ -223,6 +223,10 @@ export function HireInspectionWizard({
   const [diagramExpanded, setDiagramExpanded] = useState(false);
   const [draftDamages, setDraftDamages] = useState<HireInspectionDraftDamage[]>([]);
   const [draftMedia, setDraftMedia] = useState<HireInspectionDraftMedia[]>([]);
+  const [paymentAccounts, setPaymentAccounts] = useState<HireInspectionPaymentAccountOption[]>([]);
+  const [damagePaymentMethod, setDamagePaymentMethod] = useState("cash");
+  const [damagePaymentAccountId, setDamagePaymentAccountId] = useState("");
+  const [damagePaymentReference, setDamagePaymentReference] = useState("");
 
   const title = kind === "checkout" ? "Vehicle checkout" : "Vehicle check-in";
   const completeLabel = kind === "checkout" ? "Complete checkout" : "Complete check-in";
@@ -256,7 +260,15 @@ export function HireInspectionWizard({
 
     if (kind === "checkin") {
       const checkoutRes = await loadAction(hireGroupId, "checkout");
-      if (checkoutRes.ok) setCheckoutBaseline(checkoutRes.data);
+      if (checkoutRes.ok) {
+        setCheckoutBaseline(checkoutRes.data);
+        setDraftDamages(
+          seedCheckinDamagesFromCheckout(
+            mapInspectionDamagesToDraft(res.data.damages),
+            checkoutRes.data.damages,
+          ),
+        );
+      }
     }
     setLoading(false);
   }, [applyInspectionPayload, audience, hireGroupId, kind]);
@@ -305,6 +317,28 @@ export function HireInspectionWizard({
     };
   }, [audience, hireGroupId, readOnly, resolvedVehicleId]);
 
+  useEffect(() => {
+    if (audience !== "staff" || kind !== "checkin" || readOnly) return;
+    let cancelled = false;
+    void (async () => {
+      const res = await loadHireInspectionPaymentAccountsAction(hireGroupId);
+      if (cancelled || !res.ok) return;
+      setPaymentAccounts(res.accounts);
+      setDamagePaymentAccountId((current) => {
+        if (current) return current;
+        return (
+          res.defaultPaymentAccountId ??
+          res.accounts.find((account) => account.isDefault)?.id ??
+          res.accounts[0]?.id ??
+          ""
+        );
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [audience, hireGroupId, kind, readOnly]);
+
   const diagramDamages = useMemo(() => {
     const rows = draftDamages.map((d) => ({
       id: d.id,
@@ -316,6 +350,8 @@ export function HireInspectionWizard({
       diagramView: d.diagramView,
       pinX: d.pinX,
       pinY: d.pinY,
+      chargeGbp: d.chargeGbp,
+      chargeResolution: d.chargeResolution,
     }));
     if (kind !== "checkin" || !checkoutBaseline) {
       return rows;
@@ -331,6 +367,8 @@ export function HireInspectionWizard({
         diagramView: d.diagramView,
         pinX: d.pinX,
         pinY: d.pinY,
+        chargeGbp: d.chargeGbp,
+        chargeResolution: d.chargeResolution,
       })),
       rows,
     );
@@ -409,6 +447,14 @@ export function HireInspectionWizard({
     });
   }
 
+  function isPreExistingCheckinDamage(damage: HireInspectionDraftDamage): boolean {
+    return kind === "checkin" && damage.checkoutDamageId != null;
+  }
+
+  function canEditCheckinDamage(damage: VehicleDamageDiagramEntry): boolean {
+    return kind !== "checkin" || damage.diffStatus !== "pre_existing";
+  }
+
   function onPanelSelect(
     panelId: string,
     context: { diagramView: HireInspectionDiagramViewId; pinX: number; pinY: number },
@@ -426,7 +472,7 @@ export function HireInspectionWizard({
 
   function onDamageSelect(damageId: string) {
     const damage = draftDamages.find((d) => d.id === damageId);
-    if (!damage) return;
+    if (!damage || isPreExistingCheckinDamage(damage)) return;
     setSelectedDamageId(damageId);
     setSelectedPanelId(damage.panelId);
     setSelectedDiagramView(damage.diagramView);
@@ -438,22 +484,18 @@ export function HireInspectionWizard({
     setDamageType(damage.damageType);
     setSeverity(damage.severity);
     setDamageNotes(damage.notes ?? "");
-    setLinkPreExisting(Boolean(damage.checkoutDamageId));
+    setLinkPreExisting(false);
   }
 
   function saveDamage() {
     if (!selectedPanelId) return;
 
-    let checkoutDamageId: string | null = null;
-    if (kind === "checkin" && linkPreExisting && checkoutBaseline) {
-      const match = checkoutBaseline.damages.find(
-        (d) =>
-          d.panelId === selectedPanelId &&
-          d.damageType === damageType &&
-          d.severity === severity,
-      );
-      checkoutDamageId = match?.id ?? null;
+    if (selectedDamageId) {
+      const existing = draftDamages.find((damage) => damage.id === selectedDamageId);
+      if (existing && isPreExistingCheckinDamage(existing)) return;
     }
+
+    const checkoutDamageId: string | null = null;
 
     const patch = {
       panelId: selectedPanelId,
@@ -472,7 +514,7 @@ export function HireInspectionWizard({
           damage.id === selectedDamageId ? { ...damage, ...patch } : damage,
         );
       }
-      return [...prev, { id: newLocalDamageId(), ...patch }];
+      return [...prev, { id: newLocalDamageId(), ...patch, chargeGbp: null, chargeResolution: null }];
     });
     setError(null);
     clearDamageSelection();
@@ -481,6 +523,8 @@ export function HireInspectionWizard({
   function removeDamage(damageId?: string) {
     const id = damageId ?? selectedDamageId;
     if (!id) return;
+    const damage = draftDamages.find((item) => item.id === id);
+    if (damage && isPreExistingCheckinDamage(damage)) return;
     setDraftDamages((prev) => prev.filter((damage) => damage.id !== id));
     if (selectedDamageId === id) clearDamageSelection();
     setError(null);
@@ -513,6 +557,26 @@ export function HireInspectionWizard({
     setAccessories((prev) => ({ ...prev, [key]: value }));
   }
 
+  function setDamageCharge(
+    damageId: string,
+    patch: { chargeGbp: number | null; chargeResolution: HireInspectionDamageChargeResolution | null },
+  ) {
+    setDraftDamages((prev) =>
+      prev.map((damage) =>
+        damage.id === damageId
+          ? {
+              ...damage,
+              chargeGbp:
+                patch.chargeGbp != null && Number.isFinite(patch.chargeGbp) && patch.chargeGbp > 0
+                  ? Math.round(patch.chargeGbp * 100) / 100
+                  : null,
+              chargeResolution: patch.chargeResolution,
+            }
+          : damage,
+      ),
+    );
+  }
+
   function completeInspection() {
     startSaving(async () => {
       if (draftMedia.length < 1) {
@@ -524,7 +588,11 @@ export function HireInspectionWizard({
       const res =
         kind === "checkout"
           ? await completeHireCheckoutAction(hireGroupId)
-          : await completeHireCheckinAction(hireGroupId);
+          : await completeHireCheckinAction(hireGroupId, {
+              damagePaymentMethod,
+              damagePaymentAccountId,
+              damagePaymentReference,
+            });
       if (!res.ok) {
         setError(res.error);
         return;
@@ -544,6 +612,13 @@ export function HireInspectionWizard({
 
   if (!data) return error ? <p className="rph-alert-error text-sm">{error}</p> : null;
 
+  const selectedDraftDamage = selectedDamageId
+    ? draftDamages.find((damage) => damage.id === selectedDamageId)
+    : null;
+  const showDamageForm =
+    Boolean(selectedPanelId) &&
+    (!selectedDraftDamage || !isPreExistingCheckinDamage(selectedDraftDamage));
+
   const damageFormProps = {
     selectedPanelId,
     selectedDamageId,
@@ -562,7 +637,7 @@ export function HireInspectionWizard({
     onRemove: () => removeDamage(),
   };
 
-  const damageForm = !readOnly ? (
+  const damageForm = !readOnly && showDamageForm ? (
     <HireInspectionDamageForm {...damageFormProps} showPanelPrompt={diagramExpanded} />
   ) : null;
 
@@ -644,14 +719,15 @@ export function HireInspectionWizard({
                   <div>
                     <h2 className="text-sm font-semibold text-rph-fg">Damage diagram</h2>
                     <p className="rph-muted mt-1 text-xs">
-                      Damage is kept on this device until you save draft or complete{" "}
-                      {kind === "checkout" ? "checkout" : "check-in"}.
+                      {kind === "checkin"
+                        ? "Checkout damage is shown for reference. Click a panel to add any new damage."
+                        : "Damage is kept on this device until you save draft or complete checkout."}
                     </p>
                   </div>
                 </div>
                 <VehicleDamageDiagram
                   damages={diagramDamages}
-                  mode={kind === "checkin" ? "diff" : "edit"}
+                  mode={kind === "checkin" ? "checkin" : "edit"}
                   selectedPanelId={selectedPanelId}
                   selectedDamageId={selectedDamageId}
                   fullscreenAside={damageForm}
@@ -659,9 +735,11 @@ export function HireInspectionWizard({
                   onPanelSelect={onPanelSelect}
                   onDamageSelect={onDamageSelect}
                   onDamageRemove={removeDamage}
+                  canRemoveDamage={canEditCheckinDamage}
+                  canSelectDamage={canEditCheckinDamage}
                 />
               </div>
-              {!diagramExpanded && selectedPanelId ? (
+              {!diagramExpanded && showDamageForm ? (
                 <div className="space-y-3 border-t border-rph-border pt-4 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
                   <HireInspectionDamageForm {...damageFormProps} showPanelPrompt={false} />
                 </div>
@@ -681,52 +759,26 @@ export function HireInspectionWizard({
           ) : null}
 
           {step === 4 ? (
-            <section className="rph-card space-y-3 p-4">
-              <h2 className="text-sm font-semibold text-rph-fg">Review</h2>
-              <p className="text-sm text-rph-fg-secondary">
-                {odometer.trim() ? `${odometer} mi` : "No odometer"} ·{" "}
-                {fuelLevel != null ? formatHireFuelLevelPercent(fuelLevel) : "No fuel level"} · {draftMedia.length} photo
-                {draftMedia.length === 1 ? "" : "s"} · {draftDamages.length} damage
-                {draftDamages.length === 1 ? "" : "s"}
-              </p>
-              {kind === "checkin" && checkoutBaseline ? (
-                <p className="text-sm text-rph-fg-secondary">
-                  {buildHireInspectionDiff(
-                    checkoutBaseline.damages.map((d) => ({
-                      id: d.id,
-                      panelId: d.panelId,
-                      damageType: d.damageType,
-                      severity: d.severity,
-                      notes: d.notes,
-                      checkoutDamageId: d.checkoutDamageId,
-                      diagramView: d.diagramView,
-                      pinX: d.pinX,
-                      pinY: d.pinY,
-                    })),
-                    draftDamages.map((d) => ({
-                      id: d.id,
-                      panelId: d.panelId,
-                      damageType: d.damageType,
-                      severity: d.severity,
-                      notes: d.notes,
-                      checkoutDamageId: d.checkoutDamageId,
-                      diagramView: d.diagramView,
-                      pinX: d.pinX,
-                      pinY: d.pinY,
-                    })),
-                  ).newDamages.length}{" "}
-                  new damage(s) since checkout
-                </p>
-              ) : null}
-              <label className="block text-sm">
-                <span className="rph-muted mb-1 block text-xs">Additional notes</span>
-                <textarea
-                  className="rph-input min-h-20"
-                  value={generalNotes}
-                  onChange={(e) => setGeneralNotes(e.target.value)}
-                  placeholder="Any extra observations before completing…"
-                />
-              </label>
+            <section className="rph-card p-4">
+              <HireInspectionReviewSection
+                kind={kind}
+                odometer={odometer}
+                fuelLevel={fuelLevel}
+                accessories={accessories}
+                draftMediaCount={draftMedia.length}
+                draftDamages={draftDamages}
+                checkoutBaseline={checkoutBaseline}
+                generalNotes={generalNotes}
+                onGeneralNotesChange={setGeneralNotes}
+                onDamageChargeChange={setDamageCharge}
+                paymentAccounts={paymentAccounts}
+                damagePaymentMethod={damagePaymentMethod}
+                damagePaymentAccountId={damagePaymentAccountId}
+                damagePaymentReference={damagePaymentReference}
+                onDamagePaymentMethodChange={setDamagePaymentMethod}
+                onDamagePaymentAccountChange={setDamagePaymentAccountId}
+                onDamagePaymentReferenceChange={setDamagePaymentReference}
+              />
             </section>
           ) : null}
         </div>

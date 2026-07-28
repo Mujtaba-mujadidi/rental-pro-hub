@@ -251,10 +251,21 @@ export function VehicleFinancialsView({
                 {pnl.rentalDepositRetentionGbp > 0.005
                   ? ` · ${formatGbp(pnl.rentalDepositRetentionGbp)} deposit retained`
                   : ""}
+                {pnl.driverChargeIncomeGbp > 0.005
+                  ? ` · ${formatGbp(pnl.driverChargeIncomeGbp)} driver charges`
+                  : ""}
               </p>
-            ) : pnl.rentalDepositRetentionGbp > 0.005 ? (
+            ) : pnl.rentalDepositRetentionGbp > 0.005 || pnl.driverChargeIncomeGbp > 0.005 ? (
               <p className="rph-meta mt-1 text-[10px]">
-                Includes {formatGbp(pnl.rentalDepositRetentionGbp)} deposit retained after contract end
+                {pnl.rentalDepositRetentionGbp > 0.005
+                  ? `Includes ${formatGbp(pnl.rentalDepositRetentionGbp)} deposit retained after contract end`
+                  : ""}
+                {pnl.rentalDepositRetentionGbp > 0.005 && pnl.driverChargeIncomeGbp > 0.005
+                  ? " · "
+                  : ""}
+                {pnl.driverChargeIncomeGbp > 0.005
+                  ? `${formatGbp(pnl.driverChargeIncomeGbp)} driver charges`
+                  : ""}
               </p>
             ) : null}
           </div>

@@ -1,5 +1,6 @@
 import type { HireDamageSeverity, HireDamageType } from "@/lib/fleet/vehicle-damage-panels";
 import type { HireInspectionDiagramViewId } from "@/lib/fleet/hire-inspection-diagram";
+import type { HireInspectionDamageChargeResolution } from "@/lib/fleet/hire-inspection-damage-charges";
 
 export type HireInspectionDamageRow = {
   id: string;
@@ -11,6 +12,8 @@ export type HireInspectionDamageRow = {
   diagramView: HireInspectionDiagramViewId | null;
   pinX: number | null;
   pinY: number | null;
+  chargeGbp: number | null;
+  chargeResolution: HireInspectionDamageChargeResolution | null;
 };
 
 export type HireInspectionDiffDamage = HireInspectionDamageRow & {

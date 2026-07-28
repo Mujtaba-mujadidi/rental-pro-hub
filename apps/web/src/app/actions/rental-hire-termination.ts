@@ -28,6 +28,12 @@ import {
   settlementStepRequired,
   type HireSettlementResolution,
 } from "@/lib/fleet/hire-settlement-resolution";
+import {
+  hireDriverChargeResolutionLabel,
+  hireDriverChargeTypeLabel,
+  mapDriverChargeLineItemsFromDb,
+  type DriverChargeLineItemDbRow,
+} from "@/lib/fleet/hire-driver-charges";
 import type { HireTerminationRentBillingMode } from "@/lib/fleet/hire-termination-billing";
 import { HIRE_TERMINATION_RENT_BILLING_MODES } from "@/lib/fleet/hire-termination-billing";
 import { syncVehicleStatusForHireGroup } from "@/lib/fleet/sync-vehicle-hire-status";
@@ -91,6 +97,18 @@ export type HireBalancePaymentRow = {
   notes: string | null;
   paidAt: string;
   direction?: "received_from_driver" | "paid_to_driver";
+  paymentCategory?: "settlement" | "driver_charge" | string;
+};
+
+export type HireDriverChargeWorkspaceRow = {
+  id: string;
+  chargeType: string;
+  chargeTypeLabel: string;
+  amountGbp: number;
+  resolution: string;
+  resolutionLabel: string;
+  description: string | null;
+  createdAt: string;
 };
 
 export type HireBalancePaymentAccountOption = {
@@ -696,6 +714,7 @@ export async function recordHireBalancePaymentAction(input: {
     payment_account_id: paymentAccountId,
     payment_reference: input.paymentReference?.trim() || null,
     direction: paymentDirection,
+    payment_category: "settlement",
     notes: input.notes?.trim() || null,
     recorded_by_user_id: user.id,
   });
@@ -860,6 +879,7 @@ export type HireSettlementWorkspaceData = {
   settlementDirection: "driver_owes_company" | "company_owes_driver" | "settled";
   openBalanceGbp: number;
   payments: HireBalancePaymentRow[];
+  driverChargeLineItems: HireDriverChargeWorkspaceRow[];
   notes: HireBalanceNoteRow[];
   paymentAccounts: HireBalancePaymentAccountOption[];
   defaultPaymentAccountId: string | null;
@@ -895,7 +915,7 @@ export async function loadHireSettlementWorkspaceAction(hireGroupId: string): Pr
     | "settled"
     | null) ?? "settled";
 
-  const [{ data: notes }, { data: payments }] = await Promise.all([
+  const [{ data: notes }, { data: payments }, { data: chargeRows }] = await Promise.all([
     supabase
       .from("vehicle_hire_balance_notes")
       .select("id, body, follow_up_at, created_at")
@@ -903,9 +923,18 @@ export async function loadHireSettlementWorkspaceAction(hireGroupId: string): Pr
       .order("created_at", { ascending: false }),
     supabase
       .from("vehicle_hire_balance_payments")
-      .select("id, amount_gbp, payment_method, payment_reference, payment_account_id, notes, paid_at, direction")
+      .select(
+        "id, amount_gbp, payment_method, payment_reference, payment_account_id, notes, paid_at, direction, payment_category",
+      )
       .eq("hire_group_id", hireGroupId.trim())
       .order("paid_at", { ascending: false }),
+    supabase
+      .from("vehicle_hire_driver_charge_line_items")
+      .select(
+        "id, hire_group_id, charge_type, amount_gbp, resolution, source_kind, source_id, description, created_at",
+      )
+      .eq("hire_group_id", hireGroupId.trim())
+      .order("created_at", { ascending: false }),
   ]);
 
   const companyId = (group.parent_company_id as string | null) ?? null;
@@ -950,6 +979,22 @@ export async function loadHireSettlementWorkspaceAction(hireGroupId: string): Pr
       : null,
     notes: (payment.notes as string | null) ?? null,
     paidAt: payment.paid_at as string,
+    direction:
+      (payment.direction as "received_from_driver" | "paid_to_driver" | null) ?? undefined,
+    paymentCategory: (payment.payment_category as string | null) ?? "settlement",
+  }));
+
+  const driverChargeLineItems: HireDriverChargeWorkspaceRow[] = mapDriverChargeLineItemsFromDb(
+    (chargeRows ?? []) as DriverChargeLineItemDbRow[],
+  ).map((item) => ({
+    id: item.id,
+    chargeType: item.chargeType,
+    chargeTypeLabel: hireDriverChargeTypeLabel(item.chargeType),
+    amountGbp: item.amountGbp,
+    resolution: item.resolution,
+    resolutionLabel: hireDriverChargeResolutionLabel(item.resolution),
+    description: item.description ?? null,
+    createdAt: item.createdAt ?? "",
   }));
 
   let openDirection = direction;
@@ -989,6 +1034,7 @@ export async function loadHireSettlementWorkspaceAction(hireGroupId: string): Pr
       settlementDirection: openDirection,
       openBalanceGbp,
       payments: mappedPayments,
+      driverChargeLineItems,
       notes: (notes ?? []).map((note) => ({
         id: note.id as string,
         body: note.body as string,

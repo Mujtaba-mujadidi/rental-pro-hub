@@ -431,6 +431,91 @@ describe("computeVehicleHireIncomeGbp", () => {
     expect(pending.depositRetentionGbp).toBe(0);
     expect(pending.netIncomeGbp).toBe(70);
   });
+
+  it("includes itemized driver charges in gross and net income", () => {
+    const result = computeVehicleHireIncomeGbp({
+      scheduleRows: [
+        {
+          hireGroupId: "g1",
+          periodStart: "2026-07-01",
+          periodEnd: "2026-07-07",
+          rowKind: "rent",
+          paymentStatus: "approved",
+          approvedAmountGbp: 100,
+          baseAmountGbp: 100,
+          discountTotalGbp: 0,
+        },
+      ],
+      balancePayments: [],
+      driverChargeLineItems: [
+        {
+          chargeType: "damage",
+          amountGbp: 50,
+          resolution: "paid_now",
+          sourceKind: "checkin_inspection_damage",
+        },
+        {
+          chargeType: "damage",
+          amountGbp: 25,
+          resolution: "add_to_balance",
+          sourceKind: "checkin_inspection_damage",
+        },
+      ],
+      groupContextByGroupId: groupContext("2026-07-20"),
+      todayYmd,
+    });
+
+    expect(result.driverChargeIncomeGbp).toBe(75);
+    expect(result.driverChargeIncomeByTypeGbp).toEqual({ damage: 75 });
+    expect(result.grossApprovedGbp).toBe(175);
+    expect(result.netIncomeGbp).toBe(175);
+  });
+
+  it("excludes driver_charge balance payments from settlement collections", () => {
+    const result = computeVehicleHireIncomeGbp({
+      scheduleRows: [
+        {
+          hireGroupId: "g1",
+          periodStart: "2026-07-01",
+          periodEnd: "2026-07-07",
+          rowKind: "rent",
+          paymentStatus: "approved",
+          approvedAmountGbp: 100,
+          baseAmountGbp: 100,
+          discountTotalGbp: 0,
+        },
+        {
+          hireGroupId: "g1",
+          periodStart: "2026-07-08",
+          periodEnd: "2026-07-14",
+          rowKind: "rent",
+          paymentStatus: "not_received",
+          approvedAmountGbp: null,
+          baseAmountGbp: 400,
+          discountTotalGbp: 0,
+        },
+      ],
+      balancePayments: [
+        { amountGbp: 50, direction: "received_from_driver", paymentCategory: "settlement" },
+        { amountGbp: 40, direction: "received_from_driver", paymentCategory: "driver_charge" },
+      ],
+      driverChargeLineItems: [
+        {
+          chargeType: "damage",
+          amountGbp: 40,
+          resolution: "paid_now",
+          sourceKind: "checkin_inspection_damage",
+        },
+      ],
+      groupContextByGroupId: groupContext("2026-07-20"),
+      todayYmd,
+    });
+
+    expect(result.collectionsFromDriverGbp).toBe(50);
+    expect(result.supplementalCollectionsGbp).toBe(50);
+    expect(result.driverChargeIncomeGbp).toBe(40);
+    expect(result.netIncomeGbp).toBe(190);
+  });
 });
 
 describe("depositRetentionIncomeGbp", () => {

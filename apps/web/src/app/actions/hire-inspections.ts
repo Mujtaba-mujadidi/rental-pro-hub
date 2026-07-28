@@ -10,6 +10,17 @@ import {
   type HireInspectionDamageRow,
 } from "@/lib/fleet/hire-inspection-lifecycle";
 import {
+  applyDamageChargesToSettlementBalance,
+  isValidDamageChargeResolution,
+  parseDamageChargeGbp,
+  settlementBalanceAfterPayments,
+  summarizeInspectionDamageCharges,
+  validateInspectionDamageCharges,
+} from "@/lib/fleet/hire-inspection-damage-charges";
+import { buildDriverChargeDraftsFromCheckinDamages } from "@/lib/fleet/hire-driver-charges";
+import { HIRE_DEPOSIT_REFUND_METHODS } from "@/lib/fleet/hire-termination-summary";
+import { signedSettlementBalanceGbp } from "@/lib/fleet/hire-open-balance";
+import {
   EMPTY_HIRE_INSPECTION_ACCESSORIES,
   type HireInspectionAccessories,
 } from "@/lib/fleet/hire-inspection-accessories";
@@ -181,6 +192,11 @@ function mapDamageRow(row: Record<string, unknown>): HireInspectionDamageItem {
     diagramView: (row.diagram_view as HireInspectionDamageItem["diagramView"]) ?? null,
     pinX: (row.pin_x as number | null) ?? null,
     pinY: (row.pin_y as number | null) ?? null,
+    chargeGbp:
+      row.charge_gbp != null ? Math.round(Number(row.charge_gbp) * 100) / 100 : null,
+    chargeResolution: isValidDamageChargeResolution(row.charge_resolution as string)
+      ? (row.charge_resolution as HireInspectionDamageItem["chargeResolution"])
+      : null,
   };
 }
 
@@ -241,7 +257,7 @@ async function loadInspectionPayload(
   const [{ data: damages }, { data: media }] = await Promise.all([
     supabase
       .from("vehicle_hire_inspection_damages")
-      .select("id, panel_id, damage_type, severity, notes, checkout_damage_id, diagram_view, pin_x, pin_y")
+      .select("id, panel_id, damage_type, severity, notes, checkout_damage_id, diagram_view, pin_x, pin_y, charge_gbp, charge_resolution")
       .eq("inspection_id", inspection.id)
       .order("created_at", { ascending: true }),
     supabase
@@ -324,7 +340,57 @@ function revalidateHirePaths(hireGroupId: string, vehicleId?: string | null) {
   revalidatePath(`/rental/hires/${hireGroupId}`);
   revalidatePath(`/rental/hires/${hireGroupId}/checkout`);
   revalidatePath(`/rental/hires/${hireGroupId}/checkin`);
-  if (vehicleId) revalidatePath(`/rental/vehicles/${vehicleId}/rentals`);
+  revalidatePath(`/rental/hires/${hireGroupId}/settlement`);
+  revalidatePath(`/rental/balances/${hireGroupId}`);
+  revalidatePath("/rental/balances");
+  if (vehicleId) {
+    revalidatePath(`/rental/vehicles/${vehicleId}/rentals`);
+    revalidatePath(`/rental/vehicles/${vehicleId}/financials`);
+  }
+}
+
+export type HireInspectionPaymentAccountOption = {
+  id: string;
+  name: string;
+  isDefault: boolean;
+};
+
+export async function loadHireInspectionPaymentAccountsAction(
+  hireGroupId: string,
+): Promise<
+  | { ok: true; accounts: HireInspectionPaymentAccountOption[]; defaultPaymentAccountId: string | null }
+  | { ok: false; error: string }
+> {
+  const access = await assertHireWriteAccess(hireGroupId);
+  if (!access.ok) return access;
+
+  const { data: group, error } = await access.supabase
+    .from("vehicle_hire_groups")
+    .select("parent_company_id, default_payment_account_id")
+    .eq("id", hireGroupId.trim())
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!group) return { ok: false, error: "Hire not found." };
+
+  const defaultPaymentAccountId = (group.default_payment_account_id as string | null) ?? null;
+  const { data: accounts, error: accountsError } = await access.supabase
+    .from("company_payment_accounts")
+    .select("id, name")
+    .eq("parent_company_id", group.parent_company_id as string)
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
+  if (accountsError) return { ok: false, error: accountsError.message };
+
+  return {
+    ok: true,
+    accounts: (accounts ?? []).map((account) => ({
+      id: account.id as string,
+      name: (account.name as string)?.trim() || "Account",
+      isDefault: (account.id as string) === defaultPaymentAccountId,
+    })),
+    defaultPaymentAccountId,
+  };
 }
 
 export async function loadHireInspectionAction(
@@ -373,6 +439,8 @@ export type HireInspectionDamageDraftInput = {
   diagramView?: string | null;
   pinX?: number | null;
   pinY?: number | null;
+  chargeGbp?: number | null;
+  chargeResolution?: string | null;
 };
 
 function validateDamageDraftInput(input: HireInspectionDamageDraftInput): string | null {
@@ -390,6 +458,19 @@ function validateDamageDraftInput(input: HireInspectionDamageDraftInput): string
   const pinY = input.pinY ?? null;
   if ((pinX == null) !== (pinY == null)) {
     return "Pin coordinates must be provided together.";
+  }
+  const chargeGbp = parseDamageChargeGbp(input.chargeGbp);
+  if (input.chargeGbp != null && chargeGbp == null) {
+    return "Enter a valid damage charge amount.";
+  }
+  if (
+    input.chargeResolution &&
+    !isValidDamageChargeResolution(input.chargeResolution)
+  ) {
+    return "Invalid damage charge resolution.";
+  }
+  if (chargeGbp != null && chargeGbp > 0 && !input.chargeResolution) {
+    return "Choose how to resolve each damage charge.";
   }
   return null;
 }
@@ -423,6 +504,10 @@ async function syncInspectionDamagesDraft(
       diagram_view: damage.diagramView?.trim() || null,
       pin_x: damage.pinX ?? null,
       pin_y: damage.pinY ?? null,
+      charge_gbp: parseDamageChargeGbp(damage.chargeGbp),
+      charge_resolution: isValidDamageChargeResolution(damage.chargeResolution ?? null)
+        ? damage.chargeResolution
+        : null,
     })),
   );
   if (insertError) return { ok: false, error: insertError.message };
@@ -872,7 +957,14 @@ export async function completeHireCheckoutAction(
   return { ok: true, data: null };
 }
 
-export async function completeHireCheckinAction(hireGroupId: string): Promise<ActionResult<null>> {
+export async function completeHireCheckinAction(
+  hireGroupId: string,
+  input?: {
+    damagePaymentMethod?: string;
+    damagePaymentAccountId?: string;
+    damagePaymentReference?: string;
+  },
+): Promise<ActionResult<null>> {
   const access = await assertHireWriteAccess(hireGroupId);
   if (!access.ok) return access;
 
@@ -892,9 +984,164 @@ export async function completeHireCheckinAction(hireGroupId: string): Promise<Ac
   });
   if (!guard.ok) return guard;
 
+  const damageChargeError = validateInspectionDamageCharges(payload.damages);
+  if (damageChargeError) return { ok: false, error: damageChargeError };
+
+  const chargeSummary = summarizeInspectionDamageCharges(payload.damages);
+
   const admin = createSupabaseAdminClient();
   const now = new Date().toISOString();
   const userId = access.profile.id;
+
+  const { data: hireGroup, error: hireGroupError } = await admin
+    .from("vehicle_hire_groups")
+    .select(
+      "settlement_balance_gbp, settlement_balance_direction, parent_company_id, default_payment_account_id",
+    )
+    .eq("id", hireGroupId)
+    .maybeSingle();
+  if (hireGroupError) return { ok: false, error: hireGroupError.message };
+  if (!hireGroup) return { ok: false, error: "Hire not found." };
+
+  const paymentMethod = input?.damagePaymentMethod?.trim() ?? "";
+  const paymentAccountId =
+    input?.damagePaymentAccountId?.trim() ||
+    ((hireGroup.default_payment_account_id as string | null) ?? null);
+
+  if (chargeSummary.paidNowGbp > 0) {
+    if (!(HIRE_DEPOSIT_REFUND_METHODS as readonly string[]).includes(paymentMethod)) {
+      return { ok: false, error: "Select how the on-the-spot damage payment was received." };
+    }
+    if (!paymentAccountId) {
+      return { ok: false, error: "Select the payment account for on-the-spot damage charges." };
+    }
+  }
+
+  if (chargeSummary.addToBalanceGbp > 0 || chargeSummary.paidNowGbp > 0) {
+    const initialDirection = hireGroup.settlement_balance_direction as
+      | "driver_owes_company"
+      | "company_owes_driver"
+      | "settled"
+      | null;
+    const initialAmountGbp = Number(hireGroup.settlement_balance_gbp ?? 0);
+    const initialSigned = signedSettlementBalanceGbp(
+      initialDirection ?? "settled",
+      initialAmountGbp,
+    );
+
+    let balanceDirection = initialDirection ?? "settled";
+    let balanceAmountGbp = initialAmountGbp;
+    let damagePaymentId: string | null = null;
+
+    if (chargeSummary.addToBalanceGbp > 0) {
+      const balanceAfterCharges = applyDamageChargesToSettlementBalance({
+        settlementBalanceDirection: balanceDirection,
+        settlementBalanceGbp: balanceAmountGbp,
+        addToBalanceGbp: chargeSummary.addToBalanceGbp,
+      });
+      balanceDirection = balanceAfterCharges.settlementBalanceDirection;
+      balanceAmountGbp = balanceAfterCharges.settlementBalanceGbp;
+
+      const { error: balanceUpdateError } = await admin
+        .from("vehicle_hire_groups")
+        .update({
+          settlement_balance_direction: balanceDirection,
+          settlement_balance_gbp: balanceAmountGbp,
+        })
+        .eq("id", hireGroupId);
+      if (balanceUpdateError) return { ok: false, error: balanceUpdateError.message };
+    }
+
+    if (chargeSummary.paidNowGbp > 0) {
+      const accountId =
+        paymentAccountId || (hireGroup.default_payment_account_id as string | null);
+      const { data: account } = await admin
+        .from("company_payment_accounts")
+        .select("id")
+        .eq("id", accountId)
+        .eq("parent_company_id", hireGroup.parent_company_id as string)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (!account?.id) return { ok: false, error: "Payment account not found." };
+
+      const { data: paymentRow, error: paymentError } = await admin
+        .from("vehicle_hire_balance_payments")
+        .insert({
+          hire_group_id: hireGroupId,
+          amount_gbp: chargeSummary.paidNowGbp,
+          payment_method: paymentMethod,
+          payment_account_id: account.id,
+          payment_reference: input?.damagePaymentReference?.trim() || null,
+          direction: "received_from_driver",
+          payment_category: "driver_charge",
+          notes: "Damage charge collected at vehicle check-in",
+          recorded_by_user_id: userId,
+        })
+        .select("id")
+        .single();
+      if (paymentError) return { ok: false, error: paymentError.message };
+      damagePaymentId = (paymentRow?.id as string | undefined) ?? null;
+
+      const hadOpenBalanceToApply =
+        chargeSummary.addToBalanceGbp > 0 || Math.abs(initialSigned) > 0.005;
+      if (hadOpenBalanceToApply) {
+        const { data: payments } = await admin
+          .from("vehicle_hire_balance_payments")
+          .select("amount_gbp, direction")
+          .eq("hire_group_id", hireGroupId);
+        const remaining = settlementBalanceAfterPayments({
+          settlementBalanceDirection: balanceDirection,
+          settlementBalanceGbp: balanceAmountGbp,
+          payments: (payments ?? []).map((payment) => ({
+            amountGbp: Number(payment.amount_gbp ?? 0),
+            direction:
+              (payment.direction as "received_from_driver" | "paid_to_driver" | null) ??
+              "received_from_driver",
+          })),
+        });
+        const { error: remainingError } = await admin
+          .from("vehicle_hire_groups")
+          .update({
+            settlement_balance_direction: remaining.settlementBalanceDirection,
+            settlement_balance_gbp: remaining.settlementBalanceGbp,
+          })
+          .eq("id", hireGroupId);
+        if (remainingError) return { ok: false, error: remainingError.message };
+      }
+    }
+
+    const chargeDrafts = buildDriverChargeDraftsFromCheckinDamages(
+      payload.damages.map((damage) => ({
+        id: damage.id,
+        panelId: damage.panelId,
+        panelLabel: damage.panelLabel,
+        damageType: damage.damageType,
+        severity: damage.severity,
+        checkoutDamageId: damage.checkoutDamageId,
+        chargeGbp: damage.chargeGbp,
+        chargeResolution: damage.chargeResolution,
+      })),
+    );
+    if (chargeDrafts.length > 0) {
+      const { error: lineItemsError } = await admin
+        .from("vehicle_hire_driver_charge_line_items")
+        .insert(
+          chargeDrafts.map((draft) => ({
+            hire_group_id: hireGroupId,
+            parent_company_id: hireGroup.parent_company_id as string,
+            charge_type: draft.chargeType,
+            amount_gbp: draft.amountGbp,
+            resolution: draft.resolution,
+            source_kind: draft.sourceKind,
+            source_id: draft.sourceId ?? null,
+            description: draft.description ?? null,
+            balance_payment_id: draft.resolution === "paid_now" ? damagePaymentId : null,
+            created_by_user_id: userId,
+          })),
+        );
+      if (lineItemsError) return { ok: false, error: lineItemsError.message };
+    }
+  }
 
   const { error: inspectionError } = await admin
     .from("vehicle_hire_inspections")
@@ -918,7 +1165,10 @@ export async function completeHireCheckinAction(hireGroupId: string): Promise<Ac
   await logHireGroupEvent(admin, {
     hireGroupId,
     eventType: "checkin_completed",
-    summary: "Vehicle check-in completed — hire ended.",
+    summary:
+      chargeSummary.addToBalanceGbp > 0 || chargeSummary.paidNowGbp > 0
+        ? `Vehicle check-in completed — damage charges applied (£${(chargeSummary.addToBalanceGbp + chargeSummary.paidNowGbp).toFixed(2)}).`
+        : "Vehicle check-in completed — hire ended.",
     actorRole: "company_staff",
     actorUserId: userId,
   });

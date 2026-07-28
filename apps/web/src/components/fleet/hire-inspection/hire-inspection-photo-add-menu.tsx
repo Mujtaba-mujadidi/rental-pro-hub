@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useCanScanOrCaptureDocument } from "@/hooks/use-can-scan-or-capture-document";
 
@@ -23,24 +23,42 @@ type HireInspectionPhotoAddMenuProps = {
 /**
  * Add menu for hire inspection vehicle photos.
  *
- * - Choose photos: multi-select from the device gallery or files.
- * - Take photo (phones): rear camera — one shot per open.
- * - Scan (phones): system sheet without capture so iOS can offer Scan Documents.
+ * - Choose from library: multi-select gallery / files.
+ * - Take photos (phones): rear camera, reopening after each shot until Done.
  */
 export function HireInspectionPhotoAddMenu({ disabled, onFiles }: HireInspectionPhotoAddMenuProps) {
-  const canScanOrCapture = useCanScanOrCaptureDocument();
+  const canCapture = useCanScanOrCaptureDocument();
   const filesRef = useRef<HTMLInputElement>(null);
   const photoRef = useRef<HTMLInputElement>(null);
-  const scanRef = useRef<HTMLInputElement>(null);
+  const [cameraBurstActive, setCameraBurstActive] = useState(false);
 
-  function handleChange(input: HTMLInputElement | null) {
+  function handleLibraryChange(input: HTMLInputElement | null) {
     if (!input) return;
     onFiles(input.files);
     input.value = "";
   }
 
+  function handleCameraChange(input: HTMLInputElement | null) {
+    if (!input) return;
+    const hadFiles = Boolean(input.files?.length);
+    onFiles(input.files);
+    input.value = "";
+    if (cameraBurstActive && hadFiles) {
+      window.setTimeout(() => photoRef.current?.click(), 150);
+    }
+  }
+
+  function startCameraBurst() {
+    setCameraBurstActive(true);
+    photoRef.current?.click();
+  }
+
+  function stopCameraBurst() {
+    setCameraBurstActive(false);
+  }
+
   return (
-    <>
+    <div className="flex flex-wrap items-center gap-2">
       <input
         ref={filesRef}
         type="file"
@@ -48,7 +66,7 @@ export function HireInspectionPhotoAddMenu({ disabled, onFiles }: HireInspection
         accept={PHOTO_ACCEPT}
         multiple
         disabled={disabled}
-        onChange={(e) => handleChange(e.target)}
+        onChange={(e) => handleLibraryChange(e.target)}
       />
       <input
         ref={photoRef}
@@ -57,16 +75,7 @@ export function HireInspectionPhotoAddMenu({ disabled, onFiles }: HireInspection
         accept="image/*"
         capture="environment"
         disabled={disabled}
-        onChange={(e) => handleChange(e.target)}
-      />
-      <input
-        ref={scanRef}
-        type="file"
-        className="hidden"
-        accept="image/*"
-        multiple
-        disabled={disabled}
-        onChange={(e) => handleChange(e.target)}
+        onChange={(e) => handleCameraChange(e.target)}
       />
 
       <DropdownMenu.Root>
@@ -94,11 +103,11 @@ export function HireInspectionPhotoAddMenu({ disabled, onFiles }: HireInspection
                 filesRef.current?.click();
               }}
             >
-              <span className="font-medium">Choose photos</span>
+              <span className="font-medium">Choose from library</span>
               <span className="text-xs text-rph-fg-muted">JPEG, PNG, or WebP · multiple allowed</span>
             </DropdownMenu.Item>
 
-            {canScanOrCapture ? (
+            {canCapture ? (
               <>
                 <DropdownMenu.Separator className="my-1 h-px bg-rph-border" />
                 <DropdownMenu.Item
@@ -106,30 +115,28 @@ export function HireInspectionPhotoAddMenu({ disabled, onFiles }: HireInspection
                   disabled={disabled}
                   onSelect={(e) => {
                     e.preventDefault();
-                    scanRef.current?.click();
+                    startCameraBurst();
                   }}
                 >
-                  <span className="font-medium">Scan or pick from library</span>
-                  <span className="text-xs text-rph-fg-muted">
-                    Use Scan Documents on iPhone/iPad when offered
-                  </span>
-                </DropdownMenu.Item>
-                <DropdownMenu.Item
-                  className={itemClass}
-                  disabled={disabled}
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    photoRef.current?.click();
-                  }}
-                >
-                  <span className="font-medium">Take photo</span>
-                  <span className="text-xs text-rph-fg-muted">Camera · one photo at a time</span>
+                  <span className="font-medium">Take photos</span>
+                  <span className="text-xs text-rph-fg-muted">Camera · take multiple back to back</span>
                 </DropdownMenu.Item>
               </>
             ) : null}
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
-    </>
+
+      {cameraBurstActive ? (
+        <button
+          type="button"
+          className="rph-btn-ghost px-2 py-1 text-xs"
+          onClick={stopCameraBurst}
+          disabled={disabled}
+        >
+          Done taking photos
+        </button>
+      ) : null}
+    </div>
   );
 }

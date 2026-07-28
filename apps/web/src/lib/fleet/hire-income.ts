@@ -7,6 +7,7 @@
  * - Plus settlement collections only when rent was collected via the balance ledger instead
  *   of the schedule (avoids double-counting schedule + settlement for the same rent).
  * - Plus deposit retention when staff forfeit or partially retain the deposit after contract end.
+ * - Plus itemized driver charges (damage, etc.) recorded on check-in or future flows.
  * - Minus settlement write-offs only (balance-ledger refunds return deposits/prepaid
  *   rent and are not contra-revenue when that rent was never recognised on the vehicle).
  */
@@ -19,6 +20,13 @@ import {
 } from "@/lib/fleet/hire-payment-summary";
 import { summarizeHireRentSettlement } from "@/lib/fleet/hire-rent-settlement";
 import type { HirePaymentStatus, RentCadence } from "@/lib/fleet/hire-types";
+import {
+  partitionBalancePaymentsForIncome,
+  sumDriverChargeIncomeByTypeGbp,
+  sumDriverChargeIncomeGbp,
+  type HireDriverChargeLineItemInput,
+  type HireDriverChargeType,
+} from "@/lib/fleet/hire-driver-charges";
 import {
   terminationRentDueForRow,
   type HireTerminationRentBillingMode,
@@ -186,6 +194,7 @@ function recognizedRentIncomeGbp(
 export type HireRefundPaymentRow = {
   amountGbp: number;
   direction: string | null;
+  paymentCategory?: string | null;
 };
 
 /** Contract end date for income accrual (termination date, else check-in end date). */
@@ -304,6 +313,7 @@ export function supplementalSettlementRentCollectionsGbp(input: {
 export function computeVehicleHireIncomeGbp(input: {
   scheduleRows: readonly VehicleHireIncomeScheduleRow[];
   balancePayments: readonly HireRefundPaymentRow[];
+  driverChargeLineItems?: readonly HireDriverChargeLineItemInput[];
   groupContextByGroupId: ReadonlyMap<string, HireIncomeGroupContext>;
   todayYmd: string;
 }): {
@@ -313,6 +323,8 @@ export function computeVehicleHireIncomeGbp(input: {
   postEndPrepaidExcludedGbp: number;
   refundsToDriverGbp: number;
   collectionsFromDriverGbp: number;
+  driverChargeIncomeGbp: number;
+  driverChargeIncomeByTypeGbp: Partial<Record<HireDriverChargeType, number>>;
   settlementWriteOffsGbp: number;
   depositRetentionGbp: number;
   netIncomeGbp: number;
@@ -375,8 +387,17 @@ export function computeVehicleHireIncomeGbp(input: {
   depositRetentionGbp = roundGbp(depositRetentionGbp);
   accruedRentDueGbp = roundGbp(accruedRentDueGbp);
   postEndPrepaidExcludedGbp = roundGbp(postEndPrepaidExcludedGbp);
-  const refundsToDriverGbp = sumHireRefundsToDriverGbp(input.balancePayments);
-  const collectionsFromDriverGbp = sumHireCollectionsFromDriverGbp(input.balancePayments);
+  const { settlementPayments } = partitionBalancePaymentsForIncome(input.balancePayments);
+  const refundsToDriverGbp = sumHireRefundsToDriverGbp(settlementPayments);
+  const collectionsFromDriverGbp = sumHireCollectionsFromDriverGbp(settlementPayments);
+  const driverChargeIncomeGbp = sumDriverChargeIncomeGbp(input.driverChargeLineItems ?? []);
+  const driverChargeIncomeByTypeGbp = sumDriverChargeIncomeByTypeGbp(
+    (input.driverChargeLineItems ?? []).map((item) => ({
+      chargeType: item.chargeType,
+      amountGbp: item.amountGbp,
+      resolution: item.resolution,
+    })),
+  );
   const supplementalCollectionsGbp = supplementalSettlementRentCollectionsGbp({
     accruedRentDueGbp,
     scheduleRentIncomeGbp,
@@ -389,16 +410,22 @@ export function computeVehicleHireIncomeGbp(input: {
     ),
   );
   const netIncomeGbp = roundGbp(
-    scheduleRentIncomeGbp + supplementalCollectionsGbp + depositRetentionGbp - settlementWriteOffsGbp,
+    scheduleRentIncomeGbp +
+      supplementalCollectionsGbp +
+      depositRetentionGbp +
+      driverChargeIncomeGbp -
+      settlementWriteOffsGbp,
   );
 
   return {
-    grossApprovedGbp: roundGbp(scheduleRentIncomeGbp + depositRetentionGbp),
+    grossApprovedGbp: roundGbp(scheduleRentIncomeGbp + depositRetentionGbp + driverChargeIncomeGbp),
     accruedRentDueGbp,
     supplementalCollectionsGbp,
     postEndPrepaidExcludedGbp,
     refundsToDriverGbp,
     collectionsFromDriverGbp,
+    driverChargeIncomeGbp,
+    driverChargeIncomeByTypeGbp,
     settlementWriteOffsGbp,
     depositRetentionGbp,
     netIncomeGbp,

@@ -32,10 +32,12 @@ type VehicleDamageDiagramProps = {
   damages: VehicleDamageDiagramEntry[];
   selectedDamageId?: string | null;
   selectedPanelId?: string | null;
-  mode?: "edit" | "readonly" | "diff";
+  mode?: "edit" | "readonly" | "diff" | "checkin";
   allowExpand?: boolean;
   fullscreenAside?: ReactNode;
   onExpandedChange?: (expanded: boolean) => void;
+  canRemoveDamage?: (damage: VehicleDamageDiagramEntry) => boolean;
+  canSelectDamage?: (damage: VehicleDamageDiagramEntry) => boolean;
   onPanelSelect?: (
     panelId: string,
     context: { diagramView: HireInspectionDiagramViewId; pinX: number; pinY: number },
@@ -81,6 +83,32 @@ function damageKey(panelId: string, viewId: string): string {
   return `${panelId}:${viewId}`;
 }
 
+function DamageListContent({
+  damage,
+  index,
+  panelLabel,
+}: {
+  damage: VehicleDamageDiagramEntry;
+  index: number;
+  panelLabel: string;
+}) {
+  return (
+    <>
+      <span className="font-semibold text-rph-fg">
+        #{index + 1} {panelLabel}
+      </span>
+      <span className="rph-muted mt-0.5 block text-xs">
+        {hireDamageTypeLabel(damage.damageType)} · {hireDamageSeverityLabel(damage.severity)}
+        {damage.diffStatus === "new" ? " · New" : null}
+        {damage.diffStatus === "pre_existing" ? " · Pre-existing (read-only)" : null}
+      </span>
+      {damage.notes?.trim() ? (
+        <span className="rph-muted mt-0.5 block text-xs">{damage.notes.trim()}</span>
+      ) : null}
+    </>
+  );
+}
+
 function resolveDamageDiagramView(
   damage: VehicleDamageDiagramEntry,
   clickedViewByPanel: Record<string, string>,
@@ -117,13 +145,15 @@ export function VehicleDamageDiagram({
   onPanelSelect,
   onDamageSelect,
   onDamageRemove,
+  canRemoveDamage,
+  canSelectDamage,
 }: VehicleDamageDiagramProps) {
   const [expanded, setExpanded] = useState(false);
   const [clickedViewByPanel, setClickedViewByPanel] = useState<Record<string, string>>({});
   const [clickedPinByPanel, setClickedPinByPanel] = useState<
     Record<string, { pinX: number; pinY: number }>
   >({});
-  const interactive = mode === "edit" && Boolean(onPanelSelect);
+  const interactive = (mode === "edit" || mode === "checkin") && Boolean(onPanelSelect);
 
   const damagedHits = useMemo(() => {
     const hits = new Map<string, HireDamageSeverity>();
@@ -246,7 +276,11 @@ export function VehicleDamageDiagram({
           selectedPanelView={selectedPanelView}
           damagePins={pins}
           onHitActivate={interactive ? activateHit : undefined}
-          onDamagePinSelect={onDamageSelect}
+          onDamagePinSelect={(damageId) => {
+            const damage = damages.find((item) => item.id === damageId);
+            if (!damage || (canSelectDamage && !canSelectDamage(damage))) return;
+            onDamageSelect?.(damageId);
+          }}
         />
       </div>
     </div>
@@ -266,7 +300,7 @@ export function VehicleDamageDiagram({
         <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" />
         Major
       </span>
-      {mode === "diff" ? (
+      {mode === "diff" || mode === "checkin" ? (
         <span className="inline-flex items-center gap-1.5">
           <span className="inline-block h-2.5 w-2.5 rounded-full bg-rph-fg-muted" />
           Pre-existing
@@ -280,6 +314,8 @@ export function VehicleDamageDiagram({
       {damages.map((damage, index) => {
         const panel = getVehicleDamagePanel(damage.panelId);
         const selected = selectedDamageId === damage.id;
+        const removable = Boolean(onDamageRemove) && (canRemoveDamage?.(damage) ?? true);
+        const selectable = canSelectDamage?.(damage) ?? true;
         return (
           <li key={damage.id}>
             <div
@@ -287,32 +323,36 @@ export function VehicleDamageDiagram({
                 selected
                   ? "border-rph-rail bg-rph-rail/10"
                   : "border-rph-border bg-rph-chrome"
-              }`}
+              } ${!selectable ? "opacity-80" : ""}`}
             >
-              <button
-                type="button"
-                className="min-w-0 flex-1 rounded-lg px-3 py-2 text-left text-sm hover:bg-rph-raised"
-                onClick={() => onDamageSelect?.(damage.id)}
-              >
-                <span className="font-semibold text-rph-fg">
-                  #{index + 1} {panel?.label ?? damage.panelId}
-                </span>
-                <span className="rph-muted mt-0.5 block text-xs">
-                  {hireDamageTypeLabel(damage.damageType)} · {hireDamageSeverityLabel(damage.severity)}
-                  {damage.diffStatus === "new" ? " · New" : null}
-                  {damage.diffStatus === "pre_existing" ? " · Pre-existing" : null}
-                </span>
-                {damage.notes?.trim() ? (
-                  <span className="rph-muted mt-0.5 block text-xs">{damage.notes.trim()}</span>
-                ) : null}
-              </button>
-              {onDamageRemove ? (
+              {selectable ? (
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 rounded-lg px-3 py-2 text-left text-sm hover:bg-rph-raised"
+                  onClick={() => onDamageSelect?.(damage.id)}
+                >
+                  <DamageListContent
+                    damage={damage}
+                    index={index}
+                    panelLabel={panel?.label ?? damage.panelId}
+                  />
+                </button>
+              ) : (
+                <div className="min-w-0 flex-1 rounded-lg px-3 py-2 text-left text-sm">
+                  <DamageListContent
+                    damage={damage}
+                    index={index}
+                    panelLabel={panel?.label ?? damage.panelId}
+                  />
+                </div>
+              )}
+              {removable ? (
                 <button
                   type="button"
                   className="shrink-0 rounded-r-lg px-2.5 text-rph-fg-muted transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-300"
                   aria-label={`Remove damage on ${panel?.label ?? damage.panelId}`}
                   title="Remove damage"
-                  onClick={() => onDamageRemove(damage.id)}
+                  onClick={() => onDamageRemove?.(damage.id)}
                 >
                   <IconTrash />
                 </button>
@@ -323,7 +363,11 @@ export function VehicleDamageDiagram({
       })}
     </ul>
   ) : (
-    <p className="rph-muted text-sm">No damage marked. Click a panel on the diagram to add damage.</p>
+    <p className="rph-muted text-sm">
+      {mode === "checkin"
+        ? "No new damage marked. Click a panel on the diagram to add damage."
+        : "No damage marked. Click a panel on the diagram to add damage."}
+    </p>
   );
 
   if (expanded) {
@@ -342,7 +386,9 @@ export function VehicleDamageDiagram({
             <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-rph-border bg-rph-raised p-3">
               <div className="flex min-h-0 flex-1 items-stretch">{diagramCanvas}</div>
               <p className="rph-muted mt-2 shrink-0 text-center text-xs">
-                Click a panel on any view to mark damage · Press Esc to exit full screen
+                {mode === "checkin"
+                  ? "Pre-existing checkout damage is read-only · click a panel to add new damage · Press Esc to exit full screen"
+                  : "Click a panel on any view to mark damage · Press Esc to exit full screen"}
               </p>
             </div>
             {legend}
@@ -364,7 +410,9 @@ export function VehicleDamageDiagram({
         {allowExpand ? <div className="mb-2 flex justify-end">{expandButton}</div> : null}
         {diagramCanvas}
         <p className="rph-muted mt-2 text-center text-xs">
-          Click a panel on any view to mark damage
+          {mode === "checkin"
+            ? "Pre-existing checkout damage is read-only · click a panel to add new damage"
+            : "Click a panel on any view to mark damage"}
         </p>
       </div>
       {legend}

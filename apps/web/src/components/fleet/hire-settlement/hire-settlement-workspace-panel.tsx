@@ -149,6 +149,43 @@ export function HireSettlementWorkspacePanel({
 
       <SettlementPaymentsTable payments={data.payments} />
 
+      {data.driverChargeLineItems.length > 0 ? (
+        <section className="overflow-hidden rounded-xl border border-rph-border">
+          <div className="border-b border-rph-border bg-rph-chrome px-4 py-3">
+            <h2 className="text-sm font-semibold text-rph-fg">Driver charges</h2>
+            <p className="rph-muted mt-0.5 text-xs">
+              Itemised charges from check-in and other driver income.
+            </p>
+          </div>
+          <table className="min-w-full text-sm">
+            <thead className="bg-rph-chrome/60 text-left text-xs uppercase tracking-wide text-rph-fg-muted">
+              <tr>
+                <th className="px-4 py-2.5">Type</th>
+                <th className="px-4 py-2.5">Description</th>
+                <th className="px-4 py-2.5">Amount</th>
+                <th className="px-4 py-2.5">Resolution</th>
+                <th className="px-4 py-2.5">Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.driverChargeLineItems.map((item) => (
+                <tr key={item.id} className="border-t border-rph-border">
+                  <td className="px-4 py-3 text-rph-fg-secondary">{item.chargeTypeLabel}</td>
+                  <td className="px-4 py-3 text-rph-fg-secondary">{item.description ?? "—"}</td>
+                  <td className="px-4 py-3 font-medium tabular-nums text-rph-fg">
+                    {formatGbp(item.amountGbp)}
+                  </td>
+                  <td className="px-4 py-3 text-rph-fg-secondary">{item.resolutionLabel}</td>
+                  <td className="px-4 py-3 text-rph-fg-secondary">
+                    {item.createdAt ? formatUkDateTime(item.createdAt) : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
+
       {data.notes.length ? (
         <section className="overflow-hidden rounded-xl border border-rph-border">
           <div className="border-b border-rph-border bg-rph-chrome px-4 py-3">
@@ -259,6 +296,7 @@ function SettlementPaymentsTable({ payments }: { payments: HireBalancePaymentRow
             <th className="px-4 py-2.5">Method</th>
             <th className="px-4 py-2.5">Account</th>
             <th className="px-4 py-2.5">Reference</th>
+            <th className="px-4 py-2.5">Category</th>
           </tr>
         </thead>
         <tbody>
@@ -273,6 +311,9 @@ function SettlementPaymentsTable({ payments }: { payments: HireBalancePaymentRow
               </td>
               <td className="px-4 py-3 text-rph-fg-secondary">{payment.paymentAccountName ?? "—"}</td>
               <td className="px-4 py-3 text-rph-fg-secondary">{payment.paymentReference ?? "—"}</td>
+              <td className="px-4 py-3 text-rph-fg-secondary">
+                {payment.paymentCategory === "driver_charge" ? "Driver charge" : "Settlement"}
+              </td>
             </tr>
           ))}
         </tbody>

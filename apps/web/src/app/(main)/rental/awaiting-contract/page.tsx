@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
 import { getRentalSessionLifecycleCached } from "@/lib/auth/rental-lifecycle";
 import { loadPendingContractRenewal } from "@/lib/companies/pending-contract-renewal";
@@ -15,6 +16,13 @@ export default async function RentalAwaitingContractPage({
   const user = await getSessionUser();
   const sp = await searchParams;
   const companyId = profile.company_id?.trim();
+
+  if (companyId && user) {
+    const life = await getRentalSessionLifecycleCached(user.id, user.email);
+    if (life.kind === "rental" && life.contractActive) {
+      redirect(life.onboardingComplete ? "/rental" : "/rental/onboarding");
+    }
+  }
 
   let renewalSignaturePending = false;
   let signReady = false;

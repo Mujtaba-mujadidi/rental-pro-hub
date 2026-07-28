@@ -22,6 +22,11 @@ import {
   type VehicleHireIncomeScheduleRow,
 } from "@/lib/fleet/hire-income";
 import {
+  mapDriverChargeLineItemsFromDb,
+  type DriverChargeLineItemDbRow,
+  type HireDriverChargeLineItemInput,
+} from "@/lib/fleet/hire-driver-charges";
+import {
   buildPaymentRowEventStateMap,
   resolveHirePaymentWorkflowStatus,
 } from "@/lib/fleet/hire-payment-workflow";
@@ -297,7 +302,8 @@ async function loadVehicleHireIncomeContext(vehicleId: string): Promise<
   | {
       ok: true;
       scheduleRows: VehicleHireIncomeScheduleRow[];
-      balancePayments: { amountGbp: number; direction: string | null }[];
+      balancePayments: { amountGbp: number; direction: string | null; paymentCategory: string | null }[];
+      driverChargeLineItems: HireDriverChargeLineItemInput[];
       groupContextByGroupId: Map<string, HireIncomeGroupContext>;
     }
   | { ok: false; error: string }
@@ -330,12 +336,17 @@ async function loadVehicleHireIncomeContext(vehicleId: string): Promise<
       ok: true,
       scheduleRows: [],
       balancePayments: [],
+      driverChargeLineItems: [],
       groupContextByGroupId,
     };
   }
 
   const todayYmd = ukTodayYmd();
-  const [{ data: rows, error }, { data: balanceRows, error: balanceErr }] = await Promise.all([
+  const [
+    { data: rows, error },
+    { data: balanceRows, error: balanceErr },
+    { data: chargeRows, error: chargeErr },
+  ] = await Promise.all([
     supabase
       .from("vehicle_hire_payment_schedule")
       .select(
@@ -344,11 +355,16 @@ async function loadVehicleHireIncomeContext(vehicleId: string): Promise<
       .in("hire_group_id", groupIds),
     supabase
       .from("vehicle_hire_balance_payments")
-      .select("amount_gbp, direction")
+      .select("amount_gbp, direction, payment_category")
+      .in("hire_group_id", groupIds),
+    supabase
+      .from("vehicle_hire_driver_charge_line_items")
+      .select("id, hire_group_id, charge_type, amount_gbp, resolution, source_kind, source_id, description")
       .in("hire_group_id", groupIds),
   ]);
   if (error) return { ok: false, error: error.message };
   if (balanceErr) return { ok: false, error: balanceErr.message };
+  if (chargeErr) return { ok: false, error: chargeErr.message };
 
   const scheduleRows = await mapScheduleIncomeRows(
     supabase,
@@ -359,9 +375,20 @@ async function loadVehicleHireIncomeContext(vehicleId: string): Promise<
   const balancePayments = (balanceRows ?? []).map((payment) => ({
     amountGbp: Number(payment.amount_gbp ?? 0),
     direction: (payment.direction as string | null) ?? null,
+    paymentCategory: (payment.payment_category as string | null) ?? null,
+  }));
+  const driverChargeLineItems = mapDriverChargeLineItemsFromDb(
+    (chargeRows ?? []) as DriverChargeLineItemDbRow[],
+  ).map((item) => ({
+    chargeType: item.chargeType,
+    amountGbp: item.amountGbp,
+    resolution: item.resolution,
+    sourceKind: item.sourceKind,
+    sourceId: item.sourceId,
+    description: item.description,
   }));
 
-  return { ok: true, scheduleRows, balancePayments, groupContextByGroupId };
+  return { ok: true, scheduleRows, balancePayments, driverChargeLineItems, groupContextByGroupId };
 }
 
 async function loadFleetHireIncomeByVehicleId(
@@ -399,7 +426,8 @@ async function loadFleetHireIncomeByVehicleId(
 
   if (!groupIds.length) return { ok: true, incomeByVehicleId: new Map() };
 
-  const [{ data: rows, error }, { data: balanceRows, error: balanceErr }] = await Promise.all([
+  const [{ data: rows, error }, { data: balanceRows, error: balanceErr }, { data: chargeRows, error: chargeErr }] =
+    await Promise.all([
     supabase
       .from("vehicle_hire_payment_schedule")
       .select(
@@ -408,11 +436,16 @@ async function loadFleetHireIncomeByVehicleId(
       .in("hire_group_id", groupIds),
     supabase
       .from("vehicle_hire_balance_payments")
-      .select("hire_group_id, amount_gbp, direction")
+      .select("hire_group_id, amount_gbp, direction, payment_category")
+      .in("hire_group_id", groupIds),
+    supabase
+      .from("vehicle_hire_driver_charge_line_items")
+      .select("id, hire_group_id, charge_type, amount_gbp, resolution, source_kind, source_id, description")
       .in("hire_group_id", groupIds),
   ]);
   if (error) return { ok: false, error: error.message };
   if (balanceErr) return { ok: false, error: balanceErr.message };
+  if (chargeErr) return { ok: false, error: chargeErr.message };
 
   const mappedScheduleRows = await mapScheduleIncomeRows(
     supabase,
@@ -428,15 +461,33 @@ async function loadFleetHireIncomeByVehicleId(
     scheduleByGroupId.set(hireGroupId, list);
   }
 
-  const paymentsByGroupId = new Map<string, { amountGbp: number; direction: string | null }[]>();
+  const paymentsByGroupId = new Map<
+    string,
+    { amountGbp: number; direction: string | null; paymentCategory: string | null }[]
+  >();
   for (const payment of balanceRows ?? []) {
     const hireGroupId = payment.hire_group_id as string;
     const list = paymentsByGroupId.get(hireGroupId) ?? [];
     list.push({
       amountGbp: Number(payment.amount_gbp ?? 0),
       direction: (payment.direction as string | null) ?? null,
+      paymentCategory: (payment.payment_category as string | null) ?? null,
     });
     paymentsByGroupId.set(hireGroupId, list);
+  }
+
+  const chargeItemsByGroupId = new Map<string, HireDriverChargeLineItemInput[]>();
+  for (const row of mapDriverChargeLineItemsFromDb((chargeRows ?? []) as DriverChargeLineItemDbRow[])) {
+    const list = chargeItemsByGroupId.get(row.hireGroupId) ?? [];
+    list.push({
+      chargeType: row.chargeType,
+      amountGbp: row.amountGbp,
+      resolution: row.resolution,
+      sourceKind: row.sourceKind,
+      sourceId: row.sourceId,
+      description: row.description,
+    });
+    chargeItemsByGroupId.set(row.hireGroupId, list);
   }
 
   const incomeByVehicleId = new Map<string, ReturnType<typeof computeVehicleHireIncomeGbp>>();
@@ -459,11 +510,15 @@ async function loadFleetHireIncomeByVehicleId(
     const balancePayments = vehicleGroups.flatMap(
       (group) => paymentsByGroupId.get(group.id as string) ?? [],
     );
+    const driverChargeLineItems = vehicleGroups.flatMap(
+      (group) => chargeItemsByGroupId.get(group.id as string) ?? [],
+    );
     incomeByVehicleId.set(
       vehicleId,
       computeVehicleHireIncomeGbp({
         scheduleRows,
         balancePayments,
+        driverChargeLineItems,
         groupContextByGroupId,
         todayYmd,
       }),
@@ -526,6 +581,7 @@ export async function loadVehicleFinancialsAction(
   const hireIncome = computeVehicleHireIncomeGbp({
     scheduleRows: hireIncomeContext.scheduleRows,
     balancePayments: hireIncomeContext.balancePayments,
+    driverChargeLineItems: hireIncomeContext.driverChargeLineItems,
     groupContextByGroupId: hireIncomeContext.groupContextByGroupId,
     todayYmd: ukTodayYmd(),
   });
@@ -540,6 +596,7 @@ export async function loadVehicleFinancialsAction(
     rentalCollectionsGbp: hireIncome.collectionsFromDriverGbp,
     rentalWriteOffsGbp: hireIncome.settlementWriteOffsGbp,
     rentalDepositRetentionGbp: hireIncome.depositRetentionGbp,
+    driverChargeIncomeGbp: hireIncome.driverChargeIncomeGbp,
   });
 
   return {
@@ -624,6 +681,7 @@ export async function loadFleetPnlSummariesAction(
       rentalCollectionsGbp: hireIncome?.collectionsFromDriverGbp ?? 0,
       rentalWriteOffsGbp: hireIncome?.settlementWriteOffsGbp ?? 0,
       rentalDepositRetentionGbp: hireIncome?.depositRetentionGbp ?? 0,
+      driverChargeIncomeGbp: hireIncome?.driverChargeIncomeGbp ?? 0,
     });
     return {
       vehicleId,

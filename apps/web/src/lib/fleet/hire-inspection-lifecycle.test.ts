@@ -15,6 +15,8 @@ const checkoutDamage = {
   diagramView: null,
   pinX: null,
   pinY: null,
+  chargeGbp: null,
+  chargeResolution: null,
 };
 
 describe("buildHireInspectionDiff", () => {
@@ -30,6 +32,8 @@ describe("buildHireInspectionDiff", () => {
         diagramView: null,
         pinX: null,
         pinY: null,
+        chargeGbp: null,
+        chargeResolution: null,
       },
       {
         id: "n2",
@@ -41,6 +45,8 @@ describe("buildHireInspectionDiff", () => {
         diagramView: "top",
         pinX: 537,
         pinY: 540,
+        chargeGbp: null,
+        chargeResolution: null,
       },
     ]);
     expect(diff.preExistingDamages).toHaveLength(1);

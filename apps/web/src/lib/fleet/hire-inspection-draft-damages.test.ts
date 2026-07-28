@@ -43,6 +43,8 @@ describe("hire-inspection-draft-damages", () => {
       diagramView: null,
       pinX: null,
       pinY: null,
+      chargeGbp: null,
+      chargeResolution: null,
     });
     expect(local.id).toBeNull();
 
@@ -56,6 +58,8 @@ describe("hire-inspection-draft-damages", () => {
       diagramView: null,
       pinX: null,
       pinY: null,
+      chargeGbp: 50,
+      chargeResolution: "add_to_balance",
     });
     expect(persisted.id).toBe("550e8400-e29b-41d4-a716-446655440000");
   });

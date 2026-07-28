@@ -47,8 +47,10 @@ describe("rentalPathRequiresRedirect", () => {
     expect(rentalPathRequiresRedirect("/rental/awaiting-contract", ctx)).toBeNull();
   });
 
-  it("does not auto-redirect away from awaiting-contract when contract is active", () => {
-    expect(rentalPathRequiresRedirect("/rental/awaiting-contract", rental({ onboardingComplete: true }))).toBeNull();
+  it("redirects away from awaiting-contract when contract is active", () => {
+    expect(rentalPathRequiresRedirect("/rental/awaiting-contract", rental({ onboardingComplete: true }))).toBe(
+      "/rental",
+    );
   });
 
   it("still routes incomplete onboarding away from awaiting-contract", () => {
