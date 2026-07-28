@@ -21,9 +21,10 @@ let pdfjsModulePromise: Promise<typeof import("pdfjs-dist")> | null = null;
 
 function loadPdfjs() {
   if (!pdfjsModulePromise) {
-    pdfjsModulePromise = import("pdfjs-dist").then((pdfjs) => {
+    // Legacy build polyfills Map/WeakMap.getOrInsertComputed for older Safari (e.g. iPad).
+    pdfjsModulePromise = import("pdfjs-dist/legacy/build/pdf.mjs").then((pdfjs) => {
       pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-        "pdfjs-dist/build/pdf.worker.min.mjs",
+        "pdfjs-dist/legacy/build/pdf.worker.min.mjs",
         import.meta.url,
       ).toString();
       return pdfjs;
