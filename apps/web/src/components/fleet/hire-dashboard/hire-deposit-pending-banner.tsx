@@ -22,14 +22,14 @@ export function HireDepositPendingBanner({
     <section className="rph-alert-warning text-sm">
       <p className="font-medium text-rph-fg">
         {closure.rentSettlementSettled
-          ? "Rent settlement is cleared — deposit still needs a decision"
-          : "Deposit held pending review"}
+          ? "Final balance cleared — deposit still needs a decision"
+          : "Deposit held — decide what to do"}
       </p>
       <p className="mt-1 text-rph-fg-secondary">
-        {formatGbp(closure.depositGbp)} deposit is held separately from rent settlement.
+        {formatGbp(closure.depositGbp)} deposit is separate from the rent balance.
         {audience === "staff"
-          ? " Choose refund, forfeit, or apply to balance on the Payments tab when you have inspected the vehicle."
-          : " Your rental company will confirm how the deposit is handled after check-in."}
+          ? " After check-in, choose to return it, keep it, or use it to pay rent on the Payments tab."
+          : " Your rental company will confirm what happens to the deposit after check-in."}
       </p>
       {audience === "staff" ? (
         <p className="mt-2">

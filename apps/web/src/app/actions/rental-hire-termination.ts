@@ -1,5 +1,10 @@
 "use server";
 
+/**
+ * Hire termination, settlement ledger, and deposit resolution.
+ * Transaction side effects: see @/lib/fleet/hire-payment-transactions.ts
+ */
+
 import { loadHirePaymentsPageAction, type HirePaymentPageRow } from "@/app/actions/hire-payments";
 import { revalidatePath } from "next/cache";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
@@ -14,8 +19,9 @@ import {
   remainingOpenBalanceGbp,
   signedSettlementBalanceGbp,
 } from "@/lib/fleet/hire-open-balance";
+import { depositRentScheduleCreditGbp } from "@/lib/fleet/hire-deposit-schedule-allocation";
 import type { HirePaymentScheduleRowInput } from "@/lib/fleet/hire-payment-summary";
-import { hirePaymentRowPaidGbp } from "@/lib/fleet/hire-payment-summary";
+import { persistDepositCreditToRentSchedule } from "@/lib/fleet/persist-hire-deposit-schedule-credit";
 import {
   requiresDepositDispositionReason,
   summarizeHireRentSettlement,
@@ -341,6 +347,9 @@ export async function terminateHireGroupAction(input: {
     return { ok: false, error: "Select how the settlement payment was made." };
   }
 
+  const paymentsPage = await loadHirePaymentsPageAction(input.hireGroupId);
+  if (!paymentsPage.ok) return paymentsPage;
+
   const admin = createSupabaseAdminClient();
   const now = new Date().toISOString();
   const terminatedYmd = now.slice(0, 10);
@@ -384,6 +393,27 @@ export async function terminateHireGroupAction(input: {
       recorded_by_user_id: user.id,
     });
     if (paymentError) return { ok: false, error: paymentError.message };
+  }
+
+  const depositScheduleCredit = depositRentScheduleCreditGbp({
+    disposition,
+    depositGbp: accounts.depositGbp,
+    signedRentBalanceGbp: accounts.signedRentBalanceGbp,
+    depositRefundAmountGbp: input.depositRefundAmountGbp,
+  });
+  if (depositScheduleCredit > 0.005 && preview.data.includeDeposit) {
+    const applied = await persistDepositCreditToRentSchedule({
+      admin,
+      hireGroupId: input.hireGroupId.trim(),
+      userId: user.id,
+      disposition,
+      depositGbp: accounts.depositGbp,
+      signedRentBalanceGbp: accounts.signedRentBalanceGbp,
+      depositRefundAmountGbp: input.depositRefundAmountGbp,
+      accrualYmd: terminatedYmd,
+      scheduleRows: mapPaymentRows(paymentsPage.data.rows),
+    });
+    if (!applied.ok) return applied;
   }
 
   await admin
@@ -1070,7 +1100,7 @@ export async function resolveHireDepositDispositionAction(input: {
   const { data: group, error: groupError } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, status, deposit_disposition, settlement_balance_gbp, settlement_balance_direction, termination_settlement",
+      "id, status, terminated_at, ended_at, deposit_disposition, settlement_balance_gbp, settlement_balance_direction, termination_settlement",
     )
     .eq("id", input.hireGroupId.trim())
     .maybeSingle();
@@ -1198,6 +1228,22 @@ export async function resolveHireDepositDispositionAction(input: {
     });
     if (paymentError) return { ok: false, error: paymentError.message };
   }
+
+  const accrualYmd =
+    (group.terminated_at as string | null)?.slice(0, 10) ??
+    (group.ended_at as string | null)?.slice(0, 10) ??
+    ukTodayYmd();
+  const depositCredit = await persistDepositCreditToRentSchedule({
+    admin,
+    hireGroupId: input.hireGroupId.trim(),
+    userId: user.id,
+    disposition,
+    depositGbp: terminationSummary.depositGbp,
+    signedRentBalanceGbp: terminationSummary.signedRentBalanceGbp,
+    depositRefundAmountGbp: input.depositRefundAmountGbp,
+    accrualYmd,
+  });
+  if (!depositCredit.ok) return depositCredit;
 
   await logHireGroupEvent(admin, {
     hireGroupId: input.hireGroupId.trim(),

@@ -16,7 +16,7 @@ import { formatGbp } from "@/lib/fleet/maintenance";
 import type { FleetVehiclePnlSummary } from "@/app/actions/rental-vehicle-financials";
 import type { CompanyNotificationSettings } from "@/lib/settings/notification-settings";
 import { VehicleExpiryPills } from "./vehicle-expiry-indicators";
-import { ADD_VEHICLE_DRAFT_KEY, AddVehicleModal } from "./add-vehicle-modal";
+import { ADD_VEHICLE_DRAFT_KEY, AddVehicleModal, type AddVehicleCreatedResult } from "./add-vehicle-modal";
 
 const btnPrimary = "rph-btn-primary";
 const btnGhost = "rph-btn-ghost";
@@ -45,6 +45,7 @@ export function VehiclesView({
   const [draftHint, setDraftHint] = useState<{ vrm: string; make: string; model: string; updatedAt: string } | null>(
     null,
   );
+  const [docUploadNotice, setDocUploadNotice] = useState<AddVehicleCreatedResult | null>(null);
 
   useEffect(() => {
     function refreshDraftHint() {
@@ -106,6 +107,41 @@ export function VehiclesView({
           </button>
         ) : null}
       </div>
+
+      {docUploadNotice ? (
+        <div
+          className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-sm text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-100"
+          role="status"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1 space-y-1">
+              <p className="font-semibold">{docUploadNotice.vrm} was saved to your fleet</p>
+              <p>
+                We could not upload{" "}
+                {docUploadNotice.failedDocUploadLabels.length === 1
+                  ? docUploadNotice.failedDocUploadLabels[0]
+                  : `${docUploadNotice.failedDocUploadLabels.slice(0, -1).join(", ")} and ${docUploadNotice.failedDocUploadLabels.at(-1)}`}
+                . Those documents are still marked as missing — open the vehicle and upload smaller files on the Details
+                tab (each file under 12 MB, or use fewer images).
+              </p>
+              <Link
+                href={`${vehicleWorkspaceHref(docUploadNotice.vehicleId, "details")}#documents`}
+                className="rph-link inline-block text-sm"
+              >
+                Upload documents for {docUploadNotice.vrm}
+              </Link>
+            </div>
+            <button
+              type="button"
+              className={btnGhost}
+              onClick={() => setDocUploadNotice(null)}
+              aria-label="Dismiss"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {fleetAttentionCount > 0 ? (
         <div className="rph-alert-warn text-sm">
@@ -276,8 +312,11 @@ export function VehiclesView({
           open={createOpen}
           onOpenChange={setCreateOpen}
           subcompanies={subcompanies}
-          onCreated={() => {
+          onCreated={(result) => {
             setDraftHint(null);
+            if (result.failedDocUploadLabels.length) {
+              setDocUploadNotice(result);
+            }
             router.refresh();
           }}
         />

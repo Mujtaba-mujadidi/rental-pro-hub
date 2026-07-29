@@ -45,9 +45,7 @@ export default async function PublicLayout({ children }: { children: React.React
           </nav>
         ) : null}
       </header>
-      <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-4 py-8 sm:px-6 sm:py-10">
-        <div className="rph-card flex-1 p-6 sm:p-8">{children}</div>
-      </main>
+      <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-4 py-8 sm:px-6 sm:py-10">{children}</main>
     </div>
   );
 }

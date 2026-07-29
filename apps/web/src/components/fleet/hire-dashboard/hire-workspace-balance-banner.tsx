@@ -82,14 +82,14 @@ export function HireWorkspaceBalanceBanner({
   const settlementLabel =
     audience === "driver"
       ? settlementBalance?.settlementDirection === "driver_owes_company"
-        ? "You owe (rent settlement)"
-        : "Rent settlement owed to you"
+        ? "You owe (final balance)"
+        : "Money owed to you"
       : settlementBalance
         ? settlementBalanceLabel(
             settlementBalance.settlementDirection,
             settlementBalance.openBalanceGbp,
           )
-        : "Rent settlement";
+        : "Final balance";
 
   const closure: Pick<HireFinancialClosureState, "rentSettlementSettled" | "depositPendingReview" | "depositGbp"> =
     {
@@ -145,7 +145,7 @@ export function HireWorkspaceBalanceBanner({
               <BalanceAmount amountGbp={settlementBalance.openBalanceGbp} label={settlementLabel} />
             ) : (
               <div>
-                <p className="text-xs text-rph-fg-muted">Rent settlement</p>
+                <p className="text-xs text-rph-fg-muted">Final balance</p>
                 <p className="mt-1 text-sm font-medium text-rph-fg-secondary">
                   {hireRentSettlementStatusLabel(closure, audience)}
                 </p>
@@ -177,7 +177,7 @@ export function HireWorkspaceBalanceBanner({
 
       {audience === "staff" && hasOpenSettlement ? (
         <p className="rph-muted mt-4 text-xs">
-          Record rent settlement payments on the Payments tab, or open the{" "}
+          Record payments on the Payments tab, or open the{" "}
           <Link href={`/rental/balances/${hireGroupId}`} className="rph-link-inline">
             balance workspace
           </Link>{" "}
@@ -187,11 +187,11 @@ export function HireWorkspaceBalanceBanner({
 
       {audience === "staff" && depositPendingReview && rentSettlementSettled ? (
         <p className="rph-muted mt-4 text-xs">
-          Rent settlement is complete.{" "}
+          Final balance is cleared.{" "}
           <Link href={`/rental/hires/${hireGroupId}/payments`} className="rph-link-inline">
-            Resolve the held deposit on Payments
+            Decide what to do with the held deposit on Payments
           </Link>{" "}
-          to close this hire financially.
+          to close this hire.
         </p>
       ) : null}
     </section>

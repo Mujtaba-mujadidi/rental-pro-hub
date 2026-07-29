@@ -274,6 +274,68 @@ describe("computeVehicleHireIncomeGbp", () => {
     ).toBeCloseTo(178.57, 2);
   });
 
+  it("scopes supplemental settlement collections per hire group", () => {
+    const result = computeVehicleHireIncomeGbp({
+      scheduleRows: [
+        {
+          hireGroupId: "g1",
+          periodStart: "2026-07-23",
+          periodEnd: "2026-07-29",
+          rowKind: "rent",
+          paymentStatus: "approved",
+          approvedAmountGbp: 70,
+          baseAmountGbp: 70,
+          discountTotalGbp: 0,
+        },
+        {
+          hireGroupId: "g2",
+          periodStart: "2026-07-28",
+          periodEnd: "2026-08-03",
+          rowKind: "rent",
+          paymentStatus: "not_received",
+          approvedAmountGbp: null,
+          baseAmountGbp: 130,
+          discountTotalGbp: 0,
+        },
+      ],
+      balancePayments: [
+        { hireGroupId: "g1", amountGbp: 130, direction: "received_from_driver" },
+      ],
+      groupContextByGroupId: new Map([
+        [
+          "g1",
+          {
+            contractEndedYmd: "2026-07-27",
+            rentCadence: "weekly",
+            rentBillingMode: "end_of_period",
+            settlementWriteOffGbp: 0,
+            depositDisposition: "refund_full",
+            depositRefundAmountGbp: null,
+            depositGbp: 300,
+            signedRentBalanceGbp: -330,
+          },
+        ],
+        [
+          "g2",
+          {
+            contractEndedYmd: "2026-07-28",
+            rentCadence: "weekly",
+            rentBillingMode: "end_of_period",
+            settlementWriteOffGbp: 0,
+            depositDisposition: "refund_full",
+            depositRefundAmountGbp: null,
+            depositGbp: 200,
+            signedRentBalanceGbp: 130,
+          },
+        ],
+      ]),
+      todayYmd: "2026-07-28",
+    });
+
+    expect(result.supplementalCollectionsGbp).toBe(0);
+    expect(result.netIncomeGbp).toBe(70);
+  });
+
   it("does not double-count settlement collections already reflected on the schedule", () => {
     const result = computeVehicleHireIncomeGbp({
       scheduleRows: [

@@ -114,7 +114,7 @@ export function buildHireLifecycleAttentionItems(input: {
     items.push({
       kind: "awaiting_deposit_resolution",
       title: "Deposit decision required",
-      detail: `Rent settlement may be complete, but £${(input.depositGbp ?? 0).toFixed(2)} deposit is still held pending review.`,
+      detail: `The final balance may be cleared, but £${(input.depositGbp ?? 0).toFixed(2)} deposit is still held — decide what to do with it.`,
       href: `${base}/payments`,
     });
   }

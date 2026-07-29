@@ -6,31 +6,36 @@ import {
   confirmDriverProfileForHireAction,
   createHireDraftAction,
   finalizeHireContractsAction,
-  listPublishedHireTermsForWizardAction,
   loadHireDraftAction,
+  loadHireTermsBodyForWizardAction,
+  loadHireWizardShellAction,
   loadHireDriverProfileForReviewAction,
   requestDriverAccessForHireAction,
   saveHireDraftStepAction,
   searchAvailableVehiclesAction,
+  type AvailableVehicleSearchRow,
   sendDriverRegistrationInviteForHireAction,
   type HireDriverReviewPayload,
+  type HireWizardTermOption,
 } from "@/app/actions/rental-hire-wizard";
-import { loadPaymentSettingsAction } from "@/app/actions/rental-payment-settings";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { HireDriverReviewPanel } from "@/components/fleet/hire-driver-review-panel";
 import { hireAmendContractConfirmCopy } from "@/lib/fleet/hire-audit";
-import { formModalBtnContinue, formModalBtnGhost, formModalBtnSecondary } from "@/components/forms/form-modal-actions";
+import { formModalBtnContinue, formModalBtnGhost } from "@/components/forms/form-modal-actions";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { FormModalField, FormModalStepProgress } from "@/components/forms/form-modal-step-progress";
+import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { VehicleTabLoader } from "@/app/(main)/rental/vehicles/[id]/vehicle-tab-loader";
 import { useHireDraftRealtime } from "@/hooks/use-hire-realtime";
-import { formatUkDate } from "@/lib/datetime/uk";
+import { formatHireContractStartLabel } from "@/lib/fleet/hire-pdf-details";
 import {
   canAdvanceFromDriverAccessStep,
   canAdvanceFromStep,
   driverAccessBlocksFinalize,
   driverAccessLocksContractTerms,
+  hireWizardUsesCustomEndTime,
+  resolveHireWizardEndTime,
   type HireWizardFormState,
   type HireWizardStep,
 } from "@/lib/fleet/hire-wizard";
@@ -38,7 +43,7 @@ import type { ContractLengthKind, RentCadence } from "@/lib/fleet/hire-types";
 import DOMPurify from "isomorphic-dompurify";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
-const STEP_LABELS = ["Vehicle", "Terms", "T&C", "Driver", "Review", "E-sign"] as const;
+const STEP_LABELS = ["Vehicle", "Rental detail", "T&C", "Driver", "Review", "E-sign"] as const;
 
 const LENGTH_LABELS: Record<ContractLengthKind, string> = {
   annual: "Annual",
@@ -49,6 +54,8 @@ const LENGTH_LABELS: Record<ContractLengthKind, string> = {
 const emptyForm = (vehicleId = ""): HireWizardFormState => ({
   vehicleId,
   startDate: "",
+  startTime: "09:00",
+  endTime: "09:00",
   rentCadence: "weekly",
   rentAmountGbp: "",
   includeDeposit: false,
@@ -69,8 +76,11 @@ type Props = {
   onSaved: () => void;
 };
 
+const PAYMENT_ACCOUNT_NONE = "__none__";
+
 export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, onClose, onSaved }: Props) {
   const [pending, startTransition] = useTransition();
+  const [draftLoading, setDraftLoading] = useState(false);
   const [overlay, setOverlay] = useState<ActionStatusOverlayState | null>(null);
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [amendConfirmOpen, setAmendConfirmOpen] = useState(false);
@@ -82,11 +92,14 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
   const [error, setError] = useState<string | null>(null);
 
   const [vehicleQuery, setVehicleQuery] = useState("");
-  const [vehicles, setVehicles] = useState<{ id: string; vrm: string; label: string }[]>([]);
+  const [vehicles, setVehicles] = useState<AvailableVehicleSearchRow[]>([]);
   const [vehiclesLoading, setVehiclesLoading] = useState(false);
   const [bankAccounts, setBankAccounts] = useState<{ id: string; label: string }[]>([]);
-  const [terms, setTerms] = useState<{ id: string; title: string; version_label: string; body: string }[]>([]);
+  const [terms, setTerms] = useState<HireWizardTermOption[]>([]);
   const [termsPreviewId, setTermsPreviewId] = useState<string | null>(null);
+  const [termsPreviewHtml, setTermsPreviewHtml] = useState<string | null>(null);
+  const [termsPreviewLoading, setTermsPreviewLoading] = useState(false);
+  const termsBodyCacheRef = useRef<Map<string, string>>(new Map());
   const [accessMessage, setAccessMessage] = useState<string | null>(null);
   const [requestingDriverAccess, setRequestingDriverAccess] = useState(false);
   const [accessStatusRefreshing, setAccessStatusRefreshing] = useState(false);
@@ -97,31 +110,57 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
   const profileHireIdRef = useRef<string | null>(null);
 
   const busy = pending || overlay?.phase === "pending" || requestingDriverAccess;
+  const shellPending = busy;
+  const shellPendingMessage = "Saving…";
   const activeId = draftId ?? hireGroupId;
   const activeIdRef = useRef(activeId);
   const stepRef = useRef(step);
   activeIdRef.current = activeId;
   stepRef.current = step;
 
-  const loadDraft = useCallback((id: string, options?: { refreshStatus?: boolean }) => {
-    if (options?.refreshStatus) setAccessStatusRefreshing(true);
-    startTransition(async () => {
-      try {
-        const res = await loadHireDraftAction(id);
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
-        setDraftId(res.draft.id);
-        setStep(res.draft.wizard_step as HireWizardStep);
-        setForm(res.draft.form);
-        setDriverAccessStatus(res.draft.driver_access_status);
-        setDriverProfileConfirmed(res.draft.driver_profile_confirmed);
-        setError(null);
-      } finally {
-        if (options?.refreshStatus) setAccessStatusRefreshing(false);
+  const loadShell = useCallback(async (draftHireGroupId?: string | null) => {
+    const openingDraft = Boolean(draftHireGroupId?.trim());
+    if (openingDraft) setDraftLoading(true);
+    try {
+      const res = await loadHireWizardShellAction(draftHireGroupId ?? undefined);
+      if (!res.ok) {
+        setError(res.error);
+        return;
       }
-    });
+      setBankAccounts(res.data.bankAccounts);
+      setTerms(res.data.terms);
+      if (res.data.draft) {
+        setDraftId(res.data.draft.id);
+        setStep(res.data.draft.wizard_step as HireWizardStep);
+        setForm(res.data.draft.form);
+        setDriverAccessStatus(res.data.draft.driver_access_status);
+        setDriverProfileConfirmed(res.data.draft.driver_profile_confirmed);
+      }
+      setError(null);
+    } finally {
+      if (openingDraft) setDraftLoading(false);
+    }
+  }, []);
+
+  const loadDraft = useCallback(async (id: string, options?: { refreshStatus?: boolean }) => {
+    if (options?.refreshStatus) setAccessStatusRefreshing(true);
+    else setDraftLoading(true);
+    try {
+      const res = await loadHireDraftAction(id);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setDraftId(res.draft.id);
+      setStep(res.draft.wizard_step as HireWizardStep);
+      setForm(res.draft.form);
+      setDriverAccessStatus(res.draft.driver_access_status);
+      setDriverProfileConfirmed(res.draft.driver_profile_confirmed);
+      setError(null);
+    } finally {
+      if (options?.refreshStatus) setAccessStatusRefreshing(false);
+      else setDraftLoading(false);
+    }
   }, []);
 
   const loadDriverProfile = useCallback((id: string, options?: { force?: boolean }) => {
@@ -177,8 +216,10 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
     if (!open) return;
     setError(null);
     setAccessMessage(null);
+    setTermsPreviewId(null);
+    setTermsPreviewHtml(null);
     if (hireGroupId) {
-      loadDraft(hireGroupId);
+      void loadShell(hireGroupId);
     } else {
       setDraftId(null);
       setStep(1);
@@ -186,25 +227,12 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
       setDriverAccessStatus("not_requested");
       setDriverProfileConfirmed(false);
       clearDriverProfileCache();
+      void loadShell(null);
     }
-  }, [open, hireGroupId, initialVehicleId, loadDraft, clearDriverProfileCache]);
+  }, [open, hireGroupId, initialVehicleId, loadShell, clearDriverProfileCache]);
 
   useEffect(() => {
-    if (!open) return;
-    void loadPaymentSettingsAction().then((res) => {
-      if (res.ok) {
-        setBankAccounts(
-          res.accounts.filter((a) => a.is_active && a.show_to_hirer).map((a) => ({ id: a.id, label: a.name })),
-        );
-      }
-    });
-    void listPublishedHireTermsForWizardAction().then((res) => {
-      if (res.ok) setTerms(res.rows);
-    });
-  }, [open]);
-
-  useEffect(() => {
-    if (!open || step !== 1) return;
+    if (!open || step !== 1 || draftLoading) return;
     setVehiclesLoading(true);
     const t = window.setTimeout(() => {
       void searchAvailableVehiclesAction(vehicleQuery, { forHireGroupId: activeId ?? hireGroupId ?? undefined })
@@ -217,7 +245,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
       window.clearTimeout(t);
       setVehiclesLoading(false);
     };
-  }, [open, step, vehicleQuery, activeId, hireGroupId]);
+  }, [open, step, vehicleQuery, activeId, hireGroupId, draftLoading]);
 
   const stepAdvanceError = useMemo(() => {
     const formError = canAdvanceFromStep(step, form);
@@ -232,11 +260,39 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
     driverAccessStatus === "not_requested" ||
     driverAccessStatus === "rejected" ||
     driverAccessStatus === "awaiting_registration";
-  const previewTerms = terms.find((t) => t.id === termsPreviewId);
+
+  async function openTermsPreview(termsId: string) {
+    setTermsPreviewId(termsId);
+    const cached = termsBodyCacheRef.current.get(termsId);
+    if (cached) {
+      setTermsPreviewHtml(cached);
+      return;
+    }
+    setTermsPreviewLoading(true);
+    setTermsPreviewHtml(null);
+    const res = await loadHireTermsBodyForWizardAction(termsId);
+    setTermsPreviewLoading(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    termsBodyCacheRef.current.set(termsId, res.body);
+    setTermsPreviewHtml(res.body);
+  }
+
   const modalTitle = hireGroupId ? "Continue hire contract" : "New hire contract";
 
   function patchForm(patch: Partial<HireWizardFormState>) {
-    setForm((p) => ({ ...p, ...patch }));
+    setForm((prev) => {
+      const next = { ...prev, ...patch };
+      if (patch.contractLengths && !next.contractLengths.custom) {
+        next.endTime = next.startTime;
+      }
+      if (patch.startTime !== undefined && !next.contractLengths.custom) {
+        next.endTime = patch.startTime;
+      }
+      return next;
+    });
   }
 
   async function ensureDraftId(): Promise<string | null> {
@@ -428,7 +484,8 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
         description="Drafts are saved to your company account. Use Save draft to continue later."
         headerExtra={<FormModalStepProgress step={step - 1} labels={STEP_LABELS} ariaLabel="Hire contract steps" />}
         allowMaximize
-        pending={busy}
+        pending={shellPending}
+        pendingMessage={shellPendingMessage}
         maxWidthClass="max-w-5xl"
         panelHeightClass="h-[min(92vh,56rem)]"
         showDraftActions={false}
@@ -441,7 +498,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
         onCancelDiscard={() => setDiscardConfirmOpen(false)}
         footer={
           <>
-            <button type="button" className={formModalBtnGhost} disabled={busy} onClick={requestClose}>
+            <button type="button" className={formModalBtnGhost} disabled={busy || draftLoading} onClick={requestClose}>
               Cancel
             </button>
             <div className="flex flex-wrap gap-3">
@@ -463,14 +520,14 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
                   Back
                 </button>
               ) : null}
-              <button type="button" className={formModalBtnSecondary} disabled={busy} onClick={() => saveDraft()}>
+              <button type="button" className={formModalBtnGhost} disabled={busy || draftLoading} onClick={() => saveDraft()}>
                 Save draft
               </button>
               {step < 6 ? (
                 <button
                   type="button"
                   className={formModalBtnContinue}
-                  disabled={busy || Boolean(stepAdvanceError)}
+                  disabled={busy || draftLoading || Boolean(stepAdvanceError)}
                   onClick={goNext}
                 >
                   Continue
@@ -479,7 +536,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
                 <button
                   type="button"
                   className={formModalBtnContinue}
-                  disabled={busy || finalizeBlocked}
+                  disabled={busy || draftLoading || finalizeBlocked}
                   onClick={finalize}
                 >
                   {busy ? "Creating…" : "Create & send for e-sign"}
@@ -491,7 +548,14 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
       >
         {error ? <p className="rph-alert-error mb-4 text-sm">{error}</p> : null}
 
-        {contractTermsLocked && step >= 4 ? (
+        {draftLoading ? (
+          <div className="flex min-h-[12rem] flex-col items-center justify-center gap-3 text-sm text-rph-fg-muted">
+            <InlineSpinner />
+            <p>Loading draft…</p>
+          </div>
+        ) : null}
+
+        {!draftLoading && contractTermsLocked && step >= 4 ? (
           <p className="rph-alert-warn mb-4 text-sm">
             The driver has approved access for this contract. Vehicle, rental terms, and driver details are locked.
             Use <strong>Amend contract</strong> if you need to change them — the driver must approve access again before
@@ -499,7 +563,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
           </p>
         ) : null}
 
-        {step === 1 ? (
+        {!draftLoading && step === 1 ? (
           <div className="space-y-4">
             <p className="rph-meta text-sm">Select an available vehicle for this hire.</p>
             <FormModalField label="Search vehicles">
@@ -528,8 +592,17 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
                         disabled={busy || contractTermsLocked}
                         onClick={() => patchForm({ vehicleId: v.id })}
                       >
-                        <span className="font-semibold text-rph-fg">{v.vrm}</span>
-                        <span className="text-xs text-rph-fg-muted">{v.label}</span>
+                        <p className="font-semibold text-rph-fg">
+                          {[
+                            v.vrm,
+                            [v.make, v.model].filter(Boolean).join(" ") || null,
+                            v.year,
+                            v.colour,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+                        <p className="mt-1 text-xs text-rph-fg-muted">{v.subcompanyName ?? "—"}</p>
                       </button>
                     </li>
                   ))}
@@ -539,9 +612,10 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
           </div>
         ) : null}
 
-        {step === 2 ? (
+        {!draftLoading && step === 2 ? (
           <div className="grid gap-4 sm:grid-cols-2">
-            <FormModalField label="Start date" className="sm:col-span-2">
+            <p className="rph-meta text-sm sm:col-span-2">Rental dates, rent, and contract lengths for this hire.</p>
+            <FormModalField label="Start date" className="sm:col-span-1">
               <input
                 type="date"
                 className="rph-input w-full"
@@ -550,17 +624,31 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
                 onChange={(e) => patchForm({ startDate: e.target.value })}
               />
             </FormModalField>
-            <FormModalField label="Cadence">
-              <select
+            <FormModalField label="Start time" className="sm:col-span-1">
+              <input
+                type="time"
                 className="rph-input w-full"
+                value={form.startTime}
+                disabled={busy || contractTermsLocked}
+                onChange={(e) => patchForm({ startTime: e.target.value })}
+              />
+            </FormModalField>
+            {!hireWizardUsesCustomEndTime(form) ? (
+              <p className="rph-meta text-xs sm:col-span-2">
+                Annual and 6-month contracts end at the same time as the start.
+              </p>
+            ) : null}
+            <FormModalField label="Cadence">
+              <FormModalSelect
                 value={form.rentCadence}
                 disabled={busy || contractTermsLocked}
-                onChange={(e) => patchForm({ rentCadence: e.target.value as RentCadence })}
-              >
-                <option value="weekly">Weekly</option>
-                <option value="daily">Daily</option>
-                <option value="monthly">Monthly</option>
-              </select>
+                onValueChange={(value) => patchForm({ rentCadence: value as RentCadence })}
+                options={[
+                  { value: "weekly", label: "Weekly" },
+                  { value: "daily", label: "Daily" },
+                  { value: "monthly", label: "Monthly" },
+                ]}
+              />
             </FormModalField>
             <FormModalField label="Rent (£)">
               <input
@@ -590,19 +678,20 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
               </FormModalField>
             ) : null}
             <FormModalField label="Payment account (shown to hirer)" className="sm:col-span-2">
-              <select
-                className="rph-input w-full"
-                value={form.defaultPaymentAccountId}
+              <FormModalSelect
+                value={form.defaultPaymentAccountId || PAYMENT_ACCOUNT_NONE}
                 disabled={busy || contractTermsLocked}
-                onChange={(e) => patchForm({ defaultPaymentAccountId: e.target.value })}
-              >
-                <option value="">— Select —</option>
-                {bankAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.label}
-                  </option>
-                ))}
-              </select>
+                placeholder="— Select —"
+                onValueChange={(value) =>
+                  patchForm({
+                    defaultPaymentAccountId: value === PAYMENT_ACCOUNT_NONE ? "" : value,
+                  })
+                }
+                options={[
+                  { value: PAYMENT_ACCOUNT_NONE, label: "— Select —" },
+                  ...bankAccounts.map((a) => ({ value: a.id, label: a.label })),
+                ]}
+              />
             </FormModalField>
             <fieldset className="space-y-2 sm:col-span-2">
               <legend className="text-xs font-medium text-rph-fg-muted">Contract lengths</legend>
@@ -620,19 +709,32 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
                 </label>
               ))}
               {form.contractLengths.custom ? (
-                <input
-                  type="date"
-                  className="rph-input w-full"
-                  value={form.customEndDate}
-                  disabled={busy || contractTermsLocked}
-                  onChange={(e) => patchForm({ customEndDate: e.target.value })}
-                />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <FormModalField label="Custom end date">
+                    <input
+                      type="date"
+                      className="rph-input w-full"
+                      value={form.customEndDate}
+                      disabled={busy || contractTermsLocked}
+                      onChange={(e) => patchForm({ customEndDate: e.target.value })}
+                    />
+                  </FormModalField>
+                  <FormModalField label="End time">
+                    <input
+                      type="time"
+                      className="rph-input w-full"
+                      value={form.endTime}
+                      disabled={busy || contractTermsLocked}
+                      onChange={(e) => patchForm({ endTime: e.target.value })}
+                    />
+                  </FormModalField>
+                </div>
               ) : null}
             </fieldset>
           </div>
         ) : null}
 
-        {step === 3 ? (
+        {!draftLoading && step === 3 ? (
           <div className="space-y-4">
             <p className="rph-meta text-sm">Published hire terms are included in the contract.</p>
             {terms.map((t) => (
@@ -654,22 +756,33 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
                 <button
                   type="button"
                   className="rph-btn-ghost h-9 shrink-0 px-3 text-xs"
-                  onClick={() => setTermsPreviewId(t.id)}
+                  disabled={termsPreviewLoading}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void openTermsPreview(t.id);
+                  }}
                 >
                   Preview
                 </button>
               </label>
             ))}
-            {previewTerms ? (
-              <div
-                className="max-h-[min(32vh,16rem)] overflow-y-auto rounded-xl border border-rph-border bg-rph-page p-4 text-sm prose prose-sm dark:prose-invert"
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(previewTerms.body) }}
-              />
+            {termsPreviewId ? (
+              termsPreviewLoading ? (
+                <div className="flex items-center gap-2 rounded-xl border border-rph-border bg-rph-page p-4 text-sm text-rph-fg-muted">
+                  <InlineSpinner small />
+                  Loading preview…
+                </div>
+              ) : termsPreviewHtml ? (
+                <div
+                  className="max-h-[min(32vh,16rem)] overflow-y-auto rounded-xl border border-rph-border bg-rph-page p-4 text-sm prose prose-sm dark:prose-invert"
+                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(termsPreviewHtml) }}
+                />
+              ) : null
             ) : null}
           </div>
         ) : null}
 
-        {step === 4 ? (
+        {!draftLoading && step === 4 ? (
           <div className="space-y-4">
             <FormModalField label="Driving licence number">
               <input
@@ -739,7 +852,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
           </div>
         ) : null}
 
-        {step === 5 ? (
+        {!draftLoading && step === 5 ? (
           <HireDriverReviewPanel
             profile={
               driverProfile ?? {
@@ -764,7 +877,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
           />
         ) : null}
 
-        {step === 6 ? (
+        {!draftLoading && step === 6 ? (
           <div className="space-y-4">
             <p className="text-sm text-rph-fg-secondary">
               This will generate contract PDFs, place signature fields, and open the e-sign designer. After you sign as
@@ -772,7 +885,18 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
             </p>
             <ul className="rph-card list-inside list-disc space-y-1 p-4 text-sm text-rph-fg-muted">
               <li>Vehicle selected · {form.vehicleId ? "Yes" : "No"}</li>
-              <li>Start {form.startDate ? formatUkDate(form.startDate) : "—"}</li>
+              <li>
+                Start{" "}
+                {form.startDate
+                  ? formatHireContractStartLabel(form.startDate, form.startTime)
+                  : "—"}
+              </li>
+              <li>
+                End time ·{" "}
+                {hireWizardUsesCustomEndTime(form)
+                  ? resolveHireWizardEndTime(form) || "—"
+                  : `Same as start (${form.startTime || "—"})`}
+              </li>
               <li>Driver access approved · {driverAccessStatus === "approved" ? "Yes" : "No"}</li>
             </ul>
           </div>

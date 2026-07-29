@@ -123,5 +123,5 @@ export function parseTerminationAccountsSummary(
 }
 
 export function depositResolutionHelpText(): string {
-  return "The deposit was held at contract end. Choose how to apply or refund it — this updates the settlement balance on this hire.";
+  return "The deposit was held when the contract ended. Choose whether to return it, keep it, or use it to pay rent. This updates the money owed on this hire.";
 }

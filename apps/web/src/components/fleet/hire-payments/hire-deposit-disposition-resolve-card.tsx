@@ -175,7 +175,7 @@ export function HireDepositDispositionResolveCard({
         <div className="space-y-3 border-t border-rph-border pt-4">
           <div className="space-y-2">
             <label className="text-sm font-medium text-rph-fg" htmlFor="settlement-resolution">
-              Settlement
+              How to clear the balance
             </label>
             <select
               id="settlement-resolution"

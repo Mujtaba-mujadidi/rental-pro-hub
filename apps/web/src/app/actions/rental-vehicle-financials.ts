@@ -302,7 +302,7 @@ async function loadVehicleHireIncomeContext(vehicleId: string): Promise<
   | {
       ok: true;
       scheduleRows: VehicleHireIncomeScheduleRow[];
-      balancePayments: { amountGbp: number; direction: string | null; paymentCategory: string | null }[];
+      balancePayments: { hireGroupId: string; amountGbp: number; direction: string | null; paymentCategory: string | null }[];
       driverChargeLineItems: HireDriverChargeLineItemInput[];
       groupContextByGroupId: Map<string, HireIncomeGroupContext>;
     }
@@ -355,7 +355,7 @@ async function loadVehicleHireIncomeContext(vehicleId: string): Promise<
       .in("hire_group_id", groupIds),
     supabase
       .from("vehicle_hire_balance_payments")
-      .select("amount_gbp, direction, payment_category")
+      .select("hire_group_id, amount_gbp, direction, payment_category")
       .in("hire_group_id", groupIds),
     supabase
       .from("vehicle_hire_driver_charge_line_items")
@@ -373,6 +373,7 @@ async function loadVehicleHireIncomeContext(vehicleId: string): Promise<
   );
 
   const balancePayments = (balanceRows ?? []).map((payment) => ({
+    hireGroupId: payment.hire_group_id as string,
     amountGbp: Number(payment.amount_gbp ?? 0),
     direction: (payment.direction as string | null) ?? null,
     paymentCategory: (payment.payment_category as string | null) ?? null,
@@ -463,12 +464,13 @@ async function loadFleetHireIncomeByVehicleId(
 
   const paymentsByGroupId = new Map<
     string,
-    { amountGbp: number; direction: string | null; paymentCategory: string | null }[]
+    { hireGroupId: string; amountGbp: number; direction: string | null; paymentCategory: string | null }[]
   >();
   for (const payment of balanceRows ?? []) {
     const hireGroupId = payment.hire_group_id as string;
     const list = paymentsByGroupId.get(hireGroupId) ?? [];
     list.push({
+      hireGroupId,
       amountGbp: Number(payment.amount_gbp ?? 0),
       direction: (payment.direction as string | null) ?? null,
       paymentCategory: (payment.payment_category as string | null) ?? null,

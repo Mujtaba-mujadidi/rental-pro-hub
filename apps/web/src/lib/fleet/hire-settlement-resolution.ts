@@ -28,7 +28,7 @@ export type TerminationBalanceState = {
 
 /** Hire group settlement fields are the single source of truth; balance_payments is the ledger. */
 export function hireSettlementLedgerHelpText(): string {
-  return "The hire record holds the open balance. Payments are logged on that hire and clear it when fully paid — the Balances page lists all hires with an outstanding amount.";
+  return "This hire shows how much is still owed. Each payment you record reduces that amount. The Balances page lists all hires with money still to pay or refund.";
 }
 
 export function settlementStepRequired(netSettlementGbp: number): boolean {
@@ -47,8 +47,8 @@ export function getDepositDispositionOptions(signedRentBalanceGbp: number): Depo
       allowed = driverOwesRent;
       if (!allowed) {
         disabledReason = companyOwesRent
-          ? "Driver has rent credit — deposit cannot be applied to a balance you owe them"
-          : "No outstanding rent balance to apply the deposit to";
+          ? "Driver paid too much rent — you owe them, so the deposit cannot pay rent"
+          : "No rent is owed — deposit cannot be used to pay rent";
       }
     }
 
@@ -88,9 +88,9 @@ export function availableSettlementResolutions(
 
 export function settlementResolutionLabel(resolution: HireSettlementResolution): string {
   const labels: Record<HireSettlementResolution, string> = {
-    paid_now: "Clearing now — record payment",
-    open_balance: "Add to balance sheet (pay in phases)",
-    written_off: "Write off as discount (no payment expected)",
+    paid_now: "Pay now — record payment",
+    open_balance: "Pay later — track on balance sheet",
+    written_off: "Write off — no payment needed",
   };
   return labels[resolution];
 }

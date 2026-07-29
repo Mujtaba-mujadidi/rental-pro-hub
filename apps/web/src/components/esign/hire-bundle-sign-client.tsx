@@ -37,7 +37,8 @@ function PrivacyNotice() {
 }
 
 export function HireBundleSignClient({ token }: { token: string }) {
-  const [pending, startTransition] = useTransition();
+  const [refreshPending, startRefresh] = useTransition();
+  const [submitPending, startSubmit] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [otp, setOtp] = useState("");
   const [verified, setVerified] = useState(false);
@@ -55,7 +56,7 @@ export function HireBundleSignClient({ token }: { token: string }) {
   const effectiveSavedSignature = sessionSignature ?? savedSig;
 
   const refresh = useCallback(() => {
-    startTransition(() => {
+    startRefresh(() => {
       void (async () => {
         const res = await loadHireBundleSigningStateAction(token);
         if (!res.ok) {
@@ -109,7 +110,7 @@ export function HireBundleSignClient({ token }: { token: string }) {
 
   function verify() {
     setError(null);
-    startTransition(() => {
+    startRefresh(() => {
       void (async () => {
         const res = await verifyHireBundleOtpAction(token, otp);
         if (!res.ok) {
@@ -212,18 +213,26 @@ export function HireBundleSignClient({ token }: { token: string }) {
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
           <button
             type="button"
-            disabled={pending || otp.length !== 6}
+            disabled={refreshPending || otp.length !== 6}
             onClick={verify}
             className="w-full rounded-lg bg-rph-rail py-2.5 text-sm font-semibold text-white disabled:opacity-50"
           >
-            {pending ? "Checking…" : "Continue"}
+            {refreshPending ? "Checking…" : "Continue"}
           </button>
         </div>
       </div>
     );
   }
 
-  if (!currentAgreement || currentAgreement.signed) {
+  if (!currentAgreement) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center p-6 text-sm text-slate-600">
+        {refreshPending ? "Loading next agreement…" : "No agreement available."}
+      </div>
+    );
+  }
+
+  if (currentAgreement.signed) {
     return (
       <div className="flex min-h-dvh items-center justify-center p-6 text-sm text-slate-600">
         Loading next agreement…
@@ -235,21 +244,20 @@ export function HireBundleSignClient({ token }: { token: string }) {
   const pdfUrl = `/api/esign/${currentAgreement.envelopeId}/pdf?bundleToken=${encodeURIComponent(token)}&variant=current`;
 
   return (
-    <div className="flex min-h-dvh flex-col bg-slate-100 dark:bg-slate-950">
-      <header className="border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950">
+    <div className="flex h-full min-h-0 flex-1 flex-col">
+      <header className="shrink-0 border-b border-slate-200 bg-white px-4 py-2.5 dark:border-slate-800 dark:bg-slate-950">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
           Agreement {stepNumber} of {totalCount}
         </p>
-        <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50">
+        <h1 className="text-base font-semibold text-slate-900 dark:text-slate-50">
           {currentAgreement.lengthLabel} · {vehicleVrm}
         </h1>
-        <p className="text-sm text-slate-600 dark:text-slate-300">{currentAgreement.title}</p>
         {totalCount > 1 ? (
-          <div className="mt-3 flex gap-1">
+          <div className="mt-2 flex gap-1">
             {agreements.map((a, i) => (
               <span
                 key={a.envelopeId}
-                className={`h-1.5 flex-1 rounded-full ${
+                className={`h-1 flex-1 rounded-full ${
                   a.signed ? "bg-emerald-500" : i === currentIndex ? "bg-rph-rail" : "bg-slate-200 dark:bg-slate-700"
                 }`}
               />
@@ -261,61 +269,57 @@ export function HireBundleSignClient({ token }: { token: string }) {
       {fieldsLoading ? (
         <div className="flex flex-1 items-center justify-center text-sm text-slate-500">Loading agreement…</div>
       ) : (
-        <div className="min-h-0 flex-1">
-          <GuidedSigningViewer
-            key={currentAgreement.envelopeId}
-            sessionKey={currentAgreement.envelopeId}
-            pdfUrl={pdfUrl}
-            title={currentAgreement.title}
-            fields={currentFields}
-            pending={pending}
-            error={error}
-            savedSignatureDataUrl={effectiveSavedSignature}
-            prefillSignerName={hirerName}
-            startButtonLabel={totalCount > 1 ? `Start agreement ${stepNumber}` : "Start signing"}
-            submitButtonLabel={
-              stepNumber < totalCount ? "Sign & continue to next agreement" : "Finish & submit all agreements"
-            }
-            reviewHint={
-              totalCount > 1
-                ? `Review this agreement, then sign. You have ${totalCount - signedCount} agreement${totalCount - signedCount === 1 ? "" : "s"} in this session.`
-                : undefined
-            }
-            onSubmit={(values: FieldValueMap, options) => {
-              setError(null);
-              startTransition(() => {
-                void (async () => {
-                  const res = await completeHireBundleAgreementAction(
-                    token,
-                    currentAgreement.envelopeId,
-                    values,
-                    options,
-                  );
-                  if (!res.ok) {
-                    setError(res.error);
-                    return;
+        <GuidedSigningViewer
+          key={currentAgreement.envelopeId}
+          layout="embedded"
+          sessionKey={currentAgreement.envelopeId}
+          pdfUrl={pdfUrl}
+          title={currentAgreement.title}
+          fields={currentFields}
+          pending={submitPending}
+          error={error}
+          savedSignatureDataUrl={effectiveSavedSignature}
+          prefillSignerName={hirerName}
+          startButtonLabel={totalCount > 1 ? `Start agreement ${stepNumber}` : "Start signing"}
+          submitButtonLabel={
+            stepNumber < totalCount ? "Sign & continue to next agreement" : "Finish & submit all agreements"
+          }
+          reviewHint={
+            totalCount > 1
+              ? `Review this agreement, then sign. You have ${totalCount - signedCount} agreement${totalCount - signedCount === 1 ? "" : "s"} in this session.`
+              : undefined
+          }
+          onSubmit={(values: FieldValueMap, options) => {
+            setError(null);
+            const signedEnvelopeId = currentAgreement.envelopeId;
+            startSubmit(() => {
+              void (async () => {
+                const res = await completeHireBundleAgreementAction(token, signedEnvelopeId, values, options);
+                if (!res.ok) {
+                  setError(res.error);
+                  return;
+                }
+                setAgreements((prev) =>
+                  prev.map((a) => (a.envelopeId === signedEnvelopeId ? { ...a, signed: true } : a)),
+                );
+                if (options?.saveSignature && options.signatureDataUrl) {
+                  setSessionSignature(options.signatureDataUrl);
+                  setSavedSig(options.signatureDataUrl);
+                } else {
+                  const saved = await getHireBundleSavedSignatureAction(token);
+                  if (saved.ok) {
+                    setSavedSig(saved.dataUrl);
+                    setSessionSignature(saved.dataUrl);
                   }
-                  if (options?.saveSignature && options.signatureDataUrl) {
-                    setSessionSignature(options.signatureDataUrl);
-                    setSavedSig(options.signatureDataUrl);
-                  } else {
-                    const saved = await getHireBundleSavedSignatureAction(token);
-                    if (saved.ok) {
-                      setSavedSig(saved.dataUrl);
-                      setSessionSignature(saved.dataUrl);
-                    }
-                  }
-                  if (res.allSigned) {
-                    setAllSigned(true);
-                    refresh();
-                    return;
-                  }
-                  refresh();
-                })();
-              });
-            }}
-          />
-        </div>
+                }
+                if (res.allSigned) {
+                  setAllSigned(true);
+                }
+                refresh();
+              })();
+            });
+          }}
+        />
       )}
     </div>
   );

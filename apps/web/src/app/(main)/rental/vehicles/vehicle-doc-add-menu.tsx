@@ -1,14 +1,15 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useCanScanOrCaptureDocument } from "@/hooks/use-can-scan-or-capture-document";
 
 const triggerClass =
   "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-rph-border bg-rph-raised px-3 text-sm font-medium text-rph-fg-secondary transition-colors hover:bg-rph-chrome data-[state=open]:bg-rph-chrome disabled:opacity-50";
 
+/** z-[320] — above FormModalShell (310) so the menu anchors under the Add button inside modals. */
 const contentClass =
-  "z-[200] min-w-[14rem] overflow-hidden rounded-lg border border-rph-border bg-rph-elevated py-1 shadow-lg";
+  "z-[320] min-w-[14rem] overflow-hidden rounded-lg border border-rph-border bg-rph-elevated py-1 shadow-lg";
 
 const itemClass =
   "flex cursor-default select-none flex-col items-start gap-0.5 px-3 py-2 text-left text-sm text-rph-fg outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-rph-chrome";
@@ -30,6 +31,7 @@ export function VehicleDocAddMenu({
   onFiles: (files: FileList | null) => void;
 }) {
   const canScanOrCapture = useCanScanOrCaptureDocument();
+  const [menuOpen, setMenuOpen] = useState(false);
   const filesRef = useRef<HTMLInputElement>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const scanRef = useRef<HTMLInputElement>(null);
@@ -38,6 +40,11 @@ export function VehicleDocAddMenu({
     if (!input) return;
     onFiles(input.files);
     input.value = "";
+  }
+
+  function openFilePicker(input: HTMLInputElement | null) {
+    setMenuOpen(false);
+    requestAnimationFrame(() => input?.click());
   }
 
   return (
@@ -71,7 +78,7 @@ export function VehicleDocAddMenu({
         onChange={(e) => handleChange(e.target)}
       />
 
-      <DropdownMenu.Root>
+      <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
         <DropdownMenu.Trigger asChild>
           <button type="button" className={triggerClass} disabled={disabled} aria-label="Add document">
             Add
@@ -85,7 +92,7 @@ export function VehicleDocAddMenu({
             side="bottom"
             align="end"
             sideOffset={6}
-            avoidCollisions={false}
+            collisionPadding={12}
             className={contentClass}
           >
             <DropdownMenu.Item
@@ -93,7 +100,7 @@ export function VehicleDocAddMenu({
               disabled={disabled}
               onSelect={(e) => {
                 e.preventDefault();
-                filesRef.current?.click();
+                openFilePicker(filesRef.current);
               }}
             >
               <span className="font-medium">Choose files</span>
@@ -108,7 +115,7 @@ export function VehicleDocAddMenu({
                   disabled={disabled}
                   onSelect={(e) => {
                     e.preventDefault();
-                    scanRef.current?.click();
+                    openFilePicker(scanRef.current);
                   }}
                 >
                   <span className="font-medium">Scan documents</span>
@@ -121,7 +128,7 @@ export function VehicleDocAddMenu({
                   disabled={disabled}
                   onSelect={(e) => {
                     e.preventDefault();
-                    photoRef.current?.click();
+                    openFilePicker(photoRef.current);
                   }}
                 >
                   <span className="font-medium">Take photo</span>

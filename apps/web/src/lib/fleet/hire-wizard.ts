@@ -10,6 +10,8 @@ export type HireDraftSnapshot = {
 export type HireWizardFormState = {
   vehicleId: string;
   startDate: string;
+  startTime: string;
+  endTime: string;
   rentCadence: RentCadence;
   rentAmountGbp: string;
   includeDeposit: boolean;
@@ -26,6 +28,20 @@ export function normalizeDrivingLicence(raw: string): string {
   return raw.replace(/\s+/g, "").toUpperCase();
 }
 
+/** Custom contracts collect end time; annual and 6-month mirror start time. */
+export function hireWizardUsesCustomEndTime(
+  form: Pick<HireWizardFormState, "contractLengths">,
+): boolean {
+  return form.contractLengths.custom;
+}
+
+export function resolveHireWizardEndTime(
+  form: Pick<HireWizardFormState, "startTime" | "endTime" | "contractLengths">,
+): string {
+  if (hireWizardUsesCustomEndTime(form)) return form.endTime.trim();
+  return form.startTime.trim();
+}
+
 export function canAdvanceFromStep(step: HireWizardStep, form: HireWizardFormState): string | null {
   if (step === 1) {
     if (!form.vehicleId.trim()) return "Select a vehicle.";
@@ -33,6 +49,12 @@ export function canAdvanceFromStep(step: HireWizardStep, form: HireWizardFormSta
   }
   if (step === 2) {
     if (!form.startDate.trim()) return "Start date is required.";
+    if (!form.startTime.trim()) return "Start time is required.";
+    if (!/^\d{2}:\d{2}$/.test(form.startTime.trim())) return "Enter a valid start time.";
+    if (hireWizardUsesCustomEndTime(form)) {
+      if (!form.endTime.trim()) return "End time is required for custom contracts.";
+      if (!/^\d{2}:\d{2}$/.test(form.endTime.trim())) return "Enter a valid end time.";
+    }
     const amount = Number.parseFloat(form.rentAmountGbp);
     if (!Number.isFinite(amount) || amount < 0) return "Enter a valid rent amount.";
     if (form.includeDeposit) {

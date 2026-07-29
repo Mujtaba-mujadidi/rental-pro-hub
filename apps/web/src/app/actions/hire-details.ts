@@ -11,7 +11,7 @@ import {
 } from "@/lib/fleet/hire-document-retention";
 import { ukTodayYmd } from "@/lib/datetime/uk";
 import { CONTRACT_LENGTH_LABELS } from "@/lib/fleet/hire-access-display";
-import { formatHireContractStartLabel } from "@/lib/fleet/hire-pdf-details";
+import { formatHireContractEndLabel, formatHireContractStartLabel } from "@/lib/fleet/hire-pdf-details";
 import type { ContractLengthKind } from "@/lib/fleet/hire-types";
 import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
 import {
@@ -274,6 +274,7 @@ function mapRentalAgreements(
     esign_envelope_id?: string | null;
   }[] | null,
   signedByEnvelope: Map<string, HireSignedDocumentRow>,
+  endTime?: string | null,
 ): HireDetailsRentalAgreement[] {
   if (!agreements?.length) return [];
   return agreements.map((agreement) => {
@@ -287,7 +288,7 @@ function mapRentalAgreements(
     return {
       id: (agreement.id as string) ?? label,
       label,
-      endDateLabel: formatUkDate(agreement.end_date),
+      endDateLabel: formatHireContractEndLabel(agreement.end_date, endTime),
       statusLabel: agreementStatusLabel(agreement),
       pdfUrl: signed?.pdfUrl ?? null,
       downloadFileName,
@@ -308,6 +309,8 @@ async function loadSignedAgreementsByEnvelope(hireGroupId: string): Promise<Map<
 function buildRentalCard(input: {
   companyName: string | null;
   startDate: string | null | undefined;
+  startTime?: string | null | undefined;
+  endTime?: string | null | undefined;
   activatedAt: string | null | undefined;
   endedAt: string | null | undefined;
   rentAmountGbp: unknown;
@@ -331,13 +334,13 @@ function buildRentalCard(input: {
 
   return {
     companyName: input.companyName,
-    startDateLabel: formatHireContractStartLabel(input.startDate),
+    startDateLabel: formatHireContractStartLabel(input.startDate, input.startTime),
     activatedAtLabel: input.activatedAt ? formatUkDateTime(input.activatedAt) : null,
     endedAtLabel: input.endedAt ? formatUkDateTime(input.endedAt) : null,
     rentAmountLabel: formatRentAmount(input.rentAmountGbp),
     rentFrequencyLabel: formatRentFrequency(input.rentCadence),
     depositLabel,
-    agreements: mapRentalAgreements(input.agreements, input.signedByEnvelope),
+    agreements: mapRentalAgreements(input.agreements, input.signedByEnvelope, input.endTime),
   };
 }
 
@@ -471,7 +474,7 @@ async function buildHireDetails(
   const { data: group, error } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      `id, status, parent_company_id, subcompany_id, driver_user_id, vehicle_id, start_date, activated_at, ended_at, terminated_at, driver_documents_retain_until, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, companies(name), vehicles(vrm, make, model, colour, fuel_type, seats, cc, mot_expiry, tax_expiry, phv_licence_no, phv_licence_expiry, service_due_at), vehicle_hire_agreements(id, contract_length_kind, end_date, status, signed_at, esign_envelope_id)`,
+      `id, status, parent_company_id, subcompany_id, driver_user_id, vehicle_id, start_date, start_time, end_time, activated_at, ended_at, terminated_at, driver_documents_retain_until, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, companies(name), vehicles(vrm, make, model, colour, fuel_type, seats, cc, mot_expiry, tax_expiry, phv_licence_no, phv_licence_expiry, service_due_at), vehicle_hire_agreements(id, contract_length_kind, end_date, status, signed_at, esign_envelope_id)`,
     )
     .eq("id", hireGroupId.trim())
     .maybeSingle();
@@ -584,6 +587,8 @@ async function buildHireDetails(
   const rental = buildRentalCard({
     companyName: options.driverUserId ? companyCard.companyName : null,
     startDate: group.start_date as string | undefined,
+    startTime: (group.start_time as string | null) ?? null,
+    endTime: (group.end_time as string | null) ?? null,
     activatedAt: group.activated_at as string | null | undefined,
     endedAt:
       (group.terminated_at as string | null | undefined) ??

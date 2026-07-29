@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
-import { canWriteRentals } from "@/lib/auth/rental-permissions";
+import { canReadRentals, canWriteRentals } from "@/lib/auth/rental-permissions";
 import { logHireGroupEvent } from "@/lib/fleet/hire-audit";
 import {
   canCompleteHireCheckin,
@@ -267,19 +267,14 @@ async function loadInspectionPayload(
       .order("sort_order", { ascending: true }),
   ]);
 
-  const mediaItems: HireInspectionMediaItem[] = [];
-  for (const row of media ?? []) {
-    const filePath = row.file_path as string;
-    const { data: signed } = await supabase.storage.from(BUCKET).createSignedUrl(filePath, 3600);
-    mediaItems.push({
-      id: row.id as string,
-      filePath,
-      signedUrl: signed?.signedUrl ?? null,
-      caption: (row.caption as string | null) ?? null,
-      damageId: (row.damage_id as string | null) ?? null,
-      sortOrder: (row.sort_order as number) ?? 0,
-    });
-  }
+  const mediaItems: HireInspectionMediaItem[] = (media ?? []).map((row, index) => ({
+    id: row.id as string,
+    filePath: row.file_path as string,
+    signedUrl: null,
+    caption: (row.caption as string | null) ?? null,
+    damageId: (row.damage_id as string | null) ?? null,
+    sortOrder: (row.sort_order as number) ?? index,
+  }));
 
   return {
     id: inspection.id as string,
@@ -1276,4 +1271,128 @@ export async function loadDriverHireInspectionAction(
   }
 
   return { ok: true, data };
+}
+
+async function assertHireInspectionReadAccess(
+  hireGroupId: string,
+): Promise<
+  | { ok: true; supabase: Awaited<ReturnType<typeof createClient>>; vehicleId: string | null }
+  | { ok: false; error: string }
+> {
+  const user = await getSessionUser();
+  if (!user) return { ok: false, error: "Sign in required." };
+
+  const supabase = await createClient();
+  const { data: group, error } = await supabase
+    .from("vehicle_hire_groups")
+    .select("id, vehicle_id, driver_user_id, parent_company_id")
+    .eq("id", hireGroupId.trim())
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!group?.id) return { ok: false, error: "Hire not found." };
+
+  if (group.driver_user_id === user.id) {
+    return { ok: true, supabase, vehicleId: (group.vehicle_id as string | null) ?? null };
+  }
+
+  const { profile } = await requireRentalCompanyArea();
+  if (!canReadRentals(profile)) {
+    return { ok: false, error: "You do not have permission to view this inspection." };
+  }
+
+  return { ok: true, supabase, vehicleId: (group.vehicle_id as string | null) ?? null };
+}
+
+/** Lazy-load a signed URL for one inspection photo (viewport / tab gated on the client). */
+export async function signHireInspectionMediaUrlAction(
+  hireGroupId: string,
+  mediaId: string,
+): Promise<{ ok: true; signedUrl: string } | { ok: false; error: string }> {
+  const access = await assertHireInspectionReadAccess(hireGroupId);
+  if (!access.ok) return access;
+
+  const { data: media, error } = await access.supabase
+    .from("vehicle_hire_inspection_media")
+    .select("id, file_path, inspection_id")
+    .eq("id", mediaId.trim())
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!media?.id) return { ok: false, error: "Photo not found." };
+
+  const { data: inspection } = await access.supabase
+    .from("vehicle_hire_inspections")
+    .select("hire_group_id")
+    .eq("id", media.inspection_id as string)
+    .maybeSingle();
+  if (inspection?.hire_group_id !== hireGroupId.trim()) {
+    return { ok: false, error: "Photo not found." };
+  }
+
+  const { data: signed, error: signError } = await access.supabase.storage
+    .from(BUCKET)
+    .createSignedUrl(media.file_path as string, 3600);
+  if (signError || !signed?.signedUrl) {
+    return { ok: false, error: signError?.message ?? "Could not load photo." };
+  }
+
+  return { ok: true, signedUrl: signed.signedUrl };
+}
+
+/** Generate a one-off PDF export (not stored). */
+export async function exportHireInspectionPdfAction(
+  hireGroupId: string,
+  kind: HireInspectionKind,
+  vehicleLabel: string,
+): Promise<{ ok: true; base64: string; fileName: string } | { ok: false; error: string }> {
+  if (!HIRE_INSPECTION_KINDS.includes(kind)) return { ok: false, error: "Invalid inspection type." };
+
+  const access = await assertHireInspectionReadAccess(hireGroupId);
+  if (!access.ok) return access;
+
+  const data = await loadInspectionPayload(access.supabase, hireGroupId, kind, access.vehicleId);
+  if (!data) return { ok: false, error: "Could not load inspection." };
+  if (data.status !== "completed") {
+    return { ok: false, error: "Complete the inspection before exporting a PDF." };
+  }
+
+  const { getVehicleDamagePanel } = await import("@/lib/fleet/vehicle-damage-panels");
+  const { buildHireInspectionReportPdf } = await import("@/lib/fleet/hire-inspection-report-pdf");
+
+  const photoBuffers: { caption?: string | null; bytes: Buffer; contentType: string }[] = [];
+  for (const item of data.media) {
+    const { data: blob, error } = await access.supabase.storage.from(BUCKET).download(item.filePath);
+    if (error || !blob) continue;
+    const bytes = Buffer.from(await blob.arrayBuffer());
+    photoBuffers.push({
+      caption: item.caption,
+      bytes,
+      contentType: blob.type || "image/jpeg",
+    });
+  }
+
+  const pdf = await buildHireInspectionReportPdf(
+    {
+      kind,
+      vehicleLabel,
+      completedAt: data.completedAt,
+      odometerReading: data.odometerReading,
+      fuelLevel: data.fuelLevel,
+      accessories: data.accessories,
+      generalNotes: data.generalNotes,
+      damages: data.damages.map((d) => ({
+        panelLabel: getVehicleDamagePanel(d.panelId)?.label ?? d.panelLabel,
+        damageType: d.damageType,
+        severity: d.severity,
+        notes: d.notes,
+      })),
+      photoCount: data.media.length,
+    },
+    photoBuffers,
+  );
+
+  return {
+    ok: true,
+    base64: Buffer.from(pdf.bytes).toString("base64"),
+    fileName: pdf.fileName,
+  };
 }

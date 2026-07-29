@@ -10,8 +10,35 @@ import type { ContractLengthKind, RentCadence } from "@/lib/fleet/hire-types";
 export const HIRE_PDF_DEFAULT_START_TIME = "09:00";
 export const HIRE_PDF_DEFAULT_END_TIME = "17:00";
 
-export function formatHireContractStartLabel(startDate: string | null | undefined): string {
-  return formatUkDateAtTime(startDate, HIRE_PDF_DEFAULT_START_TIME);
+/** Normalise DB `time` or HH:MM input for display and PDFs. */
+export function normalizeHireTime(raw: string | null | undefined, fallback: string): string {
+  if (!raw?.trim()) return fallback;
+  const match = /^(\d{1,2}):(\d{2})/.exec(raw.trim());
+  if (!match) return fallback;
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
+/** @deprecated Use {@link normalizeHireTime} */
+export function normalizeHireStartTime(raw: string | null | undefined): string {
+  return normalizeHireTime(raw, HIRE_PDF_DEFAULT_START_TIME);
+}
+
+export function normalizeHireEndTime(raw: string | null | undefined): string {
+  return normalizeHireTime(raw, HIRE_PDF_DEFAULT_END_TIME);
+}
+
+export function formatHireContractStartLabel(
+  startDate: string | null | undefined,
+  startTime?: string | null | undefined,
+): string {
+  return formatUkDateAtTime(startDate, normalizeHireTime(startTime, HIRE_PDF_DEFAULT_START_TIME));
+}
+
+export function formatHireContractEndLabel(
+  endDate: string | null | undefined,
+  endTime?: string | null | undefined,
+): string {
+  return formatUkDateAtTime(endDate, normalizeHireTime(endTime, HIRE_PDF_DEFAULT_END_TIME));
 }
 
 export type HirePdfDriverSource = {
@@ -73,7 +100,9 @@ export function buildHirePdfDetails(input: {
   driverEmail: string;
   vehicle: HirePdfVehicleSource;
   startDate: string;
+  startTime?: string | null;
   endDate: string;
+  endTime?: string | null;
   contractLengthKind: ContractLengthKind;
   rentCadence: RentCadence;
   rentAmountGbp: number;
@@ -116,11 +145,11 @@ export function buildHirePdfDetails(input: {
     rental: [
       {
         label: "Hire start date and time",
-        value: formatHireContractStartLabel(input.startDate),
+        value: formatHireContractStartLabel(input.startDate, input.startTime),
       },
       {
         label: "Hire end date and time",
-        value: formatUkDateAtTime(input.endDate, HIRE_PDF_DEFAULT_END_TIME),
+        value: formatHireContractEndLabel(input.endDate, input.endTime),
       },
       { label: "Rent", value: formatGbp(input.rentAmountGbp) },
       {
@@ -151,7 +180,7 @@ export function buildHirePdfDetails(input: {
     hirer: input.driverName,
     hirerAddress: driverAddress,
     phvLicenceNumber: phvNumber,
-    hireStartDate: formatHireContractStartLabel(input.startDate),
+    hireStartDate: formatHireContractStartLabel(input.startDate, input.startTime),
   };
 
   return { hireDetails, hireRunningHeader };

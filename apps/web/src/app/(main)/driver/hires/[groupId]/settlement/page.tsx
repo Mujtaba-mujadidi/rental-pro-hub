@@ -39,9 +39,9 @@ export default function DriverHireSettlementPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="rph-h1">Settlement</h1>
+        <h1 className="rph-h1">Balance after contract end</h1>
         <p className="rph-muted mt-1 text-sm">
-          Final account balance after your contract ended
+          Money still owed or to be refunded after your contract ended
           {shell.terminatedAtLabel ? ` on ${shell.terminatedAtLabel}` : ""}.
         </p>
       </div>
@@ -50,7 +50,7 @@ export default function DriverHireSettlementPage() {
         <p className="text-xs font-medium uppercase tracking-wide text-rph-fg-muted">Balance</p>
         <p className="mt-1 text-2xl font-semibold tabular-nums text-rph-fg">
           {data.settled
-            ? "Settled — no balance outstanding"
+            ? "All clear — nothing owed"
             : settlementBalanceLabel(data.settlementDirection, data.openBalanceGbp)}
         </p>
         {!data.settled ? (

@@ -13,8 +13,10 @@ import { HireDepositDispositionResolveCard } from "@/components/fleet/hire-payme
 import { HireSettlementBalancePaymentCard } from "@/components/fleet/hire-payments/hire-settlement-balance-payment-card";
 import { HireSettlementBalancePaymentsTable } from "@/components/fleet/hire-payments/hire-settlement-balance-payments-table";
 import { HireTerminationSummaryCard } from "@/components/fleet/hire-payments/hire-termination-summary-card";
+import { HirePaymentsAccountOverview } from "@/components/fleet/hire-payments/hire-payments-account-overview";
 import { HireDepositPendingBanner } from "@/components/fleet/hire-dashboard/hire-deposit-pending-banner";
 import { HireWorkspaceBalanceBanner } from "@/components/fleet/hire-dashboard/hire-workspace-balance-banner";
+import { summarizeHireSettlementLedger } from "@/lib/fleet/hire-payments-ledger";
 import { useHirePaymentsRealtime } from "@/hooks/use-hire-realtime";
 import { useCallback, useEffect, useState, useTransition } from "react";
 
@@ -62,18 +64,24 @@ export function HirePaymentsView({
   if (error) return <p className="rph-alert-error text-sm">{error}</p>;
   if (!data) return null;
 
+  const contractEnded = Boolean(data.contractEndedYmd);
+  const ledgerSummary =
+    data.settlementBalancePayments.length > 0
+      ? summarizeHireSettlementLedger(data.settlementBalancePayments)
+      : null;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="rph-h1">Payments</h1>
           <p className="rph-muted mt-1 text-sm">
-            {data.scheduleReadOnly
-              ? "Contract ended — view balances and payment history below."
-              : "Record and approve rent payments for this hire. Total due is calculated to date, not the full contract."}
+            {contractEnded
+              ? "This hire has ended. See the summary, money in/out, and rent for the contract below."
+              : "Record and approve rent payments for this hire. Totals are for weeks started so far, not the full contract."}
           </p>
         </div>
-        {data.canSubmitPayment ? (
+        {!contractEnded && data.canSubmitPayment ? (
           <div className="shrink-0 self-start">
             <HirePaymentComposer
               hireGroupId={hireGroupId}
@@ -99,16 +107,30 @@ export function HirePaymentsView({
         ) : null}
       </div>
 
-      <HireWorkspaceBalanceBanner
-        hireGroupId={hireGroupId}
-        rentBalanceGbp={data.summary.balanceGbp}
-        rentCreditGbp={data.summary.creditGbp}
+      <HirePaymentsAccountOverview
+        contractEnded={contractEnded}
+        contractEndedAtLabel={data.contractEndedAtLabel}
+        summary={data.summary}
+        terminationSummary={data.terminationSummary}
         settlementBalance={data.settlementBalance}
-        contractEnded={Boolean(data.contractEndedYmd)}
         depositPendingReview={data.depositPendingReview}
         depositGbp={data.depositGbp ?? 0}
         depositDispositionLabel={data.depositDispositionLabel}
+        ledgerSummary={ledgerSummary}
       />
+
+      {!contractEnded ? (
+        <HireWorkspaceBalanceBanner
+          hireGroupId={hireGroupId}
+          rentBalanceGbp={data.summary.balanceGbp}
+          rentCreditGbp={data.summary.creditGbp}
+          settlementBalance={data.settlementBalance}
+          contractEnded={contractEnded}
+          depositPendingReview={data.depositPendingReview}
+          depositGbp={data.depositGbp ?? 0}
+          depositDispositionLabel={data.depositDispositionLabel}
+        />
+      ) : null}
 
       <HireDepositPendingBanner
         hireGroupId={hireGroupId}
@@ -138,7 +160,10 @@ export function HirePaymentsView({
         />
       ) : null}
 
-      <HireSettlementBalancePaymentsTable payments={data.settlementBalancePayments} />
+      <HireSettlementBalancePaymentsTable
+        payments={data.settlementBalancePayments}
+        contractEnded={contractEnded}
+      />
 
       {data.terminationSummary ? (
         <HireTerminationSummaryCard
@@ -159,25 +184,47 @@ export function HirePaymentsView({
         />
       ) : null}
 
-      <HirePaymentSummaryCards
-        summary={data.summary}
-        showDiscountTotal
-        compact
-        contractEnded={Boolean(data.contractEndedYmd)}
-      />
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-sm font-semibold text-rph-fg">
+            {contractEnded ? "Rent during contract" : "Payment schedule"}
+          </h2>
+          <p className="rph-muted mt-1 text-xs">
+            {contractEnded
+              ? "Deposit is listed first, then rent weeks. Weeks after the end date are hidden unless the driver paid early."
+              : "Deposit is listed first, then rent weeks. Only weeks that have started count toward the balance above."}
+          </p>
+        </div>
 
-      <HirePaymentScheduleTable
-        rows={data.rows}
-        canRecordOnRow={data.canSubmitPayment}
-        canApprove={data.canApprovePayments}
-        canApplyDiscount={data.canApplyDiscount}
-        highlightedRowIds={highlightedRowIds}
-        contractEndedYmd={data.contractEndedYmd}
-        settlementSettled={data.settlementBalance?.settled === true}
-        audience="staff"
-        readOnly={data.scheduleReadOnly}
-        onRefresh={reload}
-      />
+        {!contractEnded ? (
+          <HirePaymentSummaryCards
+            summary={data.summary}
+            showDiscountTotal
+            compact
+            contractEnded={contractEnded}
+          />
+        ) : (
+          <HirePaymentSummaryCards
+            summary={data.summary}
+            compact
+            contractEnded={contractEnded}
+            endedContractOnly
+          />
+        )}
+
+        <HirePaymentScheduleTable
+          rows={data.rows}
+          canRecordOnRow={data.canSubmitPayment}
+          canApprove={data.canApprovePayments}
+          canApplyDiscount={data.canApplyDiscount}
+          highlightedRowIds={highlightedRowIds}
+          contractEndedYmd={data.contractEndedYmd}
+          settlementSettled={data.settlementBalance?.settled === true}
+          audience="staff"
+          readOnly={data.scheduleReadOnly}
+          onRefresh={reload}
+        />
+      </section>
     </div>
   );
 }

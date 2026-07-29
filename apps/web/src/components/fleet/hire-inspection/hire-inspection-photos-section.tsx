@@ -1,9 +1,12 @@
 "use client";
 
+import { HireInspectionLazyImage } from "@/components/fleet/hire-inspection/hire-inspection-lazy-image";
 import { HireInspectionPhotoAddMenu } from "@/components/fleet/hire-inspection/hire-inspection-photo-add-menu";
 import type { HireInspectionDraftMedia } from "@/lib/fleet/hire-inspection-draft-media";
+import { isLocalMediaId } from "@/lib/fleet/hire-inspection-draft-media";
 
 type HireInspectionPhotosSectionProps = {
+  hireGroupId: string;
   draftMedia: HireInspectionDraftMedia[];
   onAddPhotos: (files: FileList | null) => void;
   onRemovePhoto: (mediaId: string) => void;
@@ -12,6 +15,7 @@ type HireInspectionPhotosSectionProps = {
 };
 
 export function HireInspectionPhotosSection({
+  hireGroupId,
   draftMedia,
   onAddPhotos,
   onRemovePhoto,
@@ -33,17 +37,22 @@ export function HireInspectionPhotosSection({
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         {draftMedia.map((item) => (
           <div key={item.id} className="relative overflow-hidden rounded-lg border border-rph-border">
-            {item.previewUrl ? (
+            {item.isObjectUrl || isLocalMediaId(item.id) ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={item.previewUrl}
                 alt="Vehicle photo"
+                loading="lazy"
+                decoding="async"
                 className="aspect-video w-full object-cover"
               />
             ) : (
-              <div className="flex aspect-video items-center justify-center bg-rph-chrome text-xs text-rph-fg-muted">
-                Photo
-              </div>
+              <HireInspectionLazyImage
+                hireGroupId={hireGroupId}
+                mediaId={item.id}
+                alt="Vehicle photo"
+                eagerSrc={item.previewUrl || null}
+              />
             )}
             {!readOnly ? (
               <button

@@ -161,14 +161,15 @@ export function DriverHireRequestsClient() {
         return here to sign or continue signing.
       </p>
 
-      {pending ? <LoadingPanel label="Updating hire requests…" /> : null}
+      {pending && rows === null ? <LoadingPanel label="Loading hire requests…" /> : null}
+      {pending && rows !== null ? <LoadingPanel label="Updating hire requests…" /> : null}
       {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
 
-      {rows === null ? (
-        <LoadingPanel label="Loading hire requests…" />
-      ) : !rows.length ? (
+      {rows !== null && !rows.length ? (
         <p className="rph-muted text-sm">No requests.</p>
-      ) : (
+      ) : null}
+
+      {rows?.length ? (
         <ul className="space-y-3">
           {rows.map((r) => (
             <li
@@ -250,7 +251,7 @@ export function DriverHireRequestsClient() {
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
 
       <HireAccessReviewModal
         open={reviewOpen}

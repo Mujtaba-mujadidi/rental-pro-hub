@@ -235,7 +235,7 @@ export function VehicleFinancialsView({
             <dd className="mt-0.5 font-semibold text-rph-fg">{formatGbp(pnl.rentalIncomeGbp)}</dd>
             {pnl.rentalGrossIncomeGbp > pnl.rentalIncomeGbp ? (
               <p className="rph-meta mt-1 text-[10px]">
-                Accrued rent approved {formatGbp(pnl.rentalGrossIncomeGbp)}
+                Rent paid (weeks started) {formatGbp(pnl.rentalGrossIncomeGbp)}
                 {pnl.rentalCollectionsGbp > 0.005
                   ? ` · ${formatGbp(pnl.rentalCollectionsGbp)} settlement collected`
                   : ""}

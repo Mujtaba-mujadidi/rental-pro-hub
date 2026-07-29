@@ -34,10 +34,13 @@ import { deriveDriverHireSigningSummary, driverHireAccessLabel } from "@/lib/fle
 import { parseHireAccessSnapshot, type HireAccessDisplay } from "@/lib/fleet/hire-access-display";
 import { loadBundleAgreements } from "@/lib/esign/hire-signing-bundle";
 import {
+  hireWizardUsesCustomEndTime,
   normalizeDrivingLicence,
+  resolveHireWizardEndTime,
   type HireWizardFormState,
   type HireWizardStep,
 } from "@/lib/fleet/hire-wizard";
+import { normalizeHireEndTime, normalizeHireTime } from "@/lib/fleet/hire-pdf-details";
 import {
   assertVehicleAvailableForHire,
   releaseVehicleIfNoBlockingHire,
@@ -69,6 +72,9 @@ export type HireContractTableRow = {
   vehicle_label: string | null;
   driver_label: string | null;
   start_date: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  scheduled_end_date: string | null;
   activated_at: string | null;
   rent_amount_gbp: number;
   rent_cadence: string;
@@ -100,6 +106,36 @@ export type HireDraftPayload = {
   form: HireWizardFormState;
 };
 
+export type HireWizardTermOption = {
+  id: string;
+  title: string;
+  version_label: string;
+};
+
+export type HireWizardShellData = {
+  draft: HireDraftPayload | null;
+  bankAccounts: { id: string; label: string }[];
+  terms: HireWizardTermOption[];
+};
+
+function hireDraftPayloadFromRow(
+  data: Record<string, unknown> | null,
+  companyId: string,
+): { ok: true; draft: HireDraftPayload } | { ok: false; error: string } {
+  if (!data || data.parent_company_id !== companyId) return { ok: false, error: "Draft not found." };
+  if (data.status !== "draft") return { ok: false, error: "This contract is no longer a draft." };
+  return {
+    ok: true,
+    draft: {
+      id: data.id as string,
+      wizard_step: Number(data.wizard_step ?? 1),
+      driver_access_status: (data.driver_access_status as string) ?? "not_requested",
+      driver_profile_confirmed: Boolean(data.driver_profile_confirmed),
+      form: formFromRow(data),
+    },
+  };
+}
+
 function revalidateHires() {
   revalidatePath("/rental/hires");
   revalidatePath("/rental/vehicles");
@@ -121,6 +157,10 @@ function formFromRow(row: Record<string, unknown>): HireWizardFormState {
   return {
     vehicleId: (row.vehicle_id as string) ?? "",
     startDate: (row.start_date as string) ?? "",
+    startTime: normalizeHireTime((row.start_time as string | null) ?? null, "09:00"),
+    endTime: hireWizardUsesCustomEndTime({ contractLengths })
+      ? normalizeHireEndTime((row.end_time as string | null) ?? null)
+      : normalizeHireTime((row.start_time as string | null) ?? null, "09:00"),
     rentCadence: (row.rent_cadence as RentCadence) ?? "weekly",
     rentAmountGbp: row.rent_amount_gbp != null ? String(row.rent_amount_gbp) : "",
     includeDeposit: Boolean(row.include_deposit),
@@ -149,9 +189,10 @@ export async function listHireContractsAction(
   let groupsQuery = supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, vehicle_id, status, wizard_step, driver_access_status, start_date, activated_at, rent_amount_gbp, rent_cadence, driver_licence_number, driver_email, updated_at, signing_bundle_sent_at, terminated_at, vehicles(vrm, make, model)",
+      "id, vehicle_id, status, wizard_step, driver_access_status, start_date, start_time, end_time, activated_at, rent_amount_gbp, rent_cadence, driver_licence_number, driver_email, updated_at, signing_bundle_sent_at, terminated_at, vehicles(vrm, make, model)",
     )
-    .eq("parent_company_id", companyId);
+    .eq("parent_company_id", companyId)
+    .neq("status", "cancelled");
 
   if (vehicleFilter) {
     groupsQuery = groupsQuery.eq("vehicle_id", vehicleFilter);
@@ -213,6 +254,12 @@ export async function listHireContractsAction(
       if (!hay.includes(term)) continue;
     }
     const agreements = agreementsByGroup.get(g.id as string) ?? [];
+    const scheduledEndDate =
+      agreements
+        .map((a) => (a.end_date as string | null | undefined) ?? null)
+        .filter((d): d is string => Boolean(d))
+        .sort()
+        .at(-1) ?? null;
     const envelopeRows = hireAgreementsToEnvelopeReadyRows(agreements as HireAgreementEnvelopeSource[]);
     const firstEnvelopeId = envelopeRows[0]?.envelopeId ?? agreements.find((a) => a.esign_envelope_id)?.esign_envelope_id ?? null;
     const prepareEnvelopeId = pickPrepareEnvelopeId(envelopeRows) ?? firstEnvelopeId;
@@ -283,6 +330,9 @@ export async function listHireContractsAction(
       vehicle_label: vehicleLabel,
       driver_label: driverLabel,
       start_date: (g.start_date as string | null) ?? null,
+      start_time: (g.start_time as string | null) ?? null,
+      end_time: (g.end_time as string | null) ?? null,
+      scheduled_end_date: scheduledEndDate,
       activated_at: (g.activated_at as string | null) ?? null,
       rent_amount_gbp: Number(g.rent_amount_gbp ?? 0),
       rent_cadence: (g.rent_cadence as string) ?? "weekly",
@@ -358,31 +408,103 @@ export async function createHireDraftAction(): Promise<{ ok: true; id: string } 
 export async function loadHireDraftAction(
   hireGroupId: string,
 ): Promise<{ ok: true; draft: HireDraftPayload } | { ok: false; error: string }> {
-  const { profile, user } = await requireRentalCompanyArea();
+  const { profile } = await requireRentalCompanyArea();
   if (!canReadRentals(profile)) return { ok: false, error: "You do not have permission." };
+  const companyId = profile.company_id?.trim();
+  if (!companyId) return { ok: false, error: "No active company." };
 
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, parent_company_id, wizard_step, driver_access_status, driver_profile_confirmed, vehicle_id, start_date, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, default_payment_account_id, hire_terms_version_id, driver_licence_number, driver_email, draft_snapshot, status",
+      "id, parent_company_id, wizard_step, driver_access_status, driver_profile_confirmed, vehicle_id, start_date, start_time, end_time, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, default_payment_account_id, hire_terms_version_id, driver_licence_number, driver_email, draft_snapshot, status",
     )
     .eq("id", hireGroupId)
     .maybeSingle();
   if (error) return { ok: false, error: error.message };
-  if (!data || data.parent_company_id !== profile.company_id) return { ok: false, error: "Draft not found." };
-  if (data.status !== "draft") return { ok: false, error: "This contract is no longer a draft." };
+  return hireDraftPayloadFromRow(data as Record<string, unknown> | null, companyId);
+}
+
+/** One round-trip for wizard open: draft (optional), payment accounts, and term list (no bodies). */
+export async function loadHireWizardShellAction(
+  hireGroupId?: string,
+): Promise<{ ok: true; data: HireWizardShellData } | { ok: false; error: string }> {
+  const { profile } = await requireRentalCompanyArea();
+  if (!canReadRentals(profile)) return { ok: false, error: "You do not have permission." };
+  const companyId = profile.company_id?.trim();
+  if (!companyId) return { ok: false, error: "No active company." };
+
+  const supabase = await createClient();
+  const draftId = hireGroupId?.trim() || null;
+
+  const [draftRes, accountsRes, termsRes] = await Promise.all([
+    draftId
+      ? supabase
+          .from("vehicle_hire_groups")
+          .select(
+            "id, parent_company_id, wizard_step, driver_access_status, driver_profile_confirmed, vehicle_id, start_date, start_time, end_time, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, default_payment_account_id, hire_terms_version_id, driver_licence_number, driver_email, draft_snapshot, status",
+          )
+          .eq("id", draftId)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    supabase
+      .from("company_payment_accounts")
+      .select("id, name, show_to_hirer, is_active, sort_order")
+      .eq("parent_company_id", companyId)
+      .eq("is_active", true)
+      .eq("show_to_hirer", true)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true }),
+    supabase
+      .from("company_hire_terms_versions")
+      .select("id, title, version_label")
+      .eq("parent_company_id", companyId)
+      .eq("status", "published")
+      .order("published_at", { ascending: false }),
+  ]);
+
+  if (draftRes.error) return { ok: false, error: draftRes.error.message };
+  if (accountsRes.error) return { ok: false, error: accountsRes.error.message };
+  if (termsRes.error) return { ok: false, error: termsRes.error.message };
+
+  let draft: HireDraftPayload | null = null;
+  if (draftId) {
+    const parsed = hireDraftPayloadFromRow(draftRes.data as Record<string, unknown> | null, companyId);
+    if (!parsed.ok) return parsed;
+    draft = parsed.draft;
+  }
 
   return {
     ok: true,
-    draft: {
-      id: data.id as string,
-      wizard_step: Number(data.wizard_step ?? 1),
-      driver_access_status: (data.driver_access_status as string) ?? "not_requested",
-      driver_profile_confirmed: Boolean(data.driver_profile_confirmed),
-      form: formFromRow(data as Record<string, unknown>),
+    data: {
+      draft,
+      bankAccounts: (accountsRes.data ?? []).map((row) => ({
+        id: row.id as string,
+        label: (row.name as string) ?? "Account",
+      })),
+      terms: (termsRes.data ?? []) as HireWizardTermOption[],
     },
   };
+}
+
+export async function loadHireTermsBodyForWizardAction(
+  termsVersionId: string,
+): Promise<{ ok: true; body: string } | { ok: false; error: string }> {
+  const { profile } = await requireRentalCompanyArea();
+  const companyId = profile.company_id?.trim();
+  if (!companyId) return { ok: false, error: "No active company." };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("company_hire_terms_versions")
+    .select("body")
+    .eq("id", termsVersionId.trim())
+    .eq("parent_company_id", companyId)
+    .eq("status", "published")
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!data?.body) return { ok: false, error: "Terms not found." };
+  return { ok: true, body: data.body as string };
 }
 
 export async function saveHireDraftStepAction(input: {
@@ -460,6 +582,11 @@ export async function saveHireDraftStepAction(input: {
       vehicle_id: input.form.vehicleId || null,
       subcompany_id: subcompanyId,
       start_date: input.form.startDate || null,
+      start_time: input.form.startTime?.trim() ? normalizeHireTime(input.form.startTime, "09:00") : null,
+      end_time: (() => {
+        const resolved = resolveHireWizardEndTime(input.form);
+        return resolved ? normalizeHireTime(resolved, "09:00") : null;
+      })(),
       rent_cadence: input.form.rentCadence,
       rent_amount_gbp: Number.isFinite(rentAmount) ? rentAmount : 0,
       include_deposit: input.form.includeDeposit,
@@ -496,13 +623,55 @@ export async function saveHireDraftStepAction(input: {
   return { ok: true };
 }
 
+export type AvailableVehicleSearchRow = {
+  id: string;
+  vrm: string;
+  make: string;
+  model: string;
+  year: string | null;
+  colour: string | null;
+  subcompanyName: string | null;
+  subcompany_id: string;
+};
+
+function vehicleRegistrationYear(
+  firstRegUk: string | null | undefined,
+  firstReg: string | null | undefined,
+): string | null {
+  const iso = (firstRegUk ?? firstReg ?? "").trim();
+  const match = /^(\d{4})/.exec(iso);
+  return match?.[1] ?? null;
+}
+
+function mapAvailableVehicleRow(v: {
+  id: string;
+  vrm: string;
+  make: string | null;
+  model: string | null;
+  colour: string | null;
+  first_reg_date: string | null;
+  first_reg_uk_date: string | null;
+  subcompany_id: string;
+  subcompanies?: { name: string | null } | { name: string | null }[] | null;
+}): AvailableVehicleSearchRow {
+  const nested = v.subcompanies;
+  const subName = Array.isArray(nested) ? nested[0]?.name : nested?.name;
+  return {
+    id: v.id,
+    vrm: v.vrm,
+    make: v.make?.trim() ?? "",
+    model: v.model?.trim() ?? "",
+    year: vehicleRegistrationYear(v.first_reg_uk_date, v.first_reg_date),
+    colour: v.colour?.trim() || null,
+    subcompanyName: subName?.trim() || null,
+    subcompany_id: v.subcompany_id,
+  };
+}
+
 export async function searchAvailableVehiclesAction(
   query: string,
   options?: { forHireGroupId?: string },
-): Promise<
-  | { ok: true; rows: { id: string; vrm: string; label: string; subcompany_id: string }[] }
-  | { ok: false; error: string }
-> {
+): Promise<{ ok: true; rows: AvailableVehicleSearchRow[] } | { ok: false; error: string }> {
   const { profile, user } = await requireRentalCompanyArea();
   if (!canReadRentals(profile)) return { ok: false, error: "You do not have permission." };
   const companyId = profile.company_id?.trim();
@@ -523,7 +692,7 @@ export async function searchAvailableVehiclesAction(
 
   let q = supabase
     .from("vehicles")
-    .select("id, vrm, make, model, subcompany_id, status")
+    .select("id, vrm, make, model, colour, first_reg_date, first_reg_uk_date, subcompany_id, status, subcompanies(name)")
     .eq("parent_company_id", companyId)
     .eq("status", "available")
     .order("vrm", { ascending: true })
@@ -538,12 +707,7 @@ export async function searchAvailableVehiclesAction(
   const { data, error } = await q;
   if (error) return { ok: false, error: error.message };
 
-  let rows = (data ?? []).map((v) => ({
-    id: v.id as string,
-    vrm: v.vrm as string,
-    label: [v.make, v.model].filter(Boolean).join(" ") || "Vehicle",
-    subcompany_id: v.subcompany_id as string,
-  }));
+  let rows = (data ?? []).map((v) => mapAvailableVehicleRow(v));
 
   const { data: blockingHires } = await supabase
     .from("vehicle_hire_groups")
@@ -556,20 +720,12 @@ export async function searchAvailableVehiclesAction(
   if (reservedForDraft && !rows.some((r) => r.id === reservedForDraft)) {
     const { data: reservedVehicle } = await supabase
       .from("vehicles")
-      .select("id, vrm, make, model, subcompany_id")
+      .select("id, vrm, make, model, colour, first_reg_date, first_reg_uk_date, subcompany_id, subcompanies(name)")
       .eq("id", reservedForDraft)
       .eq("parent_company_id", companyId)
       .maybeSingle();
     if (reservedVehicle) {
-      rows = [
-        {
-          id: reservedVehicle.id as string,
-          vrm: reservedVehicle.vrm as string,
-          label: [reservedVehicle.make, reservedVehicle.model].filter(Boolean).join(" ") || "Vehicle",
-          subcompany_id: reservedVehicle.subcompany_id as string,
-        },
-        ...rows,
-      ];
+      rows = [mapAvailableVehicleRow(reservedVehicle), ...rows];
     }
   }
 

@@ -128,19 +128,19 @@ export function HireSettlementWorkspacePanel({
         </div>
       ) : (
         <div>
-          <h1 className="rph-h1">Settlement</h1>
+          <h1 className="rph-h1">Balance after contract end</h1>
           <p className="rph-muted mt-1 text-sm">
-            Final account balance after contract end
+            Money still owed or to be refunded
             {data.terminatedAt ? ` on ${formatUkDateTime(data.terminatedAt)}` : ""}.
           </p>
         </div>
       )}
 
       <section className="rph-card p-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-rph-fg-muted">Outstanding</p>
+        <p className="text-xs font-medium uppercase tracking-wide text-rph-fg-muted">Still owed</p>
         <p className="mt-1 text-2xl font-semibold tabular-nums text-rph-fg">
           {settled
-            ? "Settled — no balance outstanding"
+            ? "All clear — nothing owed"
             : settlementBalanceLabel(data.settlementDirection, data.openBalanceGbp)}
         </p>
       </section>

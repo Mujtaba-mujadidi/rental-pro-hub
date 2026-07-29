@@ -1,6 +1,7 @@
 "use client";
 
-import { formatUkDate, formatUkDateTimeSeconds } from "@/lib/datetime/uk";
+import { formatHireContractEndLabel, formatHireContractStartLabel } from "@/lib/fleet/hire-pdf-details";
+import { formatUkDateTimeSeconds } from "@/lib/datetime/uk";
 import type { HireContractTableRow } from "@/app/actions/rental-hire-wizard";
 import { cancelHireGroupAction, ensureHireGroupEnvelopesPreparedAction, loadHireGroupAuditTrailAction, regenerateHireGroupContractsAction } from "@/app/actions/rental-hires";
 import { sendHireGroupSigningBundleAction } from "@/app/actions/rental-hire-signing";
@@ -31,12 +32,17 @@ function statusLabel(row: HireContractTableRow): string {
 
 function startLabel(row: HireContractTableRow): string {
   if (row.activated_at) return formatUkDateTimeSeconds(row.activated_at);
-  if (row.start_date) return `Scheduled ${formatUkDate(row.start_date)}`;
+  if (row.start_date) {
+    return `Scheduled ${formatHireContractStartLabel(row.start_date, row.start_time)}`;
+  }
   return "—";
 }
 
 function endLabel(row: HireContractTableRow): string {
   if (row.terminated_at) return formatUkDateTimeSeconds(row.terminated_at);
+  if (row.scheduled_end_date) {
+    return formatHireContractEndLabel(row.scheduled_end_date, row.end_time);
+  }
   return "—";
 }
 

@@ -39,9 +39,9 @@ export function hireRentSettlementStatusLabel(
   audience: "staff" | "driver" = "staff",
 ): string {
   if (closure.rentSettlementSettled) {
-    return audience === "driver" ? "Rent settlement cleared" : "Rent settlement cleared";
+    return audience === "driver" ? "Final balance cleared" : "Final balance cleared";
   }
-  return audience === "driver" ? "Rent settlement open" : "Rent settlement outstanding";
+  return audience === "driver" ? "Final balance still owed" : "Final balance still owed";
 }
 
 export function hireDepositStatusLabel(input: {

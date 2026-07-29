@@ -71,6 +71,18 @@ function parseOptionalInt(raw: string | null, label: string): { ok: true; value:
   return { ok: true, value: n };
 }
 
+function parseVehicleExpiryYmd(
+  raw: string | null,
+  label: string,
+): { ok: true; value: string } | { ok: false; error: string } {
+  const trimmed = raw?.trim() ?? "";
+  if (!trimmed) return { ok: false, error: `${label} is required.` };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return { ok: false, error: `${label} must be a valid date.` };
+  }
+  return { ok: true, value: trimmed };
+}
+
 async function assertSubcompanyInTenant(
   supabase: Awaited<ReturnType<typeof createClient>>,
   parentCompanyId: string,
@@ -431,19 +443,32 @@ export async function uploadVehicleDocumentAction(formData: FormData): Promise<V
     return { ok: false, error: insErr.message };
   }
 
-  // Clear MOT / PHV document attention when the matching file is uploaded.
+  // Clear MOT / PHV document attention and optionally update expiry when uploading renewed docs.
+  const vehiclePatch: Record<string, string | null> = {};
   if (docTypeRaw === "mot") {
-    await supabase
-      .from("vehicles")
-      .update({ mot_doc_attention_at: null })
-      .eq("id", vehicleId)
-      .eq("parent_company_id", parentCompanyId);
+    const expiryRaw = nullIfEmpty(formData.get("mot_expiry"));
+    if (expiryRaw) {
+      const parsed = parseVehicleExpiryYmd(expiryRaw, "MOT expiry");
+      if (!parsed.ok) return parsed;
+      vehiclePatch.mot_expiry = parsed.value;
+    }
+    vehiclePatch.mot_doc_attention_at = null;
   } else if (isPhvTaxiLicencePaperDocType(docTypeRaw)) {
-    await supabase
+    const expiryRaw = nullIfEmpty(formData.get("phv_licence_expiry"));
+    if (expiryRaw) {
+      const parsed = parseVehicleExpiryYmd(expiryRaw, "PHV/Taxi licence expiry");
+      if (!parsed.ok) return parsed;
+      vehiclePatch.phv_licence_expiry = parsed.value;
+    }
+    vehiclePatch.phv_doc_attention_at = null;
+  }
+  if (Object.keys(vehiclePatch).length) {
+    const { error: vehiclePatchErr } = await supabase
       .from("vehicles")
-      .update({ phv_doc_attention_at: null })
+      .update(vehiclePatch)
       .eq("id", vehicleId)
       .eq("parent_company_id", parentCompanyId);
+    if (vehiclePatchErr) return { ok: false, error: vehiclePatchErr.message };
   }
 
   revalidateVehiclePaths(vehicleId, parentCompanyId);

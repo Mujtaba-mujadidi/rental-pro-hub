@@ -42,6 +42,7 @@ export function VehicleDocRowMenu({
   onError?: (message: string) => void;
 }) {
   const canScanOrCapture = useCanScanOrCaptureDocument();
+  const [menuOpen, setMenuOpen] = useState(false);
   const [pending, setPending] = useState<"view" | "download" | null>(null);
   const filesRef = useRef<HTMLInputElement>(null);
   const photoRef = useRef<HTMLInputElement>(null);
@@ -92,6 +93,11 @@ export function VehicleDocRowMenu({
     input.value = "";
   }
 
+  function openFilePicker(input: HTMLInputElement | null) {
+    setMenuOpen(false);
+    requestAnimationFrame(() => input?.click());
+  }
+
   return (
     <>
       <input
@@ -119,7 +125,7 @@ export function VehicleDocRowMenu({
         onChange={(e) => handleFileInput(e.target)}
       />
 
-      <DropdownMenu.Root>
+      <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
         <DropdownMenu.Trigger asChild>
           <button type="button" className={triggerClass} disabled={busy} aria-label="Document actions">
             {busy ? (pending === "view" ? "Opening…" : "Preparing…") : "Actions"}
@@ -143,6 +149,7 @@ export function VehicleDocRowMenu({
                   disabled={busy}
                   onSelect={(e) => {
                     e.preventDefault();
+                    setMenuOpen(false);
                     void viewDoc();
                   }}
                 >
@@ -153,6 +160,7 @@ export function VehicleDocRowMenu({
                   disabled={busy}
                   onSelect={(e) => {
                     e.preventDefault();
+                    setMenuOpen(false);
                     void downloadDoc();
                   }}
                 >
@@ -168,7 +176,7 @@ export function VehicleDocRowMenu({
                   className={itemClass}
                   onSelect={(e) => {
                     e.preventDefault();
-                    filesRef.current?.click();
+                    openFilePicker(filesRef.current);
                   }}
                 >
                   {onFile ? "Replace with files" : "Choose files"}
@@ -179,7 +187,7 @@ export function VehicleDocRowMenu({
                       className={itemClass}
                       onSelect={(e) => {
                         e.preventDefault();
-                        scanRef.current?.click();
+                        openFilePicker(scanRef.current);
                       }}
                     >
                       Scan documents
@@ -188,7 +196,7 @@ export function VehicleDocRowMenu({
                       className={itemClass}
                       onSelect={(e) => {
                         e.preventDefault();
-                        photoRef.current?.click();
+                        openFilePicker(photoRef.current);
                       }}
                     >
                       Take photo
@@ -206,6 +214,7 @@ export function VehicleDocRowMenu({
                   disabled={busy || removeDisabled}
                   onSelect={(e) => {
                     e.preventDefault();
+                    setMenuOpen(false);
                     onRemove();
                   }}
                 >

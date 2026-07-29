@@ -1,5 +1,10 @@
 "use server";
 
+/**
+ * Hire payment schedule actions (active hire rent/deposit on the sheet).
+ * Transaction side effects: see @/lib/fleet/hire-payment-transactions.ts
+ */
+
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
 import { can, canReadRentals } from "@/lib/auth/rental-permissions";
 import { formatUkDate, formatUkDateTimeSeconds, ukTodayYmd } from "@/lib/datetime/uk";
@@ -19,6 +24,7 @@ import {
 } from "@/lib/fleet/hire-payment-summary";
 import { computeHireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
 import { isDepositDispositionPending } from "@/lib/fleet/hire-deposit-resolution";
+import { reconcileEndedHirePaymentsWithDepositCredit } from "@/lib/fleet/hire-deposit-schedule-allocation";
 import {
   remainingOpenBalanceGbp,
   signedSettlementBalanceGbp,
@@ -278,7 +284,7 @@ async function buildPaymentsPageData(
   const { data: group, error: groupErr } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, status, terminated_at, ended_at, parent_company_id, driver_user_id, driver_email, driver_licence_number, default_payment_account_id, settlement_balance_gbp, settlement_balance_direction, driver_documents_retain_until, deposit_disposition, settlement_resolution, termination_settlement, vehicles(vrm)",
+      "id, status, terminated_at, ended_at, parent_company_id, driver_user_id, driver_email, driver_licence_number, default_payment_account_id, settlement_balance_gbp, settlement_balance_direction, driver_documents_retain_until, deposit_disposition, deposit_refund_amount_gbp, settlement_resolution, termination_settlement, vehicles(vrm)",
     )
     .eq("id", hireGroupId)
     .maybeSingle();
@@ -335,6 +341,27 @@ async function buildPaymentsPageData(
     enriched = filterPaymentScheduleForEndedContract(enriched, contractEndedYmd);
     summary = summarizeHirePayments(enriched, accrualYmd);
     summary = { ...summary, nextDue: null };
+
+    const rawTerminationSummary = group.termination_settlement as HireTerminationAccountsSummary | null;
+    const terminationSummaryForReconcile =
+      rawTerminationSummary && typeof rawTerminationSummary === "object" ? rawTerminationSummary : null;
+    const depositDispositionForReconcile = (group.deposit_disposition as string | null) ?? null;
+    if (terminationSummaryForReconcile && depositDispositionForReconcile) {
+      const reconciled = reconcileEndedHirePaymentsWithDepositCredit({
+        rows: enriched,
+        summary,
+        disposition: depositDispositionForReconcile,
+        terminationSummary: {
+          depositGbp: terminationSummaryForReconcile.depositGbp,
+          signedRentBalanceGbp: terminationSummaryForReconcile.signedRentBalanceGbp,
+        },
+        depositRefundAmountGbp:
+          group.deposit_refund_amount_gbp != null ? Number(group.deposit_refund_amount_gbp) : null,
+        accrualYmd,
+      });
+      enriched = reconciled.rows;
+      summary = reconciled.summary;
+    }
   }
 
   const hasPostEndPrepaidPayments = contractEndedYmd

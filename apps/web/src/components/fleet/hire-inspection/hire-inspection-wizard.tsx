@@ -675,6 +675,8 @@ export function HireInspectionWizard({
 
       {readOnly ? (
         <HireInspectionCompletedView
+          hireGroupId={hireGroupId}
+          vehicleLabel={vehicleLabel}
           kind={kind}
           data={data}
           diagramDamages={diagramDamages}
@@ -750,6 +752,7 @@ export function HireInspectionWizard({
           {step === 3 ? (
             <section className="rph-card p-4">
               <HireInspectionPhotosSection
+                hireGroupId={hireGroupId}
                 draftMedia={draftMedia}
                 onAddPhotos={onUploadPhotos}
                 onRemovePhoto={removePhoto}

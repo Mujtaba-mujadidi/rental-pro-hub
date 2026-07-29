@@ -8,7 +8,7 @@ export type HireAccessTermsPreview = {
 };
 
 const HIRE_GROUP_DETAIL_SELECT =
-  `hire_terms_version_id, start_date, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, draft_snapshot, companies(name), vehicles(${HIRE_ACCESS_VEHICLE_SELECT}), subcompanies(legal_name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode), company_hire_terms_versions(title, body, version_label)`;
+  `hire_terms_version_id, start_date, start_time, end_time, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, draft_snapshot, companies(name), vehicles(${HIRE_ACCESS_VEHICLE_SELECT}), subcompanies(legal_name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode), company_hire_terms_versions(title, body, version_label)`;
 
 export function hireAccessSnapshotIsSparse(snapshot: Record<string, unknown>): boolean {
   return (

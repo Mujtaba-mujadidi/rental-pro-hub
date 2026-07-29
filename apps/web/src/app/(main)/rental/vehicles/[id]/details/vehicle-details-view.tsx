@@ -43,6 +43,10 @@ const btnDangerTall =
   "flex h-11 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300";
 const btnCardEdit =
   "inline-flex h-7 shrink-0 items-center rounded-md border border-rph-border bg-rph-raised px-2 text-xs font-medium text-rph-fg-secondary hover:bg-rph-chrome disabled:opacity-50";
+const btnDocGhost =
+  "inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-raised px-2.5 text-xs font-medium text-rph-fg-secondary hover:bg-rph-chrome disabled:opacity-50";
+const btnDocPrimary =
+  "inline-flex h-8 shrink-0 items-center justify-center rounded-lg bg-rph-rail px-2.5 text-xs font-semibold text-white hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer";
 
 type EditSection = "specs" | "registration" | "notes";
 
@@ -74,6 +78,8 @@ type FormSnapshot = {
 
 type DocUploadBundle = { files: File[] };
 type DocUploadBundles = Record<RequiredVehicleDocType, DocUploadBundle>;
+type ExpiryDocType = "mot" | "phv_taxi_licence_paper";
+type DocUploadExpiryConfirm = { docType: ExpiryDocType; expiry: string };
 
 function emptyUploadBundles(): DocUploadBundles {
   return { mot: { files: [] }, logbook: { files: [] }, phv_taxi_licence_paper: { files: [] } };
@@ -164,6 +170,14 @@ function docOnFile(docs: VehicleDocumentRow[], docType: RequiredVehicleDocType):
   return docs.find((d) => d.doc_type === docType);
 }
 
+function isExpiryDocType(docType: RequiredVehicleDocType): docType is ExpiryDocType {
+  return docType === "mot" || docType === "phv_taxi_licence_paper";
+}
+
+function defaultExpiryForDocType(vehicle: VehicleRow, docType: ExpiryDocType): string {
+  return docType === "mot" ? vehicle.mot_expiry ?? "" : vehicle.phv_licence_expiry ?? "";
+}
+
 function miles(n: number | null | undefined): string {
   return n != null ? `${n.toLocaleString("en-GB")} miles` : "—";
 }
@@ -221,6 +235,7 @@ export function VehicleDetailsView({
   const [transferNotes, setTransferNotes] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [removeDocConfirm, setRemoveDocConfirm] = useState<{ id: string; label: string } | null>(null);
+  const [docUploadExpiryConfirm, setDocUploadExpiryConfirm] = useState<DocUploadExpiryConfirm | null>(null);
 
   useEffect(() => {
     setVehicle(initialVehicle);
@@ -316,13 +331,30 @@ export function VehicleDetailsView({
     setUploadBundles((prev) => ({ ...prev, [docType]: { files: [] } }));
   }
 
-  function submitDocBundle(docType: RequiredVehicleDocType) {
+  function requestDocUpload(docType: RequiredVehicleDocType) {
     const bundle = uploadBundles[docType];
     if (!bundle.files.length) return;
+    if (isExpiryDocType(docType)) {
+      setError(null);
+      setDocUploadExpiryConfirm({ docType, expiry: defaultExpiryForDocType(vehicle, docType) });
+      return;
+    }
+    submitDocBundle(docType);
+  }
+
+  function submitDocBundle(docType: RequiredVehicleDocType, expiryYmd?: string) {
+    const bundle = uploadBundles[docType];
+    if (!bundle.files.length) return;
+    if (isExpiryDocType(docType) && !expiryYmd?.trim()) {
+      setError(docType === "mot" ? "Enter the MOT expiry date." : "Enter the PHV/Taxi licence expiry date.");
+      return;
+    }
     setError(null);
     const fd = new FormData();
     fd.set("vehicle_id", vehicle.id);
     fd.set("doc_type", docType);
+    if (docType === "mot" && expiryYmd) fd.set("mot_expiry", expiryYmd);
+    if (docType === "phv_taxi_licence_paper" && expiryYmd) fd.set("phv_licence_expiry", expiryYmd);
     for (const file of bundle.files) fd.append("files", file);
     startTransition(async () => {
       const res = await uploadVehicleDocumentAction(fd);
@@ -331,8 +363,22 @@ export function VehicleDetailsView({
         return;
       }
       clearUploadBundle(docType);
+      setDocUploadExpiryConfirm(null);
       await refresh();
     });
+  }
+
+  function confirmDocUploadWithExpiry() {
+    if (!docUploadExpiryConfirm) return;
+    if (!docUploadExpiryConfirm.expiry.trim()) {
+      setError(
+        docUploadExpiryConfirm.docType === "mot"
+          ? "Enter the MOT expiry date."
+          : "Enter the PHV/Taxi licence expiry date.",
+      );
+      return;
+    }
+    submitDocBundle(docUploadExpiryConfirm.docType, docUploadExpiryConfirm.expiry);
   }
 
   function removeDoc(docId: string) {
@@ -549,10 +595,10 @@ export function VehicleDetailsView({
                             <li key={`${f.name}-${i}`}>{f.name}</li>
                           ))}
                         </ul>
-                        <button type="button" className={btnGhost} disabled={busy} onClick={() => clearUploadBundle(docType)}>
+                        <button type="button" className={btnDocGhost} disabled={busy} onClick={() => clearUploadBundle(docType)}>
                           Clear
                         </button>
-                        <button type="button" className={btnContinue} disabled={busy} onClick={() => submitDocBundle(docType)}>
+                        <button type="button" className={btnDocPrimary} disabled={busy} onClick={() => requestDocUpload(docType)}>
                           {pending ? "Uploading…" : onFile ? "Replace" : "Upload"}
                         </button>
                       </div>
@@ -897,6 +943,76 @@ export function VehicleDetailsView({
         }}
         onCancel={() => setRemoveDocConfirm(null)}
       />
+
+      <FormModalShell
+        open={Boolean(docUploadExpiryConfirm)}
+        titleId="vehicle-doc-expiry-title"
+        title={
+          docUploadExpiryConfirm?.docType === "mot"
+            ? "MOT expiry date"
+            : "PHV/Taxi licence expiry date"
+        }
+        description={`${vehicle.vrm} · confirm the expiry on the new document before uploading.`}
+        showDraftActions={false}
+        pending={busy}
+        isDirty={false}
+        maxWidthClass="max-w-md"
+        onRequestClose={() => {
+          setError(null);
+          setDocUploadExpiryConfirm(null);
+        }}
+        discardConfirmOpen={false}
+        onConfirmDiscard={() => {}}
+        onCancelDiscard={() => {}}
+        footer={
+          <div className="flex w-full flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              className={btnGhost}
+              disabled={busy}
+              onClick={() => {
+                setError(null);
+                setDocUploadExpiryConfirm(null);
+              }}
+            >
+              Cancel
+            </button>
+            <button type="button" className={btnPrimary} disabled={busy} onClick={confirmDocUploadWithExpiry}>
+              {pending ? "Uploading…" : "Upload and save"}
+            </button>
+          </div>
+        }
+      >
+        {docUploadExpiryConfirm ? (
+          <div className="space-y-3">
+            {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
+            <Field
+              label={
+                docUploadExpiryConfirm.docType === "mot" ? "MOT expiry date *" : "PHV/Taxi licence expiry date *"
+              }
+            >
+              <input
+                type="date"
+                className="rph-input"
+                value={docUploadExpiryConfirm.expiry}
+                onChange={(e) =>
+                  setDocUploadExpiryConfirm((prev) => (prev ? { ...prev, expiry: e.target.value } : prev))
+                }
+              />
+            </Field>
+            {defaultExpiryForDocType(vehicle, docUploadExpiryConfirm.docType) ? (
+              <p className="rph-meta">
+                Current expiry on record:{" "}
+                {formatUkDate(defaultExpiryForDocType(vehicle, docUploadExpiryConfirm.docType))}. Update this if the
+                new document shows a different date.
+              </p>
+            ) : (
+              <p className="rph-meta">No expiry is saved yet — enter the date shown on the document.</p>
+            )}
+          </div>
+        ) : null}
+      </FormModalShell>
+
       <ActionStatusOverlay state={saveOverlay} onDismiss={() => setSaveOverlay(null)} />
     </div>
   );

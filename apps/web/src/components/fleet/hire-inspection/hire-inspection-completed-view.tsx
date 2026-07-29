@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { HireInspectionLazyImage } from "@/components/fleet/hire-inspection/hire-inspection-lazy-image";
+import { HireInspectionPdfExportButton } from "@/components/fleet/hire-inspection/hire-inspection-pdf-export-button";
 import { VehicleDamageDiagram } from "@/components/fleet/hire-inspection/vehicle-damage-diagram";
 import { HireInspectionReadingsSection } from "@/components/fleet/hire-inspection/hire-inspection-readings-section";
 import {
@@ -23,6 +25,8 @@ import { formatUkDateTime } from "@/lib/datetime/uk";
 const TAB_LABELS = ["Vehicle", "Damage", "Photos", "Review"] as const;
 
 type HireInspectionCompletedViewProps = {
+  hireGroupId: string;
+  vehicleLabel: string;
   kind: HireInspectionKind;
   data: HireInspectionPayload;
   diagramDamages: VehicleDamageDiagramEntry[];
@@ -33,6 +37,8 @@ type HireInspectionCompletedViewProps = {
 };
 
 export function HireInspectionCompletedView({
+  hireGroupId,
+  vehicleLabel,
   kind,
   data,
   diagramDamages,
@@ -45,7 +51,8 @@ export function HireInspectionCompletedView({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
         {TAB_LABELS.map((label, index) => (
           <button
             key={label}
@@ -56,6 +63,8 @@ export function HireInspectionCompletedView({
             {label}
           </button>
         ))}
+        </div>
+        <HireInspectionPdfExportButton hireGroupId={hireGroupId} kind={kind} vehicleLabel={vehicleLabel} />
       </div>
 
       {tab === 0 ? (
@@ -93,18 +102,12 @@ export function HireInspectionCompletedView({
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {data.media.map((item) => (
               <div key={item.id} className="overflow-hidden rounded-lg border border-rph-border">
-                {item.signedUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={item.signedUrl}
-                    alt={item.caption ?? "Vehicle photo"}
-                    className="aspect-video w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex aspect-video items-center justify-center bg-rph-chrome text-xs text-rph-fg-muted">
-                    Photo
-                  </div>
-                )}
+                <HireInspectionLazyImage
+                  hireGroupId={hireGroupId}
+                  mediaId={item.id}
+                  alt={item.caption ?? "Vehicle photo"}
+                  eagerSrc={item.signedUrl}
+                />
               </div>
             ))}
           </div>

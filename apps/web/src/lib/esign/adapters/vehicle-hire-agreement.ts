@@ -69,7 +69,7 @@ function termsToParagraphs(bodyRaw: string): string[] {
 }
 
 const HIRE_AGREEMENT_GROUP_SELECT =
-  "id, parent_company_id, subcompany_id, driver_user_id, start_date, rent_cadence, rent_amount_gbp, deposit_gbp, subcompany_legal_snapshot, hire_terms_version_id, default_payment_account_id, vehicles(vrm, make, model, colour, cc, fuel_type)";
+  "id, parent_company_id, subcompany_id, driver_user_id, start_date, start_time, end_time, rent_cadence, rent_amount_gbp, deposit_gbp, subcompany_legal_snapshot, hire_terms_version_id, default_payment_account_id, vehicles(vrm, make, model, colour, cc, fuel_type)";
 
 const HIRE_DRIVER_PROFILE_SELECT =
   "first_name, last_name, account_email, date_of_birth, phone, address_line1, address_line2, address_town, address_county, address_postcode, driving_licence_number, driving_licence_expiry, phv_licence_number";
@@ -183,7 +183,9 @@ async function loadHireAgreementPdfInput(
     driver: driver as HirePdfDriverSource,
     vehicle,
     startDate: group.start_date as string,
+    startTime: (group.start_time as string | null) ?? null,
     endDate: agreement.end_date as string,
+    endTime: (group.end_time as string | null) ?? null,
     contractLengthKind: agreement.contract_length_kind as ContractLengthKind,
     rentCadence: group.rent_cadence as RentCadence,
     rentAmountGbp: Number(group.rent_amount_gbp),
@@ -240,7 +242,9 @@ export function buildHireAgreementPdfInput(input: {
   driver: HirePdfDriverSource;
   vehicle: HirePdfVehicleSource;
   startDate: string;
+  startTime?: string | null;
   endDate: string;
+  endTime?: string | null;
   contractLengthKind: ContractLengthKind;
   rentCadence: RentCadence;
   rentAmountGbp: number;
@@ -263,7 +267,9 @@ export function buildHireAgreementPdfInput(input: {
     driverEmail: input.driverEmail,
     vehicle: input.vehicle,
     startDate: input.startDate,
+    startTime: input.startTime,
     endDate: input.endDate,
+    endTime: input.endTime,
     contractLengthKind: input.contractLengthKind,
     rentCadence: input.rentCadence,
     rentAmountGbp: input.rentAmountGbp,

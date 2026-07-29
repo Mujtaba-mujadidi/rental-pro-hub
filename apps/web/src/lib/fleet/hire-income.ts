@@ -192,6 +192,7 @@ function recognizedRentIncomeGbp(
 }
 
 export type HireRefundPaymentRow = {
+  hireGroupId?: string | null;
   amountGbp: number;
   direction: string | null;
   paymentCategory?: string | null;
@@ -334,6 +335,8 @@ export function computeVehicleHireIncomeGbp(input: {
   let depositRetentionGbp = 0;
   let accruedRentDueGbp = 0;
   let postEndPrepaidExcludedGbp = 0;
+  const groupAccruedRentDueGbp = new Map<string, number>();
+  const groupScheduleRentIncomeGbp = new Map<string, number>();
 
   const groupIds = new Set([
     ...input.groupContextByGroupId.keys(),
@@ -351,12 +354,17 @@ export function computeVehicleHireIncomeGbp(input: {
         billingMode: groupContext?.rentBillingMode ?? "end_of_period",
         rentCadence: groupContext?.rentCadence ?? "weekly",
       });
-      scheduleRentIncomeGbp += endedHireRentIncomeGbp(settlement);
+      const groupIncome = endedHireRentIncomeGbp(settlement);
+      scheduleRentIncomeGbp += groupIncome;
       accruedRentDueGbp += settlement.accruedRentDueGbp;
       postEndPrepaidExcludedGbp += settlement.prepaidRentCreditGbp;
+      groupAccruedRentDueGbp.set(groupId, settlement.accruedRentDueGbp);
+      groupScheduleRentIncomeGbp.set(groupId, groupIncome);
     } else {
+      let groupDue = 0;
+      let groupIncome = 0;
       for (const row of rentRows) {
-        accruedRentDueGbp += rowAccruedRentDueGbp(
+        groupDue += rowAccruedRentDueGbp(
           row,
           contractEndedYmd,
           input.todayYmd,
@@ -369,8 +377,12 @@ export function computeVehicleHireIncomeGbp(input: {
           groupContext,
         );
         if (amount == null) continue;
-        scheduleRentIncomeGbp += amount;
+        groupIncome += amount;
       }
+      scheduleRentIncomeGbp += groupIncome;
+      accruedRentDueGbp += groupDue;
+      groupAccruedRentDueGbp.set(groupId, groupDue);
+      groupScheduleRentIncomeGbp.set(groupId, groupIncome);
     }
 
     if (groupContext) {
@@ -398,11 +410,21 @@ export function computeVehicleHireIncomeGbp(input: {
       resolution: item.resolution,
     })),
   );
-  const supplementalCollectionsGbp = supplementalSettlementRentCollectionsGbp({
-    accruedRentDueGbp,
-    scheduleRentIncomeGbp,
-    collectionsFromDriverGbp,
-  });
+
+  const singleGroupFallback = groupIds.size === 1;
+  let supplementalCollectionsGbp = 0;
+  for (const groupId of groupIds) {
+    const groupSettlementPayments = settlementPayments.filter((payment) => {
+      if (payment.hireGroupId) return payment.hireGroupId === groupId;
+      return singleGroupFallback;
+    });
+    supplementalCollectionsGbp += supplementalSettlementRentCollectionsGbp({
+      accruedRentDueGbp: groupAccruedRentDueGbp.get(groupId) ?? 0,
+      scheduleRentIncomeGbp: groupScheduleRentIncomeGbp.get(groupId) ?? 0,
+      collectionsFromDriverGbp: sumHireCollectionsFromDriverGbp(groupSettlementPayments),
+    });
+  }
+  supplementalCollectionsGbp = roundGbp(supplementalCollectionsGbp);
   const settlementWriteOffsGbp = roundGbp(
     [...input.groupContextByGroupId.values()].reduce(
       (sum, context) => sum + (context.settlementWriteOffGbp > 0 ? context.settlementWriteOffGbp : 0),

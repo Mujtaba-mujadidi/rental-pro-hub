@@ -159,17 +159,17 @@ export function buildHireTerminationAccountsSummary(input: {
 export function settlementBalanceLabel(direction: SettlementBalanceDirection, amountGbp: number): string {
   const amount = Math.abs(amountGbp).toFixed(2);
   if (direction === "driver_owes_company") return `Driver owes £${amount}`;
-  if (direction === "company_owes_driver") return `Company owes driver £${amount}`;
-  return "Settled — no balance";
+  if (direction === "company_owes_driver") return `You owe driver £${amount}`;
+  return "All clear — nothing owed";
 }
 
 export function hireDepositDispositionLabel(disposition: HireDepositDisposition): string {
   const labels: Record<HireDepositDisposition, string> = {
-    apply_to_balance: "Apply deposit to outstanding balance",
-    refund_full: "Refund full deposit",
-    refund_partial: "Refund part of deposit",
-    forfeit: "Retain deposit (forfeit)",
-    hold_pending: "Hold deposit pending review (resolve later on Payments)",
+    apply_to_balance: "Use deposit to pay rent owed",
+    refund_full: "Return full deposit",
+    refund_partial: "Return part of deposit",
+    forfeit: "Keep deposit (no refund)",
+    hold_pending: "Hold deposit — decide later on Payments",
   };
   return labels[disposition];
 }

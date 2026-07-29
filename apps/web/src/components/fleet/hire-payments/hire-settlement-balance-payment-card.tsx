@@ -86,7 +86,7 @@ export function HireSettlementBalancePaymentCard({
 
   const clearRemainingBalance = () => {
     if (!paymentAccountId) {
-      setError("Select the payment account used for this settlement.");
+      setError("Select the bank account used for this payment.");
       return;
     }
     recordPayment(openBalanceGbp);
@@ -96,7 +96,7 @@ export function HireSettlementBalancePaymentCard({
     <section className="rph-card space-y-3 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-rph-fg">Clear settlement balance</h2>
+          <h2 className="text-sm font-semibold text-rph-fg">Pay final balance</h2>
           <p className="rph-muted mt-1 text-sm">
             Outstanding:{" "}
             <span className="font-medium text-rph-fg">

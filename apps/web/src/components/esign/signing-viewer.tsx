@@ -90,6 +90,7 @@ export function GuidedSigningViewer({
   startButtonLabel = "Start signing",
   submitButtonLabel = "Finish & submit",
   reviewHint = "Scroll the full document above. When you start, we'll take you to each field in order.",
+  layout = "fullscreen",
 }: {
   pdfUrl: string;
   title: string;
@@ -108,6 +109,8 @@ export function GuidedSigningViewer({
   startButtonLabel?: string;
   submitButtonLabel?: string;
   reviewHint?: string;
+  /** `embedded` fills a parent flex column (e.g. hire bundle header + viewer). */
+  layout?: "fullscreen" | "embedded";
 }) {
   const ordered = sortFields(signableFieldLayout(fields));
   const [pdfError, setPdfError] = useState<string | null>(null);
@@ -209,8 +212,13 @@ export function GuidedSigningViewer({
     setStarted(true);
   }
 
+  const shellClass =
+    layout === "embedded"
+      ? "relative flex min-h-0 flex-1 flex-col bg-slate-200 dark:bg-slate-900"
+      : "relative flex h-dvh flex-col bg-slate-200 dark:bg-slate-900";
+
   return (
-    <div className="relative flex h-dvh flex-col bg-slate-200 dark:bg-slate-900">
+    <div className={shellClass}>
       {!pdfReady && !pdfError ? (
         <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-slate-200 dark:bg-slate-900">
           <span className="h-10 w-10 animate-spin rounded-full border-[3px] border-slate-300 border-t-rph-rail" />
@@ -247,7 +255,7 @@ export function GuidedSigningViewer({
         ) : null}
       </header>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]">
         <div className="mx-auto flex w-full max-w-4xl flex-col items-center gap-10 px-3 py-6 sm:px-6">
           {pdfError ? <p className="text-sm text-red-600">{pdfError}</p> : null}
           {Array.from({ length: Math.max(pageCount, 1) }, (_, i) => i + 1).map((page) => (
@@ -308,7 +316,7 @@ export function GuidedSigningViewer({
               </p>
             </div>
           ))}
-          <div className="h-40 w-full shrink-0" aria-hidden />
+          <div className="h-52 w-full shrink-0 sm:h-40" aria-hidden />
         </div>
       </div>
 
@@ -333,7 +341,7 @@ export function GuidedSigningViewer({
           </div>
         </div>
       ) : current ? (
-        <div className="shrink-0 border-t border-slate-300 bg-white shadow-[0_-8px_24px_rgba(0,0,0,0.08)] dark:border-slate-700 dark:bg-slate-950">
+        <div className="shrink-0 border-t border-slate-300 bg-white pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(0,0,0,0.08)] dark:border-slate-700 dark:bg-slate-950">
           <div className="mx-auto max-w-3xl space-y-3 px-4 py-4">
             <div className="flex items-center justify-between gap-2">
               <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">
@@ -343,21 +351,24 @@ export function GuidedSigningViewer({
                 </span>
               </p>
               <div className="flex gap-1">
-                {ordered.map((f, i) => (
+                {ordered.map((f, i) => {
+                  const filled = isFilled(f, values) || (i === stepIndex && Boolean(draft.trim()));
+                  return (
                   <button
                     key={f.id}
                     type="button"
                     title={`Go to field ${i + 1}`}
                     onClick={() => goToField(i)}
-                    className={`h-2 w-2 rounded-full ${
-                      isFilled(f, values)
+                    className={`h-2.5 w-2.5 rounded-full sm:h-2 sm:w-2 ${
+                      filled
                         ? "bg-emerald-500"
                         : i === stepIndex
                           ? "bg-rph-rail"
                           : "bg-slate-300 dark:bg-slate-600"
                     }`}
                   />
-                ))}
+                  );
+                })}
               </div>
             </div>
 

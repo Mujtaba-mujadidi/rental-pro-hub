@@ -212,6 +212,12 @@ function fieldsToFormData(fields: VehicleDraftFields): FormData {
   return fd;
 }
 
+export type AddVehicleCreatedResult = {
+  vehicleId: string;
+  vrm: string;
+  failedDocUploadLabels: string[];
+};
+
 export function AddVehicleModal({
   open,
   onOpenChange,
@@ -221,7 +227,7 @@ export function AddVehicleModal({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   subcompanies: SubOpt[];
-  onCreated?: () => void;
+  onCreated?: (result: AddVehicleCreatedResult) => void;
 }) {
   const router = useRouter();
   const primarySub = subcompanies.find((s) => s.is_primary)?.id ?? subcompanies[0]?.id ?? "";
@@ -392,10 +398,10 @@ export function AddVehicleModal({
         return;
       }
 
-      const uploadErrors: string[] = [];
+      const failedDocUploadLabels: string[] = [];
 
       if (shouldSavePurchase(fields.purchase)) {
-        const purchaseRes = await recordVehiclePurchaseOnCreateAction(created.id, {
+        await recordVehiclePurchaseOnCreateAction(created.id, {
           occurred_on: fields.purchase.occurred_on || new Date().toISOString().slice(0, 10),
           amount_gbp: fields.purchase.amount_gbp,
           counterparty: fields.purchase.counterparty,
@@ -404,9 +410,6 @@ export function AddVehicleModal({
           payment_reference: fields.purchase.payment_reference,
           notes: fields.purchase.notes,
         });
-        if (!purchaseRes.ok) {
-          uploadErrors.push(`Purchase: ${purchaseRes.error}`);
-        }
       }
 
       for (const docType of REQUIRED_VEHICLE_DOC_TYPES) {
@@ -417,19 +420,19 @@ export function AddVehicleModal({
         fd.set("doc_type", docType);
         for (const file of bundle.files) fd.append("files", file);
         const up = await uploadVehicleDocumentAction(fd);
-        if (!up.ok) uploadErrors.push(`${VEHICLE_DOC_TYPE_LABELS[docType]}: ${up.error}`);
+        if (!up.ok) failedDocUploadLabels.push(VEHICLE_DOC_TYPE_LABELS[docType]);
       }
 
       clearAfterSuccess();
       setBundles(emptyBundles());
       setSaveOverlay(null);
       onOpenChange(false);
-      onCreated?.();
+      onCreated?.({
+        vehicleId: created.id,
+        vrm: fields.vrm.trim(),
+        failedDocUploadLabels,
+      });
       router.refresh();
-
-      if (uploadErrors.length) {
-        setError(`Vehicle saved, but some uploads failed: ${uploadErrors.join("; ")}`);
-      }
     });
   }
 
@@ -695,8 +698,8 @@ export function AddVehicleModal({
                 key={docType}
                 className="rph-card space-y-3 p-4"
               >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
                     <p className="font-semibold text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[docType]}</p>
                     <p className="rph-meta">
                       {ready
@@ -704,15 +707,23 @@ export function AddVehicleModal({
                         : "Missing — upload PDF or images"}
                     </p>
                   </div>
-                  <span
-                    className={
-                      ready
-                        ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
-                        : "rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100"
-                    }
-                  >
-                    {ready ? "Ready" : "Missing"}
-                  </span>
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                    <span
+                      className={
+                        ready
+                          ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+                          : "rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100"
+                      }
+                    >
+                      {ready ? "Ready" : "Missing"}
+                    </span>
+                    <VehicleDocAddMenu disabled={busy} onFiles={(files) => addFiles(docType, files)} />
+                    {ready ? (
+                      <button type="button" className={btnGhost} onClick={() => clearBundle(docType)}>
+                        Clear
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
                 {docType === "logbook" ? (
                   <p className="rph-meta">
@@ -725,14 +736,6 @@ export function AddVehicleModal({
                     PHV/Taxi licence expiry is set on Specs — upload the paper file(s) here.
                   </p>
                 )}
-                <div className="flex flex-wrap gap-2">
-                  <VehicleDocAddMenu disabled={busy} onFiles={(files) => addFiles(docType, files)} />
-                  {ready ? (
-                    <button type="button" className={btnGhost} onClick={() => clearBundle(docType)}>
-                      Clear
-                    </button>
-                  ) : null}
-                </div>
                 {ready ? (
                   <ul className="rph-meta">
                     {bundle.files.map((f, i) => (

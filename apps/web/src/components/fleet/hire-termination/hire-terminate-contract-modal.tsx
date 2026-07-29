@@ -139,11 +139,11 @@ function AccountsSummaryPanel({
           </dd>
         </div>
         <div>
-          <dt className="rph-muted text-xs">Rent due (to date)</dt>
+          <dt className="rph-muted text-xs">Rent due so far</dt>
           <dd className="font-medium text-rph-fg">£{accounts.accruedRentDueGbp.toFixed(2)}</dd>
         </div>
         <div>
-          <dt className="rph-muted text-xs">Rent paid (to date)</dt>
+          <dt className="rph-muted text-xs">Rent paid so far</dt>
           <dd className="font-medium text-rph-fg">£{accounts.accruedRentPaidGbp.toFixed(2)}</dd>
         </div>
         {accounts.accruedOverpaymentGbp > 0 ? (
@@ -154,18 +154,18 @@ function AccountsSummaryPanel({
         ) : null}
         {accounts.prepaidRentCreditGbp > 0 ? (
           <div>
-            <dt className="rph-muted text-xs">Prepaid future rent (credit)</dt>
+            <dt className="rph-muted text-xs">Rent paid in advance</dt>
             <dd className="font-medium text-rph-fg">£{accounts.prepaidRentCreditGbp.toFixed(2)}</dd>
           </div>
         ) : null}
         <div>
-          <dt className="rph-muted text-xs">Rent settlement</dt>
+          <dt className="rph-muted text-xs">Rent balance</dt>
           <dd className="font-medium text-rph-fg">
             {accounts.rentCreditGbp > 0
-              ? `Company owes driver £${accounts.rentCreditGbp.toFixed(2)}`
+              ? `You owe driver £${accounts.rentCreditGbp.toFixed(2)}`
               : accounts.balanceGbp > 0
                 ? `Driver owes £${accounts.balanceGbp.toFixed(2)}`
-                : "Settled — no rent balance"}
+                : "All clear — no rent owed"}
           </dd>
         </div>
         {showDepositLines ? (
@@ -182,7 +182,7 @@ function AccountsSummaryPanel({
         ) : null}
       </dl>
       <p className="border-t border-rph-border pt-2 font-semibold text-rph-fg">
-        Net settlement:{" "}
+        Money owed at end:{" "}
         {settlementBalanceLabel(
           accounts.netSettlementGbp > 0
             ? "driver_owes_company"
@@ -586,8 +586,8 @@ export function HireTerminateContractModal({
 
                   {depositDisposition === "hold_pending" ? (
                     <p className="rph-muted text-sm">
-                      Rent settlement continues on the next step. Resolve the deposit later on the Payments
-                      tab for this hire.
+                      You can decide about the deposit on the next step. If you hold it, choose what to
+                      do with it later on the Payments tab for this hire.
                     </p>
                   ) : null}
 
@@ -667,7 +667,7 @@ export function HireTerminateContractModal({
                 <p className="font-semibold text-rph-fg">
                   {driverOwesCompany
                     ? `Driver owes £${settlementAmount.toFixed(2)}`
-                    : `Company owes driver £${settlementAmount.toFixed(2)}`}
+                    : `You owe driver £${settlementAmount.toFixed(2)}`}
                 </p>
                 <p className="rph-muted mt-1 text-xs">{hireSettlementLedgerHelpText()}</p>
               </div>
@@ -750,7 +750,7 @@ export function HireTerminateContractModal({
               {needsSettlement ? (
                 <div className="rph-card p-3 text-sm">
                   <p className="font-medium text-rph-fg">
-                    Settlement: {settlementResolutionLabel(settlementResolution)}
+                    Payment: {settlementResolutionLabel(settlementResolution)}
                     {settlementResolution === "paid_now"
                       ? ` · £${settlementAmount.toFixed(2)} via ${settlementPaymentMethod.replace(/_/g, " ")}`
                       : settlementResolution === "open_balance"

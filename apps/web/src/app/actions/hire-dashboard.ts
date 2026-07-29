@@ -3,7 +3,14 @@
 import { loadHirePaymentsPageAction, loadDriverHirePaymentsPageAction, type HirePaymentPageRow } from "@/app/actions/hire-payments";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
 import { canReadRentals } from "@/lib/auth/rental-permissions";
-import { ukTodayYmd } from "@/lib/datetime/uk";
+import { formatUkDateTimeSeconds, ukTodayYmd } from "@/lib/datetime/uk";
+import { formatHireContractEndLabel, formatHireContractStartLabel } from "@/lib/fleet/hire-pdf-details";
+import { formatRentLabel } from "@/lib/fleet/hire-access-display";
+import { hireFrequencyPosition } from "@/lib/fleet/hire-overview-period";
+import type { HireOverviewContext } from "@/lib/fleet/hire-overview-types";
+import { hireContractEndYmd } from "@/lib/fleet/hire-income";
+import type { HireTerminationAccountsSummary } from "@/lib/fleet/hire-termination-summary";
+import type { RentCadence } from "@/lib/fleet/hire-types";
 import {
   analyzeHirePaymentHealth,
   buildHirePaymentAttentionItems,
@@ -28,6 +35,7 @@ import type { HireLifecycleAttentionItem } from "@/lib/fleet/hire-lifecycle-atte
 import type { HirePaymentSummary } from "@/lib/fleet/hire-payment-summary";
 import type { HirePaymentDisplayOptions } from "@/lib/fleet/hire-payment-display";
 import type { HireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
+import { driverHireStatusLabel } from "@/lib/fleet/driver-hire-nav";
 import { createClient } from "@/lib/supabase/server";
 
 export type HireDashboardRecentEvent = {
@@ -65,7 +73,100 @@ export type HireDashboardData = {
   depositGbp: number | null;
   depositDispositionLabel: string | null;
   financialClosure: HireFinancialClosureState;
+  overview: HireOverviewContext;
+  terminationSummary: HireTerminationAccountsSummary | null;
 };
+
+function shortHireId(hireGroupId: string): string {
+  return hireGroupId.trim().slice(0, 8);
+}
+
+function driverNameFromEmail(email: string | null): string | null {
+  const trimmed = email?.trim();
+  if (!trimmed) return null;
+  const local = trimmed.split("@")[0] ?? "";
+  if (!local) return trimmed;
+  return local
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function buildOverviewContext(input: {
+  hireGroupId: string;
+  vehicleVrm: string;
+  vehicleMakeModel: string;
+  driverEmail: string | null;
+  driverLicence: string | null;
+  companyName: string | null;
+  statusLabel: string;
+  group: {
+    start_date: string | null;
+    start_time?: string | null;
+    end_time?: string | null;
+    activated_at: string | null;
+    terminated_at: string | null;
+    ended_at: string | null;
+    status: string | null;
+    rent_cadence: string | null;
+    rent_amount_gbp: number | null;
+    deposit_gbp: number | null;
+    include_deposit: boolean | null;
+  };
+  agreementEndDates?: (string | null | undefined)[];
+  scheduleRows: HirePaymentAnalyticsRow[];
+  contractEndedAtLabel: string | null;
+  todayYmd: string;
+}): HireOverviewContext {
+  const startDate = (input.group.start_date as string | null) ?? input.todayYmd;
+  const contractEndedYmd = hireContractEndYmd({
+    status: String(input.group.status ?? ""),
+    terminatedAt: (input.group.terminated_at as string | null) ?? null,
+    endedAt: (input.group.ended_at as string | null) ?? null,
+  });
+  const referenceYmd = contractEndedYmd ?? input.todayYmd;
+  const cadence = (input.group.rent_cadence as RentCadence) ?? "weekly";
+  const activatedAt = (input.group.activated_at as string | null) ?? null;
+  const depositGbp = input.group.include_deposit ? Number(input.group.deposit_gbp ?? 0) : 0;
+  const maxAgreementEndDate =
+    (input.agreementEndDates ?? [])
+      .filter((d): d is string => Boolean(d?.trim()))
+      .sort()
+      .at(-1) ?? null;
+
+  return {
+    hireGroupId: input.hireGroupId,
+    hireGroupIdShort: shortHireId(input.hireGroupId),
+    vehicleVrm: input.vehicleVrm,
+    vehicleMakeModel: input.vehicleMakeModel,
+    driverName: driverNameFromEmail(input.driverEmail) ?? input.driverLicence,
+    driverEmail: input.driverEmail,
+    companyName: input.companyName,
+    rentLabel: formatRentLabel(input.group.rent_amount_gbp, cadence),
+    rentCadence: cadence,
+    depositLabel: depositGbp > 0 ? `£${depositGbp.toFixed(2)}` : null,
+    startAtLabel: activatedAt
+      ? formatUkDateTimeSeconds(activatedAt)
+      : formatHireContractStartLabel(startDate, input.group.start_time),
+    scheduledEndAtLabel:
+      !contractEndedYmd && maxAgreementEndDate
+        ? formatHireContractEndLabel(maxAgreementEndDate, input.group.end_time)
+        : null,
+    endedAtLabel: input.contractEndedAtLabel,
+    frequencyPositionLabel: hireFrequencyPosition({
+      cadence,
+      startDateYmd: startDate,
+      referenceYmd,
+      scheduleRows: input.scheduleRows.map((row) => ({
+        rowKind: row.rowKind,
+        periodStart: row.periodStart,
+      })),
+    }),
+    statusLabel: input.statusLabel,
+    contractEnded: Boolean(contractEndedYmd),
+  };
+}
 
 function toAnalyticsRows(rows: HirePaymentPageRow[]): HirePaymentAnalyticsRow[] {
   return rows.map((row) => ({
@@ -119,11 +220,14 @@ export async function loadHireDashboardAction(
 
   const { data: group } = await supabase
     .from("vehicle_hire_groups")
-    .select("start_date, status, include_deposit")
+    .select(
+      "start_date, start_time, end_time, status, include_deposit, activated_at, terminated_at, ended_at, rent_cadence, rent_amount_gbp, deposit_gbp, driver_email, driver_licence_number, vehicles(vrm, make, model), vehicle_hire_agreements(end_date)",
+    )
     .eq("id", hireGroupId.trim())
     .maybeSingle();
   const startDate = (group?.start_date as string | null) ?? today;
   const hireStatus = (group?.status as string | null) ?? "";
+  const vehicle = group?.vehicles as { vrm?: string; make?: string; model?: string } | null;
 
   const { data: inspectionRows } = await supabase
     .from("vehicle_hire_inspections")
@@ -225,6 +329,35 @@ export async function loadHireDashboardAction(
     depositGbp: page.data.depositGbp,
   });
   const scheduleDepositStatusLabel = depositStatusLabel(analyticsRows, today);
+  const overview = buildOverviewContext({
+    hireGroupId: hireGroupId.trim(),
+    vehicleVrm: vehicle?.vrm?.trim() || page.data.vehicleVrm,
+    vehicleMakeModel:
+      [vehicle?.make, vehicle?.model].filter(Boolean).join(" ").trim() || page.data.vehicleVrm,
+    driverEmail: (group?.driver_email as string | null) ?? null,
+    driverLicence: (group?.driver_licence_number as string | null) ?? null,
+    companyName: null,
+    statusLabel: driverHireStatusLabel(hireStatus),
+    group: group ?? {
+      start_date: startDate,
+      start_time: null,
+      end_time: null,
+      activated_at: null,
+      terminated_at: null,
+      ended_at: null,
+      status: hireStatus,
+      rent_cadence: null,
+      rent_amount_gbp: null,
+      deposit_gbp: null,
+      include_deposit: false,
+    },
+    agreementEndDates: (
+      (group?.vehicle_hire_agreements as { end_date?: string | null }[] | null | undefined) ?? []
+    ).map((a) => a.end_date),
+    scheduleRows: analyticsRows,
+    contractEndedAtLabel: page.data.contractEndedAtLabel,
+    todayYmd: today,
+  });
 
   return {
     ok: true,
@@ -260,6 +393,8 @@ export async function loadHireDashboardAction(
       depositGbp: page.data.depositGbp,
       depositDispositionLabel: page.data.depositDispositionLabel,
       financialClosure,
+      overview,
+      terminationSummary: page.data.terminationSummary,
     },
   };
 }
@@ -278,7 +413,9 @@ async function buildDriverDashboardData(
 
   const { data: group } = await supabase
     .from("vehicle_hire_groups")
-    .select("start_date, status")
+    .select(
+      "start_date, start_time, end_time, status, activated_at, terminated_at, ended_at, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, driver_email, driver_licence_number, parent_company_id, vehicles(vrm, make, model), companies(name), vehicle_hire_agreements(end_date)",
+    )
     .eq("id", hireGroupId.trim())
     .eq("driver_user_id", user.id)
     .maybeSingle();
@@ -286,6 +423,8 @@ async function buildDriverDashboardData(
 
   const startDate = (group.start_date as string | null) ?? today;
   const hireStatus = (group.status as string | null) ?? "";
+  const vehicle = group.vehicles as { vrm?: string; make?: string; model?: string } | null;
+  const company = group.companies as { name?: string } | null;
 
   const { data: inspectionRows } = await supabase
     .from("vehicle_hire_inspections")
@@ -363,6 +502,23 @@ async function buildDriverDashboardData(
     depositGbp: page.data.depositGbp,
   });
   const scheduleDepositStatusLabel = depositStatusLabel(analyticsRows, today);
+  const overview = buildOverviewContext({
+    hireGroupId: hireGroupId.trim(),
+    vehicleVrm: vehicle?.vrm?.trim() || page.data.vehicleVrm,
+    vehicleMakeModel:
+      [vehicle?.make, vehicle?.model].filter(Boolean).join(" ").trim() || page.data.vehicleVrm,
+    driverEmail: (group.driver_email as string | null) ?? user.email ?? null,
+    driverLicence: (group.driver_licence_number as string | null) ?? null,
+    companyName: company?.name?.trim() ?? null,
+    statusLabel: driverHireStatusLabel(hireStatus),
+    group,
+    agreementEndDates: (
+      (group.vehicle_hire_agreements as { end_date?: string | null }[] | null | undefined) ?? []
+    ).map((a) => a.end_date),
+    scheduleRows: analyticsRows,
+    contractEndedAtLabel: page.data.contractEndedAtLabel,
+    todayYmd: today,
+  });
 
   return {
     ok: true,
@@ -398,6 +554,8 @@ async function buildDriverDashboardData(
       depositGbp: page.data.depositGbp,
       depositDispositionLabel: page.data.depositDispositionLabel,
       financialClosure,
+      overview,
+      terminationSummary: page.data.terminationSummary,
     },
   };
 }

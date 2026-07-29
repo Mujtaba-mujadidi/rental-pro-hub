@@ -339,7 +339,7 @@ export function PdfFieldDesigner({
   const canClickSend = canSend && !busy && sendPhase !== "sending" && sendPhase !== "success";
 
   return (
-    <div className="relative flex h-[calc(100dvh-7.5rem)] min-h-[32rem] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+    <div className="relative flex h-[min(100dvh,56rem)] min-h-[24rem] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950 sm:h-[calc(100dvh-7.5rem)] sm:min-h-[32rem]">
       {sendPhase === "sending" || sendPhase === "success" || sendPhase === "error" ? (
         <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-4 bg-white/95 px-6 dark:bg-slate-950/95">
           {sendPhase === "sending" ? (
@@ -413,6 +413,14 @@ export function PdfFieldDesigner({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={pdfUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 lg:hidden"
+          >
+            Open full PDF
+          </a>
           {error && sendPhase === "idle" ? (
             <span className="max-w-xs truncate text-xs text-red-600">{error}</span>
           ) : null}
@@ -445,16 +453,16 @@ export function PdfFieldDesigner({
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1">
-        {/* Document canvas */}
-        <div className="relative min-w-0 flex-1 overflow-auto bg-slate-300/80 dark:bg-slate-800">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        {/* Document canvas — full width on mobile */}
+        <div className="relative min-h-[45dvh] min-w-0 flex-1 overflow-y-auto overscroll-y-contain bg-slate-300/80 [-webkit-overflow-scrolling:touch] dark:bg-slate-800 lg:min-h-0">
           {pdfLoading ? (
             <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-slate-300/90 dark:bg-slate-800/90">
               <span className="h-9 w-9 animate-spin rounded-full border-[3px] border-slate-300 border-t-rph-rail" />
               <p className="text-sm font-medium text-slate-600 dark:text-slate-300">Loading contract PDF…</p>
             </div>
           ) : null}
-          <div className="mx-auto flex w-full max-w-4xl flex-col items-center gap-8 px-4 py-8 sm:px-8">
+          <div className="mx-auto flex w-full max-w-4xl flex-col items-center gap-8 px-3 py-6 sm:px-8 sm:py-8">
             {Array.from({ length: Math.max(pageCount, 1) }, (_, i) => i + 1).map((page) => (
               <div key={page} className="w-full max-w-[720px]">
                 <div
@@ -569,8 +577,8 @@ export function PdfFieldDesigner({
           </div>
         </div>
 
-        {/* Always-visible place-fields rail */}
-        <aside className="flex w-56 shrink-0 flex-col border-l border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/90 sm:w-64">
+        {/* Field tools — horizontal strip on mobile, side rail on desktop */}
+        <aside className="flex max-h-[38dvh] shrink-0 flex-col border-t border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/90 lg:max-h-none lg:w-64 lg:border-l lg:border-t-0">
           <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-700">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Place fields for</h2>
             {allowOwnerFields ? (
@@ -599,7 +607,8 @@ export function PdfFieldDesigner({
             <p className="mt-2 text-xs text-slate-500">Drag onto the PDF or select then click.</p>
           </div>
 
-          <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-3">
+          <div className="flex flex-1 flex-col gap-2 overflow-y-auto overscroll-y-contain p-3 lg:overflow-y-auto">
+            <div className="grid grid-cols-3 gap-2 lg:grid-cols-1">
             {(["signature", "date", "text"] as EsignFieldType[]).map((t) => {
               const meta = FIELD_META[t];
               const active = tool === t;
@@ -615,7 +624,7 @@ export function PdfFieldDesigner({
                     setTool(t);
                   }}
                   onClick={() => setTool((prev) => (prev === t ? null : t))}
-                  className={`flex cursor-grab flex-col items-start gap-0.5 rounded-lg border-2 px-3 py-3 text-left transition active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`flex cursor-grab flex-col items-start gap-0.5 rounded-lg border-2 px-2 py-2 text-left transition active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50 lg:px-3 lg:py-3 ${
                     active
                       ? `${meta.border} ${meta.bg} ring-2 ring-rph-rail/40`
                       : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-600 dark:bg-slate-950"
@@ -624,10 +633,11 @@ export function PdfFieldDesigner({
                   <span className={`text-sm font-semibold ${active ? meta.color : "text-slate-800 dark:text-slate-100"}`}>
                     {meta.label}
                   </span>
-                  <span className="text-[11px] text-slate-500">{meta.hint}</span>
+                  <span className="hidden text-[11px] text-slate-500 lg:block">{meta.hint}</span>
                 </button>
               );
             })}
+            </div>
           </div>
 
           <div className="border-t border-slate-200 p-3 text-xs text-slate-500 dark:border-slate-700">

@@ -24,8 +24,9 @@ export type DriverHireDisplayLookups = {
 /** Contract hire start — same date and default time as the signed PDF. */
 export function formatDriverHireContractStartLabel(
   startDate: string | null | undefined,
+  startTime?: string | null | undefined,
 ): string {
-  return formatHireContractStartLabel(startDate);
+  return formatHireContractStartLabel(startDate, startTime);
 }
 
 export function resolveDriverHireCompanyName(input: {

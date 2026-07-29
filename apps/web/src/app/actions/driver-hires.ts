@@ -2,6 +2,7 @@
 
 import { getSessionUser } from "@/lib/auth/profile";
 import { formatUkDate, formatUkDateTimeSeconds } from "@/lib/datetime/uk";
+import { formatHireContractEndLabel } from "@/lib/fleet/hire-pdf-details";
 import {
   formatRentLabel,
   parseHireAccessSnapshot,
@@ -29,13 +30,13 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 const MY_HIRE_SHELL_SELECT =
-  "id, status, start_date, rent_cadence, rent_amount_gbp, activated_at, ended_at, terminated_at, vehicle_id, parent_company_id, subcompany_id";
+  "id, status, start_date, start_time, rent_cadence, rent_amount_gbp, activated_at, ended_at, terminated_at, vehicle_id, parent_company_id, subcompany_id";
 
 const MY_HIRE_RENTAL_SELECT =
-  `id, status, start_date, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, draft_snapshot, activated_at, ended_at, vehicle_id, parent_company_id, subcompany_id, company_hire_terms_versions(title, body, version_label), vehicle_hire_agreements(contract_length_kind, end_date, status, signed_at)`;
+  `id, status, start_date, start_time, end_time, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, draft_snapshot, activated_at, ended_at, vehicle_id, parent_company_id, subcompany_id, company_hire_terms_versions(title, body, version_label), vehicle_hire_agreements(contract_length_kind, end_date, status, signed_at)`;
 
 const HIRE_HISTORY_SELECT =
-  "id, status, start_date, activated_at, ended_at, terminated_at, vehicle_id, parent_company_id, subcompany_id, vehicle_hire_agreements(signed_at)";
+  "id, status, start_date, start_time, activated_at, ended_at, terminated_at, vehicle_id, parent_company_id, subcompany_id, vehicle_hire_agreements(signed_at)";
 
 const PAYMENT_STATUS_LABELS: Record<string, string> = {
   not_received: "Not received",
@@ -157,7 +158,10 @@ function mapShellRow(
     }),
     vehicleVrm: vehicle.vehicleVrm,
     vehicleMakeModel: vehicle.vehicleMakeModel,
-    startDateLabel: formatDriverHireContractStartLabel(startDate),
+    startDateLabel: formatDriverHireContractStartLabel(
+      startDate,
+      typeof row.start_time === "string" ? row.start_time : null,
+    ),
     rentLabel: formatRentLabel(row.rent_amount_gbp, row.rent_cadence),
     activatedAtLabel:
       typeof row.activated_at === "string" && row.activated_at
@@ -168,12 +172,13 @@ function mapShellRow(
 
 function mapAgreementLines(
   agreements: { contract_length_kind?: string; end_date?: string | null; signed_at?: string | null }[] | null,
+  endTime?: string | null,
 ): string[] {
   if (!agreements?.length) return [];
   return agreements
     .map((agreement) => {
       const kind = agreement.contract_length_kind?.replace(/_/g, " ") ?? "Contract";
-      const end = agreement.end_date ? formatUkDate(agreement.end_date) : null;
+      const end = agreement.end_date ? formatHireContractEndLabel(agreement.end_date, endTime) : null;
       const signed = agreement.signed_at ? "signed" : "unsigned";
       return end ? `${kind} (ends ${end}, ${signed})` : `${kind} (${signed})`;
     })
@@ -267,7 +272,7 @@ export async function loadDriverMyHireRentalDetailsAction(
       hireGroupId: id,
       status,
       statusLabel: driverHireStatusLabel(status),
-      agreementLines: mapAgreementLines(agreements),
+      agreementLines: mapAgreementLines(agreements, (row.end_time as string | null) ?? null),
     },
   };
 }
@@ -363,7 +368,10 @@ export async function loadDriverHireHistoryAction(): Promise<
       }),
       vehicleVrm: vehicle.vehicleVrm,
       vehicleMakeModel: vehicle.vehicleMakeModel,
-      startDateLabel: formatDriverHireContractStartLabel(startDate),
+      startDateLabel: formatDriverHireContractStartLabel(
+      startDate,
+      typeof row.start_time === "string" ? row.start_time : null,
+    ),
       endDateLabel: endedAt ? formatUkDate(endedAt.slice(0, 10)) : null,
       terminatedAtLabel:
         typeof row.terminated_at === "string" && row.terminated_at

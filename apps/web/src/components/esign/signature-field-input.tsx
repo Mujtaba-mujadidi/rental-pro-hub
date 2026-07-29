@@ -79,6 +79,12 @@ export function SignatureFieldInput({
     onChange(canvas && !isCanvasBlank(canvas) ? canvas.toDataURL("image/png") : null);
   }
 
+  function endStroke() {
+    if (!drawing.current) return;
+    drawing.current = false;
+    emitValue();
+  }
+
   return (
     <div className="space-y-2">
       {savedSignatureDataUrl ? (
@@ -126,10 +132,9 @@ export function SignatureFieldInput({
           ctx?.lineTo(p.x, p.y);
           ctx?.stroke();
         }}
-        onPointerUp={() => {
-          drawing.current = false;
-          emitValue();
-        }}
+        onPointerUp={endStroke}
+        onPointerCancel={endStroke}
+        onLostPointerCapture={endStroke}
       />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <button

@@ -1,6 +1,7 @@
 import { formatUkDate } from "@/lib/datetime/uk";
 import { computeContractEndDate } from "@/lib/fleet/hire-lifecycle";
 import type { HireAccessVehicleSnapshot } from "@/lib/fleet/hire-access-vehicle-fields";
+import { formatHireContractStartLabel } from "@/lib/fleet/hire-pdf-details";
 import type { ContractLengthKind, RentCadence } from "@/lib/fleet/hire-types";
 
 export const CONTRACT_LENGTH_LABELS: Record<ContractLengthKind, string> = {
@@ -123,6 +124,7 @@ export function parseHireAccessSnapshot(
   const embeddedTerms = (hireSummary.company_hire_terms_versions ?? null) as SnapshotTerms;
 
   const startDate = typeof hireSummary.start_date === "string" ? hireSummary.start_date : null;
+  const startTime = typeof hireSummary.start_time === "string" ? hireSummary.start_time : null;
   const includeDeposit = Boolean(hireSummary.include_deposit);
   const deposit = includeDeposit ? formatGbp(hireSummary.deposit_gbp) : null;
 
@@ -142,7 +144,7 @@ export function parseHireAccessSnapshot(
       subcompany?.registered_postcode,
     ]),
     startDate,
-    startDateLabel: startDate ? formatUkDate(startDate) : "—",
+    startDateLabel: startDate ? formatHireContractStartLabel(startDate, startTime) : "—",
     rentLabel: formatRentLabel(hireSummary.rent_amount_gbp, hireSummary.rent_cadence),
     depositLabel: deposit,
     contractLengthLines: buildContractLengthLines(startDate, hireSummary.draft_snapshot),

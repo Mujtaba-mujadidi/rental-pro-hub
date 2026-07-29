@@ -19,16 +19,18 @@ export default async function HireAccessPage({
   const approveIntent = sp.intent === "approve" || sp.approve === "1";
 
   return (
-    <HireAccessClient
-      token={token}
-      approveIntent={approveIntent}
-      initial={{
-        requestId: res.requestId,
-        companyName: res.companyName,
-        status: res.status,
-        termsPreview: res.termsPreview,
-        hireSummary: res.hireSummary,
-      }}
-    />
+    <div className="rph-card flex-1 p-6 sm:p-8">
+      <HireAccessClient
+        token={token}
+        approveIntent={approveIntent}
+        initial={{
+          requestId: res.requestId,
+          companyName: res.companyName,
+          status: res.status,
+          termsPreview: res.termsPreview,
+          hireSummary: res.hireSummary,
+        }}
+      />
+    </div>
   );
 }
