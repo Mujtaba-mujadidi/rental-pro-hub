@@ -39,9 +39,22 @@ export function HireInspectionPdfExportButton({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <button type="button" className="rph-btn-ghost text-sm" disabled={pending} onClick={download}>
-        {pending ? "Preparing PDF…" : "Download PDF"}
+      <button
+        type="button"
+        className="rph-btn-ghost text-sm"
+        disabled={pending}
+        aria-busy={pending}
+        onClick={download}
+      >
+        Download PDF
       </button>
+      {pending ? (
+        <span
+          className="h-4 w-4 animate-spin rounded-full border-2 border-rph-border border-t-rph-rail"
+          role="status"
+          aria-label="Preparing PDF"
+        />
+      ) : null}
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
     </div>
   );

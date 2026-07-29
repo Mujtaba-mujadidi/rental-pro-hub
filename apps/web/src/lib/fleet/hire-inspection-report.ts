@@ -40,41 +40,72 @@ export function hireInspectionReportFileName(kind: HireInspectionKind, vehicleLa
   return `${kind}-${safe}.pdf`;
 }
 
-/** Plain-text sections for PDF export (and unit tests). */
-export function buildHireInspectionReportSections(input: HireInspectionReportInput): string[][] {
-  const title = hireInspectionReportTitle(input.kind);
-  const sections: string[][] = [
-    [title, input.vehicleLabel],
-    input.completedAt ? [`Completed: ${formatUkDateTime(input.completedAt)}`] : [],
-    [
-      "Vehicle readings",
-      `Odometer: ${input.odometerReading != null ? `${input.odometerReading} mi` : "Not recorded"}`,
-      `Fuel: ${formatHireFuelLevelPercent(input.fuelLevel)}`,
-      `Photos: ${input.photoCount}`,
-    ],
-    [
-      "Vehicle kit",
-      ...HIRE_INSPECTION_ACCESSORY_KEYS.map(
-        (key) => `${hireInspectionAccessoryLabel(key)}: ${formatAccessoryPresence(input.accessories[key])}`,
-      ),
-    ],
+/** Vehicle odometer, fuel, and photo count — rendered on a dedicated PDF page. */
+export function buildHireInspectionReportReadingsSection(input: HireInspectionReportInput): string[] {
+  return [
+    "Vehicle readings",
+    `Odometer: ${input.odometerReading != null ? `${input.odometerReading} mi` : "Not recorded"}`,
+    `Fuel: ${formatHireFuelLevelPercent(input.fuelLevel)}`,
+    `Photos: ${input.photoCount}`,
   ];
+}
 
+/** Vehicle kit checklist. */
+export function buildHireInspectionReportKitSection(input: HireInspectionReportInput): string[] {
+  return [
+    "Vehicle kit",
+    ...HIRE_INSPECTION_ACCESSORY_KEYS.map(
+      (key) => `${hireInspectionAccessoryLabel(key)}: ${formatAccessoryPresence(input.accessories[key])}`,
+    ),
+  ];
+}
+
+/** Numbered damage lines for the diagram page. */
+export function buildHireInspectionReportDamageSection(input: HireInspectionReportInput): string[] {
   if (input.damages.length) {
-    sections.push([
+    return [
       "Damage",
       ...input.damages.map((d, i) => {
         const line = `#${i + 1} ${d.panelLabel} · ${hireDamageTypeLabel(d.damageType as never)} · ${hireDamageSeverityLabel(d.severity as never)}`;
         return d.notes?.trim() ? `${line} — ${d.notes.trim()}` : line;
       }),
-    ]);
-  } else {
-    sections.push(["Damage", "No damage recorded."]);
+    ];
   }
+  return ["Damage", "No damage recorded."];
+}
 
-  if (input.generalNotes?.trim()) {
-    sections.push(["Notes", input.generalNotes.trim()]);
-  }
+export function buildHireInspectionReportNotesSection(input: HireInspectionReportInput): string[] | null {
+  if (!input.generalNotes?.trim()) return null;
+  return ["Notes", input.generalNotes.trim()];
+}
 
-  return sections.filter((section) => section.length > 0);
+/** Kit and notes — rendered on the readings page (damage is on the diagram page). */
+export function buildHireInspectionReportFindingsSections(input: HireInspectionReportInput): string[][] {
+  const sections: string[][] = [buildHireInspectionReportKitSection(input)];
+  const notes = buildHireInspectionReportNotesSection(input);
+  if (notes) sections.push(notes);
+  return sections;
+}
+
+/** Inspection findings sections (readings, kit, damage, notes) — no title or hire header. */
+export function buildHireInspectionReportContentSections(input: HireInspectionReportInput): string[][] {
+  const sections: string[][] = [
+    buildHireInspectionReportReadingsSection(input),
+    buildHireInspectionReportKitSection(input),
+    buildHireInspectionReportDamageSection(input),
+  ];
+  const notes = buildHireInspectionReportNotesSection(input);
+  if (notes) sections.push(notes);
+  return sections;
+}
+
+/** Plain-text sections for PDF export (and unit tests). */
+export function buildHireInspectionReportSections(input: HireInspectionReportInput): string[][] {
+  const title = hireInspectionReportTitle(input.kind);
+  const completed = input.completedAt ? [`Completed: ${formatUkDateTime(input.completedAt)}`] : [];
+  return [
+    [title, input.vehicleLabel],
+    ...(completed.length ? [completed] : []),
+    ...buildHireInspectionReportContentSections(input),
+  ].filter((section) => section.length > 0);
 }

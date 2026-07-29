@@ -1357,6 +1357,12 @@ export async function exportHireInspectionPdfAction(
 
   const { getVehicleDamagePanel } = await import("@/lib/fleet/vehicle-damage-panels");
   const { buildHireInspectionReportPdf } = await import("@/lib/fleet/hire-inspection-report-pdf");
+  const { loadHireInspectionReportPdfContext } = await import("@/lib/fleet/hire-inspection-report-context");
+  const { renderHireInspectionDiagramPng } = await import("@/lib/fleet/hire-inspection-diagram-image");
+  const { formatUkDateTime } = await import("@/lib/datetime/uk");
+
+  const context = await loadHireInspectionReportPdfContext(access.supabase, hireGroupId, kind);
+  if (!context.ok) return { ok: false, error: context.error };
 
   const photoBuffers: { caption?: string | null; bytes: Buffer; contentType: string }[] = [];
   for (const item of data.media) {
@@ -1370,6 +1376,24 @@ export async function exportHireInspectionPdfAction(
     });
   }
 
+  const damages = data.damages.map((d) => ({
+    panelLabel: getVehicleDamagePanel(d.panelId)?.label ?? d.panelLabel,
+    damageType: d.damageType,
+    severity: d.severity,
+    notes: d.notes,
+  }));
+
+  const diagramPng = await renderHireInspectionDiagramPng(
+    data.damages.map((d, index) => ({
+      panelId: d.panelId,
+      diagramView: d.diagramView,
+      pinX: d.pinX,
+      pinY: d.pinY,
+      severity: d.severity,
+      listIndex: index,
+    })),
+  );
+
   const pdf = await buildHireInspectionReportPdf(
     {
       kind,
@@ -1379,15 +1403,17 @@ export async function exportHireInspectionPdfAction(
       fuelLevel: data.fuelLevel,
       accessories: data.accessories,
       generalNotes: data.generalNotes,
-      damages: data.damages.map((d) => ({
-        panelLabel: getVehicleDamagePanel(d.panelId)?.label ?? d.panelLabel,
-        damageType: d.damageType,
-        severity: d.severity,
-        notes: d.notes,
-      })),
+      damages,
       photoCount: data.media.length,
     },
     photoBuffers,
+    {
+      summary: {
+        ...context.summary,
+        metaLine: data.completedAt ? `Completed: ${formatUkDateTime(data.completedAt)}` : null,
+      },
+      diagramPng,
+    },
   );
 
   return {

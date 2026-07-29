@@ -1109,6 +1109,156 @@ function drawAcceptanceAndSignatureBlocks(
   };
 }
 
+export type HireSummaryPdfInput = {
+  title: string;
+  subtitle?: string | null;
+  documentLabel?: string | null;
+  platformName?: string | null;
+  logoBytes?: Uint8Array | null;
+  logoContentType?: string | null;
+  companyNumber?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  contactAddress?: string | null;
+  hireDetails?: ContractPdfHireDetails;
+  hireRunningHeader?: ContractPdfHireRunningHeader | null;
+  /** Optional line under the subtitle (e.g. completed timestamp). */
+  metaLine?: string | null;
+};
+
+export type HireSummaryPdfCanvas = {
+  doc: PDFDocument;
+  platformName: string;
+  drawSectionHeading(title: string): void;
+  drawBodyLine(text: string, opts?: { bold?: boolean; size?: number }): void;
+  ensureSpace(need: number): void;
+  addPage(): void;
+  getPage(): PDFPage;
+  getY(): number;
+  setY(y: number): void;
+  getContentWidth(): number;
+  getMarginX(): number;
+  getMarginBottom(): number;
+  embedPng(bytes: Uint8Array): Promise<PDFImage>;
+  embedJpg(bytes: Uint8Array): Promise<PDFImage>;
+  finalize(): Promise<Uint8Array>;
+};
+
+async function embedLetterheadLogo(
+  doc: PDFDocument,
+  logoBytes: Uint8Array | null | undefined,
+  logoContentType: string | null | undefined,
+): Promise<LetterheadConfig["logo"]> {
+  if (!logoBytes?.length) return null;
+  try {
+    const isJpeg = (logoContentType ?? "").includes("jpeg") || (logoContentType ?? "").includes("jpg");
+    const img = isJpeg ? await doc.embedJpg(logoBytes) : await doc.embedPng(logoBytes);
+    const fitted = fitImageWithinBox(
+      img.width,
+      img.height,
+      CONTRACT_HEADER_LOGO_MAX_WIDTH,
+      CONTRACT_HEADER_LOGO_MAX_HEIGHT,
+    );
+    return { image: img, width: fitted.width, height: fitted.height };
+  } catch (e) {
+    console.warn("[hire-summary-pdf] logo embed failed", e);
+    return null;
+  }
+}
+
+/** Letterhead + hire details canvas for non-signature hire documents (e.g. inspection reports). */
+export async function createHireSummaryPdfCanvas(
+  input: HireSummaryPdfInput,
+): Promise<HireSummaryPdfCanvas> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const platformName = (input.platformName ?? "RMS").trim() || "RMS";
+  const embeddedLogo = await embedLetterheadLogo(doc, input.logoBytes, input.logoContentType ?? null);
+
+  const letterhead: LetterheadConfig = {
+    companyName: platformName,
+    companyNumber: input.companyNumber?.trim() || null,
+    contactEmail: input.contactEmail?.trim() || null,
+    contactPhone: input.contactPhone?.trim() || null,
+    contactAddress: input.contactAddress?.trim() || null,
+    documentLabel: input.documentLabel?.trim() || null,
+    logo: embeddedLogo,
+  };
+
+  const ctx: DrawCtx = {
+    doc,
+    font,
+    fontBold,
+    page: doc.addPage([PAGE_W, PAGE_H]),
+    y: PAGE_H - MARGIN_TOP,
+    pageIndex: 1,
+    letterhead,
+    continuationSection: null,
+    hireRunningHeader: input.hireRunningHeader ?? null,
+  };
+  drawPageChrome(ctx);
+  ctx.y = drawLetterhead(ctx);
+
+  drawText(ctx, input.title, {
+    size: 18,
+    font: fontBold,
+    color: ink,
+    lineGap: 4,
+  });
+  if (input.subtitle?.trim()) {
+    ctx.y -= 2;
+    drawText(ctx, input.subtitle.trim(), {
+      size: 10,
+      color: muted,
+      lineGap: 3,
+    });
+  }
+  if (input.metaLine?.trim()) {
+    ctx.y -= 2;
+    drawText(ctx, input.metaLine.trim(), {
+      size: 9,
+      color: muted,
+      lineGap: 3,
+    });
+  }
+  ctx.y -= 8;
+
+  if (input.hireDetails) {
+    drawHireDetailsCompact(ctx, input.hireDetails);
+  }
+
+  return {
+    doc,
+    platformName,
+    drawSectionHeading: (title) => drawSectionHeading(ctx, title),
+    drawBodyLine: (text, opts) => {
+      drawText(ctx, text, {
+        size: opts?.size ?? 10,
+        font: opts?.bold ? fontBold : font,
+        color: ink,
+        lineGap: 4,
+      });
+    },
+    ensureSpace: (need) => ensureSpace(ctx, need),
+    addPage: () => newPage(ctx),
+    getPage: () => ctx.page,
+    getY: () => ctx.y,
+    setY: (y) => {
+      ctx.y = y;
+    },
+    getContentWidth: () => CONTENT_W,
+    getMarginX: () => MARGIN_X,
+    getMarginBottom: () => contentBottomReserve(),
+    embedPng: (bytes) => doc.embedPng(bytes),
+    embedJpg: (bytes) => doc.embedJpg(bytes),
+    finalize: async () => {
+      drawFooterNumbers(doc, font, platformName);
+      return doc.save();
+    },
+  };
+}
+
 /**
  * Build a professional multi-page A4 contract PDF plus suggested signature field positions
  * aligned to the Execution section placeholders.
@@ -1122,25 +1272,7 @@ export async function createProfessionalContractPdf(
 
   const platformName = (input.platformName ?? "RMS").trim() || "RMS";
 
-  let embeddedLogo: LetterheadConfig["logo"] = null;
-  if (input.logoBytes && input.logoBytes.length > 0) {
-    try {
-      const isJpeg =
-        (input.logoContentType ?? "").includes("jpeg") || (input.logoContentType ?? "").includes("jpg");
-      const img = isJpeg
-        ? await doc.embedJpg(input.logoBytes)
-        : await doc.embedPng(input.logoBytes);
-      const fitted = fitImageWithinBox(
-        img.width,
-        img.height,
-        CONTRACT_HEADER_LOGO_MAX_WIDTH,
-        CONTRACT_HEADER_LOGO_MAX_HEIGHT,
-      );
-      embeddedLogo = { image: img, width: fitted.width, height: fitted.height };
-    } catch (e) {
-      console.warn("[contract-pdf] logo embed failed", e);
-    }
-  }
+  const embeddedLogo = await embedLetterheadLogo(doc, input.logoBytes, input.logoContentType ?? null);
 
   const letterhead: LetterheadConfig = {
     companyName: platformName,
