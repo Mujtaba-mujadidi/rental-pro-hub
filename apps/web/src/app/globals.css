@@ -80,6 +80,23 @@ body {
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/*
+  iOS Safari zooms the page when focusing inputs below 16px. Use text-base on touch
+  screens so users don't need to pinch-zoom out after tapping a field.
+*/
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
 /* ——— Surfaces ——— */
 .rph-chrome {
   @apply border-rph-border bg-rph-chrome;
@@ -117,7 +134,7 @@ body {
 /* ——— Controls ——— */
 .rph-input,
 .rph-input-auth {
-  @apply w-full rounded-lg border border-rph-border bg-rph-raised px-3 py-2.5 text-sm text-rph-fg outline-none focus:border-rph-rail focus:ring-2 focus:ring-rph-rail/20;
+  @apply w-full rounded-lg border border-rph-border bg-rph-raised px-3 py-2.5 text-base text-rph-fg outline-none focus:border-rph-rail focus:ring-2 focus:ring-rph-rail/20 md:text-sm;
 }
 .rph-input-auth {
   @apply py-2;
