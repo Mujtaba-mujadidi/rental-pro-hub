@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 function isCanvasBlank(canvas: HTMLCanvasElement) {
   const ctx = canvas.getContext("2d");
@@ -55,15 +55,19 @@ export function SignatureFieldInput({
     if (autoFocus) canvas.focus();
   }, [autoFocus]);
 
+  // Sync parent draft before paint so "Next" is enabled when the checkbox is checked.
+  useLayoutEffect(() => {
+    if (useSaved && savedSignatureDataUrl) {
+      onChange(savedSignatureDataUrl);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to saved-sig toggle
+  }, [useSaved, savedSignatureDataUrl]);
+
   useEffect(() => {
     if (useSaved && savedSignatureDataUrl) {
       const canvas = canvasRef.current;
-      if (canvas) {
-        loadImageToCanvas(canvas, savedSignatureDataUrl);
-        onChange(savedSignatureDataUrl);
-      }
+      if (canvas) loadImageToCanvas(canvas, savedSignatureDataUrl);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to saved-sig toggle
   }, [useSaved, savedSignatureDataUrl]);
 
   function pos(e: React.PointerEvent) {

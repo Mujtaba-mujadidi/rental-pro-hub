@@ -149,6 +149,9 @@ export function GuidedSigningViewer({
       const existing = values[current.id]?.value;
       const parsed = existing ? parseEsignDateTimeInput(existing) : null;
       setDraft(toEsignDateTimeLocalInput(parsed ?? new Date()));
+    } else if (current.type === "signature") {
+      const existing = values[current.id]?.value?.trim();
+      setDraft(existing || savedSignatureDataUrl || "");
     } else if (
       current.type === "text" &&
       fieldLooksLikeSignerNameField(current) &&
@@ -161,7 +164,7 @@ export function GuidedSigningViewer({
     }
     const t = window.setTimeout(() => scrollToField(current.id), 80);
     return () => window.clearTimeout(t);
-  }, [current, scrollToField, values, prefillSignerName]);
+  }, [current, scrollToField, values, prefillSignerName, savedSignatureDataUrl]);
 
   function submitAll(finalValues: FieldValueMap) {
     const sig = firstSignatureValue(finalValues, ordered);
@@ -182,7 +185,7 @@ export function GuidedSigningViewer({
     if (!current) return;
     const value =
       current.type === "signature"
-        ? draft
+        ? draft.trim() || savedSignatureDataUrl || ""
         : current.type === "date"
           ? stampValueFromEsignDateInput(draft || toEsignDateTimeLocalInput())
           : draft.trim();
@@ -352,7 +355,13 @@ export function GuidedSigningViewer({
               </p>
               <div className="flex gap-1">
                 {ordered.map((f, i) => {
-                  const filled = isFilled(f, values) || (i === stepIndex && Boolean(draft.trim()));
+                  const filled =
+                    isFilled(f, values) ||
+                    (i === stepIndex &&
+                      Boolean(
+                        draft.trim() ||
+                          (f.type === "signature" && savedSignatureDataUrl),
+                      ));
                   return (
                   <button
                     key={f.id}
@@ -431,7 +440,13 @@ export function GuidedSigningViewer({
                 ) : (
                   <button
                     type="button"
-                    disabled={!draft.trim() && current.type !== "date"}
+                    disabled={
+                      current.type === "date"
+                        ? false
+                        : current.type === "signature"
+                          ? !draft.trim() && !savedSignatureDataUrl
+                          : !draft.trim()
+                    }
                     onClick={saveCurrentAndAdvance}
                     className="rounded-lg bg-rph-rail px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
                   >
