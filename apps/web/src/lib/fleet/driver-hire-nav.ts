@@ -83,14 +83,13 @@ export function driverHireDocumentsBackLink(from: string | null | undefined): {
   return { href: "/driver/hire-requests", label: "Hire requests" };
 }
 
-/** Fully signed current hires belong on My hire, not the requests inbox. */
+/** Signed or closed requests belong on My hire / history, not the requests inbox. */
 export function shouldHideHireRequestFromInbox(input: {
   signingPhase: DriverHireSigningPhase;
   hireGroupStatus: string | null;
+  accessRequestStatus?: string | null;
 }): boolean {
-  return (
-    input.signingPhase === "fully_signed" &&
-    input.hireGroupStatus !== null &&
-    isDriverCurrentHireStatus(input.hireGroupStatus)
-  );
+  if (input.accessRequestStatus === "rejected") return true;
+  if (input.signingPhase === "fully_signed") return true;
+  return false;
 }

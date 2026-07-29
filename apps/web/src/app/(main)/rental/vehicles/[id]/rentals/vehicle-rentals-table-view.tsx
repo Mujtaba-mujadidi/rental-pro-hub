@@ -69,6 +69,7 @@ export function VehicleRentalsTableView({ vehicleId, notifyDays }: Props) {
         onClose={() => {
           setWizardOpen(false);
           setEditDraftId(null);
+          reload();
         }}
         onSaved={reload}
       />

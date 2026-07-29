@@ -346,7 +346,6 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
         return;
       }
       setStep(next);
-      onSaved();
     });
   }
 

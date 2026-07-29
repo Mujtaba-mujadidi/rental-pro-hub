@@ -70,6 +70,7 @@ export function FleetHiresView() {
         onClose={() => {
           setWizardOpen(false);
           setEditDraftId(null);
+          reload();
         }}
         onSaved={reload}
       />

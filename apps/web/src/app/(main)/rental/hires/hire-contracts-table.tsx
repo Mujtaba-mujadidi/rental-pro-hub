@@ -218,8 +218,8 @@ export function HireContractsTable({
 
       <div className="space-y-1">
         <p className="text-xs text-rph-fg-muted md:hidden">Swipe sideways to see all columns and actions.</p>
-        <div className="-mx-4 overflow-x-auto overscroll-x-contain px-4 sm:mx-0 sm:px-0 [scrollbar-width:thin]">
-          <div className="min-w-[52rem] overflow-hidden rounded-xl border border-rph-border">
+        <div className="-mx-4 overflow-x-auto overscroll-x-contain scroll-px-4 px-4 sm:mx-0 sm:px-0 [scrollbar-width:thin]">
+          <div className="min-w-[52rem] rounded-xl border border-rph-border">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-rph-border bg-rph-chrome/60 text-left text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">
@@ -232,7 +232,8 @@ export function HireContractsTable({
                   <th className="px-4 py-2.5">Driver access</th>
                   <th className="px-4 py-2.5">E-sign</th>
                   <th className="px-4 py-2.5">Workflow</th>
-                  <th className="sticky right-0 z-10 bg-rph-chrome/95 px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(0,0,0,0.25)] backdrop-blur-sm">
+                  <th className="w-24 min-w-24 p-0" aria-hidden />
+                  <th className="sticky right-0 z-20 min-w-[6.5rem] bg-rph-chrome/95 px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(0,0,0,0.25)] backdrop-blur-sm">
                     Actions
                   </th>
                 </tr>
@@ -240,14 +241,14 @@ export function HireContractsTable({
               <tbody className="divide-y divide-rph-border">
                 {!filtered.length ? (
                   <tr>
-                    <td colSpan={vehicleScoped ? 9 : 10} className="px-4 py-8 text-center text-rph-fg-muted">
+                    <td colSpan={vehicleScoped ? 10 : 11} className="px-4 py-8 text-center text-rph-fg-muted">
                       No contracts found.
                     </td>
                   </tr>
                 ) : (
                   filtered.map((r) => (
                     <Fragment key={r.id}>
-                      <tr className="bg-rph-raised/30 hover:bg-rph-chrome/40">
+                      <tr className="group bg-rph-raised/30 hover:bg-rph-chrome/40">
                         {!vehicleScoped ? (
                           <td className="px-4 py-3">
                             {r.status !== "draft" ? (
@@ -287,7 +288,8 @@ export function HireContractsTable({
                             <span className="text-rph-fg-muted">—</span>
                           )}
                         </td>
-                        <td className="sticky right-0 z-10 bg-rph-raised/95 px-4 py-3 text-right shadow-[-8px_0_12px_-8px_rgba(0,0,0,0.25)] backdrop-blur-sm">
+                        <td className="w-24 min-w-24 p-0" aria-hidden />
+                        <td className="sticky right-0 z-20 min-w-[6.5rem] bg-rph-raised/95 px-4 py-3 text-right shadow-[-8px_0_12px_-8px_rgba(0,0,0,0.25)] backdrop-blur-sm group-hover:bg-rph-chrome/40">
                           <HireContractRowActionsMenu
                             row={r}
                             canWrite={canWrite}
@@ -316,7 +318,7 @@ export function HireContractsTable({
                       </tr>
                       {r.can_view_signed_documents ? (
                         <tr key={`${r.id}-mobile-docs`} className="bg-rph-raised/20 md:hidden">
-                          <td colSpan={vehicleScoped ? 9 : 10} className="px-4 py-2">
+                          <td colSpan={vehicleScoped ? 10 : 11} className="px-4 py-2">
                             <Link
                               href={`/rental/hires/${r.id}/documents`}
                               className="text-sm font-medium text-rph-link hover:text-rph-link-hover"

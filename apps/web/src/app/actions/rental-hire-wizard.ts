@@ -546,7 +546,8 @@ export async function saveHireDraftStepAction(input: {
 
   const previousVehicleId = (existing.vehicle_id as string | null) ?? null;
   const nextVehicleId = input.form.vehicleId.trim() || null;
-  if (nextVehicleId) {
+  const vehicleChanged = previousVehicleId !== nextVehicleId;
+  if (nextVehicleId && vehicleChanged) {
     const free = await assertVehicleAvailableForHire(admin, nextVehicleId, input.hireGroupId);
     if (!free.ok) return free;
   }
@@ -601,13 +602,15 @@ export async function saveHireDraftStepAction(input: {
 
   if (error) return { ok: false, error: error.message };
 
-  if (previousVehicleId && previousVehicleId !== nextVehicleId) {
-    await releaseVehicleIfNoBlockingHire(admin, previousVehicleId, input.hireGroupId);
-  }
-  if (nextVehicleId) {
-    await syncVehicleStatusForHireGroup(admin, input.hireGroupId);
-  } else if (previousVehicleId) {
-    await releaseVehicleIfNoBlockingHire(admin, previousVehicleId, input.hireGroupId);
+  if (vehicleChanged) {
+    if (previousVehicleId && previousVehicleId !== nextVehicleId) {
+      await releaseVehicleIfNoBlockingHire(admin, previousVehicleId, input.hireGroupId);
+    }
+    if (nextVehicleId) {
+      await syncVehicleStatusForHireGroup(admin, input.hireGroupId);
+    } else if (previousVehicleId) {
+      await releaseVehicleIfNoBlockingHire(admin, previousVehicleId, input.hireGroupId);
+    }
   }
 
   await logHireGroupEvent(admin, {
@@ -1570,6 +1573,7 @@ export async function listDriverHireRequestsAction(): Promise<
       shouldHideHireRequestFromInbox({
         signingPhase: signing.phase,
         hireGroupStatus,
+        accessRequestStatus: row.status as string,
       })
     ) {
       continue;
