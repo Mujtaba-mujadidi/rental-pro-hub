@@ -254,20 +254,14 @@ export function VehicleDamageDiagram({
   ) : null;
 
   const diagramCanvas = (
-    <div
-      className={
-        expanded
-          ? "flex min-h-0 w-full flex-1 items-center justify-center"
-          : "w-full"
-      }
-    >
+    <div className={expanded ? "relative min-h-0 flex-1" : "w-full"}>
       <div
-        className={`relative ${
+        className={
           expanded
-            ? "h-full max-h-full w-auto max-w-full"
-            : "w-full overflow-hidden rounded-lg"
-        }`}
-        style={{ aspectRatio: String(DIAGRAM_ASPECT_RATIO) }}
+            ? "absolute inset-0"
+            : "relative w-full overflow-hidden rounded-lg"
+        }
+        style={expanded ? undefined : { aspectRatio: String(DIAGRAM_ASPECT_RATIO) }}
       >
         <HireInspectionDiagramCanvas
           interactive={interactive}
@@ -310,7 +304,11 @@ export function VehicleDamageDiagram({
   );
 
   const damageList = damages.length > 0 ? (
-    <ul className={`space-y-1.5 ${expanded ? "min-h-0 flex-1 overflow-y-auto" : ""}`}>
+    <ul
+      className={`space-y-1.5 ${
+        expanded && !fullscreenAside ? "min-h-0 flex-1 overflow-y-auto" : ""
+      } ${expanded && fullscreenAside ? "max-h-36 overflow-y-auto sm:max-h-44" : ""}`}
+    >
       {damages.map((damage, index) => {
         const panel = getVehicleDamagePanel(damage.panelId);
         const selected = selectedDamageId === damage.id;
@@ -371,35 +369,41 @@ export function VehicleDamageDiagram({
   );
 
   if (expanded) {
+    const diagramSection = (
+      <div className="flex min-h-[min(52dvh,58%)] min-w-0 flex-col rounded-xl border border-rph-border bg-rph-raised p-3 lg:min-h-0 lg:flex-1">
+        <div className="flex min-h-0 flex-1 flex-col">{diagramCanvas}</div>
+        <p className="rph-muted mt-2 shrink-0 text-center text-xs">
+          {mode === "checkin"
+            ? "Pre-existing checkout damage is read-only · click a panel to add new damage · Press Esc to exit full screen"
+            : "Click a panel on any view to mark damage · Press Esc to exit full screen"}
+        </p>
+      </div>
+    );
+
     return (
-      <div className="fixed inset-0 z-[200] flex flex-col overflow-hidden bg-rph-page p-4 sm:p-6">
+      <div className="fixed inset-0 z-[200] flex flex-col overflow-hidden bg-rph-page p-3 sm:p-6">
         <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-rph-fg">Damage diagram</h2>
           {expandButton}
         </div>
-        <div
-          className={`grid min-h-0 flex-1 gap-4 ${
-            fullscreenAside ? "lg:grid-cols-[minmax(0,1fr)_min(20rem,34%)]" : ""
-          }`}
-        >
-          <div className="flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden">
-            <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-rph-border bg-rph-raised p-3">
-              <div className="flex min-h-0 flex-1 items-stretch">{diagramCanvas}</div>
-              <p className="rph-muted mt-2 shrink-0 text-center text-xs">
-                {mode === "checkin"
-                  ? "Pre-existing checkout damage is read-only · click a panel to add new damage · Press Esc to exit full screen"
-                  : "Click a panel on any view to mark damage · Press Esc to exit full screen"}
-              </p>
+        {fullscreenAside ? (
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto lg:grid lg:overflow-hidden lg:grid-cols-[minmax(0,1fr)_min(20rem,34%)] lg:grid-rows-[minmax(0,1fr)_auto] lg:gap-4">
+            {diagramSection}
+            <aside className="min-h-0 shrink-0 overflow-y-auto rounded-xl border border-rph-border bg-rph-raised p-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:min-h-0">
+              {fullscreenAside}
+            </aside>
+            <div className="flex min-h-0 shrink-0 flex-col gap-3 overflow-hidden lg:col-start-1 lg:row-start-2 lg:min-h-0 lg:shrink">
+              {legend}
+              {damageList}
             </div>
+          </div>
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+            {diagramSection}
             {legend}
             {damageList}
           </div>
-          {fullscreenAside ? (
-            <aside className="min-h-0 overflow-y-auto rounded-xl border border-rph-border bg-rph-raised p-4">
-              {fullscreenAside}
-            </aside>
-          ) : null}
-        </div>
+        )}
       </div>
     );
   }

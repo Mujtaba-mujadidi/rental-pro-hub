@@ -11,7 +11,7 @@ import { HireGroupAuditModal } from "@/components/fleet/hire-group-audit-modal";
 import { hireTableStatusToneClass, type HireTableStatusTone } from "@/lib/fleet/hire-contract-table-display";
 import { hireCancelConfirmCopy, hireRegenerateContractsConfirmCopy, type HireGroupAuditRow } from "@/lib/fleet/hire-audit";
 import Link from "next/link";
-import { Fragment, useCallback, useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import { HireContractRowActionsMenu } from "./hire-contract-row-actions-menu";
 
 type Props = {
@@ -53,6 +53,116 @@ function WorkflowStatusPill({ label, tone }: { label: string; tone: HireTableSta
       {label}
     </span>
   );
+}
+
+type RowActionsProps = {
+  row: HireContractTableRow;
+  canWrite: boolean;
+  disabled: boolean;
+  onAudit: () => void;
+  onContinue: () => void;
+  onPrepareForSignature: () => void;
+  onSendForSignature: () => void;
+  onRegenerateContracts: () => void;
+  onCancel: () => void;
+};
+
+function HireContractMobileCard({
+  row,
+  vehicleScoped,
+  actions,
+}: {
+  row: HireContractTableRow;
+  vehicleScoped?: boolean;
+  actions: RowActionsProps;
+}) {
+  const title = vehicleScoped ? row.driver_label ?? "Hire contract" : row.vehicle_vrm ?? "—";
+  const subtitle = vehicleScoped
+    ? null
+    : [row.vehicle_label, row.driver_label].filter(Boolean).join(" · ") || null;
+
+  return (
+    <article className="rph-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          {row.status !== "draft" ? (
+            <Link href={`/rental/hires/${row.id}`} className="font-semibold text-rph-link hover:text-rph-link-hover">
+              {title}
+            </Link>
+          ) : (
+            <p className="font-semibold text-rph-fg">{title}</p>
+          )}
+          {subtitle ? <p className="mt-0.5 text-sm text-rph-fg-secondary">{subtitle}</p> : null}
+          <div className="mt-2">
+            <span className="rph-pill capitalize">{statusLabel(row)}</span>
+          </div>
+        </div>
+        <HireContractRowActionsMenu {...actions} />
+      </div>
+
+      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-rph-fg-muted">Started</dt>
+          <dd className="mt-0.5 text-rph-fg-secondary">{startLabel(row)}</dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-rph-fg-muted">Ended</dt>
+          <dd className="mt-0.5 text-rph-fg-secondary">{endLabel(row)}</dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-rph-fg-muted">Rent</dt>
+          <dd className="mt-0.5 text-rph-fg-secondary">
+            {row.rent_amount_gbp > 0 ? `£${row.rent_amount_gbp.toFixed(2)} / ${row.rent_cadence}` : "—"}
+          </dd>
+        </div>
+        {row.lifecycle_label ? (
+          <div>
+            <dt className="text-xs font-medium uppercase tracking-wide text-rph-fg-muted">Workflow</dt>
+            <dd className="mt-1">
+              <WorkflowStatusPill label={row.lifecycle_label} tone={row.lifecycle_tone} />
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+
+      <div className="mt-4 flex flex-wrap gap-2 border-t border-rph-border pt-3">
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-rph-fg-muted">Driver access</span>
+          <WorkflowStatusPill label={row.driver_access_label} tone={row.driver_access_tone} />
+        </div>
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-rph-fg-muted">E-sign</span>
+          <WorkflowStatusPill label={row.esign_label} tone={row.esign_tone} />
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function rowActionsProps(
+  row: HireContractTableRow,
+  canWrite: boolean,
+  tableBusy: boolean,
+  handlers: {
+    openAudit: (row: HireContractTableRow) => void;
+    onOpenDraft: (id: string) => void;
+    prepareForSignature: (row: HireContractTableRow) => void;
+    onSendForSignature: (row: HireContractTableRow) => void;
+    openRegenerateConfirm: (row: HireContractTableRow) => void;
+    openCancelConfirm: (row: HireContractTableRow) => void;
+  },
+): RowActionsProps {
+  return {
+    row,
+    canWrite,
+    disabled: tableBusy,
+    onAudit: () => handlers.openAudit(row),
+    onContinue: () => handlers.onOpenDraft(row.id),
+    onPrepareForSignature: () => handlers.prepareForSignature(row),
+    onSendForSignature: () => handlers.onSendForSignature(row),
+    onRegenerateContracts: () => handlers.openRegenerateConfirm(row),
+    onCancel: () => handlers.openCancelConfirm(row),
+  };
 }
 
 export function HireContractsTable({
@@ -189,6 +299,29 @@ export function HireContractsTable({
     });
   }
 
+  function sendForSignature(row: HireContractTableRow) {
+    runAction(
+      () => sendHireGroupSigningBundleAction(row.id, { resend: Boolean(row.signing_bundle_sent_at) }),
+      {
+        title: row.signing_bundle_sent_at ? "Resending for signature…" : "Sending for signature…",
+        detail: "Emailing the signing bundle to the hirer.",
+      },
+      {
+        title: row.signing_bundle_sent_at ? "Signing email resent" : "Sent for signature",
+        detail: "The hirer will receive an email with signing links.",
+      },
+    );
+  }
+
+  const actionHandlers = {
+    openAudit,
+    onOpenDraft,
+    prepareForSignature,
+    onSendForSignature: sendForSignature,
+    openRegenerateConfirm,
+    openCancelConfirm,
+  };
+
   const tableBusy = busy || actionPending || overlay?.phase === "pending";
 
   return (
@@ -216,8 +349,22 @@ export function HireContractsTable({
 
       {actionError ? <p className="rph-alert-error text-sm">{actionError}</p> : null}
 
-      <div className="space-y-1">
-        <p className="text-xs text-rph-fg-muted md:hidden">Swipe sideways to see all columns and actions.</p>
+      <div className="space-y-3 lg:hidden">
+        {!filtered.length ? (
+          <p className="rph-muted py-8 text-center text-sm">No contracts found.</p>
+        ) : (
+          filtered.map((r) => (
+            <HireContractMobileCard
+              key={r.id}
+              row={r}
+              vehicleScoped={vehicleScoped}
+              actions={rowActionsProps(r, canWrite, tableBusy, actionHandlers)}
+            />
+          ))
+        )}
+      </div>
+
+      <div className="hidden space-y-1 lg:block">
         <div className="-mx-4 overflow-x-auto overscroll-x-contain scroll-px-4 px-4 sm:mx-0 sm:px-0 [scrollbar-width:thin]">
           <div className="min-w-[52rem] rounded-xl border border-rph-border">
             <table className="w-full text-sm">
@@ -247,8 +394,7 @@ export function HireContractsTable({
                   </tr>
                 ) : (
                   filtered.map((r) => (
-                    <Fragment key={r.id}>
-                      <tr className="group bg-rph-raised/30 hover:bg-rph-chrome/40">
+                    <tr key={r.id} className="group bg-rph-raised/30 hover:bg-rph-chrome/40">
                         {!vehicleScoped ? (
                           <td className="px-4 py-3">
                             {r.status !== "draft" ? (
@@ -291,45 +437,10 @@ export function HireContractsTable({
                         <td className="w-24 min-w-24 p-0" aria-hidden />
                         <td className="sticky right-0 z-20 min-w-[6.5rem] bg-rph-raised/95 px-4 py-3 text-right shadow-[-8px_0_12px_-8px_rgba(0,0,0,0.25)] backdrop-blur-sm group-hover:bg-rph-chrome/40">
                           <HireContractRowActionsMenu
-                            row={r}
-                            canWrite={canWrite}
-                            disabled={tableBusy}
-                            onAudit={() => openAudit(r)}
-                            onContinue={() => onOpenDraft(r.id)}
-                            onPrepareForSignature={() => prepareForSignature(r)}
-                            onSendForSignature={() =>
-                              runAction(
-                                () =>
-                                  sendHireGroupSigningBundleAction(r.id, { resend: Boolean(r.signing_bundle_sent_at) }),
-                                {
-                                  title: r.signing_bundle_sent_at ? "Resending for signature…" : "Sending for signature…",
-                                  detail: "Emailing the signing bundle to the hirer.",
-                                },
-                                {
-                                  title: r.signing_bundle_sent_at ? "Signing email resent" : "Sent for signature",
-                                  detail: "The hirer will receive an email with signing links.",
-                                },
-                              )
-                            }
-                            onRegenerateContracts={() => openRegenerateConfirm(r)}
-                            onCancel={() => openCancelConfirm(r)}
+                            {...rowActionsProps(r, canWrite, tableBusy, actionHandlers)}
                           />
                         </td>
                       </tr>
-                      {r.can_view_signed_documents ? (
-                        <tr key={`${r.id}-mobile-docs`} className="bg-rph-raised/20 md:hidden">
-                          <td colSpan={vehicleScoped ? 10 : 11} className="px-4 py-2">
-                            <Link
-                              href={`/rental/hires/${r.id}/documents`}
-                              className="text-sm font-medium text-rph-link hover:text-rph-link-hover"
-                            >
-                              View signed document{r.signed_agreement_count === 1 ? "" : "s"}
-                              {r.agreement_count > 1 ? ` (${r.signed_agreement_count}/${r.agreement_count})` : ""}
-                            </Link>
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
                   ))
                 )}
               </tbody>
