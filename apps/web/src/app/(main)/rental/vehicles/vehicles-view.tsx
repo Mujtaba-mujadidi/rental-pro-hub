@@ -200,7 +200,7 @@ export function VehiclesView({
       ) : !filtered.length ? (
         <p className="rph-muted text-sm">No vehicles match your filters.</p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-rph-border">
+        <div className="rph-table-responsive">
           <table className="min-w-full divide-y divide-rph-border text-sm">
             <thead className="bg-rph-chrome text-left text-xs uppercase tracking-wide text-rph-fg-muted">
               <tr>
@@ -242,59 +242,75 @@ export function VehiclesView({
                           : ""
                     }`}
                   >
-                    <td className="px-4 py-3 font-mono font-semibold text-rph-fg">
+                    <td data-label="VRM" className="rph-table-primary px-4 py-3 font-mono font-semibold text-rph-fg">
                       <Link href={workspaceHref} className="hover:underline">
                         {v.vrm}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 text-rph-fg-secondary">
-                      {v.make} {v.model}
-                      {v.colour ? <span className="text-rph-fg-muted"> · {v.colour}</span> : null}
+                    <td data-label="Vehicle" className="px-4 py-3 text-rph-fg-secondary">
+                      <div className="rph-table-cell-value">
+                        {v.make} {v.model}
+                        {v.colour ? <span className="text-rph-fg-muted"> · {v.colour}</span> : null}
+                      </div>
                     </td>
-                    <td className="px-4 py-3 text-rph-fg-muted">{v.subcompany_name ?? "—"}</td>
-                    <td className="px-4 py-3">
-                      <span className={vehicleStatusPillClass(v.status)}>
-                        {VEHICLE_STATUS_LABELS[v.status]}
+                    <td data-label="Subcompany" className="px-4 py-3 text-rph-fg-muted">
+                      <span className="rph-table-cell-value">{v.subcompany_name ?? "—"}</span>
+                    </td>
+                    <td data-label="Status" className="px-4 py-3">
+                      <div className="rph-table-cell-value">
+                        <span className={vehicleStatusPillClass(v.status)}>
+                          {VEHICLE_STATUS_LABELS[v.status]}
+                        </span>
+                      </div>
+                    </td>
+                    <td data-label="Purchase" className="px-4 py-3 text-rph-fg-secondary">
+                      <span className="rph-table-cell-value">
+                        {pnl?.purchaseGbp != null ? formatGbp(pnl.purchaseGbp) : "—"}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-rph-fg-secondary">
-                      {pnl?.purchaseGbp != null ? formatGbp(pnl.purchaseGbp) : "—"}
+                    <td data-label="Sale" className="px-4 py-3 text-rph-fg-secondary">
+                      <span className="rph-table-cell-value">
+                        {pnl?.saleGbp != null ? formatGbp(pnl.saleGbp) : "—"}
+                      </span>
                     </td>
-                    <td className="px-4 py-3 text-rph-fg-secondary">
-                      {pnl?.saleGbp != null ? formatGbp(pnl.saleGbp) : "—"}
+                    <td data-label="P&amp;L" className="px-4 py-3 font-medium text-rph-fg-secondary">
+                      <span className="rph-table-cell-value">{pnlDisplay}</span>
                     </td>
-                    <td className="px-4 py-3 font-medium text-rph-fg-secondary">{pnlDisplay}</td>
-                    <td className="px-4 py-3">
-                      {missing.length ? (
-                        <Link href={`${detailsHref}#documents`} className="flex flex-wrap gap-1" title="Add missing documents">
-                          {missing.map((t) => (
-                            <span
-                              key={t}
-                              className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100"
-                            >
-                              Missing {VEHICLE_DOC_TYPE_LABELS[t]}
-                            </span>
-                          ))}
-                        </Link>
-                      ) : (
-                        <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
-                          Complete
-                        </span>
-                      )}
+                    <td data-label="Documents" className="px-4 py-3">
+                      <div className="rph-table-cell-value">
+                        {missing.length ? (
+                          <Link href={`${detailsHref}#documents`} className="flex flex-wrap justify-end gap-1" title="Add missing documents">
+                            {missing.map((t) => (
+                              <span
+                                key={t}
+                                className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100"
+                              >
+                                Missing {VEHICLE_DOC_TYPE_LABELS[t]}
+                              </span>
+                            ))}
+                          </Link>
+                        ) : (
+                          <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+                            Complete
+                          </span>
+                        )}
+                      </div>
                     </td>
-                    <td className="px-4 py-3">
-                      {attention.length ? (
-                        <div className="space-y-1">
-                          <VehicleExpiryPills items={attention} />
-                          <p className={`text-xs ${vehicleExpiryTextClass(motItem?.tone ?? "ok")}`}>
-                            MOT {formatUkDate(v.mot_expiry)}
-                          </p>
-                        </div>
-                      ) : (
-                        <span className="text-rph-fg-muted">MOT {formatUkDate(v.mot_expiry)}</span>
-                      )}
+                    <td data-label="Expiry" className="px-4 py-3">
+                      <div className="rph-table-cell-value">
+                        {attention.length ? (
+                          <div className="space-y-1 text-right">
+                            <VehicleExpiryPills items={attention} />
+                            <p className={`text-xs ${vehicleExpiryTextClass(motItem?.tone ?? "ok")}`}>
+                              MOT {formatUkDate(v.mot_expiry)}
+                            </p>
+                          </div>
+                        ) : (
+                          <span className="text-rph-fg-muted">MOT {formatUkDate(v.mot_expiry)}</span>
+                        )}
+                      </div>
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td data-label="" className="rph-table-actions px-4 py-3 text-right">
                       <Link href={workspaceHref} className={btnGhost}>
                         {canManage ? "Open" : "View"}
                       </Link>

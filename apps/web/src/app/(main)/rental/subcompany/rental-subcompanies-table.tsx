@@ -13,6 +13,7 @@ import { getRentalSubcompaniesPageAction } from "@/app/actions/rental-subcompani
 import type { RentalSubcompanyListRow } from "@/lib/rental/subcompany-list-shared";
 import type { RentalSubcompanyStatusFilter } from "@/lib/rental/subcompanies-query";
 import { formatUkDateTime } from "@/lib/datetime/uk";
+import { responsiveTableCellProps } from "@/lib/ui/responsive-table";
 
 const btn =
   "inline-flex items-center justify-center rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50";
@@ -138,6 +139,7 @@ export function RentalSubcompaniesTable({ listVersion = 0 }: { listVersion?: num
       {
         id: "name",
         accessorKey: "name",
+        meta: { dataLabel: "Subcompany", tablePrimary: true },
         header: ({ column }) => (
           <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
             Subcompany
@@ -161,11 +163,12 @@ export function RentalSubcompaniesTable({ listVersion = 0 }: { listVersion?: num
           );
         },
       },
-      { id: "company_number", accessorKey: "companyNumber", header: "Co. number", enableSorting: false },
+      { id: "company_number", accessorKey: "companyNumber", header: "Co. number", enableSorting: false, meta: { dataLabel: "Co. number" } },
       {
         id: "contact",
         header: "Primary contact",
         enableSorting: false,
+        meta: { dataLabel: "Primary contact" },
         cell: (info) => {
           const r = info.row.original;
           return [r.contactFirstName, r.contactLastName].filter(Boolean).join(" ") || "—";
@@ -174,6 +177,7 @@ export function RentalSubcompaniesTable({ listVersion = 0 }: { listVersion?: num
       {
         id: "primary_contact_email",
         accessorKey: "email",
+        meta: { dataLabel: "Email" },
         header: ({ column }) => (
           <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
             Email
@@ -181,10 +185,11 @@ export function RentalSubcompaniesTable({ listVersion = 0 }: { listVersion?: num
           </button>
         ),
       },
-      { id: "phone", accessorKey: "phone", header: "Phone", enableSorting: false },
+      { id: "phone", accessorKey: "phone", header: "Phone", enableSorting: false, meta: { dataLabel: "Phone" } },
       {
         id: "registered_town",
         accessorKey: "town",
+        meta: { dataLabel: "Town" },
         header: ({ column }) => (
           <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
             Town
@@ -195,6 +200,7 @@ export function RentalSubcompaniesTable({ listVersion = 0 }: { listVersion?: num
       {
         id: "registered_postcode",
         accessorKey: "postcode",
+        meta: { dataLabel: "Postcode" },
         header: ({ column }) => (
           <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
             Postcode
@@ -205,6 +211,7 @@ export function RentalSubcompaniesTable({ listVersion = 0 }: { listVersion?: num
       {
         id: "status",
         accessorKey: "status",
+        meta: { dataLabel: "Status" },
         header: ({ column }) => (
           <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
             Status
@@ -216,6 +223,7 @@ export function RentalSubcompaniesTable({ listVersion = 0 }: { listVersion?: num
       {
         id: "created_at",
         accessorKey: "createdAt",
+        meta: { dataLabel: "Added" },
         header: ({ column }) => (
           <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
             Added
@@ -305,8 +313,8 @@ export function RentalSubcompaniesTable({ listVersion = 0 }: { listVersion?: num
           {hasFilters ? "No subcompanies match your filters." : "No subcompanies yet. Register one to get started."}
         </p>
       ) : (
-        <div className={`overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 ${loading ? "opacity-60" : ""}`}>
-          <table className="w-full min-w-[1080px] border-collapse text-left text-sm">
+        <div className={`rph-table-responsive ${loading ? "opacity-60" : ""}`}>
+          <table className="w-full border-collapse text-left text-sm">
             <thead>
               {table.getHeaderGroups().map((hg) => (
                 <tr key={hg.id} className="border-b border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/60">
@@ -322,7 +330,10 @@ export function RentalSubcompaniesTable({ listVersion = 0 }: { listVersion?: num
               {table.getRowModel().rows.map((row) => (
                 <tr key={row.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800 odd:bg-white even:bg-slate-50/50 dark:odd:bg-slate-900/40 dark:even:bg-slate-900/20">
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-4 py-3 text-slate-700 dark:text-slate-300">
+                    <td
+                      key={cell.id}
+                      {...responsiveTableCellProps(cell.column.columnDef, "px-4 py-3 text-slate-700 dark:text-slate-300")}
+                    >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}

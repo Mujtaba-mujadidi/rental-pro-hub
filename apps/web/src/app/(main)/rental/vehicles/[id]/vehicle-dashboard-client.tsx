@@ -2,7 +2,6 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { VehicleFleetTrackingCard } from "@/app/(main)/rental/vehicles/[id]/vehicle-fleet-tracking-card";
 import { useVehicleWorkspace } from "@/app/(main)/rental/vehicles/[id]/vehicle-workspace-provider";
 import { VehicleExpiryAlert, VehicleExpiryPills } from "@/app/(main)/rental/vehicles/vehicle-expiry-indicators";
 import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
@@ -25,7 +24,7 @@ function IconArrowRight({ className }: { className?: string }) {
 
 export function VehicleDashboardClient() {
   const { shell, financials, ensureFinancials } = useVehicleWorkspace();
-  const { vehicle, transfers, notifySettings, canManage } = shell;
+  const { vehicle, transfers, notifySettings } = shell;
 
   useEffect(() => {
     void ensureFinancials();
@@ -186,8 +185,6 @@ export function VehicleDashboardClient() {
             </ul>
           )}
         </div>
-
-        <VehicleFleetTrackingCard vehicleId={vehicle.id} canManage={canManage} />
       </div>
     </div>
   );

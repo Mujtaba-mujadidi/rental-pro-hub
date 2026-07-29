@@ -82,7 +82,7 @@ function DiffTable({ rows }: { rows: ContractChangeDiffRow[] }) {
           edited.
         </p>
       ) : null}
-      <div className="max-h-64 overflow-auto rounded-lg border border-rph-border">
+      <div className="rph-table-responsive max-h-64 lg:overflow-auto">
         <table className="min-w-full text-sm">
           <thead className="bg-rph-chrome text-left text-xs uppercase tracking-wide text-rph-fg-muted">
             <tr>
@@ -101,7 +101,7 @@ function DiffTable({ rows }: { rows: ContractChangeDiffRow[] }) {
                     : "bg-amber-50/60 dark:bg-amber-950/20"
                 }`}
               >
-                <td className="px-3 py-2 font-medium text-rph-fg">
+                <td data-label="Field" className="rph-table-primary px-3 py-2 font-medium text-rph-fg">
                   {row.label}
                   <span
                     className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
@@ -113,15 +113,18 @@ function DiffTable({ rows }: { rows: ContractChangeDiffRow[] }) {
                     {row.formattingOnly ? "Formatting" : "Changed"}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-rph-fg-secondary">{formatDiffValue(row.key, row.before)}</td>
+                <td data-label="Current" className="px-3 py-2 text-rph-fg-secondary">
+                  <span className="rph-table-cell-value">{formatDiffValue(row.key, row.before)}</span>
+                </td>
                 <td
+                  data-label="Proposed"
                   className={`px-3 py-2 ${
                     row.changed
                       ? "font-semibold text-amber-900 dark:text-amber-100"
                       : "font-medium text-sky-900 dark:text-sky-100"
                   }`}
                 >
-                  {formatDiffValue(row.key, row.after)}
+                  <span className="rph-table-cell-value">{formatDiffValue(row.key, row.after)}</span>
                 </td>
               </tr>
             ))}
@@ -656,7 +659,7 @@ export function ContractChangesClient({
   return (
     <div className="space-y-6">
       {openRequests.length ? (
-        <div className="overflow-x-auto rounded-xl border border-rph-border">
+        <div className="rph-table-responsive">
           <table className="min-w-full text-sm">
             <thead className="bg-rph-chrome text-left text-xs uppercase tracking-wide text-rph-fg-muted">
               <tr>
@@ -670,17 +673,19 @@ export function ContractChangesClient({
             <tbody>
               {openRequests.map((r) => (
                 <tr key={r.id} className="border-t border-rph-border bg-rph-raised">
-                  <td className="px-4 py-3 font-medium text-rph-fg">
+                  <td data-label="Company" className="rph-table-primary px-4 py-3 font-medium text-rph-fg">
                     {r.companyName ?? r.proposed_name ?? "—"}
                   </td>
-                  <td className="px-4 py-3 text-rph-fg-secondary">
-                    {formatContractChangeTransitionType(r.transition_type)}
+                  <td data-label="Type" className="px-4 py-3 text-rph-fg-secondary">
+                    <span className="rph-table-cell-value">{formatContractChangeTransitionType(r.transition_type)}</span>
                   </td>
-                  <td className="px-4 py-3 text-rph-fg-secondary">
-                    {formatContractChangeReviewStatus(r.review_status)}
+                  <td data-label="Status" className="px-4 py-3 text-rph-fg-secondary">
+                    <span className="rph-table-cell-value">{formatContractChangeReviewStatus(r.review_status)}</span>
                   </td>
-                  <td className="px-4 py-3 text-rph-fg-secondary">{formatUkDateTime(r.created_at)}</td>
-                  <td className="px-4 py-3">
+                  <td data-label="Submitted" className="px-4 py-3 text-rph-fg-secondary">
+                    <span className="rph-table-cell-value">{formatUkDateTime(r.created_at)}</span>
+                  </td>
+                  <td data-label="" className="rph-table-actions px-4 py-3">
                     <div className="flex justify-end">
                       <RequestActionsMenu
                         row={r}
@@ -712,7 +717,7 @@ export function ContractChangesClient({
           <p className="text-sm text-slate-600 dark:text-slate-300">
             These companies show renewal pending without an open request row.
           </p>
-          <div className="overflow-x-auto rounded-xl border border-amber-200 dark:border-amber-900/50">
+          <div className="rph-table-responsive border-amber-200 dark:border-amber-900/50">
             <table className="min-w-full text-sm">
               <thead className="bg-amber-50 text-left text-xs uppercase tracking-wide text-amber-900 dark:bg-amber-950/35 dark:text-amber-100">
                 <tr>
@@ -724,11 +729,13 @@ export function ContractChangesClient({
               <tbody>
                 {stuckRenewals.map((row) => (
                   <tr key={row.companyId} className="border-t border-amber-200 bg-amber-50/50 dark:border-amber-900/50 dark:bg-amber-950/20">
-                    <td className="px-4 py-3 font-medium text-amber-950 dark:text-amber-100">
+                    <td data-label="Company" className="rph-table-primary px-4 py-3 font-medium text-amber-950 dark:text-amber-100">
                       {row.companyName ?? "Unnamed company"}
                     </td>
-                    <td className="px-4 py-3 text-amber-900 dark:text-amber-100">Renewal pending</td>
-                    <td className="px-4 py-3 text-right">
+                    <td data-label="Status" className="px-4 py-3 text-amber-900 dark:text-amber-100">
+                      <span className="rph-table-cell-value">Renewal pending</span>
+                    </td>
+                    <td data-label="" className="rph-table-actions px-4 py-3 text-right">
                       <button
                         type="button"
                         disabled={busy}

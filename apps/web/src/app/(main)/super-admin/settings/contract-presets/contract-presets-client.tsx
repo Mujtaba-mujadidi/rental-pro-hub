@@ -284,8 +284,8 @@ export function ContractPresetsClient({
             )}
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+          <div className="rph-table-responsive">
+            <table className="w-full border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900/50">
                   <th className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-300 sm:px-5">Name</th>
@@ -305,20 +305,27 @@ export function ContractPresetsClient({
                     key={p.id}
                     className="border-b border-slate-100 last:border-0 dark:border-slate-800/80 odd:bg-white even:bg-slate-50/40 dark:odd:bg-transparent dark:even:bg-slate-900/20"
                   >
-                    <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100 sm:px-5">{p.name}</td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300 sm:px-5">{modelLabel(p.pricing_model_type)}</td>
-                    <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums text-slate-800 dark:text-slate-200 sm:px-5">
-                      <span title={amount.title}>{amount.label}</span>
+                    <td data-label="Name" className="rph-table-primary px-4 py-3 font-medium text-slate-900 dark:text-slate-100 sm:px-5">{p.name}</td>
+                    <td data-label="Pricing model" className="px-4 py-3 text-slate-600 dark:text-slate-300 sm:px-5">
+                      <span className="rph-table-cell-value">{modelLabel(p.pricing_model_type)}</span>
                     </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300 sm:px-5">
-                      {p.billing_frequency ? (
-                        <span className="capitalize">{p.billing_frequency.replace(/_/g, " ")}</span>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
+                    <td data-label="Amount" className="whitespace-nowrap px-4 py-3 font-medium tabular-nums text-slate-800 dark:text-slate-200 sm:px-5">
+                      <span className="rph-table-cell-value" title={amount.title}>{amount.label}</span>
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-700 dark:text-slate-300 sm:px-5">{p.currency}</td>
-                    <td className="px-4 py-3 sm:px-5">
+                    <td data-label="Billing period" className="px-4 py-3 text-slate-600 dark:text-slate-300 sm:px-5">
+                      <span className="rph-table-cell-value">
+                        {p.billing_frequency ? (
+                          <span className="capitalize">{p.billing_frequency.replace(/_/g, " ")}</span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </span>
+                    </td>
+                    <td data-label="Currency" className="px-4 py-3 font-mono text-xs text-slate-700 dark:text-slate-300 sm:px-5">
+                      <span className="rph-table-cell-value">{p.currency}</span>
+                    </td>
+                    <td data-label="Status" className="px-4 py-3 sm:px-5">
+                      <div className="rph-table-cell-value">
                       {p.is_active ? (
                         <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-100">
                           Active
@@ -328,8 +335,9 @@ export function ContractPresetsClient({
                           Inactive
                         </span>
                       )}
+                      </div>
                     </td>
-                    <td className="px-4 py-3 sm:px-5">
+                    <td data-label="" className="rph-table-actions px-4 py-3 sm:px-5">
                       <button
                         type="button"
                         disabled={listBroken}

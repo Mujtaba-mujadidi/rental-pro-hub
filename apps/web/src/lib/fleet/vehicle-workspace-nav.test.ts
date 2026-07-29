@@ -12,6 +12,7 @@ describe("vehicleWorkspaceNav / href", () => {
     const nav = vehicleWorkspaceNav("v1");
     expect(nav[0]).toEqual({ href: "/rental/vehicles/v1", label: "Dashboard", match: "exact" });
     expect(nav.find((i) => i.label === "Maintenance")?.href).toBe("/rental/vehicles/v1/maintenance");
+    expect(nav.find((i) => i.label === "Tracking")?.href).toBe("/rental/vehicles/v1/tracking");
     expect(nav.find((i) => i.label === "Financials")?.href).toBe("/rental/vehicles/v1/financials");
     expect(vehicleWorkspaceHref("v1")).toBe("/rental/vehicles/v1");
     expect(vehicleWorkspaceHref("v1", "maintenance")).toBe("/rental/vehicles/v1/maintenance");
@@ -29,6 +30,7 @@ describe("parseVehicleWorkspaceSection", () => {
   it("parses known sections", () => {
     expect(parseVehicleWorkspaceSection("/rental/vehicles/v1/details", "v1")).toBe("details");
     expect(parseVehicleWorkspaceSection("/rental/vehicles/v1/maintenance/extra", "v1")).toBe("maintenance");
+    expect(parseVehicleWorkspaceSection("/rental/vehicles/v1/tracking", "v1")).toBe("tracking");
     expect(parseVehicleWorkspaceSection("/rental/vehicles/v1/financials", "v1")).toBe("financials");
   });
 });

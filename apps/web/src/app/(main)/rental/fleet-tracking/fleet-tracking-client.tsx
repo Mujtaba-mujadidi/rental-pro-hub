@@ -14,6 +14,7 @@ import {
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { ManualDeviceLinkModal } from "@/app/(main)/rental/fleet-tracking/manual-device-link-modal";
 import type { MappingSuggestion, DeviceGroup } from "@/lib/fleet-tracking/mapping";
+import { FLEET_TRACKING_UNAVAILABLE_COPY } from "@/lib/fleet-tracking/messaging";
 import { formatMiles } from "@/lib/fleet-tracking/units";
 
 type FleetTrackingTab = "connection" | "mapping" | "reports";
@@ -296,10 +297,7 @@ export function FleetTrackingClient({ canManage }: { canManage: boolean }) {
     return (
       <div className="space-y-4">
         <h1 className="rph-h1">Fleet Tracking</h1>
-        <p className="rph-muted text-sm">
-          Fleet Tracking is not enabled for your company. Ask your platform administrator to enable SmartCar Tracker
-          access.
-        </p>
+        <p className="rph-muted text-sm">{FLEET_TRACKING_UNAVAILABLE_COPY}</p>
       </div>
     );
   }
@@ -450,7 +448,7 @@ export function FleetTrackingClient({ canManage }: { canManage: boolean }) {
                   </p>
                 ) : null}
 
-                <div className="max-h-[min(28rem,50vh)] overflow-auto rounded-xl border border-rph-border">
+                <div className="rph-table-responsive max-h-[min(28rem,50vh)] lg:overflow-auto">
                   <table className="min-w-full divide-y divide-rph-border text-sm">
                     <thead className="sticky top-0 z-10 bg-rph-chrome text-left text-xs uppercase tracking-wide text-rph-fg-muted">
                       <tr>
@@ -485,7 +483,7 @@ export function FleetTrackingClient({ canManage }: { canManage: boolean }) {
                             }`}
                           >
                             {canManage ? (
-                              <td className="px-4 py-3 align-top">
+                              <td data-label="" className="rph-table-select px-4 py-3 align-top">
                                 <input
                                   type="checkbox"
                                   className="h-4 w-4 rounded border-rph-border"
@@ -498,7 +496,7 @@ export function FleetTrackingClient({ canManage }: { canManage: boolean }) {
                                 />
                               </td>
                             ) : null}
-                            <td className="px-4 py-3 align-top">
+                            <td data-label="Vehicle" className="rph-table-primary px-4 py-3 align-top">
                               <p className="font-mono font-semibold text-rph-fg">{s.vrm}</p>
                               <p className="mt-0.5 text-rph-fg-secondary">
                                 {s.make} {s.model}
@@ -509,11 +507,14 @@ export function FleetTrackingClient({ canManage }: { canManage: boolean }) {
                                 </span>
                               ) : null}
                             </td>
-                            <td className="px-4 py-3 align-top">
+                            <td data-label="Primary device" className="px-4 py-3 align-top">
+                              <div className="rph-table-cell-value">
                               <p className="font-medium text-rph-fg">{s.primaryName}</p>
                               <p className="mt-0.5 font-mono text-xs text-rph-fg-muted">{s.primaryImei}</p>
+                              </div>
                             </td>
-                            <td className="px-4 py-3 align-top">
+                            <td data-label="Secondary device" className="px-4 py-3 align-top">
+                              <div className="rph-table-cell-value">
                               {s.secondaryName ? (
                                 <>
                                   <p className="font-medium text-rph-fg">{s.secondaryName}</p>
@@ -522,6 +523,7 @@ export function FleetTrackingClient({ canManage }: { canManage: boolean }) {
                               ) : (
                                 <span className="text-rph-fg-muted">—</span>
                               )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -598,7 +600,7 @@ export function FleetTrackingClient({ canManage }: { canManage: boolean }) {
                   {unmatchedDevices.length ? (
                     <div className="space-y-2">
                       <p className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Unmatched devices</p>
-                      <div className="max-h-[min(28rem,50vh)] overflow-auto rounded-xl border border-rph-border">
+                      <div className="rph-table-responsive max-h-[min(28rem,50vh)] lg:overflow-auto">
                         <table className="min-w-full divide-y divide-rph-border text-sm">
                           <thead className="sticky top-0 z-10 bg-rph-chrome text-left text-xs uppercase tracking-wide text-rph-fg-muted">
                             <tr>
@@ -611,25 +613,29 @@ export function FleetTrackingClient({ canManage }: { canManage: boolean }) {
                           <tbody className="divide-y divide-rph-border bg-rph-raised">
                             {unmatchedDevices.map((d) => (
                               <tr key={d.baseVrm} className="transition-colors hover:bg-rph-chrome/60">
-                                <td className="px-4 py-3 align-top">
+                                <td data-label="Device label" className="rph-table-primary px-4 py-3 align-top">
                                   <p className="font-mono font-semibold text-rph-fg">{d.baseVrm}</p>
                                 </td>
-                                <td className="px-4 py-3 align-top">
-                                  <p className="font-medium text-rph-fg">{d.primaryName}</p>
-                                  <p className="mt-0.5 font-mono text-xs text-rph-fg-muted">{d.primaryImei}</p>
+                                <td data-label="Primary device" className="px-4 py-3 align-top">
+                                  <div className="rph-table-cell-value">
+                                    <p className="font-medium text-rph-fg">{d.primaryName}</p>
+                                    <p className="mt-0.5 font-mono text-xs text-rph-fg-muted">{d.primaryImei}</p>
+                                  </div>
                                 </td>
-                                <td className="px-4 py-3 align-top">
-                                  {d.secondaryName ? (
-                                    <>
-                                      <p className="font-medium text-rph-fg">{d.secondaryName}</p>
-                                      <p className="mt-0.5 font-mono text-xs text-rph-fg-muted">{d.secondaryImei}</p>
-                                    </>
-                                  ) : (
-                                    <span className="text-rph-fg-muted">—</span>
-                                  )}
+                                <td data-label="Secondary device" className="px-4 py-3 align-top">
+                                  <div className="rph-table-cell-value">
+                                    {d.secondaryName ? (
+                                      <>
+                                        <p className="font-medium text-rph-fg">{d.secondaryName}</p>
+                                        <p className="mt-0.5 font-mono text-xs text-rph-fg-muted">{d.secondaryImei}</p>
+                                      </>
+                                    ) : (
+                                      <span className="text-rph-fg-muted">—</span>
+                                    )}
+                                  </div>
                                 </td>
                                 {canManage ? (
-                                  <td className="px-4 py-3 align-top">
+                                  <td data-label="" className="rph-table-actions px-4 py-3 align-top">
                                     <button
                                       type="button"
                                       className="rph-btn-ghost !min-h-0 h-9 px-3 text-xs"
@@ -651,7 +657,7 @@ export function FleetTrackingClient({ canManage }: { canManage: boolean }) {
                   {unmatchedVehicles.length ? (
                     <div className="space-y-2">
                       <p className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Unmatched vehicles</p>
-                      <div className="max-h-[min(28rem,50vh)] overflow-auto rounded-xl border border-rph-border">
+                      <div className="rph-table-responsive max-h-[min(28rem,50vh)] lg:overflow-auto">
                         <table className="min-w-full divide-y divide-rph-border text-sm">
                           <thead className="sticky top-0 z-10 bg-rph-chrome text-left text-xs uppercase tracking-wide text-rph-fg-muted">
                             <tr>
@@ -664,20 +670,20 @@ export function FleetTrackingClient({ canManage }: { canManage: boolean }) {
                           <tbody className="divide-y divide-rph-border bg-rph-raised">
                             {unmatchedVehicles.map((v) => (
                               <tr key={v.id} className="transition-colors hover:bg-rph-chrome/60">
-                                <td className="px-4 py-3 align-top">
+                                <td data-label="Vehicle" className="rph-table-primary px-4 py-3 align-top">
                                   <p className="font-mono font-semibold text-rph-fg">{v.vrm}</p>
                                   <p className="mt-0.5 text-rph-fg-secondary">
                                     {v.make} {v.model}
                                   </p>
                                 </td>
-                                <td className="px-4 py-3 align-top">
-                                  <span className="text-rph-fg-muted">—</span>
+                                <td data-label="Primary device" className="px-4 py-3 align-top">
+                                  <span className="rph-table-cell-value text-rph-fg-muted">—</span>
                                 </td>
-                                <td className="px-4 py-3 align-top">
-                                  <span className="text-rph-fg-muted">—</span>
+                                <td data-label="Secondary device" className="px-4 py-3 align-top">
+                                  <span className="rph-table-cell-value text-rph-fg-muted">—</span>
                                 </td>
                                 {canManage ? (
-                                  <td className="px-4 py-3 align-top">
+                                  <td data-label="" className="rph-table-actions px-4 py-3 align-top">
                                     <button
                                       type="button"
                                       className="rph-btn-ghost !min-h-0 h-9 px-3 text-xs"
@@ -727,8 +733,8 @@ export function FleetTrackingClient({ canManage }: { canManage: boolean }) {
                 {!weekly.rows.length ? (
                   <p className="text-sm text-rph-fg-muted">No linked vehicles yet.</p>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[28rem] text-left text-sm">
+                  <div className="rph-table-responsive">
+                    <table className="w-full text-left text-sm">
                       <thead className="border-b border-rph-border text-xs uppercase tracking-wide text-rph-fg-muted">
                         <tr>
                           <th className="py-2 pr-2 font-semibold">VRM</th>
@@ -739,12 +745,18 @@ export function FleetTrackingClient({ canManage }: { canManage: boolean }) {
                       <tbody className="divide-y divide-rph-border">
                         {weekly.rows.map((r) => (
                           <tr key={r.vehicleId}>
-                            <td className="py-2 pr-2 font-semibold">{r.vrm}</td>
-                            <td className="py-2 pr-2 text-rph-fg-secondary">
-                              {r.make} {r.model}
+                            <td data-label="VRM" className="rph-table-primary py-2 pr-2 font-semibold">
+                              {r.vrm}
                             </td>
-                            <td className="py-2">
-                              {r.unavailable || r.miles == null ? "—" : formatMiles(r.miles, 1)}
+                            <td data-label="Vehicle" className="py-2 pr-2 text-rph-fg-secondary">
+                              <span className="rph-table-cell-value">
+                                {r.make} {r.model}
+                              </span>
+                            </td>
+                            <td data-label="Miles" className="py-2">
+                              <span className="rph-table-cell-value">
+                                {r.unavailable || r.miles == null ? "—" : formatMiles(r.miles, 1)}
+                              </span>
                             </td>
                           </tr>
                         ))}

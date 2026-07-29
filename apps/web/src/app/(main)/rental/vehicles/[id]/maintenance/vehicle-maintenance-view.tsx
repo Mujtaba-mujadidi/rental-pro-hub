@@ -481,7 +481,7 @@ export function VehicleMaintenanceView({
       {!records.length ? (
         <p className="rph-muted text-sm">No maintenance expenses recorded yet.</p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-rph-border">
+        <div className="rph-table-responsive">
           <table className="min-w-full divide-y divide-rph-border text-sm">
             <thead className="bg-rph-chrome text-left text-xs uppercase tracking-wide text-rph-fg-muted">
               <tr>
@@ -500,21 +500,35 @@ export function VehicleMaintenanceView({
             <tbody className="divide-y divide-rph-border">
               {records.map((r) => (
                 <tr key={r.id} className="bg-rph-raised">
-                  <td className="whitespace-nowrap px-3 py-2.5 text-rph-fg-secondary">{formatUkDate(r.occurred_on)}</td>
-                  <td className="px-3 py-2.5 text-rph-fg-secondary">{MAINTENANCE_CATEGORY_LABELS[r.category]}</td>
-                  <td className="max-w-[14rem] truncate px-3 py-2.5 text-rph-fg" title={r.description}>
+                  <td data-label="Date" className="whitespace-nowrap px-3 py-2.5 text-rph-fg-secondary">
+                    <span className="rph-table-cell-value">{formatUkDate(r.occurred_on)}</span>
+                  </td>
+                  <td data-label="Category" className="px-3 py-2.5 text-rph-fg-secondary">
+                    <span className="rph-table-cell-value">{MAINTENANCE_CATEGORY_LABELS[r.category]}</span>
+                  </td>
+                  <td data-label="Description" className="rph-table-primary max-w-[14rem] truncate px-3 py-2.5 text-rph-fg" title={r.description}>
                     {r.description || "—"}
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2.5 font-semibold text-rph-fg">{formatGbp(r.amount_gbp)}</td>
-                  <td className="px-3 py-2.5 text-rph-fg-muted">{r.paid_to || "—"}</td>
-                  <td className="px-3 py-2.5 text-rph-fg-muted">{r.paid_by_display || "—"}</td>
-                  <td className="px-3 py-2.5 text-rph-fg-muted">{r.payment_method_name || "—"}</td>
-                  <td className="px-3 py-2.5 text-rph-fg-muted">{r.payment_account_name || "—"}</td>
-                  <td className="max-w-[10rem] truncate px-3 py-2.5 text-rph-fg-muted" title={r.payment_reference || undefined}>
-                    {r.payment_reference || "—"}
+                  <td data-label="Amount" className="whitespace-nowrap px-3 py-2.5 font-semibold text-rph-fg">
+                    <span className="rph-table-cell-value">{formatGbp(r.amount_gbp)}</span>
+                  </td>
+                  <td data-label="Paid to" className="px-3 py-2.5 text-rph-fg-muted">
+                    <span className="rph-table-cell-value">{r.paid_to || "—"}</span>
+                  </td>
+                  <td data-label="Paid by" className="px-3 py-2.5 text-rph-fg-muted">
+                    <span className="rph-table-cell-value">{r.paid_by_display || "—"}</span>
+                  </td>
+                  <td data-label="Method" className="px-3 py-2.5 text-rph-fg-muted">
+                    <span className="rph-table-cell-value">{r.payment_method_name || "—"}</span>
+                  </td>
+                  <td data-label="Account" className="px-3 py-2.5 text-rph-fg-muted">
+                    <span className="rph-table-cell-value">{r.payment_account_name || "—"}</span>
+                  </td>
+                  <td data-label="Reference" className="max-w-[10rem] truncate px-3 py-2.5 text-rph-fg-muted" title={r.payment_reference || undefined}>
+                    <span className="rph-table-cell-value">{r.payment_reference || "—"}</span>
                   </td>
                   {initial.canWrite ? (
-                    <td className="whitespace-nowrap px-3 py-2.5 text-right">
+                    <td data-label="" className="rph-table-actions whitespace-nowrap px-3 py-2.5 text-right">
                       <DropdownMenu.Root>
                         <DropdownMenu.Trigger asChild>
                           <button
@@ -930,7 +944,7 @@ export function VehicleMaintenanceView({
             </p>
           ) : null}
           {csvPreview?.length ? (
-            <div className="max-h-64 overflow-auto rounded-lg border border-rph-border">
+            <div className="rph-table-responsive max-h-64 lg:overflow-auto">
               <table className="min-w-full text-xs">
                 <thead className="bg-rph-chrome text-left text-rph-fg-muted">
                   <tr>
@@ -942,9 +956,9 @@ export function VehicleMaintenanceView({
                 <tbody className="divide-y divide-rph-border">
                   {csvPreview.map((r) => (
                     <tr key={r.line} className={r.ok ? "" : "bg-red-50/80 dark:bg-red-950/30"}>
-                      <td className="px-2 py-1.5">{r.line}</td>
-                      <td className="px-2 py-1.5 font-semibold">{r.ok ? "OK" : "Error"}</td>
-                      <td className="px-2 py-1.5">
+                      <td data-label="Line" className="px-2 py-1.5">{r.line}</td>
+                      <td data-label="Status" className="px-2 py-1.5 font-semibold">{r.ok ? "OK" : "Error"}</td>
+                      <td data-label="Summary" className="rph-table-primary px-2 py-1.5">
                         {r.ok
                           ? `${formatUkDate(r.occurred_on)} · ${r.category} · ${formatGbp(r.amount_gbp ?? 0)} · ${r.payment_method}${r.payment_account ? ` / ${r.payment_account}` : ""}`
                           : r.error}

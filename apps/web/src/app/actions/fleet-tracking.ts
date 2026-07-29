@@ -272,6 +272,9 @@ export async function confirmVehicleMappingsAction(
 
   revalidatePath("/rental/fleet-tracking");
   revalidatePath("/rental/vehicles");
+  for (const link of normalizedLinks) {
+    revalidatePath(`/rental/vehicles/${link.vehicleId}/tracking`);
+  }
   return { ok: true, updated };
 }
 

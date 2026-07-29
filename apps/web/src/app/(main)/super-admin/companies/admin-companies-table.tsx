@@ -28,6 +28,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import type { AdminCompanyListRow } from "@/lib/admin/company-list-shared";
 import type { CompanyListStatusFilter } from "@/lib/admin/companies-query";
 import { formatUkDateTime } from "@/lib/datetime/uk";
+import { responsiveTableCellProps } from "@/lib/ui/responsive-table";
 
 const btn =
   "inline-flex items-center justify-center rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50";
@@ -500,6 +501,7 @@ export function AdminCompaniesTable({
       {
         id: "name",
         accessorKey: "name",
+        meta: { dataLabel: "Company", tablePrimary: true },
         header: ({ column }) => (
           <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
             Company
@@ -533,6 +535,7 @@ export function AdminCompaniesTable({
         accessorKey: "companyNumber",
         header: "Co. number",
         enableSorting: false,
+        meta: { dataLabel: "Co. number" },
         cell: (info) => (
           <span className="whitespace-nowrap font-mono text-xs text-slate-700 dark:text-slate-300">
             {String(info.getValue() || "—")}
@@ -543,6 +546,7 @@ export function AdminCompaniesTable({
         id: "contact",
         header: "Primary contact",
         enableSorting: false,
+        meta: { dataLabel: "Primary contact" },
         cell: (info) => {
           const r = info.row.original;
           const full = [r.contactFirstName, r.contactLastName].filter(Boolean).join(" ");
@@ -556,6 +560,7 @@ export function AdminCompaniesTable({
       {
         id: "primary_contact_email",
         accessorKey: "email",
+        meta: { dataLabel: "Email" },
         header: ({ column }) => (
           <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
             Email
@@ -576,6 +581,7 @@ export function AdminCompaniesTable({
         accessorKey: "phone",
         header: "Phone",
         enableSorting: false,
+        meta: { dataLabel: "Phone" },
         cell: (info) => String(info.getValue() || "—"),
       },
       {
@@ -583,6 +589,7 @@ export function AdminCompaniesTable({
         accessorKey: "hasLogo",
         header: "Logo",
         enableSorting: false,
+        meta: { dataLabel: "Logo" },
         cell: (info) =>
           info.getValue() ? (
             <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Yes</span>
@@ -593,6 +600,7 @@ export function AdminCompaniesTable({
       {
         id: "status",
         accessorKey: "status",
+        meta: { dataLabel: "Status" },
         header: ({ column }) => (
           <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
             Status
@@ -606,6 +614,7 @@ export function AdminCompaniesTable({
         accessorKey: "contractStatus",
         header: "Contract",
         enableSorting: false,
+        meta: { dataLabel: "Contract" },
         cell: (info) => {
           const r = info.row.original;
           const account = String(r.contractStatus ?? "").toLowerCase();
@@ -649,6 +658,7 @@ export function AdminCompaniesTable({
       {
         id: "created_at",
         accessorKey: "createdAt",
+        meta: { dataLabel: "Added" },
         header: ({ column }) => (
           <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
             Added
@@ -665,6 +675,7 @@ export function AdminCompaniesTable({
         id: "actions",
         header: "Actions",
         enableSorting: false,
+        meta: { dataLabel: "", tableActions: true },
         cell: (info) => {
           const r = info.row.original;
           const inviteBusy = inviteBusyId === r.id;
@@ -1265,7 +1276,7 @@ export function AdminCompaniesTable({
           {hasFilters ? "No companies match your filters." : "No companies yet. Register one to get started."}
         </p>
       ) : (
-        <div className="relative overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+        <div className="rph-table-responsive relative">
           {loading ? (
             <div
               className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-white/75 dark:bg-slate-950/75"
@@ -1280,7 +1291,7 @@ export function AdminCompaniesTable({
               <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Loading companies…</p>
             </div>
           ) : null}
-          <table className="w-full min-w-[960px] border-collapse text-left text-sm">
+          <table className="w-full border-collapse text-left text-sm">
             <thead>
               {table.getHeaderGroups().map((hg) => (
                 <tr
@@ -1295,7 +1306,7 @@ export function AdminCompaniesTable({
                         scope="col"
                         className={`px-4 py-3 ${
                           sticky
-                            ? "sticky left-0 z-10 border-r border-slate-200 bg-slate-50 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)] dark:border-slate-700 dark:bg-slate-800 dark:shadow-[2px_0_6px_-2px_rgba(0,0,0,0.35)]"
+                            ? "lg:sticky lg:left-0 lg:z-10 lg:border-r lg:border-slate-200 lg:bg-slate-50 lg:shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)] dark:lg:border-slate-700 dark:lg:bg-slate-800 dark:lg:shadow-[2px_0_6px_-2px_rgba(0,0,0,0.35)]"
                             : ""
                         }`}
                       >
@@ -1325,15 +1336,16 @@ export function AdminCompaniesTable({
                     >
                       {row.getVisibleCells().map((cell) => {
                         const sticky = cell.column.id === "name";
+                        const responsive = responsiveTableCellProps(
+                          cell.column.columnDef,
+                          `px-4 py-3 text-slate-700 dark:text-slate-300 ${
+                            sticky
+                              ? "lg:sticky lg:left-0 lg:z-10 lg:border-r lg:border-slate-200 lg:bg-white lg:shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)] dark:lg:border-slate-700 dark:lg:bg-slate-900 dark:lg:shadow-[2px_0_6px_-2px_rgba(0,0,0,0.35)] group-odd:lg:bg-white group-even:lg:bg-slate-50 dark:group-odd:lg:bg-slate-900 dark:group-even:lg:bg-slate-950"
+                              : ""
+                          }`,
+                        );
                         return (
-                          <td
-                            key={cell.id}
-                            className={`px-4 py-3 text-slate-700 dark:text-slate-300 ${
-                              sticky
-                                ? "sticky left-0 z-10 border-r border-slate-200 bg-white shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)] group-odd:bg-white group-even:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:shadow-[2px_0_6px_-2px_rgba(0,0,0,0.35)] dark:group-odd:bg-slate-900 dark:group-even:bg-slate-950"
-                                : ""
-                            }`}
-                          >
+                          <td key={cell.id} data-label={responsive["data-label"]} className={responsive.className}>
                             {flexRender(cell.column.columnDef.cell, cell.getContext())}
                           </td>
                         );

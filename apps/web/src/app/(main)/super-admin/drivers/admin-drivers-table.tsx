@@ -18,6 +18,7 @@ import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { driverIsBlocked, type AdminDriverListRow } from "@/lib/admin/driver-list-shared";
 import type { DriverListStatusFilter } from "@/lib/admin/drivers-query";
+import { responsiveTableCellProps } from "@/lib/ui/responsive-table";
 import { DriverRowActionsMenu } from "./driver-row-actions-menu";
 import { formatUkDateTime } from "@/lib/datetime/uk";
 
@@ -251,6 +252,7 @@ export function AdminDriversTable() {
       {
         id: "first_name",
         accessorFn: (r) => [r.firstName, r.lastName].filter(Boolean).join(" ") || "—",
+        meta: { dataLabel: "Name", tablePrimary: true },
         header: ({ column }) => (
           <button
             type="button"
@@ -268,6 +270,7 @@ export function AdminDriversTable() {
       {
         id: "account_email",
         accessorKey: "email",
+        meta: { dataLabel: "Email" },
         header: ({ column }) => (
           <button
             type="button"
@@ -290,6 +293,7 @@ export function AdminDriversTable() {
       {
         id: "phone",
         accessorKey: "phone",
+        meta: { dataLabel: "Phone" },
         header: ({ column }) => (
           <button
             type="button"
@@ -304,6 +308,7 @@ export function AdminDriversTable() {
       {
         id: "address_town",
         accessorKey: "town",
+        meta: { dataLabel: "Town" },
         header: ({ column }) => (
           <button
             type="button"
@@ -318,6 +323,7 @@ export function AdminDriversTable() {
       {
         id: "address_postcode",
         accessorKey: "postcode",
+        meta: { dataLabel: "Postcode" },
         header: ({ column }) => (
           <button
             type="button"
@@ -334,6 +340,7 @@ export function AdminDriversTable() {
         id: "_status",
         header: "Status",
         enableSorting: false,
+        meta: { dataLabel: "Status" },
         cell: (info) => {
           const d = info.row.original;
           const blocked = driverIsBlocked(d);
@@ -351,6 +358,7 @@ export function AdminDriversTable() {
       {
         id: "created_at",
         accessorKey: "registeredAt",
+        meta: { dataLabel: "Registered" },
         header: ({ column }) => (
           <button
             type="button"
@@ -371,6 +379,7 @@ export function AdminDriversTable() {
         id: "_actions",
         header: "Actions",
         enableSorting: false,
+        meta: { dataLabel: "", tableActions: true },
         cell: (info) => {
           const d = info.row.original;
           return (
@@ -569,10 +578,8 @@ export function AdminDriversTable() {
             : "No driver profiles found yet."}
         </p>
       ) : (
-        <div
-          className={`overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 ${loading ? "opacity-60" : ""}`}
-        >
-          <table className="w-full min-w-[880px] border-collapse text-left text-sm">
+        <div className={`rph-table-responsive ${loading ? "opacity-60" : ""}`}>
+          <table className="w-full border-collapse text-left text-sm">
             <thead>
               {table.getHeaderGroups().map((hg) => (
                 <tr
@@ -594,7 +601,10 @@ export function AdminDriversTable() {
                   className="border-b border-slate-100 last:border-0 dark:border-slate-800 odd:bg-white even:bg-slate-50/50 dark:odd:bg-slate-900/40 dark:even:bg-slate-900/20"
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-4 py-3 text-slate-700 dark:text-slate-300">
+                    <td
+                      key={cell.id}
+                      {...responsiveTableCellProps(cell.column.columnDef, "px-4 py-3 text-slate-700 dark:text-slate-300")}
+                    >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}

@@ -442,8 +442,8 @@ export function TermsVersionsClient({
       </div>
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900/50">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-sm">
+        <div className="rph-table-responsive border-0">
+          <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
                 <th className="px-4 py-3">Id</th>
@@ -465,25 +465,29 @@ export function TermsVersionsClient({
               ) : (
                 filtered.map((row) => (
                   <tr key={row.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-                    <td className="px-4 py-3 font-mono text-xs text-slate-600 dark:text-slate-300">{row.id.slice(0, 8)}</td>
-                    <td className="px-4 py-3">
+                    <td data-label="Id" className="px-4 py-3 font-mono text-xs text-slate-600 dark:text-slate-300">{row.id.slice(0, 8)}</td>
+                    <td data-label="Title" className="rph-table-primary px-4 py-3">
                       <p className="font-medium text-slate-900 dark:text-slate-100">{row.title}</p>
                       <p className="text-xs text-slate-500 dark:text-slate-400">Version {row.version_label}</p>
                     </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                      <span className="font-medium text-slate-800 dark:text-slate-200">{config.scopeLabel}</span>
-                      <p className="text-xs text-slate-500">{config.scopeDescription}</p>
+                    <td data-label="Scope" className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                      <div className="rph-table-cell-value">
+                        <span className="font-medium text-slate-800 dark:text-slate-200">{config.scopeLabel}</span>
+                        <p className="text-xs text-slate-500">{config.scopeDescription}</p>
+                      </div>
                     </td>
-                    <td className="max-w-[220px] px-4 py-3 text-xs text-slate-600 dark:text-slate-400">
-                      {truncatePreview(stripTagsToPlain(row.body))}
+                    <td data-label="Content" className="max-w-[220px] px-4 py-3 text-xs text-slate-600 dark:text-slate-400">
+                      <span className="rph-table-cell-value">{truncatePreview(stripTagsToPlain(row.body))}</span>
                     </td>
-                    <td className="px-4 py-3">
-                      <span className={statusBadge(row.status)}>{row.status}</span>
+                    <td data-label="Status" className="px-4 py-3">
+                      <div className="rph-table-cell-value">
+                        <span className={statusBadge(row.status)}>{row.status}</span>
+                      </div>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-600 dark:text-slate-300">
-                      {formatUkDate(row.created_at)}
+                    <td data-label="Created" className="whitespace-nowrap px-4 py-3 text-slate-600 dark:text-slate-300">
+                      <span className="rph-table-cell-value">{formatUkDate(row.created_at)}</span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td data-label="" className="rph-table-actions px-4 py-3">
                       <div className="flex justify-end">
                         <TermsVersionRowActionsMenu
                           row={row}

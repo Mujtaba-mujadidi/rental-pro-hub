@@ -224,3 +224,107 @@ html {
   @apply outline outline-2 outline-offset-2 outline-rph-rail/50;
 }
 
+/*
+  Responsive data tables — wrap `<table>` in `.rph-table-responsive` and set `data-label`
+  on each `<td>` (via responsiveTableCellProps or manually). Below lg, rows become compact
+  cards with label/value pairs. Use `rph-table-primary` / `rph-table-actions` on key cells.
+*/
+.rph-table-responsive {
+  @apply overflow-hidden rounded-xl border border-rph-border;
+}
+
+@media (min-width: 1024px) {
+  .rph-table-responsive {
+    @apply overflow-x-auto;
+  }
+}
+
+@media (max-width: 1023px) {
+  .rph-table-responsive table {
+    display: block;
+    min-width: 0 !important;
+    width: 100%;
+  }
+
+  .rph-table-responsive thead {
+    @apply sr-only;
+  }
+
+  .rph-table-responsive tbody {
+    display: block;
+  }
+
+  .rph-table-responsive tr {
+    display: block;
+    @apply border-b border-rph-border bg-rph-raised px-4 py-3 last:border-b-0;
+  }
+
+  .rph-table-responsive td[colspan] {
+    display: block;
+    @apply px-0 py-8 text-center;
+  }
+
+  .rph-table-responsive td[colspan]::before {
+    content: none !important;
+  }
+
+  .rph-table-responsive td {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    @apply border-0 px-0 py-2 text-sm;
+  }
+
+  .rph-table-responsive td::before {
+    content: attr(data-label);
+    @apply shrink-0 pt-0.5 text-xs font-semibold uppercase tracking-wide text-rph-fg-muted;
+    max-width: 42%;
+  }
+
+  .rph-table-responsive td:not([data-label])::before,
+  .rph-table-responsive td[data-label=""]::before {
+    content: none;
+  }
+
+  .rph-table-responsive td.rph-table-primary {
+    display: block;
+    @apply pb-2 pt-0 pr-10;
+  }
+
+  .rph-table-responsive td.rph-table-primary::before {
+    content: none;
+  }
+
+  .rph-table-responsive td.rph-table-actions {
+    @apply mt-2 justify-end border-t border-rph-border pt-3;
+  }
+
+  .rph-table-responsive td.rph-table-actions::before {
+    content: none;
+  }
+
+  .rph-table-responsive td .rph-table-cell-value {
+    @apply min-w-0 flex-1 text-right;
+  }
+
+  .rph-table-responsive tr {
+    position: relative;
+  }
+
+  .rph-table-responsive td.rph-table-select {
+    @apply absolute right-4 top-4 border-0 p-0;
+  }
+
+  .rph-table-responsive td.rph-table-select::before {
+    content: none;
+  }
+
+  .rph-table-responsive th.sticky,
+  .rph-table-responsive td.sticky {
+    position: static;
+    border-right-width: 0;
+    box-shadow: none;
+  }
+}
+

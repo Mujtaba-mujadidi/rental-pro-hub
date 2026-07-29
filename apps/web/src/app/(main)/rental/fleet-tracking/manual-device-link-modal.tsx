@@ -18,6 +18,8 @@ export type ManualDeviceLinkModalProps = {
   deviceGroups: DeviceGroup[];
   initialVehicleId?: string | null;
   initialDeviceBaseVrm?: string | null;
+  /** When true, vehicle select is read-only (single-vehicle link from vehicle workspace). */
+  lockVehicle?: boolean;
   onClose: () => void;
   onSubmit: (input: { vehicleId: string; deviceBaseVrm: string }) => void;
 };
@@ -42,6 +44,7 @@ export function ManualDeviceLinkModal({
   deviceGroups,
   initialVehicleId = null,
   initialDeviceBaseVrm = null,
+  lockVehicle = false,
   onClose,
   onSubmit,
 }: ManualDeviceLinkModalProps) {
@@ -108,7 +111,7 @@ export function ManualDeviceLinkModal({
           <select
             className="rph-input"
             value={vehicleId}
-            disabled={pending || !vehicles.length}
+            disabled={pending || !vehicles.length || lockVehicle}
             onChange={(event) => setVehicleId(event.target.value)}
           >
             {!vehicles.length ? <option value="">No unmatched vehicles</option> : null}

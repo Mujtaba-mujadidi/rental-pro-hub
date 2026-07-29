@@ -12,6 +12,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import type { CompanyMembershipRole } from "@/lib/auth/profile";
 import { formatUkDate } from "@/lib/datetime/uk";
+import { responsiveTableCellProps } from "@/lib/ui/responsive-table";
 import { StaffManageMemberModal, type StaffMember } from "./staff-manage-member-modal";
 
 export type { StaffMember };
@@ -233,6 +234,7 @@ export function StaffDirectory({
       {
         id: "member",
         accessorFn: (row) => memberSortLabel(row),
+        meta: { dataLabel: "Member", tablePrimary: true },
         header: ({ column }) => (
           <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
             Member
@@ -257,6 +259,7 @@ export function StaffDirectory({
       {
         id: "email",
         accessorFn: (row) => row.email ?? "",
+        meta: { dataLabel: "Email" },
         header: ({ column }) => (
           <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
             Email
@@ -270,6 +273,7 @@ export function StaffDirectory({
       {
         id: "role",
         accessorKey: "role",
+        meta: { dataLabel: "Role" },
         header: ({ column }) => (
           <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
             Role
@@ -281,6 +285,7 @@ export function StaffDirectory({
       {
         id: "status",
         accessorKey: "status",
+        meta: { dataLabel: "Status" },
         header: ({ column }) => (
           <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
             Status
@@ -293,6 +298,7 @@ export function StaffDirectory({
         id: "access",
         header: "Access",
         enableSorting: false,
+        meta: { dataLabel: "Access" },
         cell: ({ row }) => {
           const m = row.original;
           return (
@@ -305,6 +311,7 @@ export function StaffDirectory({
       {
         id: "added",
         accessorFn: (row) => row.created_at,
+        meta: { dataLabel: "Added" },
         header: ({ column }) => (
           <button type="button" className={thBtn} onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
             Added
@@ -319,6 +326,7 @@ export function StaffDirectory({
         id: "actions",
         header: "",
         enableSorting: false,
+        meta: { dataLabel: "", tableActions: true },
         cell: ({ row }) => {
           const m = row.original;
           const canRowManage = canManage && !(m.role === "owner" && m.user_id !== currentUserId);
@@ -517,8 +525,8 @@ export function StaffDirectory({
               {hasFilters ? "No team members match your filters." : "No team members to show."}
             </p>
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
-              <table className="w-full min-w-[920px] border-collapse text-left text-sm">
+            <div className="rph-table-responsive">
+              <table className="w-full border-collapse text-left text-sm">
                 <thead>
                   {table.getHeaderGroups().map((hg) => (
                     <tr key={hg.id} className="border-b border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/60">
@@ -537,7 +545,13 @@ export function StaffDirectory({
                       className="border-b border-slate-100 last:border-0 dark:border-slate-800 odd:bg-white even:bg-slate-50/50 dark:odd:bg-slate-900/40 dark:even:bg-slate-900/20"
                     >
                       {row.getVisibleCells().map((cell) => (
-                        <td key={cell.id} className="align-middle px-4 py-3 text-slate-700 dark:text-slate-300">
+                        <td
+                          key={cell.id}
+                          {...responsiveTableCellProps(
+                            cell.column.columnDef,
+                            "align-middle px-4 py-3 text-slate-700 dark:text-slate-300",
+                          )}
+                        >
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
                         </td>
                       ))}

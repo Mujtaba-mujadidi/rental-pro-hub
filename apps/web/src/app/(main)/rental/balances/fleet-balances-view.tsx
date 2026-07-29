@@ -47,7 +47,7 @@ export function FleetBalancesView() {
       {rows.length === 0 && !pending ? (
         <p className="rph-muted text-sm">No open balances right now.</p>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-rph-border">
+        <div className="rph-table-responsive">
           <table className="min-w-full text-sm">
             <thead className="bg-rph-chrome text-left text-xs uppercase tracking-wide text-rph-fg-muted">
               <tr>
@@ -61,15 +61,23 @@ export function FleetBalancesView() {
             <tbody>
               {rows.map((row) => (
                 <tr key={row.hireGroupId} className="border-t border-rph-border hover:bg-rph-chrome/40">
-                  <td className="px-4 py-3 font-medium text-rph-fg">{row.vehicleVrm ?? "—"}</td>
-                  <td className="px-4 py-3 text-rph-fg-secondary">{row.driverLabel ?? "—"}</td>
-                  <td className="px-4 py-3 text-rph-fg-secondary">
-                    {row.terminatedAt ? formatUkDateTime(row.terminatedAt) : "—"}
+                  <td data-label="Vehicle" className="rph-table-primary px-4 py-3 font-medium text-rph-fg">
+                    {row.vehicleVrm ?? "—"}
                   </td>
-                  <td className="px-4 py-3 font-semibold tabular-nums text-rph-fg">
-                    {settlementBalanceLabel(row.settlementDirection, row.openBalanceGbp)}
+                  <td data-label="Driver" className="px-4 py-3 text-rph-fg-secondary">
+                    <span className="rph-table-cell-value">{row.driverLabel ?? "—"}</span>
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td data-label="Ended" className="px-4 py-3 text-rph-fg-secondary">
+                    <span className="rph-table-cell-value">
+                      {row.terminatedAt ? formatUkDateTime(row.terminatedAt) : "—"}
+                    </span>
+                  </td>
+                  <td data-label="Balance" className="px-4 py-3 font-semibold tabular-nums text-rph-fg">
+                    <span className="rph-table-cell-value">
+                      {settlementBalanceLabel(row.settlementDirection, row.openBalanceGbp)}
+                    </span>
+                  </td>
+                  <td data-label="" className="rph-table-actions px-4 py-3 text-right">
                     <Link
                       href={`/rental/balances/${row.hireGroupId}`}
                       className="rph-btn-ghost h-9 px-3 text-xs"

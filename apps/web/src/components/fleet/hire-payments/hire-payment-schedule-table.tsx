@@ -152,9 +152,8 @@ export function HirePaymentScheduleTable({
 
       {rowError ? <p className="rph-alert-error text-sm">{rowError}</p> : null}
 
-      <div className="-mx-4 overflow-x-auto overscroll-x-contain px-4 sm:mx-0 sm:px-0">
-        <div className="min-w-[48rem] overflow-hidden rounded-xl border border-rph-border">
-          <div className="max-h-[min(60vh,28rem)] overflow-y-auto overscroll-y-contain">
+      <div className="rph-table-responsive">
+        <div className="lg:max-h-[min(60vh,28rem)] lg:overflow-y-auto lg:overscroll-y-contain">
             <table className="w-full text-sm">
               <thead className="sticky top-0 z-10">
                 <tr className="border-b border-rph-border bg-rph-chrome text-left text-xs font-semibold uppercase tracking-wide text-rph-fg-muted shadow-[0_1px_0_0_var(--rph-border)]">
@@ -191,7 +190,7 @@ export function HirePaymentScheduleTable({
                               : "bg-rph-raised/30"
                       }
                     >
-                      <td className="px-4 py-3">
+                      <td data-label="Period" className="rph-table-primary px-4 py-3">
                         <p className="font-medium text-rph-fg">{periodCell(row)}</p>
                         <p className="rph-meta text-xs capitalize">{row.rowKind}</p>
                         {row.discountTotalGbp > 0 ? (
@@ -210,10 +209,17 @@ export function HirePaymentScheduleTable({
                           <p className="mt-1 text-xs font-medium text-rph-link">Allocated in payment</p>
                         ) : null}
                       </td>
-                      <td className="px-4 py-3 tabular-nums">{formatGbp(row.netDueGbp)}</td>
-                      <td className="px-4 py-3 tabular-nums">{formatGbp(row.paidGbp)}</td>
-                      <td className="px-4 py-3 tabular-nums font-medium">{formatGbp(row.balanceGbp)}</td>
-                      <td className="px-4 py-3">
+                      <td data-label="Due" className="px-4 py-3 tabular-nums">
+                        <span className="rph-table-cell-value">{formatGbp(row.netDueGbp)}</span>
+                      </td>
+                      <td data-label="Paid" className="px-4 py-3 tabular-nums">
+                        <span className="rph-table-cell-value">{formatGbp(row.paidGbp)}</span>
+                      </td>
+                      <td data-label="Balance" className="px-4 py-3 tabular-nums font-medium">
+                        <span className="rph-table-cell-value">{formatGbp(row.balanceGbp)}</span>
+                      </td>
+                      <td data-label="Status" className="px-4 py-3">
+                        <div className="rph-table-cell-value">
                         <span
                           className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${hireTableStatusToneClass(statusMeta.tone)}`}
                         >
@@ -226,8 +232,9 @@ export function HirePaymentScheduleTable({
                         ) : row.paymentStatus === "pending_approval" ? (
                           <p className="rph-meta mt-1 text-xs">Awaiting company approval</p>
                         ) : null}
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td data-label="" className="rph-table-actions px-4 py-3 text-right">
                         <div className="flex justify-end">
                           <HirePaymentRowActions
                             row={row}
@@ -246,7 +253,6 @@ export function HirePaymentScheduleTable({
               )}
             </tbody>
           </table>
-          </div>
         </div>
       </div>
     </div>
