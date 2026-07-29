@@ -20,7 +20,10 @@ import {
   signedSettlementBalanceGbp,
 } from "@/lib/fleet/hire-open-balance";
 import { depositRentScheduleCreditGbp } from "@/lib/fleet/hire-deposit-schedule-allocation";
-import type { HirePaymentScheduleRowInput } from "@/lib/fleet/hire-payment-summary";
+import {
+  hirePaymentRowPaidGbp,
+  type HirePaymentScheduleRowInput,
+} from "@/lib/fleet/hire-payment-summary";
 import { persistDepositCreditToRentSchedule } from "@/lib/fleet/persist-hire-deposit-schedule-credit";
 import {
   requiresDepositDispositionReason,

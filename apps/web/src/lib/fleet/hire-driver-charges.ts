@@ -32,6 +32,7 @@ export type HireDriverChargeLineItemRow = HireDriverChargeLineItemInput & {
 };
 
 export type HireBalancePaymentIncomeRow = {
+  hireGroupId?: string | null;
   amountGbp: number;
   direction: string | null;
   paymentCategory?: HireBalancePaymentCategory | string | null;
