@@ -33,6 +33,7 @@ import {
   assertDriverLinkedToCompany,
   loadDriverLabelsMap,
 } from "@/app/actions/rental-driver-links";
+import { buildSubcompanyLegalSnapshot } from "@/lib/rental/subcompany-legal-snapshot";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -185,25 +186,13 @@ export async function createHireGroupAction(input: {
 
   const { data: sub } = await supabase
     .from("subcompanies")
-    .select("legal_name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode")
+    .select(
+      "name, display_name, legal_name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode, country, primary_contact_first_name, primary_contact_last_name, primary_contact_phone, primary_contact_email, logo_storage_path",
+    )
     .eq("id", vehicle.subcompany_id)
     .maybeSingle();
 
-  const legalSnapshot = sub
-    ? {
-        legal_name: sub.legal_name,
-        company_number: sub.company_number,
-        address: [
-          sub.registered_address_line1,
-          sub.registered_address_line2,
-          sub.registered_town,
-          sub.registered_county,
-          sub.registered_postcode,
-        ]
-          .filter(Boolean)
-          .join(", "),
-      }
-    : {};
+  const legalSnapshot = sub ? buildSubcompanyLegalSnapshot(sub) : {};
 
   const { data: publishedTerms } = await supabase
     .from("company_hire_terms_versions")
@@ -557,7 +546,7 @@ export async function regenerateHireGroupContractsAction(
 
   const { data: group } = await admin
     .from("vehicle_hire_groups")
-    .select("id, parent_company_id, status, vehicle_id, signing_bundle_sent_at")
+    .select("id, parent_company_id, status, vehicle_id, signing_bundle_sent_at, subcompany_id")
     .eq("id", hireGroupId.trim())
     .maybeSingle();
   if (!group || group.parent_company_id !== profile.company_id) {
@@ -565,6 +554,23 @@ export async function regenerateHireGroupContractsAction(
   }
   if (group.status !== "pending_signature" && group.status !== "draft") {
     return { ok: false, error: "Only contracts awaiting signature can be regenerated." };
+  }
+
+  // Prefer live subcompany branding when regenerating after a details change.
+  if (group.subcompany_id) {
+    const { data: sub } = await admin
+      .from("subcompanies")
+      .select(
+        "name, display_name, legal_name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode, country, primary_contact_first_name, primary_contact_last_name, primary_contact_phone, primary_contact_email, logo_storage_path",
+      )
+      .eq("id", group.subcompany_id)
+      .maybeSingle();
+    if (sub) {
+      await admin
+        .from("vehicle_hire_groups")
+        .update({ subcompany_legal_snapshot: buildSubcompanyLegalSnapshot(sub) })
+        .eq("id", group.id);
+    }
   }
 
   const { data: agreements } = await admin
@@ -638,8 +644,21 @@ export async function regenerateHireGroupContractsAction(
     metadata: { envelope_ids: newEnvelopeIds, sent_to_hirer: sentToHirer },
   });
 
+  // Complete any open subcompany detail-change requirements for this hire's agreements.
+  await admin
+    .from("subcompany_hire_document_requirements")
+    .update({
+      status: "completed",
+      completed_at: new Date().toISOString(),
+      completed_by: user.id,
+      completed_via: "regenerate_unsigned",
+    })
+    .eq("hire_group_id", group.id)
+    .eq("status", "required");
+
   revalidatePath("/rental/hires");
   revalidatePath("/rental/vehicles");
+  revalidatePath("/rental/subcompany");
   return { ok: true, envelopeIds: newEnvelopeIds };
 }
 

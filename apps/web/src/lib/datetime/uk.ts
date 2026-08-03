@@ -105,6 +105,7 @@ export function formatUkDateTime(value: string | Date | null | undefined, empty 
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    timeZone: "Europe/London",
   });
 }
 
@@ -124,6 +125,7 @@ export function formatUkDateTimeSeconds(value: string | Date | null | undefined,
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
+    timeZone: "Europe/London",
   });
 }
 

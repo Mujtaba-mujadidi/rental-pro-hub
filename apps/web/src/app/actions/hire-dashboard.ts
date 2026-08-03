@@ -1,6 +1,7 @@
 "use server";
 
 import { loadHirePaymentsPageAction, loadDriverHirePaymentsPageAction, type HirePaymentPageRow } from "@/app/actions/hire-payments";
+import { loadDriverHireWorkspaceShellAction } from "@/app/actions/driver-hires";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
 import { canReadRentals } from "@/lib/auth/rental-permissions";
 import { formatUkDateTimeSeconds, ukTodayYmd } from "@/lib/datetime/uk";
@@ -405,8 +406,14 @@ async function buildDriverDashboardData(
   const user = await getSessionUser();
   if (!user) return { ok: false, error: "Sign in required." };
 
-  const page = await loadDriverHirePaymentsPageAction(hireGroupId.trim());
+  // Vehicle/company joins are blocked for drivers by RLS — use the admin-backed shell.
+  const [page, shellRes] = await Promise.all([
+    loadDriverHirePaymentsPageAction(hireGroupId.trim()),
+    loadDriverHireWorkspaceShellAction(hireGroupId.trim()),
+  ]);
   if (!page.ok) return page;
+  if (!shellRes.ok) return shellRes;
+  const shell = shellRes.shell;
 
   const supabase = await createClient();
   const today = ukTodayYmd();
@@ -414,7 +421,7 @@ async function buildDriverDashboardData(
   const { data: group } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "start_date, start_time, end_time, status, activated_at, terminated_at, ended_at, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, driver_email, driver_licence_number, parent_company_id, vehicles(vrm, make, model), companies(name), vehicle_hire_agreements(end_date)",
+      "start_date, start_time, end_time, status, activated_at, terminated_at, ended_at, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, driver_email, driver_licence_number, vehicle_hire_agreements(end_date)",
     )
     .eq("id", hireGroupId.trim())
     .eq("driver_user_id", user.id)
@@ -422,9 +429,7 @@ async function buildDriverDashboardData(
   if (!group) return { ok: false, error: "Hire not found." };
 
   const startDate = (group.start_date as string | null) ?? today;
-  const hireStatus = (group.status as string | null) ?? "";
-  const vehicle = group.vehicles as { vrm?: string; make?: string; model?: string } | null;
-  const company = group.companies as { name?: string } | null;
+  const hireStatus = (group.status as string | null) ?? shell.status;
 
   const { data: inspectionRows } = await supabase
     .from("vehicle_hire_inspections")
@@ -504,13 +509,12 @@ async function buildDriverDashboardData(
   const scheduleDepositStatusLabel = depositStatusLabel(analyticsRows, today);
   const overview = buildOverviewContext({
     hireGroupId: hireGroupId.trim(),
-    vehicleVrm: vehicle?.vrm?.trim() || page.data.vehicleVrm,
-    vehicleMakeModel:
-      [vehicle?.make, vehicle?.model].filter(Boolean).join(" ").trim() || page.data.vehicleVrm,
+    vehicleVrm: shell.vehicleVrm,
+    vehicleMakeModel: shell.vehicleMakeModel,
     driverEmail: (group.driver_email as string | null) ?? user.email ?? null,
     driverLicence: (group.driver_licence_number as string | null) ?? null,
-    companyName: company?.name?.trim() ?? null,
-    statusLabel: driverHireStatusLabel(hireStatus),
+    companyName: shell.companyName,
+    statusLabel: shell.statusLabel,
     group,
     agreementEndDates: (
       (group.vehicle_hire_agreements as { end_date?: string | null }[] | null | undefined) ?? []

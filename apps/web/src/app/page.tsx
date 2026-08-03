@@ -38,11 +38,6 @@ export default function Home() {
             <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
               Rental management for operators & drivers
             </h1>
-            <p className="mt-3 text-slate-600 dark:text-slate-400">
-              Drivers register in four steps, then complete licence onboarding after sign-in. Console
-              styling follows the PHVDriveHub / Option 7 reference: navy rail, matching accents, white
-              workspace.
-            </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link
                 href="/login"

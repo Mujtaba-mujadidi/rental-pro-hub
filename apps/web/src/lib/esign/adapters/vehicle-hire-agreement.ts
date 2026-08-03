@@ -5,7 +5,6 @@ import {
   type ContractPdfInput,
 } from "@/lib/esign/pdf-generate";
 import { ESIGN_BUCKET, ESIGN_RECIPIENT_ROLE, type EsignFieldLayoutItem } from "@/lib/esign/types";
-import { loadCompanyLogoForContractPdf } from "@/lib/companies/company-logo";
 import { formatRegisteredCompanyAddress } from "@/lib/companies/registered-address";
 import { ukTodayYmd } from "@/lib/datetime/uk";
 import { allAgreementsSigned, hireGroupStatusAfterAllSigned, isStartDateInFuture, vehicleStatusForHireGroup } from "@/lib/fleet/hire-lifecycle";
@@ -15,6 +14,12 @@ import { touchHireGroupForEnvelopeRealtime, touchHireGroupRealtime } from "@/lib
 import type { ContractLengthKind, RentCadence } from "@/lib/fleet/hire-types";
 import { buildHirePdfDetails, type HirePdfDriverSource, type HirePdfVehicleSource } from "@/lib/fleet/hire-pdf-details";
 import { persistHireTimesheetForGroup } from "@/lib/fleet/persist-hire-timesheet";
+import {
+  lessorAddressFromSnapshot,
+  lessorDisplayNameFromSnapshot,
+  snapshotString,
+} from "@/lib/rental/subcompany-legal-snapshot";
+import { loadSubcompanyLogoForContractPdf } from "@/lib/rental/subcompany-logo";
 import type { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type Admin = ReturnType<typeof createSupabaseAdminClient>;
@@ -79,32 +84,19 @@ async function resolveHireLessorAddress(
   group: Record<string, unknown>,
   legalSnap: Record<string, unknown>,
 ): Promise<string | null> {
-  const fromSnapshot = typeof legalSnap.address === "string" ? legalSnap.address.trim() : "";
+  const fromSnapshot = lessorAddressFromSnapshot(legalSnap);
   if (fromSnapshot) return fromSnapshot;
 
   const subcompanyId = (group.subcompany_id as string | null) ?? null;
-  if (subcompanyId) {
-    const { data: sub } = await admin
-      .from("subcompanies")
-      .select(
-        "registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode",
-      )
-      .eq("id", subcompanyId)
-      .maybeSingle();
-    const formatted = formatRegisteredCompanyAddress(sub ?? {});
-    if (formatted) return formatted;
-  }
-
-  const companyId = (group.parent_company_id as string | null) ?? null;
-  if (!companyId) return null;
-  const { data: company } = await admin
-    .from("companies")
+  if (!subcompanyId) return null;
+  const { data: sub } = await admin
+    .from("subcompanies")
     .select(
       "registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode",
     )
-    .eq("id", companyId)
+    .eq("id", subcompanyId)
     .maybeSingle();
-  return formatRegisteredCompanyAddress(company ?? {});
+  return formatRegisteredCompanyAddress(sub ?? {}) || null;
 }
 
 async function loadHireAgreementPdfInput(
@@ -126,12 +118,10 @@ async function loadHireAgreementPdfInput(
   const companyId = group.parent_company_id as string;
   const driverUserId = group.driver_user_id as string;
 
-  const [{ data: company }, { data: driver }, { data: terms }, resolvedPermission] = await Promise.all([
-    admin
-      .from("companies")
-      .select("name, company_number, primary_contact_email, primary_contact_phone")
-      .eq("id", companyId)
-      .maybeSingle(),
+  const legalSnap = (group.subcompany_legal_snapshot ?? {}) as Record<string, unknown>;
+  const logoPath = snapshotString(legalSnap, "logo_storage_path");
+
+  const [{ data: driver }, { data: terms }, resolvedPermission, logo] = await Promise.all([
     admin.from("driver_profiles").select(HIRE_DRIVER_PROFILE_SELECT).eq("user_id", driverUserId).maybeSingle(),
     group.hire_terms_version_id
       ? admin
@@ -141,10 +131,25 @@ async function loadHireAgreementPdfInput(
           .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
     resolvePermissionLetterForHirePdf(admin, companyId),
+    loadSubcompanyLogoForContractPdf(admin, logoPath),
   ]);
 
   if (!driver?.account_email?.trim()) {
     return { ok: false, error: "Driver email is required for e-sign." };
+  }
+
+  // Fallback logo from live subcompany when snapshot has no path (legacy hires).
+  let resolvedLogo = logo;
+  if (!resolvedLogo) {
+    const subId = (group.subcompany_id as string | null) ?? null;
+    if (subId) {
+      const { data: sub } = await admin
+        .from("subcompanies")
+        .select("logo_storage_path")
+        .eq("id", subId)
+        .maybeSingle();
+      resolvedLogo = await loadSubcompanyLogoForContractPdf(admin, sub?.logo_storage_path as string | null);
+    }
   }
 
   let bankPayee: string | null = null;
@@ -165,17 +170,17 @@ async function loadHireAgreementPdfInput(
     }
   }
 
-  const legalSnap = (group.subcompany_legal_snapshot ?? {}) as Record<string, unknown>;
-  const subcompanyLegalName = (legalSnap.legal_name as string) || company?.name || "Lessor";
+  const subcompanyLegalName = lessorDisplayNameFromSnapshot(legalSnap);
   const subcompanyAddress = await resolveHireLessorAddress(admin, group, legalSnap);
-  const companyNumber = ((legalSnap.company_number as string) || company?.company_number || "").trim() || null;
-  const contactEmail = (company?.primary_contact_email as string | null)?.trim() || null;
-  const contactPhone = (company?.primary_contact_phone as string | null)?.trim() || null;
+  const companyNumber = snapshotString(legalSnap, "company_number");
+  const contactEmail = snapshotString(legalSnap, "primary_contact_email");
+  const contactPhone = snapshotString(legalSnap, "primary_contact_phone");
   const driverName =
     [driver.first_name, driver.last_name].filter(Boolean).join(" ").trim() || driver.account_email;
 
+  // Driver-facing PDFs use subcompany as sole lessor identity (no parent company name).
   const pdfInput = buildHireAgreementPdfInput({
-    companyName: company?.name ?? "Rental company",
+    companyName: subcompanyLegalName,
     subcompanyLegalName,
     subcompanyAddress,
     driverName,
@@ -203,10 +208,9 @@ async function loadHireAgreementPdfInput(
     bankReferenceHint,
   });
 
-  const logo = await loadCompanyLogoForContractPdf(admin, companyId);
-  if (logo) {
-    pdfInput.logoBytes = logo.bytes;
-    pdfInput.logoContentType = logo.contentType;
+  if (resolvedLogo) {
+    pdfInput.logoBytes = resolvedLogo.bytes;
+    pdfInput.logoContentType = resolvedLogo.contentType;
   }
 
   return { ok: true, pdfInput, companyId, driverEmail: driver.account_email.trim(), driverName };

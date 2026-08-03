@@ -43,13 +43,14 @@ export default async function MainShellLayout({
   let rentalCompanyHeader: { name: string; address: string | null } | null = null;
   let driverPendingHireRequests = 0;
   let driverHasCurrentHire = false;
+  let driverCurrentHireGroupId: string | null = null;
   let driverUnreadNotifications = 0;
   if (variant === "driver") {
     const supabase = await createClient();
     const [
       { data },
       { count },
-      { count: currentHireCount },
+      { data: currentHires },
       unreadNotifications,
     ] = await Promise.all([
       supabase.from("driver_profiles").select(DRIVER_ONBOARDING_COLUMNS).eq("user_id", user.id).maybeSingle(),
@@ -60,9 +61,11 @@ export default async function MainShellLayout({
         .eq("status", "pending"),
       supabase
         .from("vehicle_hire_groups")
-        .select("id", { count: "exact", head: true })
+        .select("id")
         .eq("driver_user_id", user.id)
-        .in("status", [...DRIVER_CURRENT_HIRE_STATUSES]),
+        .in("status", [...DRIVER_CURRENT_HIRE_STATUSES])
+        .order("start_date", { ascending: false })
+        .limit(1),
       getUnreadNotificationCountCached(user.id),
     ]);
     const complete = driverOnboardingComplete(data);
@@ -75,7 +78,8 @@ export default async function MainShellLayout({
       };
     }
     driverPendingHireRequests = count ?? 0;
-    driverHasCurrentHire = (currentHireCount ?? 0) > 0;
+    driverCurrentHireGroupId = currentHires?.[0]?.id ?? null;
+    driverHasCurrentHire = Boolean(driverCurrentHireGroupId);
     driverUnreadNotifications = unreadNotifications;
   }
   if (variant === "rental_company") {
@@ -131,6 +135,7 @@ export default async function MainShellLayout({
       driverLicenceBanner={variant === "driver" ? driverLicenceBanner : null}
       driverPendingHireRequests={variant === "driver" ? driverPendingHireRequests : 0}
       driverHasCurrentHire={variant === "driver" ? driverHasCurrentHire : false}
+      driverCurrentHireGroupId={variant === "driver" ? driverCurrentHireGroupId : null}
       driverUnreadNotifications={variant === "driver" ? driverUnreadNotifications : 0}
       fleetTrackingEnabled={fleetTrackingEnabled}
       rentalUnreadNotifications={variant === "rental_company" ? rentalUnreadNotifications : 0}

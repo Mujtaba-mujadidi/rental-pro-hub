@@ -83,6 +83,20 @@ export function driverHireDocumentsBackLink(from: string | null | undefined): {
   return { href: "/driver/hire-requests", label: "Hire requests" };
 }
 
+/**
+ * Maps legacy `/driver/my-hire?tab=` links onto the hire workspace route.
+ * My hire always opens the current hire workspace directly (no list).
+ */
+export function resolveDriverMyHireRedirectPath(
+  hireGroupId: string,
+  tab: string | null | undefined,
+): string {
+  const id = hireGroupId.trim();
+  if (tab === "payments") return `/driver/hires/${id}/payments`;
+  if (tab === "details") return `/driver/hires/${id}/details`;
+  return `/driver/hires/${id}`;
+}
+
 /** Signed or closed requests belong on My hire / history, not the requests inbox. */
 export function shouldHideHireRequestFromInbox(input: {
   signingPhase: DriverHireSigningPhase;

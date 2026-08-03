@@ -1,62 +1,260 @@
 ---
-description: Call before any build — KISS/DRY, readable code, no hallucination, RMS constraints, unit tests for all pure lib functions.
+description: Call before any build — KISS/DRY, readable code, shared UI components, repository conventions, no hallucination, RMS constraints, and appropriate tests.
 alwaysApply: false
 ---
 
 # Build standards (`build`)
 
-Invoke this rule before implementing features. Prefer clarity over cleverness.
+Invoke this rule before implementing or changing features in Rental Pro Hub.
 
-## Core
+Prefer clarity, consistency, and maintainability over cleverness.
 
-- **KISS** — simplest solution that meets the request; no premature abstraction
-- **DRY** — extract a helper only when the same logic is real and repeated (not speculative)
-- **Readable** — a human should understand the code without a tour; boring linear code beats clever indirection
-- **Comment why**, not what; skip obvious narration
-- **Do not hallucinate** — check the repo for APIs, columns, env vars, helpers before inventing them
-- **Scope** — only change what the request needs; no drive-by refactors or unrelated files
+Security-sensitive work (authz, RLS, storage, payments, documents, invitations, contracts) is governed by the always-applied rule `.cursor/rules/rms-security.mdc` and skill `.cursor/skills/rms-secure-development/`. This file covers normal feature implementation, code quality, and repository conventions — do not turn it into a full security document. When a change touches access control or tenant data, invoke the security rule and skill as well.
 
-## This repo
+---
 
-- Fixed rental roles + `can()` from `@/lib/auth/rental-permissions` — no DIY permission matrices
-- UK dates/times via `@/lib/datetime/uk` helpers — not raw ISO or browser locale
-- Theme: `rph-*` tokens / utilities from `globals.css` — no ad-hoc `dark:bg-zinc-*` stacks on new UI
-- DB changes: migration + idempotent `supabase/manual/ensure_*.sql` when schema changes
-- Match nearby patterns (server actions, FormModalShell, overlays, vehicle workspace)
+## 1. Core engineering principles
 
-## Multi-step modals (UI consistency)
+- **KISS** — implement the simplest solution that correctly satisfies the requirement.
+- **DRY** — extract helpers only when logic is genuinely repeated; do not abstract for speculative future use.
+- Prefer readable, direct, linear code over clever indirection.
+- Comments explain **why** something is necessary, not what the code already shows.
+- **Do not hallucinate** repository APIs, database columns, environment variables, helpers, components, routes, or dependencies.
+- Inspect the repository before introducing anything new.
+- Change only what the requested task needs; no unrelated refactors or drive-by file edits.
+- Preserve existing working behaviour unless the change requires altering it.
+- Match existing naming, folder structure, error handling, server-action patterns, and component conventions.
+- Avoid unnecessary dependencies.
+- Reuse existing helpers and components before creating new ones; do not duplicate logic that already exists.
 
-Use the same chrome for every stepped `FormModalShell` flow:
+---
 
-- **Shell** — `FormModalShell` from `@/components/forms/form-modal-shell` (backdrop does not dismiss; Close/Cancel + discard confirm)
-- **Progress** — `FormModalStepProgress` in `headerExtra` with a `STEP_LABELS` array; **0-based** `step` prop (`step - 1` if your wizard stores 1-based steps)
-- **Title** — stable action name (`New hire contract`, `Add vehicle`); put “Step X of Y” in the progress component, not the title
-- **Footer** — `Cancel` left; `Back` / primary action right via `formModalBtnGhost` / `formModalBtnContinue` from `@/components/forms/form-modal-actions`
-- **Fields** — `rph-input`, `FormModalField`, `rph-meta`, `rph-card`; UK dates via `@/lib/datetime/uk`
-- **Drafts** — browser drafts: `useFormModalDraft` + shell `onSaveProgress` / `onSaveAndClose`; server drafts: `showDraftActions={false}` and a footer `formModalBtnSecondary` “Save draft” that calls your server action
-- **Large forms** — `allowMaximize` + `maxWidthClass` when needed (match hire/terms modals)
-- **Reference** — `add-vehicle-modal.tsx`, `register-subcompany-modal.tsx`, `hire-contract-wizard-modal.tsx`
+## 2. Repository-specific rules
 
-Do not invent a new step indicator or footer button layout when extending an existing wizard.
+Confirm these paths still exist before relying on them.
 
-## Product safety
+| Concern | Location |
+| --- | --- |
+| Fixed rental roles + `can()` | `@/lib/auth/rental-permissions` |
+| UK date / time display | `@/lib/datetime/uk` |
+| Theme tokens / utilities | `apps/web/src/app/globals.css` |
 
-- Do not silently invent or restore history (e.g. previous MOT expiry) without stored data
-- Keep expense logs separate from vehicle source-of-truth fields unless the feature explicitly updates both
-- Permissions and RLS must stay aligned with fixed roles
+### Theme classes (use these; do not invent parallel stacks)
 
-## Validate (unit tests)
+- Surfaces / chrome: `rph-card`, `rph-panel`, and related page/raised tokens in `globals.css`
+- Text: `rph-input`, `rph-meta`
+- Buttons: `rph-btn-primary`, `rph-btn-ghost`, `rph-btn-toolbar`
+- Pills / alerts: `rph-pill`, `rph-pill-active`, `rph-alert-error`, `rph-alert-warn`, `rph-alert-ok`
+- Tables: `rph-table-responsive` + `data-label` / `responsiveTableCellProps` from `@/lib/ui/responsive-table`
 
-Vitest lives in `apps/web` (`*.test.ts` next to the module under `src/`).
+### Database changes
 
-**Goal:** every **pure** exported function in `src/lib` has unit tests (happy path + branches).
+When the established pattern applies:
 
-- Pure = sync logic with no Supabase/Next/fetch/env secrets (dates, money, permissions, identity, validation, mapping, etc.)
-- **Not** unit-tested here: server actions, React pages, Supabase queries, PDF/mail, env-keyed crypto — validate those manually or with later integration tests
-- When you add a new pure helper, add `foo.test.ts` beside it covering all exports and branches
-- **After each implementation:** `npm test` (root) or `npm run test --workspace=@rph/web`
-- **To verify coverage of the pure set:** `npm run test:coverage --workspace=@rph/web` (see `vitest.config.ts` `PURE_LIB_COVERAGE`)
-- Still include a short manual check list for UI wiring
-- **Do not** invent flaky E2E unless the user asks
+1. Add a normal migration under `supabase/migrations/`.
+2. Add an idempotent `supabase/manual/ensure_*.sql` script.
+3. Update affected types, queries, and fixtures.
 
-Colocate tests as `foo.test.ts` beside `foo.ts`. Keep tests deterministic (`vi.useFakeTimers()` for “today”).
+### Match nearby patterns
+
+Copy established patterns for server actions, Supabase queries, form validation, modals, overlays, vehicle workspaces, company onboarding, staff invitations, and contract wizards. Do not invent a replacement pattern when one already exists.
+
+---
+
+## 3. Permissions and access checks
+
+- Use the central fixed-role system and `can()` from `@/lib/auth/rental-permissions`.
+- Do not introduce independent role matrices or duplicate permission systems.
+- Do not scatter hard-coded checks such as `user.role === "admin"` / `membership_role === …` across pages and actions when `can()` covers the capability.
+
+`can()` is a **capability** check. It is **not** by itself sufficient for access to a specific record.
+
+Protected server operations must also use the repository’s approved security helpers for authenticated user, active company membership, parent-company / subcompany scope, resource ownership, active driver–company relationship, and the requested action — as defined by the security rule.
+
+Do not implement security only in the frontend. The dedicated security rule and skill are the source of truth for security-sensitive implementation.
+
+---
+
+## 4. UI consistency
+
+New UI must reuse existing components and visual language. Do not create one-off dropdowns, buttons, modals, tables, fields, status indicators, or form styling when a shared implementation exists.
+
+| Requirement | Prefer |
+| --- | --- |
+| Form / wizard modal | `FormModalShell` (`@/components/forms/form-modal-shell`) |
+| Confirmation / destructive prompt | `ConfirmDialog` (`@/components/confirm-dialog`) — not `window.confirm` |
+| Form dropdown | `FormModalSelect` (`@/components/forms/form-modal-select`) or matching Radix Select styling |
+| Pending / success / error | `ActionStatusOverlay` (`@/components/action-status-overlay`) |
+| Form fields | `rph-input`, `FormModalField`, existing label / meta utilities |
+| Buttons | `rph-btn-*` and modal footer helpers from `@/components/forms/form-modal-actions` |
+| Cards / panels / pills / alerts | existing `rph-*` classes |
+| Responsive tables | `rph-table-responsive`, `data-label`, `responsiveTableCellProps` |
+
+### Rules
+
+- Copy the nearest comparable screen (interaction, spacing, typography, fields, buttons).
+- Extend a shared component for a small reusable variant; do not fork a second implementation.
+- Do not introduce a parallel styling system or ad-hoc Tailwind colour stacks (`dark:bg-zinc-*`, etc.) when a suitable `rph-*` token exists.
+- Preserve accessibility attributes and keyboard support.
+
+---
+
+## 5. Modal behaviour
+
+For modal forms:
+
+- Use `FormModalShell` where appropriate.
+- Backdrop clicks must not silently dismiss a form with unsaved data.
+- Provide visible Close / Cancel controls.
+- Show a discard confirmation when a dirty form is closed.
+- Cancel left; primary action right; reuse shared modal footer helpers.
+- Use the same loading / success / error overlays as nearby screens.
+- Avoid duplicate submissions; disable relevant actions while pending.
+- Keep validation messages close to the affected field.
+- Preserve form state when a recoverable server error occurs.
+
+---
+
+## 6. Multi-step modals and wizards
+
+Use the established stepped-modal pattern:
+
+| Piece | Pattern |
+| --- | --- |
+| Shell | `FormModalShell` |
+| Progress | `FormModalStepProgress` in `headerExtra` with a stable `STEP_LABELS` array |
+| Step index | **0-based** (`step - 1` if the wizard stores 1-based steps) |
+| Title | Stable action name (`New hire contract`, `Add vehicle`, `Register subcompany`) — not “Step X of Y” in the title |
+| Footer | Cancel left; Back / primary right via `@/components/forms/form-modal-actions` |
+| Fields | `rph-*`, `FormModalField`, UK helpers from `@/lib/datetime/uk` |
+| Browser drafts | `useFormModalDraft` + shell `onSaveProgress` / `onSaveAndClose` |
+| Server drafts | existing server draft pattern (`showDraftActions={false}` + footer “Save draft”); do not mix incompatible draft systems |
+| Large forms | `allowMaximize` + established `maxWidthClass` where needed |
+
+References: `add-vehicle-modal.tsx`, `register-subcompany-modal.tsx`, `hire-contract-wizard-modal.tsx`.
+
+Do not invent a new step indicator or footer layout.
+
+---
+
+## 7. Data and product integrity
+
+- Do not invent or silently reconstruct historical data that is not stored.
+- Do not present inferred data as confirmed data.
+- Keep source-of-truth fields separate from logs unless the feature explicitly updates both.
+- Do not silently overwrite legal company information, signed contract information, paid invoice history, or completed records.
+- Preserve historical versions where the domain requires versioning.
+- Use server-side calculations and existing money utilities for authoritative monetary values; use decimal-safe handling — do not rely on browser floating-point for authoritative totals.
+- Keep parent company, subcompany, user, driver, vehicle, contract, and invoice relationships explicit.
+- Do not treat a subcompany as the legal contracting parent unless the domain model explicitly defines it that way.
+
+---
+
+## 8. Database changes
+
+Before changing the database:
+
+1. Inspect the current schema.
+2. Inspect existing migrations.
+3. Inspect RLS policies.
+4. Inspect generated / handwritten database types.
+5. Inspect server queries and actions affected by the change.
+
+For schema changes:
+
+- Create a migration following repository naming conventions.
+- Create an idempotent `supabase/manual/ensure_*.sql` where repository practice requires it.
+- Update types; add indexes needed by real query patterns; preserve foreign-key integrity.
+- Avoid destructive changes without a migration path.
+- Provide sensible defaults only where valid.
+- Do not make tenant or ownership fields client-editable.
+- Update tests and fixtures affected by the schema.
+- Do not edit production data assumptions without explaining the migration impact.
+
+---
+
+## 9. Validation and error handling
+
+- Reuse the project’s existing schema-validation approach.
+- Validate client input again on the server.
+- Reject unknown or forbidden fields where practical.
+- Return user-readable errors without leaking internal stack traces or database details.
+- Preserve enough context for developers through safe server logging.
+- Do not log secrets, tokens, full identity-document numbers, document contents, or unnecessary personal information.
+- Handle expected conflicts and missing records explicitly.
+- Fail clearly rather than silently ignoring invalid state.
+
+---
+
+## 10. Testing
+
+Vitest lives in `apps/web` (`*.test.ts` colocated beside the module under `src/`).
+
+### Pure `src/lib` helpers
+
+For every **pure** exported function:
+
+- Add deterministic unit tests covering happy path, branches, boundaries, invalid input, and relevant date / money behaviour.
+- Pure = synchronous logic with no direct Supabase, Next.js runtime, network fetch, browser APIs, environment secrets, or external services.
+- Examples: dates, money, validation, mapping, identity helpers, permission helpers, pricing / billing schedule calculations.
+- Colocate as `foo.test.ts` beside `foo.ts`.
+- Use deterministic clocks (`vi.useFakeTimers()` when “today” matters).
+
+### Not forced into pure unit tests here
+
+React pages, server actions, Supabase queries, PDF generation, mail, environment-keyed encryption, external signature providers.
+
+Security-sensitive server actions, APIs, RLS, storage, payments, documents, invitations, contracts, and access-control flows may require integration tests under the **security** rule.
+
+### Commands (confirm in `package.json` before running)
+
+Root / workspace scripts that exist today:
+
+- `npm test` (root → `@rph/web`)
+- `npm run test --workspace=@rph/web`
+- `npm run test:coverage --workspace=@rph/web`
+- `npm run typecheck --workspace=@rph/web` (or root `npm run typecheck`)
+- `npm run lint --workspace=@rph/web` (or root `npm run lint`)
+- `npm run build --workspace=@rph/web` when practical
+
+Do not invent commands that do not exist.
+
+---
+
+## 11. Manual verification
+
+For UI or end-to-end wiring, provide a short manual checklist of **relevant** checks only, for example:
+
+- Permitted user can complete the flow; unauthorised paths fail safely (per security rule).
+- Validation, cancel / dirty-state, loading, and errors behave correctly.
+- Nearby flows remain unaffected; mobile / responsive layout remains usable.
+- UK date formatting; correct company / subcompany context retained.
+
+Do not introduce flaky browser E2E tests unless requested or already established in the repository.
+
+---
+
+## 12. Before implementing
+
+1. Inspect the relevant files.
+2. Find the closest existing implementation.
+3. Confirm database fields and types.
+4. Confirm existing components and helpers.
+5. Identify the smallest safe change.
+6. Identify required tests.
+7. Check whether the security rule and skill must also be invoked.
+8. Do not start by creating new abstractions.
+
+---
+
+## 13. After implementing
+
+1. Review the diff for unnecessary changes.
+2. Confirm repository patterns were followed.
+3. Run relevant tests, typecheck, and lint; run the build when practical.
+4. Remove unused imports, duplicate helpers, and dead code.
+5. Confirm UI uses shared components; UK dates and money are consistent.
+6. Confirm no invented fields, routes, or environment variables.
+7. Provide a concise summary of: files changed; behaviour added or changed; tests run; manual checks; remaining issues.
+
+Do not claim a change is complete if required tests or checks are failing.

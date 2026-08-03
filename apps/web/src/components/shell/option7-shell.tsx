@@ -23,12 +23,29 @@ export type DriverNavMode = "onboarding" | "full";
 
 type Crumb = { label: string; href?: string };
 
-function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
+function buildBreadcrumbs(
+  pathname: string,
+  variant: ShellVariant,
+  driverCurrentHireGroupId?: string | null,
+): Crumb[] {
   if (variant === "rental_company") {
     if (pathname === "/rental") {
       return [{ label: "Home", href: "/rental" }, { label: "Dashboard" }];
     }
     if (pathname === "/rental/subcompany" || pathname.startsWith("/rental/subcompany/")) {
+      const parts = pathname.split("/").filter(Boolean);
+      // /rental/subcompany/:id[/section]
+      if (parts.length >= 3) {
+        const subcompanyId = parts[2];
+        const base: Crumb[] = [
+          { label: "Home", href: "/rental" },
+          { label: "Subcompany", href: "/rental/subcompany" },
+          { label: "Workspace", href: `/rental/subcompany/${subcompanyId}` },
+        ];
+        if (!parts[3]) return [...base, { label: "Overview" }];
+        const section = parts[3];
+        return [...base, { label: section.charAt(0).toUpperCase() + section.slice(1) }];
+      }
       return [{ label: "Home", href: "/rental" }, { label: "Subcompany", href: "/rental/subcompany" }];
     }
     if (pathname === "/rental/hires" || pathname.startsWith("/rental/hires/")) {
@@ -190,6 +207,7 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
   }
   const driverHireWorkspaceMatch = pathname.match(/^\/driver\/hires\/([^/]+)(?:\/(.*))?$/);
   if (driverHireWorkspaceMatch) {
+    const groupId = driverHireWorkspaceMatch[1];
     const section = driverHireWorkspaceMatch[2]?.split("/")[0];
     const sectionLabels: Record<string, string> = {
       payments: "Payments",
@@ -198,9 +216,12 @@ function buildBreadcrumbs(pathname: string, variant: ShellVariant): Crumb[] {
       checkin: "Check-in",
       settlement: "Settlement",
     };
+    const isCurrent = Boolean(driverCurrentHireGroupId && groupId === driverCurrentHireGroupId);
     const crumbs: { label: string; href?: string }[] = [
       { label: "Home", href: "/driver" },
-      { label: "Hire history", href: "/driver/hire-history" },
+      isCurrent
+        ? { label: "My hire", href: `/driver/hires/${groupId}` }
+        : { label: "Hire history", href: "/driver/hire-history" },
     ];
     if (section && sectionLabels[section]) {
       crumbs.push({ label: sectionLabels[section] });
@@ -303,6 +324,7 @@ export function Option7Shell({
   driverLicenceBanner,
   driverPendingHireRequests = 0,
   driverHasCurrentHire = false,
+  driverCurrentHireGroupId = null,
   driverUnreadNotifications = 0,
   fleetTrackingEnabled = false,
   rentalUnreadNotifications = 0,
@@ -324,6 +346,8 @@ export function Option7Shell({
   driverPendingHireRequests?: number;
   /** Show My hire nav when the driver has a reserved or active hire. */
   driverHasCurrentHire?: boolean;
+  /** Current hire group id — My hire nav opens this workspace directly. */
+  driverCurrentHireGroupId?: string | null;
   /** Unread platform notifications for drivers. */
   driverUnreadNotifications?: number;
   /** Rental companies with Fleet Tracking (SmartCar Tracker) enabled by super-admin. */
@@ -361,7 +385,22 @@ export function Option7Shell({
 
   const closeMobileNav = useCallback(() => setMobileNavOpen(false), []);
 
-  const crumbs = useMemo(() => buildBreadcrumbs(pathname, variant), [pathname, variant]);
+  const crumbs = useMemo(
+    () => buildBreadcrumbs(pathname, variant, driverCurrentHireGroupId),
+    [pathname, variant, driverCurrentHireGroupId],
+  );
+
+  const myHireHref = driverCurrentHireGroupId
+    ? `/driver/hires/${driverCurrentHireGroupId}`
+    : "/driver/my-hire";
+  const myHireActive =
+    pathname === "/driver/my-hire" ||
+    pathname.startsWith("/driver/my-hire/") ||
+    Boolean(
+      driverCurrentHireGroupId &&
+        (pathname === `/driver/hires/${driverCurrentHireGroupId}` ||
+          pathname.startsWith(`/driver/hires/${driverCurrentHireGroupId}/`)),
+    );
 
   const nav =
     variant === "super_admin" ? (
@@ -506,11 +545,7 @@ export function Option7Shell({
           Hire requests
         </NavLink>
         {driverHasCurrentHire ? (
-          <NavLink
-            href="/driver/my-hire"
-            active={pathname === "/driver/my-hire" || pathname.startsWith("/driver/my-hire/")}
-            onNavigate={closeMobileNav}
-          >
+          <NavLink href={myHireHref} active={myHireActive} onNavigate={closeMobileNav}>
             My hire
           </NavLink>
         ) : null}
@@ -544,11 +579,7 @@ export function Option7Shell({
           Hire requests
         </NavLink>
         {driverHasCurrentHire ? (
-          <NavLink
-            href="/driver/my-hire"
-            active={pathname === "/driver/my-hire" || pathname.startsWith("/driver/my-hire/")}
-            onNavigate={closeMobileNav}
-          >
+          <NavLink href={myHireHref} active={myHireActive} onNavigate={closeMobileNav}>
             My hire
           </NavLink>
         ) : null}

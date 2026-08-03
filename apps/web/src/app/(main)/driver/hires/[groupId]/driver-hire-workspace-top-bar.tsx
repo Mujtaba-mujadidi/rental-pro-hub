@@ -20,7 +20,7 @@ export function DriverHireWorkspaceTopBar() {
 
   const backLink =
     shell.status === "reserved" || shell.status === "active"
-      ? { href: "/driver/my-hire", label: "My hire" }
+      ? { href: "/driver", label: "Home" }
       : { href: "/driver/hire-history", label: "Hire history" };
 
   return (

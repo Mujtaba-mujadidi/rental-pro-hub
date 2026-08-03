@@ -8,6 +8,7 @@ import {
   type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getRentalSubcompaniesPageAction } from "@/app/actions/rental-subcompanies-list";
 import type { RentalSubcompanyListRow } from "@/lib/rental/subcompany-list-shared";
@@ -150,8 +151,10 @@ export function RentalSubcompaniesTable({ listVersion = 0 }: { listVersion?: num
           const r = info.row.original;
           return (
             <div>
-              <div className="font-medium text-slate-900 dark:text-slate-100">
-                {r.name || "—"}{" "}
+              <div className="font-medium">
+                <Link href={`/rental/subcompany/${r.id}`} className="rph-link">
+                  {r.name || "—"}
+                </Link>{" "}
                 {r.isPrimary ? (
                   <span className="ml-1 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-900 dark:border-indigo-900/50 dark:bg-indigo-950/35 dark:text-indigo-100">
                     Main

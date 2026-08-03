@@ -8,7 +8,6 @@ import { HireOverviewPaymentSummary } from "@/components/fleet/hire-overview/hir
 import { HireOverviewSettlementNote } from "@/components/fleet/hire-overview/hire-overview-settlement-note";
 import { HireDashboardPaymentChart } from "@/components/fleet/hire-dashboard/hire-dashboard-payment-chart";
 import { HireDashboardAttentionList } from "@/components/fleet/hire-dashboard/hire-dashboard-attention-list";
-import { HireLifecycleAttentionList } from "@/components/fleet/hire-dashboard/hire-lifecycle-attention-list";
 import { HireDepositPendingBanner } from "@/components/fleet/hire-dashboard/hire-deposit-pending-banner";
 import type { ReactNode } from "react";
 
@@ -69,8 +68,6 @@ export function HireOverviewView({
       ) : null}
 
       <HireDashboardPaymentChart points={data.chartPoints} />
-
-      <HireLifecycleAttentionList items={data.lifecycleAttentionItems} />
 
       <HireDashboardAttentionList
         items={data.attentionItems}

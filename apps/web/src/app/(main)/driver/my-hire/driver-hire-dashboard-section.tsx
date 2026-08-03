@@ -4,19 +4,9 @@ import { loadDriverHireDashboardAction, type HireDashboardData } from "@/app/act
 import { HireOverviewView } from "@/components/fleet/hire-overview/hire-overview-view";
 import { driverHireWorkspaceHref } from "@/lib/fleet/driver-hire-workspace-nav";
 import { useHirePaymentsRealtime } from "@/hooks/use-hire-realtime";
-import Link from "next/link";
 import { useCallback, useEffect, useState, useTransition } from "react";
 
-export function DriverHireDashboardSection({
-  hireGroupId,
-  onOpenPayments,
-}: {
-  hireGroupId: string;
-  hireStatusLabel?: string;
-  startDateLabel?: string;
-  rentLabel?: string | null;
-  onOpenPayments?: () => void;
-}) {
+export function DriverHireDashboardSection({ hireGroupId }: { hireGroupId: string }) {
   const [pending, startTransition] = useTransition();
   const [data, setData] = useState<HireDashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -52,17 +42,6 @@ export function DriverHireDashboardSection({
       context={data.overview}
       audience="driver"
       paymentsHref={driverHireWorkspaceHref(hireGroupId, "payments")}
-      onOpenPayments={onOpenPayments}
-      headerActions={
-        <>
-          <Link href={driverHireWorkspaceHref(hireGroupId, "payments")} className="rph-btn-primary">
-            Payments
-          </Link>
-          <Link href={driverHireWorkspaceHref(hireGroupId, "details")} className="rph-btn-ghost">
-            Details
-          </Link>
-        </>
-      }
     />
   );
 }

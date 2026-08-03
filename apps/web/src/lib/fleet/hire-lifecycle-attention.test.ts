@@ -74,6 +74,15 @@ describe("hire-lifecycle-attention", () => {
     });
     expect(active.map((item) => item.kind)).toEqual(["awaiting_termination"]);
 
+    const activeDriver = buildHireLifecycleAttentionItems({
+      hireGroupId: "g1",
+      status: "active",
+      checkoutCompleted: true,
+      checkinCompleted: false,
+      audience: "driver",
+    });
+    expect(activeDriver.map((item) => item.kind)).toEqual([]);
+
     const activeMissingCheckout = buildHireLifecycleAttentionItems({
       hireGroupId: "g1",
       status: "active",
@@ -110,6 +119,9 @@ describe("hire-lifecycle-attention", () => {
       checkinCompleted: false,
       audience: "driver",
     });
+    expect(items).toHaveLength(1);
+    expect(items[0]?.kind).toBe("awaiting_checkin");
+    expect(items[0]?.title).toBe("Check-in is now available");
     expect(items[0]?.href).toBe("/driver/hires/g1/checkin");
   });
 });

@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
+import { canWriteSubcompany } from "@/lib/auth/rental-permissions";
+import { logSubcompanyEvent } from "@/lib/rental/subcompany-audit";
 
 export type RegisterSubcompanyResult = { ok: true; id: string } | { ok: false; error: string };
 
@@ -14,9 +16,12 @@ function nullIfEmpty(v: FormDataEntryValue | null): string | null {
 }
 
 export async function registerSubcompanyAction(formData: FormData): Promise<RegisterSubcompanyResult> {
-  const { profile } = await requireRentalCompanyArea();
+  const { profile, user } = await requireRentalCompanyArea();
   const frozen = await assertRentalCompanyWritable(profile);
   if (!frozen.ok) return { ok: false, error: frozen.error };
+  if (!canWriteSubcompany(profile)) {
+    return { ok: false, error: "You do not have permission to register subcompanies." };
+  }
   const parentCompanyId = profile.company_id?.trim();
   if (!parentCompanyId) return { ok: false, error: "Missing rental company context." };
 
@@ -85,6 +90,16 @@ export async function registerSubcompanyAction(formData: FormData): Promise<Regi
 
   if (error) return { ok: false, error: error.message };
   if (!data?.id) return { ok: false, error: "Could not create subcompany." };
+
+  await logSubcompanyEvent(admin, {
+    subcompanyId: data.id,
+    parentCompanyId,
+    eventType: "created",
+    summary: `Registered subcompany ${name}.`,
+    actorUserId: user.id,
+    actorRole: profile.membership_role ?? profile.company_role,
+    metadata: { name },
+  });
 
   revalidatePath("/rental/subcompany");
   return { ok: true, id: data.id };

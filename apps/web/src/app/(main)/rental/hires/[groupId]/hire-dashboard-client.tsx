@@ -72,12 +72,6 @@ export function HireDashboardClient() {
                 Vehicle check-in
               </Link>
             ) : null}
-            <Link href={`${base}/payments`} className="rph-btn-ghost">
-              Payments
-            </Link>
-            <Link href={`${base}/details`} className="rph-btn-ghost">
-              Details
-            </Link>
           </>
         }
       />

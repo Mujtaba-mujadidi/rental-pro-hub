@@ -1,0 +1,49 @@
+---
+description: Mandatory security, privacy, authorisation, tenant-isolation, driver-access, document-protection, and audit requirements for Rental Pro Hub.
+alwaysApply: true
+---
+
+# Rental Pro Hub security (always apply)
+
+Security is an **acceptance criterion** for every change. Do not ship insecure shortcuts.
+
+## Non-negotiables
+
+- All authorisation is enforced **server-side**. Frontend visibility (hidden buttons, disabled links) is **not** a security control.
+- Access is **denied by default**. Grant only after explicit checks succeed.
+- Every tenant-owned query is scoped to the **authorised parent company**.
+- Every driver-owned query is scoped to the **authorised driver** or an **active driver–company relationship**.
+- Resource IDs from the browser are **never** proof of access. Resolve identity, membership, role, and ownership from the **session and database**.
+- The Supabase **service-role key must never** be exposed to the browser. Service-role usage on the server must still pass application authorisation — it does not replace ownership / tenant / driver-approval checks.
+- Protected documents are **private by default** (private buckets; short-lived signed URLs only after authorisation).
+- Security-sensitive changes require **negative authorisation tests** (wrong tenant, wrong driver, wrong role, pending/revoked access, IDOR).
+- **Do not remove** security checks to make a feature work.
+- Any **unresolved security risk** must be reported clearly. Do not claim the app is fully secure or vulnerability-free.
+- Invoke the **`rms-secure-development`** skill whenever changing authentication, authorisation, users, companies, subcompanies, staff, drivers, driver access, vehicles, contracts, documents, invoices, payments, signatures, APIs, RLS, storage, webhooks, exports, or any personal/company data.
+
+## Core checks (combine as required)
+
+Protected operations need the appropriate combination of:
+
+1. Authenticated, active user (verified session — prefer claims verification, not `getSession()` alone as proof of identity on the server).
+2. Active parent-company membership (where applicable).
+3. Role / capability via `can()` from `@/lib/auth/rental-permissions` (not a DIY matrix).
+4. Authorised subcompany scope.
+5. Resource ownership / tenant scope (`parent_company_id` / equivalent).
+6. Active driver–company access where driver PII or identity documents are involved (`pending` ≠ access).
+7. Valid resource status and permitted action.
+
+Never trust client-supplied: user ID, role, company/subcompany IDs, driver ID, access status, document ID, invoice totals, payment status, or super-admin flags.
+
+## Session performance (not a bypass)
+
+- Authenticate once; persist secure cookie sessions; verify/refresh tokens as designed.
+- Reuse auth/permission context **within one request**; short-lived tenant-keyed caches only where appropriate.
+- Cache keys must include user + parent-company context; invalidate on membership, role, subcompany, driver-access, suspension, or session revoke.
+- A valid login **does not** grant every resource. High-risk actions (identity docs, exports, role changes, payments validation, legal/contract changes, super-admin) require a **current** server-side authorisation check — not a stale cache alone.
+
+## Pointers
+
+- Full workflow and references: skill `rms-secure-development` (`.cursor/skills/rms-secure-development/`).
+- Feature quality / UI conventions: `.cursor/rules/build.mdc` (invoke for builds; not a substitute for this rule).
+- Fixed staff roles: `.cursor/rules/fixed-rental-roles.mdc`.

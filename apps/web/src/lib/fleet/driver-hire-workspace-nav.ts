@@ -25,7 +25,8 @@ export function driverHireWorkspaceNav(groupId: string, status?: string): Driver
   if (status === "reserved" || status === "active" || status === "terminated" || status === "completed") {
     items.push({ href: `${base}/checkout`, label: "Checkout", match: "prefix" });
   }
-  if (status === "active" || status === "terminated" || status === "completed") {
+  // Check-in only after the contract has ended (not while on rent).
+  if (status === "terminated" || status === "completed") {
     items.push({ href: `${base}/checkin`, label: "Check-in", match: "prefix" });
   }
   if (status === "terminated" || status === "completed") {

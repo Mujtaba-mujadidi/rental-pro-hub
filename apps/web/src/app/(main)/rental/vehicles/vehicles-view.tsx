@@ -30,6 +30,9 @@ export function VehiclesView({
   canManage,
   canDelete: _canDelete,
   pnlByVehicle,
+  initialSubcompanyId = null,
+  /** When set (e.g. subcompany workspace), filter is locked and chrome stays in-workspace. */
+  lockedSubcompanyId = null,
 }: {
   vehicles: VehicleRow[];
   subcompanies: SubOpt[];
@@ -37,10 +40,19 @@ export function VehiclesView({
   canManage: boolean;
   canDelete: boolean;
   pnlByVehicle?: Map<string, FleetVehiclePnlSummary>;
+  initialSubcompanyId?: string | null;
+  lockedSubcompanyId?: string | null;
 }) {
   const router = useRouter();
+  const lockedId = lockedSubcompanyId?.trim() || null;
   const [filter, setFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [subcompanyFilter, setSubcompanyFilter] = useState<string>(
+    lockedId ?? initialSubcompanyId ?? "all",
+  );
+  const modalSubcompanies = lockedId
+    ? subcompanies.filter((s) => s.id === lockedId)
+    : subcompanies;
   const [createOpen, setCreateOpen] = useState(false);
   const [draftHint, setDraftHint] = useState<{ vrm: string; make: string; model: string; updatedAt: string } | null>(
     null,
@@ -70,6 +82,7 @@ export function VehiclesView({
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return vehicles.filter((v) => {
+      if (subcompanyFilter !== "all" && v.subcompany_id !== subcompanyFilter) return false;
       if (statusFilter !== "all" && v.status !== statusFilter) return false;
       if (!q) return true;
       return (
@@ -79,7 +92,12 @@ export function VehiclesView({
         (v.subcompany_name ?? "").toLowerCase().includes(q)
       );
     });
-  }, [vehicles, filter, statusFilter]);
+  }, [vehicles, filter, statusFilter, subcompanyFilter]);
+
+  const subcompanyFilterName =
+    subcompanyFilter === "all"
+      ? null
+      : subcompanies.find((s) => s.id === subcompanyFilter)?.name ?? "Subcompany";
 
   const fleetAttentionCount = useMemo(
     () => vehicles.filter((v) => vehicleExpiryAttentionItems(v, notifySettings).length > 0).length,
@@ -101,7 +119,7 @@ export function VehiclesView({
             </p>
           ) : null}
         </div>
-        {canManage && subcompanies.length > 0 ? (
+        {canManage && (lockedId ? modalSubcompanies.length > 0 : subcompanies.length > 0) ? (
           <button type="button" className={btnPrimary} onClick={() => setCreateOpen(true)}>
             Add vehicle
           </button>
@@ -174,6 +192,24 @@ export function VehiclesView({
         </div>
       ) : null}
 
+      {subcompanyFilterName && !lockedId ? (
+        <div className="rph-alert-ok flex flex-wrap items-center justify-between gap-2 text-sm">
+          <p>
+            Showing vehicles for <span className="font-semibold">{subcompanyFilterName}</span>
+          </p>
+          <button
+            type="button"
+            className="rph-btn-ghost h-8 px-3 text-xs"
+            onClick={() => {
+              setSubcompanyFilter("all");
+              router.replace("/rental/vehicles");
+            }}
+          >
+            Clear filter
+          </button>
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <input
           className="rph-input sm:max-w-xs"
@@ -193,6 +229,25 @@ export function VehiclesView({
             </option>
           ))}
         </select>
+        {!lockedId && subcompanies.length > 1 ? (
+          <select
+            className="rph-input sm:max-w-[14rem]"
+            value={subcompanyFilter}
+            onChange={(e) => {
+              const next = e.target.value;
+              setSubcompanyFilter(next);
+              router.replace(next === "all" ? "/rental/vehicles" : `/rental/vehicles?subcompanyId=${next}`);
+            }}
+          >
+            <option value="all">All subcompanies</option>
+            {subcompanies.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name ?? "—"}
+                {s.is_primary ? " (Main)" : ""}
+              </option>
+            ))}
+          </select>
+        ) : null}
       </div>
 
       {!vehicles.length ? (
@@ -327,7 +382,7 @@ export function VehiclesView({
         <AddVehicleModal
           open={createOpen}
           onOpenChange={setCreateOpen}
-          subcompanies={subcompanies}
+          subcompanies={modalSubcompanies.length ? modalSubcompanies : subcompanies}
           onCreated={(result) => {
             setDraftHint(null);
             if (result.failedDocUploadLabels.length) {

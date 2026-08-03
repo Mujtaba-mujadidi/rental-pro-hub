@@ -88,7 +88,8 @@ export function buildHireLifecycleAttentionItems(input: {
     });
   }
 
-  if (canTerminateHire(input.status)) {
+  // Staff-only reminder — drivers cannot end the contract themselves.
+  if (input.audience !== "driver" && canTerminateHire(input.status)) {
     items.push({
       kind: "awaiting_termination",
       title: "Hire is active",
@@ -100,8 +101,11 @@ export function buildHireLifecycleAttentionItems(input: {
   if (isCheckinDue(input)) {
     items.push({
       kind: "awaiting_checkin",
-      title: "Vehicle check-in required",
-      detail: "The contract has ended. Complete check-in when the vehicle is returned.",
+      title: input.audience === "driver" ? "Check-in is now available" : "Vehicle check-in required",
+      detail:
+        input.audience === "driver"
+          ? "Your contract has ended. Complete check-in when you return the vehicle."
+          : "The contract has ended. Complete check-in when the vehicle is returned.",
       href: `${base}/checkin`,
     });
   }

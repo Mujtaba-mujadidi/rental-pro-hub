@@ -48,6 +48,7 @@ import {
   vehicleIdsBlockedByInProgressHires,
 } from "@/lib/fleet/sync-vehicle-hire-status";
 import { mapHireInspectionCompletionByGroup } from "@/lib/fleet/hire-inspection-status";
+import { buildSubcompanyLegalSnapshot } from "@/lib/rental/subcompany-legal-snapshot";
 import {
   canStartCheckin,
   canStartCheckout,
@@ -96,6 +97,7 @@ export type HireContractTableRow = {
   can_checkout: boolean;
   can_terminate: boolean;
   can_checkin: boolean;
+  subcompany_id: string | null;
 };
 
 export type HireDraftPayload = {
@@ -189,7 +191,7 @@ export async function listHireContractsAction(
   let groupsQuery = supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, vehicle_id, status, wizard_step, driver_access_status, start_date, start_time, end_time, activated_at, rent_amount_gbp, rent_cadence, driver_licence_number, driver_email, updated_at, signing_bundle_sent_at, terminated_at, vehicles(vrm, make, model)",
+      "id, vehicle_id, subcompany_id, status, wizard_step, driver_access_status, start_date, start_time, end_time, activated_at, rent_amount_gbp, rent_cadence, driver_licence_number, driver_email, updated_at, signing_bundle_sent_at, terminated_at, vehicles(vrm, make, model)",
     )
     .eq("parent_company_id", companyId)
     .neq("status", "cancelled");
@@ -361,6 +363,7 @@ export async function listHireContractsAction(
         checkoutCompleted: inspection.checkoutCompleted,
         checkinCompleted: inspection.checkinCompleted,
       }),
+      subcompany_id: (g.subcompany_id as string | null) ?? null,
     });
   }
 
@@ -1266,25 +1269,13 @@ export async function finalizeHireContractsAction(
 
   const { data: sub } = await supabase
     .from("subcompanies")
-    .select("legal_name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode")
+    .select(
+      "name, display_name, legal_name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode, country, primary_contact_first_name, primary_contact_last_name, primary_contact_phone, primary_contact_email, logo_storage_path",
+    )
     .eq("id", group.subcompany_id)
     .maybeSingle();
 
-  const legalSnapshot = sub
-    ? {
-        legal_name: sub.legal_name,
-        company_number: sub.company_number,
-        address: [
-          sub.registered_address_line1,
-          sub.registered_address_line2,
-          sub.registered_town,
-          sub.registered_county,
-          sub.registered_postcode,
-        ]
-          .filter(Boolean)
-          .join(", "),
-      }
-    : {};
+  const legalSnapshot = sub ? buildSubcompanyLegalSnapshot(sub) : {};
 
   const { data: perm } = await supabase
     .from("company_hire_permission_letter_versions")

@@ -23,7 +23,6 @@ export function hireWorkspaceNav(groupId: string, status?: string): HireWorkspac
     { href: base, label: "Overview", match: "exact" },
     { href: `${base}/payments`, label: paymentsLabel, match: "prefix" },
     { href: `${base}/details`, label: "Details", match: "prefix" },
-    { href: `${base}/documents`, label: "Documents", match: "prefix" },
     { href: `${base}/activity`, label: "Activity", match: "prefix" },
   ];
 

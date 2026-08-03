@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { driverCanAccessVehicleDocuments, shouldHideHireRequestFromInbox } from "@/lib/fleet/driver-hire-nav";
+import {
+  driverCanAccessVehicleDocuments,
+  resolveDriverMyHireRedirectPath,
+  shouldHideHireRequestFromInbox,
+} from "@/lib/fleet/driver-hire-nav";
+import { driverHireWorkspaceNav } from "@/lib/fleet/driver-hire-workspace-nav";
 
 describe("shouldHideHireRequestFromInbox", () => {
   it("hides fully signed requests regardless of hire status", () => {
@@ -51,5 +56,31 @@ describe("driverCanAccessVehicleDocuments", () => {
     expect(driverCanAccessVehicleDocuments("active")).toBe(false);
     expect(driverCanAccessVehicleDocuments("terminated")).toBe(false);
     expect(driverCanAccessVehicleDocuments("completed")).toBe(false);
+  });
+});
+
+describe("resolveDriverMyHireRedirectPath", () => {
+  it("opens the hire workspace overview by default", () => {
+    expect(resolveDriverMyHireRedirectPath("g1", null)).toBe("/driver/hires/g1");
+    expect(resolveDriverMyHireRedirectPath("g1", "overview")).toBe("/driver/hires/g1");
+  });
+
+  it("maps legacy tab query params to workspace sections", () => {
+    expect(resolveDriverMyHireRedirectPath("g1", "payments")).toBe("/driver/hires/g1/payments");
+    expect(resolveDriverMyHireRedirectPath("g1", "details")).toBe("/driver/hires/g1/details");
+  });
+});
+
+describe("driverHireWorkspaceNav", () => {
+  it("shows checkout but not check-in while hire is active", () => {
+    const labels = driverHireWorkspaceNav("g1", "active").map((item) => item.label);
+    expect(labels).toContain("Checkout");
+    expect(labels).not.toContain("Check-in");
+  });
+
+  it("shows check-in only after the contract has ended", () => {
+    expect(driverHireWorkspaceNav("g1", "terminated").map((item) => item.label)).toContain("Check-in");
+    expect(driverHireWorkspaceNav("g1", "completed").map((item) => item.label)).toContain("Check-in");
+    expect(driverHireWorkspaceNav("g1", "reserved").map((item) => item.label)).not.toContain("Check-in");
   });
 });

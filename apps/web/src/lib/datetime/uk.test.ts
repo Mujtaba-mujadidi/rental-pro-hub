@@ -40,10 +40,9 @@ describe("formatUkDateTime", () => {
     expect(formatUkDateTime(null)).toBe("—");
   });
 
-  it("formats an ISO instant with 24h time", () => {
-    const out = formatUkDateTime("2026-07-17T20:16:00.000Z");
-    expect(out).toMatch(/17 Jul 2026/);
-    expect(out).toMatch(/\d{2}:\d{2}/);
+  it("formats an ISO instant in Europe/London with 24h time", () => {
+    // 20:16 UTC in July = 21:16 BST
+    expect(formatUkDateTime("2026-07-17T20:16:00.000Z")).toBe("17 Jul 2026, 21:16");
   });
 });
 
@@ -52,9 +51,8 @@ describe("formatUkDateTimeSeconds", () => {
     expect(formatUkDateTimeSeconds(null)).toBe("—");
   });
 
-  it("includes seconds", () => {
-    const out = formatUkDateTimeSeconds("2026-07-17T20:16:42.000Z");
-    expect(out).toMatch(/42/);
+  it("includes seconds in Europe/London", () => {
+    expect(formatUkDateTimeSeconds("2026-07-17T20:16:42.000Z")).toBe("17/07/2026, 21:16:42");
   });
 });
 

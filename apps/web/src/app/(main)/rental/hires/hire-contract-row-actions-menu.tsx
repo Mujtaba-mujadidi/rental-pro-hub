@@ -111,7 +111,7 @@ export function HireContractRowActionsMenu({
 
           {showViewSignedDocuments ? (
             <DropdownMenu.Item className={itemClass} asChild>
-              <Link href={`/rental/hires/${row.id}/documents`}>
+              <Link href={`/rental/hires/${row.id}/details`}>
                 View signed document{row.signed_agreement_count === 1 ? "" : "s"}
                 {row.agreement_count > 1 ? ` (${row.signed_agreement_count}/${row.agreement_count})` : ""}
               </Link>
