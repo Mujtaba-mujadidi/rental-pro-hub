@@ -28,14 +28,28 @@ export async function assertRentalCompanyWritable(
   if (!companyId) {
     return { ok: false, error: "No active company in your profile." };
   }
+  if (!profile.membership_role) {
+    return { ok: false, error: "No active company membership." };
+  }
 
   const supabase = await createClient();
-  const { data: row, error } = await supabase
-    .from("companies")
-    .select("deletion_phase")
-    .eq("id", companyId)
-    .maybeSingle();
+  const [{ data: membership, error: mErr }, { data: row, error }] = await Promise.all([
+    supabase
+      .from("user_company_memberships")
+      .select("id")
+      .eq("user_id", profile.id)
+      .eq("parent_company_id", companyId)
+      .eq("status", "active")
+      .maybeSingle(),
+    supabase.from("companies").select("deletion_phase").eq("id", companyId).maybeSingle(),
+  ]);
 
+  if (mErr) {
+    return { ok: false, error: mErr.message };
+  }
+  if (!membership?.id) {
+    return { ok: false, error: "No active company membership." };
+  }
   if (error) {
     return { ok: false, error: error.message };
   }

@@ -13,6 +13,7 @@ import {
   HireDetailsDocActionsMenu,
   hireDetailsDocumentFileName,
 } from "@/components/fleet/hire-details/hire-details-doc-actions";
+import { getDriverHireVehicleDocumentUrlAction } from "@/app/actions/hire-details";
 import { useState } from "react";
 
 const cardClass = "rph-card flex h-full flex-col p-3";
@@ -61,10 +62,12 @@ function DocumentsList({
   documents,
   onError,
   inaccessibleMessage,
+  resolveDocumentUrl,
 }: {
   documents: HireDetailsDocumentItem[];
   onError?: (message: string) => void;
   inaccessibleMessage?: string | null;
+  resolveDocumentUrl?: (documentId: string) => Promise<string>;
 }) {
   if (inaccessibleMessage) {
     return (
@@ -114,6 +117,11 @@ function DocumentsList({
               {doc.status === "on_file" ? (
                 <HireDetailsDocActionsMenu
                   viewUrl={doc.viewUrl}
+                  resolveUrl={
+                    resolveDocumentUrl
+                      ? async () => resolveDocumentUrl(doc.id)
+                      : undefined
+                  }
                   fileName={hireDetailsDocumentFileName(doc.label, doc.fileName)}
                   onError={onError}
                 />
@@ -214,6 +222,7 @@ function VehicleDetailsCard({
   vehicleDocumentsAccessible = true,
   showDocuments = true,
   onError,
+  resolveDocumentUrl,
 }: {
   vehicle: HireDetailsVehicleCard;
   dates: HireDetailsImportantDateRow[];
@@ -221,6 +230,7 @@ function VehicleDetailsCard({
   vehicleDocumentsAccessible?: boolean;
   showDocuments?: boolean;
   onError?: (message: string) => void;
+  resolveDocumentUrl?: (documentId: string) => Promise<string>;
 }) {
   return (
     <section className={cardClass}>
@@ -246,6 +256,7 @@ function VehicleDetailsCard({
           <DocumentsList
             documents={documents}
             onError={onError}
+            resolveDocumentUrl={resolveDocumentUrl}
             inaccessibleMessage={
               vehicleDocumentsAccessible
                 ? null
@@ -345,6 +356,12 @@ function StaffDetailsLayout({ data }: { data: HireDetailsPayload }) {
 function DriverDetailsLayout({ data }: { data: HireDetailsPayload }) {
   const [error, setError] = useState<string | null>(null);
 
+  async function resolveVehicleDocumentUrl(documentId: string): Promise<string> {
+    const res = await getDriverHireVehicleDocumentUrlAction(data.hireGroupId, documentId);
+    if (!res.ok) throw new Error(res.error);
+    return res.url;
+  }
+
   return (
     <div className="space-y-3">
       {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
@@ -355,7 +372,10 @@ function DriverDetailsLayout({ data }: { data: HireDetailsPayload }) {
           dates={data.importantDates.vehicle}
           documents={data.vehicleDocuments}
           vehicleDocumentsAccessible={data.vehicleDocumentsAccessible}
-          showDocuments={false}
+          showDocuments
+          resolveDocumentUrl={
+            data.vehicleDocumentsAccessible ? resolveVehicleDocumentUrl : undefined
+          }
           onError={setError}
         />
       </div>

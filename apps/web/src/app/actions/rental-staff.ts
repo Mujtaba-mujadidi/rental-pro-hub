@@ -181,9 +181,12 @@ export async function updateMembershipRoleAction(
 
   const isSelf = row.user_id === profile.id;
   const canAssignOwner =
-    profile.membership_role === "owner" || (isSelf && nextRole === "owner");
+    profile.membership_role === "owner";
   if (nextRole === "owner" && !canAssignOwner) {
-    return { ok: false, error: "Only an owner can assign the owner role to someone else. You can restore your own account to owner if needed." };
+    return { ok: false, error: "Only an owner can assign the owner role." };
+  }
+  if (isSelf && nextRole === "owner" && profile.membership_role !== "owner") {
+    return { ok: false, error: "You cannot promote yourself to owner." };
   }
   if (row.role === "owner" && profile.membership_role !== "owner" && !isSelf) {
     return { ok: false, error: "You cannot change another owner’s role." };

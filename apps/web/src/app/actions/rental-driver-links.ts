@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
 import { canReadRentals, canWriteRentals } from "@/lib/auth/rental-permissions";
+import { loadDriverLabelsMap } from "@/lib/fleet/driver-labels";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type Admin = ReturnType<typeof createSupabaseAdminClient>;
@@ -22,7 +23,6 @@ export type DriverAccessRequestRow = {
   status: string;
   created_at: string;
   driver_label: string;
-  driver_email: string | null;
 };
 
 function driverLabel(row: {
@@ -32,32 +32,6 @@ function driverLabel(row: {
 }): string {
   const name = [row.first_name, row.last_name].filter(Boolean).join(" ").trim();
   return name || row.account_email || "Driver";
-}
-
-export async function loadDriverLabelsMap(userIds: string[]): Promise<Map<string, string>> {
-  const ids = [...new Set(userIds.map((id) => id.trim()).filter(Boolean))];
-  if (!ids.length) return new Map();
-
-  let admin: Admin;
-  try {
-    admin = createSupabaseAdminClient();
-  } catch {
-    return new Map();
-  }
-
-  const { data } = await admin
-    .from("driver_profiles")
-    .select("user_id, first_name, last_name, account_email")
-    .in("user_id", ids);
-
-  const map = new Map<string, string>();
-  for (const d of data ?? []) {
-    map.set(d.user_id as string, driverLabel(d));
-  }
-  for (const id of ids) {
-    if (!map.has(id)) map.set(id, "Driver");
-  }
-  return map;
 }
 
 export async function searchLinkedDriversAction(
@@ -114,6 +88,7 @@ export async function searchLinkedDriversAction(
   };
 }
 
+/** Pending requests for the tenant — labels only; no emails until the driver has approved access. */
 export async function listDriverAccessRequestsAction(): Promise<
   { ok: true; rows: DriverAccessRequestRow[]; canManage: boolean } | { ok: false; error: string }
 > {
@@ -139,12 +114,7 @@ export async function listDriverAccessRequestsAction(): Promise<
   if (error) return { ok: false, error: error.message };
 
   const driverIds = (requests ?? []).map((r) => r.driver_user_id as string);
-  const labels = await loadDriverLabelsMap(driverIds);
-  const { data: profiles } = driverIds.length
-    ? await admin.from("driver_profiles").select("user_id, account_email").in("user_id", driverIds)
-    : { data: [] };
-
-  const emailByUser = new Map((profiles ?? []).map((p) => [p.user_id as string, p.account_email as string | null]));
+  const labels = await loadDriverLabelsMap(admin, driverIds);
 
   return {
     ok: true,
@@ -156,15 +126,25 @@ export async function listDriverAccessRequestsAction(): Promise<
       status: r.status as string,
       created_at: r.created_at as string,
       driver_label: labels.get(r.driver_user_id as string) ?? "Driver",
-      driver_email: emailByUser.get(r.driver_user_id as string) ?? null,
     })),
   };
 }
 
+/**
+ * Company staff may cancel a pending request. Drivers alone approve via
+ * `respondToHireAccessRequestAction` / hire-access token flow.
+ */
 export async function resolveDriverAccessRequestAction(input: {
   requestId: string;
   approve: boolean;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (input.approve) {
+    return {
+      ok: false,
+      error: "Only the driver can approve access to their profile and documents.",
+    };
+  }
+
   const { profile, user } = await requireRentalCompanyArea();
   const writable = await assertRentalCompanyWritable(profile);
   if (!writable.ok) return writable;
@@ -190,26 +170,12 @@ export async function resolveDriverAccessRequestAction(input: {
   const { error: upErr } = await admin
     .from("company_driver_access_requests")
     .update({
-      status: input.approve ? "approved" : "rejected",
+      status: "rejected",
       resolved_at: now,
       resolved_by_user_id: user.id,
     })
     .eq("id", input.requestId);
   if (upErr) return { ok: false, error: upErr.message };
-
-  if (input.approve) {
-    const { error: linkErr } = await admin.from("company_driver_links").upsert(
-      {
-        parent_company_id: req.parent_company_id,
-        driver_user_id: req.driver_user_id,
-        status: "active",
-        linked_at: now,
-        linked_by_user_id: user.id,
-      },
-      { onConflict: "parent_company_id,driver_user_id" },
-    );
-    if (linkErr) return { ok: false, error: linkErr.message };
-  }
 
   revalidatePath("/rental/hires");
   revalidatePath("/rental/settings");

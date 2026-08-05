@@ -51,11 +51,13 @@ describe("shouldHideHireRequestFromInbox", () => {
 });
 
 describe("driverCanAccessVehicleDocuments", () => {
-  it("never allows vehicle compliance documents for drivers", () => {
+  it("allows vehicle compliance documents only while the hire is active", () => {
+    expect(driverCanAccessVehicleDocuments("active")).toBe(true);
     expect(driverCanAccessVehicleDocuments("reserved")).toBe(false);
-    expect(driverCanAccessVehicleDocuments("active")).toBe(false);
     expect(driverCanAccessVehicleDocuments("terminated")).toBe(false);
     expect(driverCanAccessVehicleDocuments("completed")).toBe(false);
+    expect(driverCanAccessVehicleDocuments("cancelled")).toBe(false);
+    expect(driverCanAccessVehicleDocuments("draft")).toBe(false);
   });
 });
 

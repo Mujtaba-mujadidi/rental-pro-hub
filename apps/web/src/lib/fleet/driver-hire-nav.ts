@@ -39,9 +39,9 @@ export function isDriverHireHistoryStatus(status: string): status is DriverHireH
   return (DRIVER_HIRE_HISTORY_STATUSES as readonly string[]).includes(status);
 }
 
-/** Vehicle compliance documents (MOT, logbook, PHV) are staff-only — never shown to drivers. */
-export function driverCanAccessVehicleDocuments(_hireStatus: string): boolean {
-  return false;
+/** Vehicle compliance documents (MOT, logbook, PHV): drivers may view only while the hire is on rent. */
+export function driverCanAccessVehicleDocuments(hireStatus: string): boolean {
+  return hireStatus === "active";
 }
 
 const DRIVER_HIRE_STATUS_LABELS: Record<string, string> = {

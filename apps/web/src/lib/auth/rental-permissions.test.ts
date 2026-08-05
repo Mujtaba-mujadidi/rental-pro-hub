@@ -12,6 +12,8 @@ import {
   canWriteSubcompany,
   canSubmitBillingPayment,
   canReadMaintenance,
+  canReadDriverIdentity,
+  canReadRentals,
 } from "@/lib/auth/rental-permissions";
 import type { AppProfile } from "@/lib/auth/profile";
 
@@ -61,14 +63,23 @@ describe("can()", () => {
     expect(can(p, "maintenance.read")).toBe(true);
     expect(can(p, "maintenance.write")).toBe(false);
     expect(can(p, "fleet.write")).toBe(false);
+    expect(can(p, "driver.identity.read")).toBe(false);
   });
 
-  it("viewer can only read maintenance", () => {
+  it("viewer can only read maintenance and rentals", () => {
     const p = profile("viewer");
     expect(can(p, "maintenance.read")).toBe(true);
+    expect(can(p, "rentals.read")).toBe(true);
     expect(can(p, "maintenance.write")).toBe(false);
     expect(can(p, "fleet.write")).toBe(false);
     expect(can(p, "billing.pay")).toBe(false);
+    expect(can(p, "driver.identity.read")).toBe(false);
+  });
+
+  it("operations can read driver identity; finance and viewer cannot", () => {
+    expect(can(profile("operations"), "driver.identity.read")).toBe(true);
+    expect(can(profile("owner"), "driver.identity.read")).toBe(true);
+    expect(can(profile("finance"), "driver.identity.read")).toBe(false);
   });
 });
 
@@ -91,5 +102,8 @@ describe("named wrappers", () => {
     expect(canWriteMaintenance(ops)).toBe(true);
     expect(canSubmitBillingPayment(finance)).toBe(true);
     expect(canReadMaintenance(viewer)).toBe(true);
+    expect(canReadRentals(viewer)).toBe(true);
+    expect(canReadDriverIdentity(ops)).toBe(true);
+    expect(canReadDriverIdentity(finance)).toBe(false);
   });
 });

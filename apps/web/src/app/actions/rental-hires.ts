@@ -31,8 +31,8 @@ import {
 } from "@/lib/fleet/hire-types";
 import {
   assertDriverLinkedToCompany,
-  loadDriverLabelsMap,
 } from "@/app/actions/rental-driver-links";
+import { loadDriverLabelsMap } from "@/lib/fleet/driver-labels";
 import { buildSubcompanyLegalSnapshot } from "@/lib/rental/subcompany-legal-snapshot";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -118,7 +118,12 @@ export async function loadVehicleRentalsAction(
 
   const summaries: HireGroupSummary[] = [];
   const driverIds = (groups ?? []).map((g) => g.driver_user_id as string);
-  const driverLabels = await loadDriverLabelsMap(driverIds);
+  let driverLabels = new Map<string, string>();
+  try {
+    driverLabels = await loadDriverLabelsMap(createSupabaseAdminClient(), driverIds);
+  } catch {
+    /* labels optional when admin client unavailable */
+  }
 
   for (const g of groups ?? []) {
     const agreements = ((g as { vehicle_hire_agreements?: HireAgreementSummary[] }).vehicle_hire_agreements ??
@@ -306,7 +311,15 @@ export async function loadFleetHiresAction(): Promise<
       ? company.notify_contract_expiry_days_before
       : 28;
   const today = new Date().toISOString().slice(0, 10);
-  const driverLabels = await loadDriverLabelsMap((groups ?? []).map((g) => g.driver_user_id as string));
+  let driverLabels = new Map<string, string>();
+  try {
+    driverLabels = await loadDriverLabelsMap(
+      createSupabaseAdminClient(),
+      (groups ?? []).map((g) => g.driver_user_id as string),
+    );
+  } catch {
+    /* labels optional when admin client unavailable */
+  }
 
   const rows: FleetHireRow[] = (groups ?? []).map((g) => {
     const vehicle = (g as { vehicles?: { vrm?: string; make?: string; model?: string } }).vehicles ?? {};

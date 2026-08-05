@@ -56,7 +56,7 @@ async function fetchSubcompanyWorkspaceShell(
       .eq("id", id)
       .eq("parent_company_id", parentCompanyId)
       .maybeSingle();
-    data = fallback.data;
+    data = fallback.data as typeof data;
     error = fallback.error;
   }
 
@@ -84,6 +84,7 @@ async function fetchSubcompanyWorkspaceShell(
       logoSignedUrl = await createSubcompanyLogoSignedUrl(
         createSupabaseAdminClient(),
         subcompany.logo_storage_path,
+        { parentCompanyId, subcompanyId: id },
       );
     } catch {
       logoSignedUrl = null;

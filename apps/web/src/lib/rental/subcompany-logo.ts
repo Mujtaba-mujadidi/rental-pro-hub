@@ -12,6 +12,20 @@ export const SUBCOMPANY_LOGOS_BUCKET = "subcompany-logos";
 export { COMPANY_LOGO_STORE_MAX_HEIGHT as SUBCOMPANY_LOGO_STORE_MAX_HEIGHT };
 export { COMPANY_LOGO_STORE_MAX_WIDTH as SUBCOMPANY_LOGO_STORE_MAX_WIDTH };
 
+/** True when the storage path is under `{parentCompanyId}/{subcompanyId}/` with no path traversal. */
+export function isSubcompanyLogoPathOwned(
+  path: string,
+  parentCompanyId: string,
+  subcompanyId: string,
+): boolean {
+  const trimmed = path.trim();
+  const parent = parentCompanyId.trim();
+  const sub = subcompanyId.trim();
+  if (!trimmed || !parent || !sub) return false;
+  if (trimmed.includes("..")) return false;
+  return trimmed.startsWith(`${parent}/${sub}/`);
+}
+
 export async function processSubcompanyLogoForStorage(
   input: Buffer,
   mime: string,
@@ -56,13 +70,21 @@ export async function loadSubcompanyLogoForContractPdf(
 export async function createSubcompanyLogoSignedUrl(
   admin: Admin,
   logoStoragePath: string | null | undefined,
-  expiresInSeconds = 3600,
+  opts: {
+    parentCompanyId: string;
+    subcompanyId: string;
+    expiresInSeconds?: number;
+  },
 ): Promise<string | null> {
   const path = logoStoragePath?.trim();
   if (!path) return null;
+  if (!isSubcompanyLogoPathOwned(path, opts.parentCompanyId, opts.subcompanyId)) {
+    console.warn("[subcompany-logo] refusing signed URL for path outside tenant folder", path);
+    return null;
+  }
   const { data, error } = await admin.storage
     .from(SUBCOMPANY_LOGOS_BUCKET)
-    .createSignedUrl(path, expiresInSeconds);
+    .createSignedUrl(path, opts.expiresInSeconds ?? 3600);
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
 }

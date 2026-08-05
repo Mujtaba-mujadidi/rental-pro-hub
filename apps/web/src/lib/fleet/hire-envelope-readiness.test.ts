@@ -35,7 +35,7 @@ describe("deriveHireEnvelopePreparationStatus", () => {
       status: "awaiting_placement",
       requiresOwner: true,
       ownerSignedAt: "2026-01-01T10:00:00Z",
-      fieldLayout: [{ id: "f1", type: "signature", page: 1, x: 0, y: 0, width: 1, height: 1, role: "owner" }],
+      fieldLayout: [{ id: "f1", type: "signature", page: 1, x: 0, y: 0, w: 1, h: 1, role: "owner" }],
       signed: false,
     });
     expect(status).toBe("lessor_signed");
@@ -48,7 +48,7 @@ describe("deriveHireEnvelopePreparationStatus", () => {
       status: "awaiting_placement",
       requiresOwner: true,
       ownerSignedAt: null,
-      fieldLayout: [{ id: "f1", type: "signature", page: 1, x: 0, y: 0, width: 1, height: 1, role: "owner" }],
+      fieldLayout: [{ id: "f1", type: "signature", page: 1, x: 0, y: 0, w: 1, h: 1, role: "owner" }],
       signed: false,
     });
     expect(status).toBe("awaiting_lessor");

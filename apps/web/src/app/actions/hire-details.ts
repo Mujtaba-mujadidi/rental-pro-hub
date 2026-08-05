@@ -178,12 +178,12 @@ async function loadVehicleDocumentsForDriver(
   const rows: HireDetailsDocumentItem[] = [];
   for (const docType of REQUIRED_VEHICLE_DOC_TYPES) {
     const onFile = byType.get(docType);
-    const viewUrl = onFile?.file_path ? await signVehicleDocUrlAdmin(admin, onFile.file_path) : null;
     rows.push({
       id: onFile?.id ?? docType,
       label: VEHICLE_DOC_TYPE_LABELS[docType as RequiredVehicleDocType],
       status: onFile ? "on_file" : "missing",
-      viewUrl,
+      // Signed URLs are issued on demand after a fresh status check.
+      viewUrl: null,
       fileName: onFile?.file_name ?? null,
     });
   }
@@ -673,6 +673,54 @@ export async function getHireVehicleDocumentUrlAction(
   if (!doc || doc.vehicle_id !== group.vehicle_id) return { ok: false, error: "Document not found." };
 
   const url = await signVehicleDocUrl(supabase, doc.file_path as string);
+  if (!url) return { ok: false, error: "Could not open document." };
+  return { ok: true, url };
+}
+
+/**
+ * Driver open/download for vehicle compliance docs. Re-checks hire ownership and
+ * that the hire is still `active` before issuing a short-lived signed URL.
+ */
+export async function getDriverHireVehicleDocumentUrlAction(
+  hireGroupId: string,
+  documentId: string,
+): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const user = await getSessionUser();
+  if (!user) return { ok: false, error: "Sign in required." };
+
+  const id = hireGroupId.trim();
+  const docId = documentId.trim();
+  if (!id || !docId) return { ok: false, error: "Document not found." };
+
+  let admin: ReturnType<typeof createSupabaseAdminClient>;
+  try {
+    admin = createSupabaseAdminClient();
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Server error." };
+  }
+
+  const { data: group } = await admin
+    .from("vehicle_hire_groups")
+    .select("id, status, vehicle_id, driver_user_id")
+    .eq("id", id)
+    .eq("driver_user_id", user.id)
+    .maybeSingle();
+  if (!group?.vehicle_id) return { ok: false, error: "Hire not found." };
+  if (!driverCanAccessVehicleDocuments(String(group.status ?? ""))) {
+    return {
+      ok: false,
+      error: "Vehicle documents are only available while your hire is active.",
+    };
+  }
+
+  const { data: doc } = await admin
+    .from("vehicle_documents")
+    .select("id, file_path, vehicle_id")
+    .eq("id", docId)
+    .maybeSingle();
+  if (!doc || doc.vehicle_id !== group.vehicle_id) return { ok: false, error: "Document not found." };
+
+  const url = await signVehicleDocUrlAdmin(admin, doc.file_path as string);
   if (!url) return { ok: false, error: "Could not open document." };
   return { ok: true, url };
 }

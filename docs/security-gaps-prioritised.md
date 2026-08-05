@@ -1,16 +1,30 @@
 # Prioritised security gaps (vs documented model)
 
-Snapshot after introducing `.cursor/rules/rms-security.mdc` and `rms-secure-development`. Not a claim of a full audit.
+Updated after `fix/security-hardening` remediations (2026-08-03). Not a claim of a full audit or that the application is vulnerability-free.
 
-| Priority | Gap | Evidence (approx.) | Recommended next action |
+| Priority | Gap | Status | Notes |
 | --- | --- | --- | --- |
-| P0 | Pre-approval global driver licence scan via service role | Hire wizard loads many `driver_profiles` to match licence | Replace with constrained lookup (hash/index) that does not dump PII; never scan all drivers |
-| P0 | Company staff can approve driver access requests | `resolveDriverAccessRequestAction` in `rental-driver-links.ts` | Enforce driver-only approval for profile access (or product-documented exception with audit) |
-| P1 | Driver PII/docs gated only in app (service role), not RLS for company reads | Pattern across hire/driver preview actions | Shared authz helper + negative tests; longer-term RLS or SECURITY DEFINER accessors with checks |
-| P1 | `assertSubcompanyInTenant` ≠ explicit subcompany scope | Vehicle/fleet helpers | Re-check `user_subcompany_permissions` on every admin path |
-| P2 | Vehicle-documents storage select broader than table RLS | Membership on parent folder | Tighten storage policies to subcompany where required |
-| P2 | Sparse automated negative authz tests for access/docs | Vitest coverage | Add cases from `security-test-cases.md` for hire access + document download |
-| P3 | Super-admin env email + profile role dual paths | `roles.ts` / policies | Document and harden single source of truth + MFA ops process |
-| P3 | No malware quarantine pipeline | Document security ref | Track residual risk; harden allow-lists |
+| P0 | Self-assign `profiles.role = super_admin` | **Mitigated** | Trigger + tightened insert policy; privileged profile writes require service role |
+| P0 | Unauthenticated `loadDriverLabelsMap` server action | **Mitigated** | Moved to internal `@/lib/fleet/driver-labels` (not a server action) |
+| P0 | Global driver licence PII scan | **Mitigated** | Normalised column + exact `.eq` lookup; apply migration `20260803120000_security_privileged_columns.sql` |
+| P0 | Staff can approve driver access | **Mitigated** | `resolveDriverAccessRequestAction` rejects approve; driver-only paths remain |
+| P0 | Broad membership/`companies` JWT updates | **Mitigated** | Triggers block identity / lifecycle / legal hijacks under JWT |
+| P0 | Stale membership → admin-ish fallback | **Mitigated** | No active membership clears tenant context; `requireRentalCompanyArea` / writable guard require membership |
+| P0 | E-sign OTP/links logged when mail unset | **Mitigated** | Mail refuses send without logging body |
+| P1 | Finance/viewer identity docs | **Mitigated** | `driver.identity.read` for owner/admin/operations only |
+| P1 | Pending request emails | **Mitigated** | List returns labels only |
+| P1 | Logo signed URL path trust | **Mitigated** | Path must be `{parent}/{sub}/…` |
+| P1 | Client-controlled payment proof path | **Mitigated** | Ignored until real upload exists |
+| P1 | E-sign envelope expiry on token / complete | **Mitigated** | Checked in `findRecipientByAccessToken` + `completeSigning` |
+| P1 | Subcompany scope on mutations / hire inspections RLS | **Open** | Still parent-membership based in places |
+| P1 | Driver PII mainly app-gated (service role) | **Open** | Residual; missed app check remains high impact |
+| P2 | Vehicle storage broader than subcompany | **Open** | |
+| P2 | Negative authz automated tests | **Open** | Add cases from skill `security-test-cases.md` |
+| P2 | OTP attempt race | **Partial** | Optimistic `otp_attempts` match on failure path |
+| P2 | Audit fail-open | **Open** | |
+| P3 | Super-admin env email + DB role dual trust | **Open** | DB role still trusted but no longer self-writable |
+| P3 | Malware quarantine | **Open** | Residual |
 
-Foundational docs/rules were added in this change. Behavioural remediations above should be separate, reviewed tickets — do not “fix” P0 by weakening other controls.
+## Deploy note
+
+Apply migration (or `supabase/manual/ensure_security_privileged_columns.sql`) before relying on licence exact-match in production.

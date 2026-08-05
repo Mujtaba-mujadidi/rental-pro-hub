@@ -17,7 +17,8 @@ export type RentalCapability =
   | "maintenance.read"
   | "maintenance.write"
   | "rentals.read"
-  | "rentals.write";
+  | "rentals.write"
+  | "driver.identity.read";
 
 const ROLE_CAPS: Record<CompanyMembershipRole, ReadonlySet<RentalCapability>> = {
   owner: new Set([
@@ -34,6 +35,7 @@ const ROLE_CAPS: Record<CompanyMembershipRole, ReadonlySet<RentalCapability>> = 
     "maintenance.write",
     "rentals.read",
     "rentals.write",
+    "driver.identity.read",
   ]),
   admin: new Set([
     "staff.manage",
@@ -49,6 +51,7 @@ const ROLE_CAPS: Record<CompanyMembershipRole, ReadonlySet<RentalCapability>> = 
     "maintenance.write",
     "rentals.read",
     "rentals.write",
+    "driver.identity.read",
   ]),
   operations: new Set([
     "fleet.write",
@@ -58,6 +61,7 @@ const ROLE_CAPS: Record<CompanyMembershipRole, ReadonlySet<RentalCapability>> = 
     "maintenance.write",
     "rentals.read",
     "rentals.write",
+    "driver.identity.read",
   ]),
   finance: new Set(["billing.pay", "maintenance.read", "rentals.read"]),
   viewer: new Set(["maintenance.read", "rentals.read"]),
@@ -130,6 +134,11 @@ export function canReadRentals(profile: Pick<AppProfile, "membership_role" | "co
 
 export function canWriteRentals(profile: Pick<AppProfile, "membership_role" | "company_role">) {
   return can(profile, "rentals.write");
+}
+
+/** Driver profile + identity documents for an approved company relationship. */
+export function canReadDriverIdentity(profile: Pick<AppProfile, "membership_role" | "company_role">) {
+  return can(profile, "driver.identity.read");
 }
 
 /** Remaining planned modules (not yet wired as capabilities). */

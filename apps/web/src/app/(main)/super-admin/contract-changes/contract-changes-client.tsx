@@ -27,6 +27,7 @@ import { contractChangeDiffDisplayChangedRows } from "@/lib/companies/contract-c
 import { rentalContractCopy } from "@/lib/rental-contract-copy";
 import { useContractChangeRealtime } from "@/hooks/use-contract-change-realtime";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useRouter } from "next/navigation";
 import { useCallback, useState, useTransition } from "react";
 
@@ -204,10 +205,7 @@ function RequestActionsMenu({
               <DropdownMenu.Separator className="my-1 h-px bg-slate-200 dark:bg-slate-700" />
               <DropdownMenu.Item
                 className={rowActionItemClass}
-                onSelect={() => {
-                  if (!window.confirm("Create new parent company and migrate all memberships from the old tenant?")) return;
-                  onCompleteNewEntity();
-                }}
+                onSelect={onCompleteNewEntity}
               >
                 Complete new legal entity
               </DropdownMenu.Item>
@@ -415,6 +413,11 @@ export function ContractChangesClient({
     loading: boolean;
     error: string | null;
   } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<
+    | { kind: "complete_new_entity"; changeId: string }
+    | { kind: "clear_renewal"; companyId: string; companyName: string | null }
+    | null
+  >(null);
 
   const actionBusy = actionOverlay?.phase === "pending";
   const busy = pending || actionBusy;
@@ -699,7 +702,7 @@ export function ContractChangesClient({
                           if (r.esign_envelope_id) void regenerateContract(r.esign_envelope_id);
                         }}
                         onCompleteNewEntity={() => {
-                          void completeNewEntity(r.id);
+                          setConfirmDialog({ kind: "complete_new_entity", changeId: r.id });
                         }}
                       />
                     </div>
@@ -741,18 +744,10 @@ export function ContractChangesClient({
                         disabled={busy}
                         className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-950 disabled:opacity-50 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
                         onClick={() => {
-                          if (!window.confirm(`Clear renewal pending for ${row.companyName ?? "this company"}?`)) return;
-                          setErr(null);
-                          setMsg(null);
-                          startTransition(() => {
-                            void (async () => {
-                              const res = await clearStuckContractRenewalAction(row.companyId);
-                              if (!res.ok) setErr(res.error);
-                              else {
-                                setMsg("Renewal lock cleared.");
-                                router.refresh();
-                              }
-                            })();
+                          setConfirmDialog({
+                            kind: "clear_renewal",
+                            companyId: row.companyId,
+                            companyName: row.companyName,
                           });
                         }}
                       >
@@ -846,6 +841,48 @@ export function ContractChangesClient({
       ) : null}
 
       <ActionStatusOverlay state={actionOverlay} onDismiss={() => setActionOverlay(null)} />
+
+      <ConfirmDialog
+        open={confirmDialog?.kind === "complete_new_entity"}
+        title="Create new parent company?"
+        description="This migrates all memberships from the old tenant to the new parent company. This cannot be undone from this screen."
+        confirmLabel="Create and migrate"
+        variant="danger"
+        pending={busy}
+        onCancel={() => setConfirmDialog(null)}
+        onConfirm={() => {
+          if (confirmDialog?.kind !== "complete_new_entity") return;
+          const changeId = confirmDialog.changeId;
+          setConfirmDialog(null);
+          void completeNewEntity(changeId);
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmDialog?.kind === "clear_renewal"}
+        title="Clear renewal lock?"
+        description={`Clear renewal pending for ${confirmDialog?.kind === "clear_renewal" ? (confirmDialog.companyName ?? "this company") : "this company"}?`}
+        confirmLabel="Clear lock"
+        pending={busy}
+        onCancel={() => setConfirmDialog(null)}
+        onConfirm={() => {
+          if (confirmDialog?.kind !== "clear_renewal") return;
+          const companyId = confirmDialog.companyId;
+          setConfirmDialog(null);
+          setErr(null);
+          setMsg(null);
+          startTransition(() => {
+            void (async () => {
+              const res = await clearStuckContractRenewalAction(companyId);
+              if (!res.ok) setErr(res.error);
+              else {
+                setMsg("Renewal lock cleared.");
+                router.refresh();
+              }
+            })();
+          });
+        }}
+      />
     </div>
   );
 }

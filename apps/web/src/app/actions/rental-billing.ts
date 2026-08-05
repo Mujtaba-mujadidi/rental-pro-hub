@@ -57,7 +57,8 @@ export async function submitInvoicePaymentAction(formData: FormData): Promise<{ 
     payment_method,
     reference: nullIfEmpty(formData.get("reference")),
     note: nullIfEmpty(formData.get("note")),
-    proof_storage_path: nullIfEmpty(formData.get("proof_storage_path")),
+    // Proof uploads are not yet wired; never trust a client-supplied storage path.
+    proof_storage_path: null,
     status: "submitted",
   });
   if (subErr) return { ok: false, error: subErr.message };

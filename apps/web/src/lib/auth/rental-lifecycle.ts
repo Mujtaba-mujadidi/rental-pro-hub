@@ -168,7 +168,7 @@ export async function getRentalSessionLifecycle(
   const activeParent =
     preferred && rows.some((m) => m.parent_company_id === preferred)
       ? preferred
-      : rows[0]?.parent_company_id ?? preferred;
+      : (rows[0]?.parent_company_id ?? null);
 
   if (!activeParent) {
     return { kind: "not_rental" };

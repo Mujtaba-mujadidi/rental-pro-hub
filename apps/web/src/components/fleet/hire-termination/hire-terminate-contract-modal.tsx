@@ -90,15 +90,17 @@ function ContractIdentityCard({
           </dd>
         </div>
         <div>
-          <dt className="rph-muted text-xs">Driver</dt>
-          <dd className="font-medium text-rph-fg">{preview.driverLabel ?? "—"}</dd>
+          <dt className="rph-muted text-xs">Hire start</dt>
+          <dd className="font-medium text-rph-fg">{preview.hireStartDateLabel}</dd>
         </div>
-        {preview.driverLicenceNumber ? (
-          <div className="sm:col-span-2">
-            <dt className="rph-muted text-xs">Licence number</dt>
-            <dd className="font-medium text-rph-fg">{preview.driverLicenceNumber}</dd>
-          </div>
-        ) : null}
+        <div>
+          <dt className="rph-muted text-xs">Driver</dt>
+          <dd className="font-medium text-rph-fg">{preview.driverName ?? "—"}</dd>
+        </div>
+        <div>
+          <dt className="rph-muted text-xs">Email</dt>
+          <dd className="font-medium text-rph-fg">{preview.driverEmail ?? "—"}</dd>
+        </div>
       </dl>
     </div>
   );

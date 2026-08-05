@@ -15,7 +15,6 @@ import {
 } from "@/lib/rental/subcompany-contract-impact";
 import { buildSubcompanyLegalSnapshot } from "@/lib/rental/subcompany-legal-snapshot";
 import {
-  createSubcompanyLogoSignedUrl,
   processSubcompanyLogoForStorage,
   SUBCOMPANY_LOGOS_BUCKET,
 } from "@/lib/rental/subcompany-logo";

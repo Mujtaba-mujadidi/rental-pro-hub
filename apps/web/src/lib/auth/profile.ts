@@ -401,7 +401,7 @@ function normalizeAppProfileRow(row: {
     display_name: row.display_name,
     company_id: row.company_id ?? null,
     company_role:
-      row.company_role === "admin" || row.company_role === "staff" ? row.company_role : role === "rental_company" ? "admin" : null,
+      row.company_role === "admin" || row.company_role === "staff" ? row.company_role : null,
     membership_role: null,
     subcompany_scope: null,
   };
@@ -453,8 +453,15 @@ async function resolveRentalMemberships(
     list = (memberships as CachedMembershipRow[] | null) ?? [];
   }
 
+  // No active membership → no tenant privileges (do not fall back to stale profiles.company_id).
   if (list.length === 0) {
-    return base;
+    return {
+      ...base,
+      company_id: null,
+      company_role: null,
+      membership_role: null,
+      subcompany_scope: null,
+    };
   }
 
   const preferred = row.company_id?.trim() ?? null;
@@ -524,6 +531,9 @@ export async function requireRentalCompanyArea(options?: { skipActiveContractReq
   }
   if (profile.role !== "rental_company") {
     redirect("/driver");
+  }
+  if (!profile.company_id?.trim() || !profile.membership_role) {
+    redirect("/login?error=no_membership");
   }
   if (!options?.skipActiveContractRequirement) {
     await redirectIfRentalContractNotActive(profile.company_id);

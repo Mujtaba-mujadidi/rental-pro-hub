@@ -8,7 +8,7 @@ describe("summarizeHireFinancialClosure", () => {
   it("requires both rent settlement and deposit resolution to close", () => {
     expect(
       summarizeHireFinancialClosure({
-        settlementBalance: { settled: true, settlementDirection: "settled", openBalanceGbp: 0 },
+        settlementBalance: { settled: true },
         depositDisposition: "hold_pending",
         depositGbp: 300,
       }),
@@ -21,7 +21,7 @@ describe("summarizeHireFinancialClosure", () => {
 
     expect(
       summarizeHireFinancialClosure({
-        settlementBalance: { settled: true, settlementDirection: "settled", openBalanceGbp: 0 },
+        settlementBalance: { settled: true },
         depositDisposition: "refund_full",
         depositGbp: 300,
       }).financiallyClosed,

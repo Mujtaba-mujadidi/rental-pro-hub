@@ -10,7 +10,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
 import { canReadRentals, canWriteRentals } from "@/lib/auth/rental-permissions";
-import { ukTodayYmd } from "@/lib/datetime/uk";
+import { formatUkDate, ukTodayYmd } from "@/lib/datetime/uk";
 import { logHireGroupEvent } from "@/lib/fleet/hire-audit";
 import { driverDocumentsRetainUntilYmd } from "@/lib/fleet/hire-document-retention";
 import { canTerminateHire } from "@/lib/fleet/hire-lifecycle-attention";
@@ -63,6 +63,7 @@ import {
   type HireDepositRefundMethod,
   type HireTerminationAccountsSummary,
 } from "@/lib/fleet/hire-termination-summary";
+import { loadDriverLabelsMap } from "@/lib/fleet/driver-labels";
 import type { RentCadence } from "@/lib/fleet/hire-types";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -71,8 +72,12 @@ export type HireTerminationPreview = {
   hireGroupId: string;
   vehicleVrm: string | null;
   vehicleLabel: string | null;
+  /** Display name when known; otherwise null. */
+  driverName: string | null;
+  driverEmail: string | null;
+  hireStartDateLabel: string;
+  /** Compact label for confirm copy (name, else email). */
   driverLabel: string | null;
-  driverLicenceNumber: string | null;
   includeDeposit: boolean;
   depositPaidGbp: number;
   rentCadence: RentCadence;
@@ -198,7 +203,7 @@ export async function loadHireTerminationPreviewAction(
   const { data: group, error } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, status, activated_at, start_date, rent_cadence, rent_amount_gbp, include_deposit, deposit_gbp, driver_email, driver_licence_number, vehicles(vrm, make, model)",
+      "id, status, activated_at, start_date, rent_cadence, rent_amount_gbp, include_deposit, deposit_gbp, driver_email, driver_user_id, vehicles(vrm, make, model)",
     )
     .eq("id", hireGroupId.trim())
     .maybeSingle();
@@ -233,10 +238,24 @@ export async function loadHireTerminationPreviewAction(
   });
 
   const vehicle = group.vehicles as { vrm?: string; make?: string; model?: string } | null;
-  const driverLabel =
-    (group.driver_email as string | null)?.trim() ||
-    (group.driver_licence_number as string | null)?.trim() ||
-    null;
+  const driverEmail = (group.driver_email as string | null)?.trim() || null;
+  const driverUserId = (group.driver_user_id as string | null)?.trim() || null;
+  let driverName: string | null = null;
+  if (driverUserId) {
+    try {
+      const labels = await loadDriverLabelsMap(createSupabaseAdminClient(), [driverUserId]);
+      const label = labels.get(driverUserId)?.trim() || "";
+      if (label && label !== "Driver") {
+        const looksLikeEmail = label.includes("@");
+        if (!looksLikeEmail) driverName = label;
+      }
+    } catch {
+      driverName = null;
+    }
+  }
+  const driverLabel = driverName || driverEmail || null;
+  const startDateRaw = (group.start_date as string | null)?.trim() || "";
+  const hireStartDateLabel = startDateRaw ? formatUkDate(startDateRaw) : "—";
 
   const depositRows = mapPaymentRows(payments.data.rows).filter((row) => row.rowKind === "deposit");
   const depositPaidGbp = depositRows.reduce((sum, row) => sum + hirePaymentRowPaidGbp(row), 0);
@@ -247,8 +266,10 @@ export async function loadHireTerminationPreviewAction(
       hireGroupId: group.id as string,
       vehicleVrm: vehicle?.vrm?.trim() ?? null,
       vehicleLabel: formatVehicleLabel(vehicle),
+      driverName,
+      driverEmail,
+      hireStartDateLabel,
       driverLabel,
-      driverLicenceNumber: (group.driver_licence_number as string | null)?.trim() || null,
       includeDeposit: Boolean(group.include_deposit),
       depositPaidGbp: Math.round(depositPaidGbp * 100) / 100,
       rentCadence,

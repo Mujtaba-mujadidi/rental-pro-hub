@@ -168,11 +168,15 @@ export async function sendEsignMail(input: SendMailInput): Promise<{ ok: true } 
   );
 
   if (!resendKey && !hasSmtp) {
+    // Never log OTP / signing URLs — they are live credentials.
     console.warn(
-      "[esign-mail] No RESEND_API_KEY or SMTP_* — logging message instead.\n",
-      `To: ${input.to}\nSubject: ${input.subject}\n\n${input.text}`,
+      "[esign-mail] No RESEND_API_KEY or SMTP_* configured; refusing to send (message body not logged).",
     );
-    return { ok: true };
+    return {
+      ok: false,
+      error:
+        "Email is not configured on this server (set RESEND_API_KEY or SMTP_*). Signing messages were not sent.",
+    };
   }
 
   try {

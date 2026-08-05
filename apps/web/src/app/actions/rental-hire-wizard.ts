@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireRentalCompanyArea, getSessionUser } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
-import { canReadRentals, canWriteRentals } from "@/lib/auth/rental-permissions";
+import { canReadDriverIdentity, canReadRentals, canWriteRentals } from "@/lib/auth/rental-permissions";
 import { computeContractEndDate } from "@/lib/fleet/hire-lifecycle";
 import {
   sendDriverRegistrationInviteEmail,
@@ -794,14 +794,20 @@ export async function requestDriverAccessForHireAction(
     return { ok: false, error: e instanceof Error ? e.message : "Server configuration error." };
   }
 
-  const { data: drivers } = await admin
+  // Exact normalised match only — never scan all driver PII.
+  const { data: matchedDrivers, error: licenceLookupErr } = await admin
     .from("driver_profiles")
-    .select("user_id, first_name, last_name, account_email, driving_licence_number")
-    .not("driving_licence_number", "is", null);
-
-  const driver = (drivers ?? []).find(
-    (d) => normalizeDrivingLicence(d.driving_licence_number ?? "") === licence,
-  );
+    .select("user_id, first_name, last_name, account_email")
+    .eq("driving_licence_number_normalized", licence)
+    .limit(2);
+  if (licenceLookupErr) return { ok: false, error: licenceLookupErr.message };
+  if ((matchedDrivers ?? []).length > 1) {
+    return {
+      ok: false,
+      error: "Multiple driver profiles share this licence number. Ask support to resolve the duplicate before continuing.",
+    };
+  }
+  const driver = matchedDrivers?.[0] ?? null;
 
   let hireSnapshot: Record<string, unknown>;
   try {
@@ -1110,7 +1116,9 @@ export async function loadHireDriverProfileForReviewAction(
   hireGroupId: string,
 ): Promise<{ ok: true; profile: HireDriverReviewPayload } | { ok: false; error: string }> {
   const { profile } = await requireRentalCompanyArea();
-  if (!canReadRentals(profile)) return { ok: false, error: "You do not have permission." };
+  if (!canReadDriverIdentity(profile)) {
+    return { ok: false, error: "You do not have permission to view driver identity details." };
+  }
 
   const supabase = await createClient();
   const { data: group } = await supabase

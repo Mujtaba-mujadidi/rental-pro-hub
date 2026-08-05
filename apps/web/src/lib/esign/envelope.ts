@@ -519,12 +519,27 @@ export async function findRecipientByAccessToken(admin: Admin, token: string) {
   const hash = hashSecret(token);
   const { data, error } = await admin
     .from("esign_recipients")
-    .select("id, envelope_id, email, name, role, otp_hash, otp_expires_at, otp_attempts, verified_at, signed_at")
+    .select(
+      "id, envelope_id, email, name, role, otp_hash, otp_expires_at, otp_attempts, verified_at, signed_at, esign_envelopes!inner(expires_at, status)",
+    )
     .eq("access_token_hash", hash)
     .maybeSingle();
   if (error) return { ok: false as const, error: error.message };
   if (!data?.id) return { ok: false as const, error: "Invalid or expired link." };
-  return { ok: true as const, recipient: data };
+
+  const envelope = data.esign_envelopes as { expires_at?: string | null; status?: string | null } | null;
+  if (envelope?.expires_at && new Date(envelope.expires_at).getTime() < Date.now()) {
+    return { ok: false as const, error: "Invalid or expired link." };
+  }
+  const status = (envelope?.status ?? "").toLowerCase();
+  if (status === "voided" || status === "cancelled" || status === "expired") {
+    return { ok: false as const, error: "Invalid or expired link." };
+  }
+
+  const { esign_envelopes: _env, ...recipient } = data as typeof data & {
+    esign_envelopes?: unknown;
+  };
+  return { ok: true as const, recipient };
 }
 
 export async function verifyRecipientOtp(
@@ -550,7 +565,16 @@ export async function verifyRecipientOtp(
     return { ok: false, error: "Code expired. Ask the sender to resend." };
   }
   if (!safeEqualHash(rec.otp_hash as string, hashSecret(otp.trim()))) {
-    await admin.from("esign_recipients").update({ otp_attempts: attempts + 1 }).eq("id", recipientId);
+    const { data: bumped } = await admin
+      .from("esign_recipients")
+      .update({ otp_attempts: attempts + 1 })
+      .eq("id", recipientId)
+      .eq("otp_attempts", attempts)
+      .select("id")
+      .maybeSingle();
+    if (!bumped?.id) {
+      return { ok: false, error: "Incorrect code. Please try again." };
+    }
     return { ok: false, error: "Incorrect code." };
   }
 
@@ -617,11 +641,14 @@ export async function completeSigning(
   const { data: env, error: eErr } = await admin
     .from("esign_envelopes")
     .select(
-      "id, status, field_layout, field_values, unsigned_pdf_path, context_type, context_id, parent_company_id, owner_signed_at, requires_owner_signature",
+      "id, status, expires_at, field_layout, field_values, unsigned_pdf_path, context_type, context_id, parent_company_id, owner_signed_at, requires_owner_signature",
     )
     .eq("id", input.envelopeId)
     .maybeSingle();
   if (eErr || !env?.id) return { ok: false, error: eErr?.message ?? "Envelope not found." };
+  if (env.expires_at && new Date(env.expires_at as string).getTime() < Date.now()) {
+    return { ok: false, error: "This signing link has expired." };
+  }
   const needsOwner = env.requires_owner_signature !== false;
   if (needsOwner && !env.owner_signed_at) return { ok: false, error: "Owner must sign before the recipient." };
   if (env.status === "completed") return { ok: false, error: "Already completed." };

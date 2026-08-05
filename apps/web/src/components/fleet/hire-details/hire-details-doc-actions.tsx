@@ -29,22 +29,32 @@ async function downloadFile(url: string, fileName: string) {
 
 export function HireDetailsDocActionsMenu({
   viewUrl,
+  resolveUrl,
   fileName,
   onError,
 }: {
-  viewUrl: string | null;
+  viewUrl?: string | null;
+  /** When set, URL is fetched on each open/download (fresh authz). */
+  resolveUrl?: () => Promise<string>;
   fileName: string;
   onError?: (message: string) => void;
 }) {
   const [pending, setPending] = useState<"view" | "download" | null>(null);
   const busy = pending != null;
 
-  if (!viewUrl) return null;
+  if (!viewUrl && !resolveUrl) return null;
+
+  async function obtainUrl(): Promise<string> {
+    if (resolveUrl) return resolveUrl();
+    if (!viewUrl) throw new Error("Document is not available.");
+    return viewUrl;
+  }
 
   async function viewDoc() {
     setPending("view");
     try {
-      window.open(viewUrl!, "_blank", "noopener,noreferrer");
+      const url = await obtainUrl();
+      window.open(url, "_blank", "noopener,noreferrer");
     } catch (e) {
       onError?.(e instanceof Error ? e.message : "Could not open document.");
     } finally {
@@ -55,10 +65,14 @@ export function HireDetailsDocActionsMenu({
   async function downloadDoc() {
     setPending("download");
     try {
-      await downloadFile(viewUrl!, fileName);
+      const url = await obtainUrl();
+      try {
+        await downloadFile(url, fileName);
+      } catch {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
     } catch (e) {
       onError?.(e instanceof Error ? e.message : "Could not download document.");
-      window.open(viewUrl!, "_blank", "noopener,noreferrer");
     } finally {
       setPending(null);
     }
