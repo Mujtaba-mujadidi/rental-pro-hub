@@ -96,6 +96,7 @@ export function reconcileEndedHirePaymentsWithDepositCredit(input: {
   terminationSummary: {
     depositGbp: number;
     signedRentBalanceGbp: number;
+    accruedRentPaidGbp?: number;
   };
   depositRefundAmountGbp?: number | null;
   accrualYmd: string;
@@ -106,11 +107,20 @@ export function reconcileEndedHirePaymentsWithDepositCredit(input: {
     signedRentBalanceGbp: input.terminationSummary.signedRentBalanceGbp,
     depositRefundAmountGbp: input.depositRefundAmountGbp,
   });
-  if (credit <= 0.005 || input.summary.balanceGbp <= 0.005) {
+  const rentPaidOnSchedule = roundGbp(
+    input.rows
+      .filter((row) => row.rowKind === "rent")
+      .reduce((sum, row) => sum + row.paidGbp, 0),
+  );
+  const accruedRentPaidGbp = roundGbp(input.terminationSummary.accruedRentPaidGbp ?? 0);
+  const creditAlreadyOnSchedule = roundGbp(Math.max(0, rentPaidOnSchedule - accruedRentPaidGbp));
+  const remainingCredit = roundGbp(Math.max(0, credit - creditAlreadyOnSchedule));
+
+  if (remainingCredit <= 0.005 || input.summary.balanceGbp <= 0.005) {
     return { rows: [...input.rows], summary: input.summary };
   }
 
-  const adjustedRows = applyDepositCreditToEnrichedRows(input.rows, credit, input.accrualYmd);
+  const adjustedRows = applyDepositCreditToEnrichedRows(input.rows, remainingCredit, input.accrualYmd);
   const rentInputs: HirePaymentScheduleRowInput[] = adjustedRows.map((row) => ({
     id: row.id,
     periodStart: row.periodStart,

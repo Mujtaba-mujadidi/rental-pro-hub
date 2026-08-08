@@ -1,5 +1,3 @@
-import { driverHireDocumentsPath } from "@/lib/fleet/driver-hire-nav";
-
 export type DriverHireWorkspaceNavItem = {
   href: string;
   label: string;
@@ -9,36 +7,29 @@ export type DriverHireWorkspaceNavItem = {
 export type DriverHireWorkspaceSection =
   | ""
   | "payments"
+  | "settlement"
+  | "documents"
   | "details"
   | "checkout"
-  | "checkin"
-  | "settlement";
+  | "checkin";
 
+/** Driver hire workspace pills — mirrors rental staff tab order (without Activity). */
 export function driverHireWorkspaceNav(groupId: string, status?: string): DriverHireWorkspaceNavItem[] {
   const base = `/driver/hires/${groupId}`;
+  const paymentsLabel =
+    status === "terminated" || status === "completed" ? "Payments & settlement" : "Payments";
   const items: DriverHireWorkspaceNavItem[] = [
     { href: base, label: "Overview", match: "exact" },
-    { href: `${base}/payments`, label: "Payments", match: "prefix" },
+    { href: `${base}/payments`, label: paymentsLabel, match: "prefix" },
     { href: `${base}/details`, label: "Details", match: "prefix" },
   ];
 
   if (status === "reserved" || status === "active" || status === "terminated" || status === "completed") {
-    items.push({ href: `${base}/checkout`, label: "Checkout", match: "prefix" });
-  }
-  // Check-in only after the contract has ended (not while on rent).
-  if (status === "terminated" || status === "completed") {
-    items.push({ href: `${base}/checkin`, label: "Check-in", match: "prefix" });
+    items.splice(1, 0, { href: `${base}/checkout`, label: "Checkout", match: "prefix" });
   }
   if (status === "terminated" || status === "completed") {
-    items.push({ href: `${base}/settlement`, label: "Settlement", match: "prefix" });
-  }
-
-  if (status === "terminated" || status === "completed" || status === "cancelled") {
-    items.push({
-      href: driverHireDocumentsPath(groupId, "hire-history"),
-      label: "Signed documents",
-      match: "prefix",
-    });
+    items.splice(2, 0, { href: `${base}/checkin`, label: "Check-in", match: "prefix" });
+    items.splice(3, 0, { href: `${base}/settlement`, label: "Settlement", match: "prefix" });
   }
 
   return items;
@@ -58,10 +49,11 @@ export function parseDriverHireWorkspaceSection(
   const segment = pathname.slice(base.length + 1).split("/")[0] ?? "";
   if (
     segment === "payments" ||
+    segment === "settlement" ||
+    segment === "documents" ||
     segment === "details" ||
     segment === "checkout" ||
-    segment === "checkin" ||
-    segment === "settlement"
+    segment === "checkin"
   ) {
     return segment;
   }

@@ -52,7 +52,11 @@ export function HireOverviewView({
 
       <HireOverviewRentalSummary context={context} />
 
-      <HireOverviewPaymentSummary summary={data.summary} contractEnded={contractEnded} />
+      <HireOverviewPaymentSummary
+        summary={data.summary}
+        contractEnded={contractEnded}
+        terminationSummary={data.terminationSummary}
+      />
 
       {contractEnded ? (
         <HireOverviewSettlementNote

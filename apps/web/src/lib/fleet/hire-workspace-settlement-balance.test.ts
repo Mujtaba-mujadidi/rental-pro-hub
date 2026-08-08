@@ -16,17 +16,17 @@ describe("computeHireWorkspaceSettlementBalance", () => {
     });
   });
 
-  it("reduces open balance as settlement payments are recorded", () => {
+  it("uses the database open balance without replaying payment history", () => {
     const result = computeHireWorkspaceSettlementBalance({
-      settlementBalanceDirection: "driver_owes_company",
-      settlementBalanceGbp: 330,
-      balancePayments: [{ amountGbp: 330, direction: "received_from_driver" }],
+      settlementBalanceDirection: "company_owes_driver",
+      settlementBalanceGbp: 242.86,
+      balancePayments: [{ amountGbp: 100, direction: "paid_to_driver" }],
     });
 
     expect(result).toEqual({
-      settlementDirection: "settled",
-      openBalanceGbp: 0,
-      settled: true,
+      settlementDirection: "company_owes_driver",
+      openBalanceGbp: 242.86,
+      settled: false,
     });
   });
 });

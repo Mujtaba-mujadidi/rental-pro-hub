@@ -6,13 +6,15 @@
  *   through today or contract end, with termination proration on the final period.
  * - Plus settlement collections only when rent was collected via the balance ledger instead
  *   of the schedule (avoids double-counting schedule + settlement for the same rent).
- * - Plus deposit retention when staff forfeit or partially retain the deposit after contract end.
+ * - Plus deposit retention when staff forfeit or partially retain the deposit after contract end
+ *   (deposit applied to rent at contract end counts as rent income, not deposit retention).
  * - Plus itemized driver charges (damage, etc.) recorded on check-in or future flows.
  * - Minus settlement write-offs only (balance-ledger refunds return deposits/prepaid
  *   rent and are not contra-revenue when that rent was never recognised on the vehicle).
  */
 
 import { isDepositDispositionPending } from "@/lib/fleet/hire-deposit-resolution";
+import { depositRentScheduleCreditGbp } from "@/lib/fleet/hire-deposit-schedule-allocation";
 
 import {
   hirePaymentRowPaidGbp,
@@ -55,6 +57,9 @@ export type HireIncomeGroupContext = {
   depositRefundAmountGbp: number | null;
   depositGbp: number;
   signedRentBalanceGbp: number | null;
+  /** Persisted at contract end — preferred over raw schedule paid for ended hires. */
+  accruedRentPaidGbp?: number | null;
+  accruedRentDueGbp?: number | null;
 };
 
 function roundGbp(n: number): number {
@@ -271,7 +276,31 @@ export function sumHireSettlementWriteOffsGbp(
   return roundGbp(total);
 }
 
-/** Deposit retained by the company after disposition (forfeit, partial refund, apply to balance). */
+/** Deposit applied to outstanding rent at contract end (counts as rent income, not deposit retention). */
+export function depositAppliedToRentIncomeGbp(input: {
+  depositDisposition: string | null | undefined;
+  depositGbp: number;
+  signedRentBalanceGbp: number | null | undefined;
+  depositRefundAmountGbp?: number | null;
+  recognizedRentIncomeGbp: number;
+  accruedRentDueGbp: number;
+}): number {
+  const disposition = String(input.depositDisposition ?? "").trim();
+  if (disposition !== "apply_to_balance") return 0;
+
+  const credit = depositRentScheduleCreditGbp({
+    disposition,
+    depositGbp: input.depositGbp,
+    signedRentBalanceGbp: Math.max(0, Number(input.signedRentBalanceGbp ?? 0)),
+    depositRefundAmountGbp: input.depositRefundAmountGbp,
+  });
+  const rentShortfall = roundGbp(
+    Math.max(0, input.accruedRentDueGbp - input.recognizedRentIncomeGbp),
+  );
+  return roundGbp(Math.min(credit, rentShortfall));
+}
+
+/** Deposit retained by the company after disposition (forfeit, partial refund). */
 export function depositRetentionIncomeGbp(input: {
   depositDisposition: string | null | undefined;
   depositGbp: number;
@@ -290,11 +319,6 @@ export function depositRetentionIncomeGbp(input: {
 
   if (disposition === "forfeit") {
     return deposit;
-  }
-
-  if (disposition === "apply_to_balance") {
-    const owed = Math.max(0, Number(input.signedRentBalanceGbp ?? 0));
-    return roundGbp(Math.min(deposit, owed));
   }
 
   return 0;
@@ -354,11 +378,35 @@ export function computeVehicleHireIncomeGbp(input: {
         billingMode: groupContext?.rentBillingMode ?? "end_of_period",
         rentCadence: groupContext?.rentCadence ?? "weekly",
       });
-      const groupIncome = endedHireRentIncomeGbp(settlement);
+      const accruedDueGbp =
+        groupContext?.accruedRentDueGbp != null
+          ? roundGbp(groupContext.accruedRentDueGbp)
+          : settlement.accruedRentDueGbp;
+      const accruedPaidGbp =
+        groupContext?.accruedRentPaidGbp != null
+          ? roundGbp(groupContext.accruedRentPaidGbp)
+          : settlement.accruedRentPaidGbp;
+      let groupIncome = endedHireRentIncomeGbp({
+        accruedRentPaidGbp: accruedPaidGbp,
+        accruedRentDueGbp: accruedDueGbp,
+      });
+      if (groupContext) {
+        groupIncome = roundGbp(
+          groupIncome +
+            depositAppliedToRentIncomeGbp({
+              depositDisposition: groupContext.depositDisposition,
+              depositGbp: groupContext.depositGbp,
+              signedRentBalanceGbp: groupContext.signedRentBalanceGbp,
+              depositRefundAmountGbp: groupContext.depositRefundAmountGbp,
+              recognizedRentIncomeGbp: groupIncome,
+              accruedRentDueGbp: accruedDueGbp,
+            }),
+        );
+      }
       scheduleRentIncomeGbp += groupIncome;
-      accruedRentDueGbp += settlement.accruedRentDueGbp;
+      accruedRentDueGbp += accruedDueGbp;
       postEndPrepaidExcludedGbp += settlement.prepaidRentCreditGbp;
-      groupAccruedRentDueGbp.set(groupId, settlement.accruedRentDueGbp);
+      groupAccruedRentDueGbp.set(groupId, accruedDueGbp);
       groupScheduleRentIncomeGbp.set(groupId, groupIncome);
     } else {
       let groupDue = 0;

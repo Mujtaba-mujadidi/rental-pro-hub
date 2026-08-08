@@ -1,9 +1,3 @@
-import {
-  openBalanceDirection,
-  remainingOpenBalanceGbp,
-  signedSettlementBalanceGbp,
-} from "@/lib/fleet/hire-open-balance";
-
 export type HireWorkspaceSettlementBalance = {
   settlementDirection: "driver_owes_company" | "company_owes_driver" | "settled";
   openBalanceGbp: number;
@@ -15,11 +9,18 @@ type BalancePaymentInput = {
   direction: "received_from_driver" | "paid_to_driver";
 };
 
+/**
+ * Open balance for hire workspace UI.
+ * `vehicle_hire_groups.settlement_balance_*` is kept current when payments and charges are recorded;
+ * balance payment rows are an audit ledger only — do not subtract them again here.
+ */
 export function computeHireWorkspaceSettlementBalance(input: {
   settlementBalanceDirection: string | null;
   settlementBalanceGbp: number | null;
-  balancePayments: readonly BalancePaymentInput[];
+  balancePayments?: readonly BalancePaymentInput[];
 }): HireWorkspaceSettlementBalance | null {
+  void input.balancePayments;
+
   const direction = input.settlementBalanceDirection as
     | "driver_owes_company"
     | "company_owes_driver"
@@ -27,7 +28,6 @@ export function computeHireWorkspaceSettlementBalance(input: {
     | null;
   if (!direction) return null;
 
-  // Once marked settled in the DB, payments are historical — do not re-apply them on top of zero.
   if (direction === "settled") {
     return {
       settlementDirection: "settled",
@@ -36,21 +36,11 @@ export function computeHireWorkspaceSettlementBalance(input: {
     };
   }
 
-  const signed = signedSettlementBalanceGbp(direction, Number(input.settlementBalanceGbp ?? 0));
-  const paymentDirection =
-    direction === "driver_owes_company" ? "received_from_driver" : "paid_to_driver";
-  const remaining = remainingOpenBalanceGbp(
-    signed,
-    input.balancePayments.map((payment) => ({
-      amountGbp: payment.amountGbp,
-      direction: payment.direction ?? paymentDirection,
-    })),
-  );
-  const openDirection = openBalanceDirection(remaining);
+  const openBalanceGbp = Math.round(Math.abs(Number(input.settlementBalanceGbp ?? 0)) * 100) / 100;
 
   return {
-    settlementDirection: openDirection,
-    openBalanceGbp: Math.abs(remaining),
-    settled: openDirection === "settled",
+    settlementDirection: direction,
+    openBalanceGbp,
+    settled: openBalanceGbp <= 0.005,
   };
 }

@@ -21,9 +21,13 @@ export function HireDepositPendingBanner({
   return (
     <section className="rph-alert-warning text-sm">
       <p className="font-medium text-rph-fg">
-        {closure.rentSettlementSettled
-          ? "Final balance cleared — deposit still needs a decision"
-          : "Deposit held — decide what to do"}
+        {audience === "driver"
+          ? closure.rentSettlementSettled
+            ? "Final balance cleared — deposit still being reviewed"
+            : "Deposit held — waiting for rental company"
+          : closure.rentSettlementSettled
+            ? "Final balance cleared — deposit still needs a decision"
+            : "Deposit held — decide what to do"}
       </p>
       <p className="mt-1 text-rph-fg-secondary">
         {formatGbp(closure.depositGbp)} deposit is separate from the rent balance.

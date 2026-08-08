@@ -26,13 +26,21 @@ import { computeHireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspac
 import { isDepositDispositionPending } from "@/lib/fleet/hire-deposit-resolution";
 import { reconcileEndedHirePaymentsWithDepositCredit } from "@/lib/fleet/hire-deposit-schedule-allocation";
 import {
-  remainingOpenBalanceGbp,
   signedSettlementBalanceGbp,
 } from "@/lib/fleet/hire-open-balance";
 import {
   filterPaymentScheduleForEndedContract,
+  adjustEndedContractPaymentRowDues,
   hasPostEndPrepaidRows,
 } from "@/lib/fleet/hire-ended-payment-schedule";
+import { buildHireSettlementBreakdown, type HireSettlementBreakdown } from "@/lib/fleet/hire-settlement-breakdown";
+import {
+  hireDriverChargeResolutionLabel,
+  hireDriverChargeTypeLabel,
+  mapDriverChargeLineItemsFromDb,
+  type DriverChargeLineItemDbRow,
+} from "@/lib/fleet/hire-driver-charges";
+import type { HireDriverChargeWorkspaceRow } from "@/app/actions/rental-hire-termination";
 import type { HirePaymentStatus } from "@/lib/fleet/hire-types";
 import {
   formatHirePaymentRowEvents,
@@ -105,6 +113,8 @@ export type HirePaymentsPageData = {
   depositGbp: number | null;
   currentSignedSettlementGbp: number;
   settlementResolutionLabel: string | null;
+  settlementBreakdown: HireSettlementBreakdown | null;
+  driverChargeLineItems: HireDriverChargeWorkspaceRow[];
   summary: ReturnType<typeof summarizeHirePayments>;
   rows: HirePaymentPageRow[];
   paymentAccount: HirePaymentAccountDisplay | null;
@@ -130,6 +140,10 @@ function maskAccountNumber(value: string | null | undefined): string | null {
   const digits = (value ?? "").replace(/\D/g, "");
   if (digits.length < 4) return null;
   return `···${digits.slice(-4)}`;
+}
+
+function roundGbpSum(values: readonly number[]): number {
+  return Math.round(values.reduce((sum, value) => sum + value, 0) * 100) / 100;
 }
 
 function mapDbRow(
@@ -354,6 +368,7 @@ async function buildPaymentsPageData(
         terminationSummary: {
           depositGbp: terminationSummaryForReconcile.depositGbp,
           signedRentBalanceGbp: terminationSummaryForReconcile.signedRentBalanceGbp,
+          accruedRentPaidGbp: terminationSummaryForReconcile.accruedRentPaidGbp,
         },
         depositRefundAmountGbp:
           group.deposit_refund_amount_gbp != null ? Number(group.deposit_refund_amount_gbp) : null,
@@ -361,6 +376,28 @@ async function buildPaymentsPageData(
       });
       enriched = reconciled.rows;
       summary = reconciled.summary;
+    }
+
+    if (terminationSummaryForReconcile) {
+      enriched = adjustEndedContractPaymentRowDues(
+        enriched,
+        contractEndedYmd,
+        terminationSummaryForReconcile.rentBillingMode ?? "end_of_period",
+        terminationSummaryForReconcile.rentCadence ?? "weekly",
+      );
+      const adjustedInputs: HirePaymentScheduleRowInput[] = enriched.map((row) => ({
+        id: row.id,
+        periodStart: row.periodStart,
+        periodEnd: row.periodEnd,
+        rowKind: row.rowKind,
+        baseAmountGbp: row.baseAmountGbp,
+        discountTotalGbp: row.discountTotalGbp,
+        paymentStatus: row.paymentStatus,
+        approvedAmountGbp: row.paidGbp,
+        pendingSubmittedGbp: row.pendingSubmittedGbp,
+        sortOrder: row.sortOrder,
+      }));
+      summary = summarizeHirePayments(adjustedInputs, accrualYmd);
     }
   }
 
@@ -393,6 +430,28 @@ async function buildPaymentsPageData(
     )
     .eq("hire_group_id", hireGroupId)
     .order("paid_at", { ascending: false });
+
+  const { data: chargeRows } = await supabase
+    .from("vehicle_hire_driver_charge_line_items")
+    .select(
+      "id, hire_group_id, charge_type, amount_gbp, resolution, source_kind, source_id, description, created_at",
+    )
+    .eq("hire_group_id", hireGroupId)
+    .order("created_at", { ascending: false });
+
+  const driverChargeLineItems: HireDriverChargeWorkspaceRow[] = mapDriverChargeLineItemsFromDb(
+    (chargeRows ?? []) as DriverChargeLineItemDbRow[],
+  ).map((item) => ({
+    id: item.id,
+    chargeType: item.chargeType,
+    chargeTypeLabel: hireDriverChargeTypeLabel(item.chargeType),
+    amountGbp: item.amountGbp,
+    resolution: item.resolution,
+    resolutionLabel: hireDriverChargeResolutionLabel(item.resolution),
+    description: item.description ?? null,
+    createdAt: item.createdAt ?? "",
+  }));
+
   const settlementBalance = computeHireWorkspaceSettlementBalance({
     settlementBalanceDirection: (group.settlement_balance_direction as string | null) ?? null,
     settlementBalanceGbp: Number(group.settlement_balance_gbp ?? 0),
@@ -410,12 +469,9 @@ async function buildPaymentsPageData(
   const currentSignedSettlementGbp =
     settlementDirection === "settled"
       ? 0
-      : remainingOpenBalanceGbp(
-          signedSettlementBalanceGbp(settlementDirection, Number(group.settlement_balance_gbp ?? 0)),
-          (balancePayments ?? []).map((payment) => ({
-            amountGbp: Number(payment.amount_gbp ?? 0),
-            direction: payment.direction as "received_from_driver" | "paid_to_driver",
-          })),
+      : signedSettlementBalanceGbp(
+          settlementDirection,
+          Number(group.settlement_balance_gbp ?? 0),
         );
 
   const settlementPaymentAccountIds = new Set<string>();
@@ -515,6 +571,35 @@ async function buildPaymentsPageData(
   const depositPendingReview = isDepositDispositionPending(depositDisposition);
   const settlementResolution = (group.settlement_resolution as string | null) ?? null;
 
+  const settlementPaymentsToDriverGbp = roundGbpSum(
+    (balancePayments ?? [])
+      .filter((payment) => payment.direction === "paid_to_driver")
+      .map((payment) => Number(payment.amount_gbp ?? 0)),
+  );
+  const settlementPaymentsFromDriverGbp = roundGbpSum(
+    (balancePayments ?? [])
+      .filter((payment) => payment.direction === "received_from_driver")
+      .map((payment) => Number(payment.amount_gbp ?? 0)),
+  );
+  const driverChargesOnBalanceGbp = roundGbpSum(
+    driverChargeLineItems
+      .filter((item) => item.resolution === "add_to_balance")
+      .map((item) => item.amountGbp),
+  );
+  const audience = options.driverUserId ? ("driver" as const) : ("staff" as const);
+  const settlementBreakdown =
+    settlementBalance && terminationSummary
+      ? buildHireSettlementBreakdown({
+          terminationSummary,
+          openBalanceGbp: settlementBalance.openBalanceGbp,
+          openDirection: settlementBalance.settlementDirection,
+          driverChargesGbp: driverChargesOnBalanceGbp,
+          settlementPaymentsToDriverGbp,
+          settlementPaymentsFromDriverGbp,
+          audience,
+        })
+      : null;
+
   return {
     ok: true,
     data: {
@@ -536,7 +621,7 @@ async function buildPaymentsPageData(
       settlementBalancePayments,
       terminationSummary,
       depositDispositionLabel: depositDisposition
-        ? hireDepositDispositionLabel(depositDisposition as HireDepositDisposition)
+        ? hireDepositDispositionLabel(depositDisposition as HireDepositDisposition, audience)
         : null,
       depositDisposition,
       depositPendingReview,
@@ -547,8 +632,10 @@ async function buildPaymentsPageData(
         (["paid_now", "open_balance", "written_off"] as const).includes(
           settlementResolution as HireSettlementResolution,
         )
-          ? settlementResolutionLabel(settlementResolution as HireSettlementResolution)
+          ? settlementResolutionLabel(settlementResolution as HireSettlementResolution, audience)
           : null,
+      settlementBreakdown,
+      driverChargeLineItems,
       summary,
       rows,
       paymentAccount,

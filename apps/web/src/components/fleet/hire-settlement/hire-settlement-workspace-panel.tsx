@@ -7,7 +7,9 @@ import {
   type HireBalancePaymentRow,
   type HireSettlementWorkspaceData,
 } from "@/app/actions/rental-hire-termination";
+import { HireSettlementBreakdownPanel } from "@/components/fleet/hire-settlement/hire-settlement-breakdown-panel";
 import { RphSelect } from "@/components/forms/rph-select";
+import { settlementPaymentMethodRequiresAccount } from "@/lib/fleet/hire-settlement-payment-method";
 import { formatGbp } from "@/lib/fleet/maintenance";
 import { settlementBalanceLabel } from "@/lib/fleet/hire-termination-summary";
 import { formatUkDateTime } from "@/lib/datetime/uk";
@@ -108,6 +110,7 @@ export function HireSettlementWorkspacePanel({
   if (!data) return null;
 
   const settled = data.settlementDirection === "settled";
+  const showPaymentAccount = settlementPaymentMethodRequiresAccount(paymentMethod);
 
   return (
     <div className="space-y-4">
@@ -145,6 +148,10 @@ export function HireSettlementWorkspacePanel({
             : settlementBalanceLabel(data.settlementDirection, data.openBalanceGbp)}
         </p>
       </section>
+
+      {data.settlementBreakdown ? (
+        <HireSettlementBreakdownPanel breakdown={data.settlementBreakdown} />
+      ) : null}
 
       {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
 
@@ -238,21 +245,30 @@ export function HireSettlementWorkspacePanel({
                 value,
                 label,
               }))}
-              onValueChange={setPaymentMethod}
+              onValueChange={(value) => {
+                setPaymentMethod(value);
+                if (!settlementPaymentMethodRequiresAccount(value)) {
+                  setPaymentAccountId("");
+                }
+              }}
             />
-            <RphSelect
-              value={paymentAccountId || "__none__"}
-              placeholder="Select payment account…"
-              aria-label="Payment account"
-              options={[
-                { value: "__none__", label: "Select payment account…" },
-                ...data.paymentAccounts.map((account) => ({
-                  value: account.id,
-                  label: `${account.name}${account.isDefault ? " (hire default)" : ""}`,
-                })),
-              ]}
-              onValueChange={(value) => setPaymentAccountId(value === "__none__" ? "" : value)}
-            />
+            {showPaymentAccount ? (
+              <RphSelect
+                value={paymentAccountId || "__none__"}
+                placeholder="Select payment account…"
+                aria-label="Payment account"
+                options={[
+                  { value: "__none__", label: "Select payment account…" },
+                  ...data.paymentAccounts.map((account) => ({
+                    value: account.id,
+                    label: `${account.name}${account.isDefault ? " (hire default)" : ""}`,
+                  })),
+                ]}
+                onValueChange={(value) => setPaymentAccountId(value === "__none__" ? "" : value)}
+              />
+            ) : (
+              <p className="rph-muted text-xs">No bank account needed for cash payments.</p>
+            )}
             <input
               className="rph-input w-full"
               placeholder="Reference"
@@ -263,7 +279,7 @@ export function HireSettlementWorkspacePanel({
               type="button"
               className="rph-btn-primary"
               onClick={recordPayment}
-              disabled={pending || !paymentAmount.trim() || !paymentAccountId}
+              disabled={pending || !paymentAmount.trim() || (showPaymentAccount && !paymentAccountId)}
             >
               Record payment
             </button>

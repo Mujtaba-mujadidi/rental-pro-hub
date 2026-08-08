@@ -8,6 +8,7 @@ import type { HireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-
 import { formatGbp } from "@/lib/fleet/maintenance";
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
+import { settlementPaymentMethodRequiresAccount } from "@/lib/fleet/hire-settlement-payment-method";
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
   bank_transfer: "Bank transfer",
@@ -38,6 +39,7 @@ export function HireSettlementBalancePaymentCard({
   const [paymentAccountId, setPaymentAccountId] = useState("");
 
   const openBalanceGbp = settlementBalance.openBalanceGbp;
+  const showPaymentAccount = settlementPaymentMethodRequiresAccount(paymentMethod);
 
   useEffect(() => {
     setPaymentAccountId((current) => {
@@ -86,7 +88,7 @@ export function HireSettlementBalancePaymentCard({
   };
 
   const clearRemainingBalance = () => {
-    if (!paymentAccountId) {
+    if (showPaymentAccount && !paymentAccountId) {
       setError("Select the bank account used for this payment.");
       return;
     }
@@ -146,26 +148,35 @@ export function HireSettlementBalancePaymentCard({
               value,
               label,
             }))}
-            onValueChange={setPaymentMethod}
+            onValueChange={(value) => {
+              setPaymentMethod(value);
+              if (!settlementPaymentMethodRequiresAccount(value)) {
+                setPaymentAccountId("");
+              }
+            }}
           />
         </label>
 
-        <label className="space-y-1 sm:col-span-2">
-          <span className="text-xs font-medium text-rph-fg-muted">Payment account</span>
-          <RphSelect
-            value={paymentAccountId || "__none__"}
-            placeholder="Select payment account…"
-            aria-label="Payment account"
-            options={[
-              { value: "__none__", label: "Select payment account…" },
-              ...paymentAccounts.map((account) => ({
-                value: account.id,
-                label: `${account.name}${account.isDefault ? " (hire default)" : ""}`,
-              })),
-            ]}
-            onValueChange={(value) => setPaymentAccountId(value === "__none__" ? "" : value)}
-          />
-        </label>
+        {showPaymentAccount ? (
+          <label className="space-y-1 sm:col-span-2">
+            <span className="text-xs font-medium text-rph-fg-muted">Payment account</span>
+            <RphSelect
+              value={paymentAccountId || "__none__"}
+              placeholder="Select payment account…"
+              aria-label="Payment account"
+              options={[
+                { value: "__none__", label: "Select payment account…" },
+                ...paymentAccounts.map((account) => ({
+                  value: account.id,
+                  label: `${account.name}${account.isDefault ? " (hire default)" : ""}`,
+                })),
+              ]}
+              onValueChange={(value) => setPaymentAccountId(value === "__none__" ? "" : value)}
+            />
+          </label>
+        ) : (
+          <p className="rph-muted text-xs sm:col-span-2">No bank account needed for cash payments.</p>
+        )}
 
         <label className="space-y-1 sm:col-span-2">
           <span className="text-xs font-medium text-rph-fg-muted">Reference (optional)</span>
@@ -178,7 +189,7 @@ export function HireSettlementBalancePaymentCard({
         </label>
       </div>
 
-      {!paymentAccounts.length ? (
+      {showPaymentAccount && !paymentAccounts.length ? (
         <p className="rph-muted text-xs">No active payment accounts. Add one in rental settings.</p>
       ) : null}
 
@@ -187,7 +198,9 @@ export function HireSettlementBalancePaymentCard({
           type="button"
           className="rph-btn-primary"
           onClick={clearRemainingBalance}
-          disabled={pending || !paymentAccounts.length || !paymentAccountId}
+          disabled={
+            pending || (showPaymentAccount && (!paymentAccounts.length || !paymentAccountId))
+          }
         >
           {pending ? "Recording…" : `Clear remaining balance (${formatGbp(openBalanceGbp)})`}
         </button>
@@ -195,7 +208,11 @@ export function HireSettlementBalancePaymentCard({
           type="button"
           className="rph-btn-ghost"
           onClick={submitForm}
-          disabled={pending || !paymentAmount.trim() || !paymentAccountId}
+          disabled={
+            pending ||
+            !paymentAmount.trim() ||
+            (showPaymentAccount && !paymentAccountId)
+          }
         >
           Record partial payment
         </button>

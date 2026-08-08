@@ -174,6 +174,18 @@ function parseTerminationSignedRentBalanceGbp(raw: unknown): number | null {
   return Number.isFinite(signed) ? Number(signed) : null;
 }
 
+function parseTerminationAccruedRentPaidGbp(raw: unknown): number | null {
+  if (!raw || typeof raw !== "object") return null;
+  const paid = (raw as { accruedRentPaidGbp?: number }).accruedRentPaidGbp;
+  return Number.isFinite(paid) ? Number(paid) : null;
+}
+
+function parseTerminationAccruedRentDueGbp(raw: unknown): number | null {
+  if (!raw || typeof raw !== "object") return null;
+  const due = (raw as { accruedRentDueGbp?: number }).accruedRentDueGbp;
+  return Number.isFinite(due) ? Number(due) : null;
+}
+
 function buildGroupContextByGroupId(groups: readonly HireGroupIncomeSource[]): Map<string, HireIncomeGroupContext> {
   return new Map(
     groups.map((group) => {
@@ -196,6 +208,8 @@ function buildGroupContextByGroupId(groups: readonly HireGroupIncomeSource[]): M
               : null,
           depositGbp: parseTerminationDepositGbp(group.termination_settlement),
           signedRentBalanceGbp: parseTerminationSignedRentBalanceGbp(group.termination_settlement),
+          accruedRentPaidGbp: parseTerminationAccruedRentPaidGbp(group.termination_settlement),
+          accruedRentDueGbp: parseTerminationAccruedRentDueGbp(group.termination_settlement),
         },
       ];
     }),

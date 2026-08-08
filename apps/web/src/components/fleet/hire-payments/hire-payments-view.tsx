@@ -16,6 +16,8 @@ import { HireTerminationSummaryCard } from "@/components/fleet/hire-payments/hir
 import { HirePaymentsAccountOverview } from "@/components/fleet/hire-payments/hire-payments-account-overview";
 import { HireDepositPendingBanner } from "@/components/fleet/hire-dashboard/hire-deposit-pending-banner";
 import { HireWorkspaceBalanceBanner } from "@/components/fleet/hire-dashboard/hire-workspace-balance-banner";
+import { HireSettlementBreakdownPanel } from "@/components/fleet/hire-settlement/hire-settlement-breakdown-panel";
+import { HireDriverChargesTable } from "@/components/fleet/hire-payments/hire-driver-charges-table";
 import { summarizeHireSettlementLedger } from "@/lib/fleet/hire-payments-ledger";
 import { useHirePaymentsRealtime } from "@/hooks/use-hire-realtime";
 import { useCallback, useEffect, useState, useTransition } from "react";
@@ -117,7 +119,16 @@ export function HirePaymentsView({
         depositGbp={data.depositGbp ?? 0}
         depositDispositionLabel={data.depositDispositionLabel}
         ledgerSummary={ledgerSummary}
+        driverChargeLineItems={data.driverChargeLineItems}
       />
+
+      {data.settlementBreakdown ? (
+        <HireSettlementBreakdownPanel breakdown={data.settlementBreakdown} />
+      ) : null}
+
+      {data.driverChargeLineItems.length > 0 ? (
+        <HireDriverChargesTable items={data.driverChargeLineItems} />
+      ) : null}
 
       {!contractEnded ? (
         <HireWorkspaceBalanceBanner

@@ -3,6 +3,7 @@ import {
   HIRE_DEPOSIT_DISPOSITIONS,
   hireDepositDispositionLabel,
   resolveSettlementBalanceDirection,
+  type HireUiAudience,
   type SettlementBalanceDirection,
 } from "@/lib/fleet/hire-termination-summary";
 
@@ -86,13 +87,21 @@ export function availableSettlementResolutions(
   return [];
 }
 
-export function settlementResolutionLabel(resolution: HireSettlementResolution): string {
-  const labels: Record<HireSettlementResolution, string> = {
+export function settlementResolutionLabel(
+  resolution: HireSettlementResolution,
+  audience: HireUiAudience = "staff",
+): string {
+  const staffLabels: Record<HireSettlementResolution, string> = {
     paid_now: "Pay now — record payment",
     open_balance: "Pay later — track on balance sheet",
     written_off: "Write off — no payment needed",
   };
-  return labels[resolution];
+  const driverLabels: Record<HireSettlementResolution, string> = {
+    paid_now: "Paid when contract ended",
+    open_balance: "Balance left open after contract end",
+    written_off: "Balance written off by rental company",
+  };
+  return (audience === "driver" ? driverLabels : staffLabels)[resolution];
 }
 
 export function resolveTerminationBalanceState(input: {

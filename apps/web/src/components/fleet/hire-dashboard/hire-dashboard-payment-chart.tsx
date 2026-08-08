@@ -33,7 +33,9 @@ export function HireDashboardPaymentChart({ points }: { points: HirePaymentChart
   return (
     <section className="rph-card p-4">
       <h2 className="text-sm font-semibold text-rph-fg">Payment schedule</h2>
-      <p className="rph-meta mt-1 text-xs">Due amount per period; green shows paid portion.</p>
+      <p className="rph-meta mt-1 text-xs">
+        Due amount per period; bar colour reflects status, green shows paid portion.
+      </p>
 
       <div className="mt-4 overflow-x-auto pb-2">
         <div className="flex min-w-max items-end gap-2" style={{ minHeight: "10rem" }}>
@@ -49,13 +51,14 @@ export function HireDashboardPaymentChart({ points }: { points: HirePaymentChart
             return (
               <div key={point.rowId} className="flex w-14 flex-col items-center gap-1">
                 <div
-                  className="relative w-full overflow-hidden rounded-t-md border border-rph-border bg-rph-page"
+                  className="relative w-full overflow-hidden rounded-t-md border border-rph-border"
                   style={{ height: `${dueHeight}px` }}
                   title={`${point.label}: due ${formatGbp(point.netDueGbp)}, paid ${formatGbp(point.paidGbp)}`}
                 >
+                  <div className={`absolute inset-0 ${barColour}`} />
                   {paidHeight > 0 ? (
                     <div
-                      className={`absolute bottom-0 left-0 right-0 ${barColour}`}
+                      className="absolute bottom-0 left-0 right-0 bg-emerald-500 dark:bg-emerald-600"
                       style={{ height: `${paidHeight}px` }}
                     />
                   ) : null}

@@ -1,8 +1,8 @@
 "use client";
 
-import type { HireTerminationAccountsSummary } from "@/lib/fleet/hire-termination-summary";
+import type { HireTerminationAccountsSummary, HireUiAudience } from "@/lib/fleet/hire-termination-summary";
 import { settlementBalanceLabel } from "@/lib/fleet/hire-termination-summary";
-import type { HireSettlementLedgerSummary } from "@/lib/fleet/hire-payments-ledger";
+import type { HireDriverChargeWorkspaceRow } from "@/app/actions/rental-hire-termination";
 import type { HireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
 import type { HirePaymentSummary } from "@/lib/fleet/hire-payment-summary";
 import { formatGbp } from "@/lib/fleet/maintenance";
@@ -47,6 +47,8 @@ export function HirePaymentsAccountOverview({
   depositGbp,
   depositDispositionLabel,
   ledgerSummary,
+  driverChargeLineItems = [],
+  audience = "staff",
 }: {
   contractEnded: boolean;
   contractEndedAtLabel?: string | null;
@@ -56,7 +58,9 @@ export function HirePaymentsAccountOverview({
   depositPendingReview?: boolean;
   depositGbp?: number;
   depositDispositionLabel?: string | null;
-  ledgerSummary?: HireSettlementLedgerSummary | null;
+  ledgerSummary?: import("@/lib/fleet/hire-payments-ledger").HireSettlementLedgerSummary | null;
+  driverChargeLineItems?: HireDriverChargeWorkspaceRow[];
+  audience?: HireUiAudience;
 }) {
   if (!contractEnded) {
     return (
@@ -79,11 +83,12 @@ export function HirePaymentsAccountOverview({
   }
 
   const rentDueGbp = terminationSummary?.accruedRentDueGbp ?? summary.totalDueGbp;
-  const rentPaidGbp = terminationSummary?.accruedRentPaidGbp ?? summary.totalPaidGbp;
-  const rentOutstandingGbp = Math.max(0, summary.balanceGbp);
+  const rentPaidGbp = summary.totalPaidGbp;
+  const rentOutstandingGbp = Math.max(0, rentDueGbp - rentPaidGbp);
   const rentCreditGbp = Math.max(0, summary.creditGbp);
   const settlementSettled = settlementBalance?.settled === true;
   const needsAction = !settlementSettled || depositPendingReview;
+  const isDriver = audience === "driver";
 
   return (
     <section
@@ -101,7 +106,17 @@ export function HirePaymentsAccountOverview({
           ) : null}
         </div>
         <StatusPill
-          label={needsAction ? "Action required" : "Accounts closed"}
+          label={
+            needsAction
+              ? isDriver
+                ? depositPendingReview && settlementSettled
+                  ? "Deposit still being reviewed"
+                  : "Outstanding balance"
+                : "Action required"
+              : isDriver
+                ? "All accounts closed"
+                : "Accounts closed"
+          }
           tone={needsAction ? "action" : "ok"}
         />
       </div>
@@ -115,6 +130,7 @@ export function HirePaymentsAccountOverview({
                 ? settlementBalanceLabel(
                     settlementBalance.settlementDirection,
                     settlementBalance.openBalanceGbp,
+                    audience,
                   )
                 : "Final balance"
           }
@@ -131,7 +147,11 @@ export function HirePaymentsAccountOverview({
         <Metric
           label="Rent due for contract"
           value={formatGbp(rentDueGbp)}
-          hint="Rent for the time the driver had the car"
+          hint={
+            isDriver
+              ? "Rent for the time you had the vehicle"
+              : "Rent for the time the driver had the car"
+          }
         />
         <Metric
           label="Paid on rent schedule"
@@ -150,22 +170,28 @@ export function HirePaymentsAccountOverview({
             value={settlementBalanceLabel(
               terminationSummary.balanceDirection,
               Math.abs(terminationSummary.netSettlementGbp),
+              audience,
             )}
             hint="Recorded when the contract was ended"
           />
         ) : null}
-        {ledgerSummary ? (
+        {driverChargeLineItems.length > 0 ? (
           <Metric
-            label="Net cash (this hire)"
-            value={formatGbp(ledgerSummary.netCashGbp)}
-            hint={`In ${formatGbp(ledgerSummary.totalReceivedGbp)} · Out ${formatGbp(ledgerSummary.totalPaidGbp)}`}
+            label={isDriver ? "Charges" : "Driver charges"}
+            value={formatGbp(
+              driverChargeLineItems
+                .filter((item) => item.resolution === "add_to_balance")
+                .reduce((sum, item) => sum + item.amountGbp, 0),
+            )}
+            hint="Added to the final balance after contract end"
           />
         ) : null}
       </div>
 
       <p className="text-xs text-rph-fg-muted">
-        Each hire contract has its own balances. Rent on the schedule, payments after contract end,
-        and deposit are kept separate — they do not mix across contracts.
+        {isDriver
+          ? "Your rent, deposit, and post-contract payments for this hire only."
+          : "Each hire contract has its own balances. Rent on the schedule, payments after contract end, and deposit are kept separate — they do not mix across contracts."}
       </p>
     </section>
   );

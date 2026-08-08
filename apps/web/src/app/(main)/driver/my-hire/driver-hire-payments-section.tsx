@@ -14,6 +14,8 @@ import { HirePaymentsAccountOverview } from "@/components/fleet/hire-payments/hi
 import { HireDepositPendingBanner } from "@/components/fleet/hire-dashboard/hire-deposit-pending-banner";
 import { HireWorkspaceBalanceBanner } from "@/components/fleet/hire-dashboard/hire-workspace-balance-banner";
 import { HirePaymentScheduleTable } from "@/components/fleet/hire-payments/hire-payment-schedule-table";
+import { HireSettlementBreakdownPanel } from "@/components/fleet/hire-settlement/hire-settlement-breakdown-panel";
+import { HireDriverChargesTable } from "@/components/fleet/hire-payments/hire-driver-charges-table";
 import { summarizeHireSettlementLedger } from "@/lib/fleet/hire-payments-ledger";
 import { useHirePaymentsRealtime } from "@/hooks/use-hire-realtime";
 import { useCallback, useEffect, useState, useTransition } from "react";
@@ -67,6 +69,18 @@ export function DriverHirePaymentsSection({ hireGroupId }: { hireGroupId: string
         depositGbp={data.depositGbp ?? 0}
         depositDispositionLabel={data.depositDispositionLabel}
         ledgerSummary={ledgerSummary}
+        driverChargeLineItems={data.driverChargeLineItems}
+        audience="driver"
+      />
+
+      {data.settlementBreakdown ? (
+        <HireSettlementBreakdownPanel breakdown={data.settlementBreakdown} audience="driver" />
+      ) : null}
+
+      <HireDriverChargesTable
+        items={data.driverChargeLineItems}
+        description="Charges from check-in and other events on this hire."
+        audience="driver"
       />
 
       {!contractEnded ? (
@@ -103,6 +117,7 @@ export function DriverHirePaymentsSection({ hireGroupId }: { hireGroupId: string
       <HireSettlementBalancePaymentsTable
         payments={data.settlementBalancePayments}
         contractEnded={contractEnded}
+        audience="driver"
       />
 
       {data.terminationSummary ? (
@@ -110,6 +125,7 @@ export function DriverHirePaymentsSection({ hireGroupId }: { hireGroupId: string
           summary={data.terminationSummary}
           depositDispositionLabel={data.depositDispositionLabel}
           settlementResolutionLabel={data.settlementResolutionLabel}
+          audience="driver"
         />
       ) : null}
 
@@ -153,6 +169,11 @@ export function DriverHirePaymentsSection({ hireGroupId }: { hireGroupId: string
           <h2 className="text-sm font-semibold text-rph-fg">
             {contractEnded ? "Rent during contract" : "Payment schedule"}
           </h2>
+          <p className="rph-muted mt-1 text-xs">
+            {contractEnded
+              ? "Deposit is listed first, then rent weeks. Weeks after the end date are hidden unless you paid early."
+              : "Deposit is listed first, then rent weeks. Only weeks that have started count toward the balance above."}
+          </p>
         </div>
         {contractEnded ? (
           <HirePaymentSummaryCards summary={data.summary} compact contractEnded endedContractOnly />

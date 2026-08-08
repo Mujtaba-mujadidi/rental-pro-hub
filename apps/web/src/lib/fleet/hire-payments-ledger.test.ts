@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   hireLedgerPaymentTypeLabel,
+  hireSettlementLedgerNetGbp,
   summarizeHireSettlementLedger,
 } from "@/lib/fleet/hire-payments-ledger";
 
@@ -16,6 +17,15 @@ describe("summarizeHireSettlementLedger", () => {
     expect(summary.settlementReceivedGbp).toBe(130);
     expect(summary.netCashGbp).toBe(160);
   });
+
+  it("computes driver-facing net as received minus paid", () => {
+    const summary = summarizeHireSettlementLedger([
+      { amountGbp: 100, direction: "paid_to_driver", paymentCategory: "settlement" },
+    ]);
+    expect(summary.netCashGbp).toBe(-100);
+    expect(hireSettlementLedgerNetGbp(summary, "staff")).toBe(-100);
+    expect(hireSettlementLedgerNetGbp(summary, "driver")).toBe(100);
+  });
 });
 
 describe("hireLedgerPaymentTypeLabel", () => {
@@ -26,5 +36,22 @@ describe("hireLedgerPaymentTypeLabel", () => {
         paymentCategory: "driver_charge",
       }),
     ).toBe("Damage charge");
+  });
+
+  it("uses driver-facing settlement labels", () => {
+    expect(
+      hireLedgerPaymentTypeLabel({
+        direction: "paid_to_driver",
+        paymentCategory: "settlement",
+        audience: "driver",
+      }),
+    ).toBe("Paid to you");
+    expect(
+      hireLedgerPaymentTypeLabel({
+        direction: "received_from_driver",
+        paymentCategory: "settlement",
+        audience: "driver",
+      }),
+    ).toBe("You paid");
   });
 });

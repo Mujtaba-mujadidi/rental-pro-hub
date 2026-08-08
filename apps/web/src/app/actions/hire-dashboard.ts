@@ -378,7 +378,8 @@ export async function loadHireDashboardAction(
         }),
         documentsStatusLabel: documentsStatusFromAgreements(agreements ?? []),
         contractPaidGbp: page.data.summary.totalPaidGbp,
-        contractTotalGbp: page.data.summary.contractTotalGbp,
+        contractTotalGbp:
+          page.data.terminationSummary?.accruedRentDueGbp ?? page.data.summary.contractTotalGbp,
         financialClosure,
       },
       recentEvents,
@@ -542,7 +543,8 @@ async function buildDriverDashboardData(
         }),
         documentsStatusLabel: "—",
         contractPaidGbp: page.data.summary.totalPaidGbp,
-        contractTotalGbp: page.data.summary.contractTotalGbp,
+        contractTotalGbp:
+          page.data.terminationSummary?.accruedRentDueGbp ?? page.data.summary.contractTotalGbp,
         financialClosure,
       },
       recentEvents,

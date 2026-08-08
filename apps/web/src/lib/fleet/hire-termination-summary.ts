@@ -29,6 +29,8 @@ export type HireDepositRefundMethod = (typeof HIRE_DEPOSIT_REFUND_METHODS)[numbe
 
 export type SettlementBalanceDirection = "driver_owes_company" | "company_owes_driver" | "settled";
 
+export type HireUiAudience = "staff" | "driver";
+
 export type HireTerminationAccountsSummary = {
   activatedAt: string | null;
   terminatedAt: string;
@@ -76,6 +78,27 @@ export function billedPeriodsForDuration(cadence: RentCadence, durationDays: num
   if (cadence === "daily") return durationDays;
   if (cadence === "weekly") return Math.ceil(durationDays / 7);
   return Math.ceil(durationDays / 30);
+}
+
+/** Human-readable hire length for payment summaries (e.g. "1 week and 4 days"). */
+export function formatHireDurationWeeksAndDays(durationDays: number): string {
+  if (durationDays <= 0) return "0 days";
+  const weeks = Math.floor(durationDays / 7);
+  const days = durationDays % 7;
+  const parts: string[] = [];
+  if (weeks > 0) parts.push(`${weeks} week${weeks === 1 ? "" : "s"}`);
+  if (days > 0) parts.push(`${days} day${days === 1 ? "" : "s"}`);
+  return parts.join(" and ");
+}
+
+/** Rent reduction from charging pro-rata on a partial final period — not a staff discount. */
+export function hireProRataRentAdjustmentGbp(input: {
+  rentGrossAccruedGbp: number;
+  totalDiscountGbp: number;
+  accruedRentDueGbp: number;
+}): number {
+  const fullPeriodNet = Math.round((input.rentGrossAccruedGbp - input.totalDiscountGbp) * 100) / 100;
+  return Math.round(Math.max(0, fullPeriodNet - input.accruedRentDueGbp) * 100) / 100;
 }
 
 export function netSettlementAfterDeposit(input: {
@@ -156,20 +179,38 @@ export function buildHireTerminationAccountsSummary(input: {
   };
 }
 
-export function settlementBalanceLabel(direction: SettlementBalanceDirection, amountGbp: number): string {
+export function settlementBalanceLabel(
+  direction: SettlementBalanceDirection,
+  amountGbp: number,
+  audience: HireUiAudience = "staff",
+): string {
   const amount = Math.abs(amountGbp).toFixed(2);
+  if (direction === "settled") return "All clear — nothing owed";
+  if (audience === "driver") {
+    if (direction === "driver_owes_company") return `You owe £${amount}`;
+    return `Owed to you: £${amount}`;
+  }
   if (direction === "driver_owes_company") return `Driver owes £${amount}`;
-  if (direction === "company_owes_driver") return `You owe driver £${amount}`;
-  return "All clear — nothing owed";
+  return `You owe driver £${amount}`;
 }
 
-export function hireDepositDispositionLabel(disposition: HireDepositDisposition): string {
-  const labels: Record<HireDepositDisposition, string> = {
+export function hireDepositDispositionLabel(
+  disposition: HireDepositDisposition,
+  audience: HireUiAudience = "staff",
+): string {
+  const staffLabels: Record<HireDepositDisposition, string> = {
     apply_to_balance: "Use deposit to pay rent owed",
     refund_full: "Return full deposit",
     refund_partial: "Return part of deposit",
     forfeit: "Keep deposit (no refund)",
     hold_pending: "Hold deposit — decide later on Payments",
   };
-  return labels[disposition];
+  const driverLabels: Record<HireDepositDisposition, string> = {
+    apply_to_balance: "Deposit used to pay rent you owed",
+    refund_full: "Full deposit returned to you",
+    refund_partial: "Part of deposit returned to you",
+    forfeit: "Deposit retained by rental company",
+    hold_pending: "Deposit held — your rental company will confirm",
+  };
+  return (audience === "driver" ? driverLabels : staffLabels)[disposition];
 }

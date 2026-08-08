@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ukTodayYmd } from "@/lib/datetime/uk";
 import {
   computeVehicleHireIncomeGbp,
+  depositAppliedToRentIncomeGbp,
   depositRetentionIncomeGbp,
   endedHireRentIncomeGbp,
   hireContractEndYmd,
@@ -494,6 +495,56 @@ describe("computeVehicleHireIncomeGbp", () => {
     expect(pending.netIncomeGbp).toBe(70);
   });
 
+  it("does not double-count deposit applied to rent when schedule shows inflated paid amounts", () => {
+    const result = computeVehicleHireIncomeGbp({
+      scheduleRows: [
+        {
+          hireGroupId: "g1",
+          periodStart: "2026-07-29",
+          periodEnd: "2026-08-04",
+          rowKind: "rent",
+          paymentStatus: "approved",
+          approvedAmountGbp: 100,
+          baseAmountGbp: 100,
+          discountTotalGbp: 0,
+        },
+        {
+          hireGroupId: "g1",
+          periodStart: "2026-08-05",
+          periodEnd: "2026-08-08",
+          rowKind: "rent",
+          paymentStatus: "approved",
+          approvedAmountGbp: 100,
+          baseAmountGbp: 100,
+          discountTotalGbp: 0,
+        },
+      ],
+      balancePayments: [{ amountGbp: 100, direction: "paid_to_driver", paymentCategory: "settlement" }],
+      driverChargeLineItems: [
+        {
+          chargeType: "damage",
+          amountGbp: 100,
+          resolution: "add_to_balance",
+          sourceKind: "checkin_inspection_damage",
+        },
+      ],
+      groupContextByGroupId: groupContext("2026-08-08", {
+        rentBillingMode: "actual",
+        depositDisposition: "apply_to_balance",
+        depositGbp: 500,
+        signedRentBalanceGbp: 57.14,
+        accruedRentPaidGbp: 100,
+        accruedRentDueGbp: 157.14,
+      }),
+      todayYmd: "2026-08-08",
+    });
+
+    expect(result.depositRetentionGbp).toBe(0);
+    expect(result.grossApprovedGbp).toBe(257.14);
+    expect(result.netIncomeGbp).toBe(257.14);
+    expect(result.driverChargeIncomeGbp).toBe(100);
+  });
+
   it("includes itemized driver charges in gross and net income", () => {
     const result = computeVehicleHireIncomeGbp({
       scheduleRows: [
@@ -602,6 +653,16 @@ describe("depositRetentionIncomeGbp", () => {
         depositDisposition: "apply_to_balance",
         depositGbp: 300,
         signedRentBalanceGbp: 70,
+      }),
+    ).toBe(0);
+
+    expect(
+      depositAppliedToRentIncomeGbp({
+        depositDisposition: "apply_to_balance",
+        depositGbp: 300,
+        signedRentBalanceGbp: 70,
+        recognizedRentIncomeGbp: 100,
+        accruedRentDueGbp: 170,
       }),
     ).toBe(70);
 

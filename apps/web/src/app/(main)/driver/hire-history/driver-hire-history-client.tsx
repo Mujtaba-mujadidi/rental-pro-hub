@@ -3,7 +3,7 @@
 import { loadDriverHireHistoryAction } from "@/app/actions/driver-hires";
 import type { DriverHireHistoryRow } from "@/lib/fleet/driver-hire-types";
 import { hireTableStatusToneClass } from "@/lib/fleet/hire-contract-table-display";
-import { driverHireDocumentsPath, driverHireStatusTone } from "@/lib/fleet/driver-hire-nav";
+import { driverHireStatusTone } from "@/lib/fleet/driver-hire-nav";
 import { driverHireWorkspaceHref } from "@/lib/fleet/driver-hire-workspace-nav";
 import { useDriverHireAccessRealtime } from "@/hooks/use-hire-realtime";
 import Link from "next/link";
@@ -65,7 +65,7 @@ function HireHistoryCard({ row }: { row: DriverHireHistoryRow }) {
       {row.signedAgreementCount > 0 ? (
         <div className="border-t border-rph-border px-4 py-3">
           <Link
-            href={driverHireDocumentsPath(row.hireGroupId, "hire-history")}
+            href={driverHireWorkspaceHref(row.hireGroupId, "details")}
             className="text-sm font-medium text-rph-link hover:text-rph-link-hover"
           >
             View signed document{row.signedAgreementCount === 1 ? "" : "s"}

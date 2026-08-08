@@ -45,6 +45,9 @@ import {
 } from "@/lib/fleet/hire-driver-charges";
 import type { HireTerminationRentBillingMode } from "@/lib/fleet/hire-termination-billing";
 import { HIRE_TERMINATION_RENT_BILLING_MODES } from "@/lib/fleet/hire-termination-billing";
+import { buildHireSettlementBreakdown, type HireSettlementBreakdown } from "@/lib/fleet/hire-settlement-breakdown";
+import { computeHireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
+import { settlementPaymentMethodRequiresAccount } from "@/lib/fleet/hire-settlement-payment-method";
 import { syncVehicleStatusForHireGroup } from "@/lib/fleet/sync-vehicle-hire-status";
 import { cancelOpenSubcompanyDocumentRequirementsForHire } from "@/lib/rental/subcompany-hire-document-requirements";
 import { revalidateVehicleFinancialsForHireGroup } from "@/app/actions/rental-vehicle-financials";
@@ -521,37 +524,6 @@ export async function listHireOpenBalancesAction(): Promise<
     .limit(200);
   if (error) return { ok: false, error: error.message };
 
-  const groupIds = (groups ?? []).map((group) => group.id as string);
-  const paymentsByGroup = new Map<
-    string,
-    { amount_gbp: number; direction: "received_from_driver" | "paid_to_driver" }[]
-  >();
-  if (groupIds.length) {
-    const { data: payments } = await supabase
-      .from("vehicle_hire_balance_payments")
-      .select("hire_group_id, amount_gbp, direction")
-      .in("hire_group_id", groupIds);
-    for (const payment of payments ?? []) {
-      const groupDirection = (groups ?? []).find((group) => group.id === payment.hire_group_id)
-        ?.settlement_balance_direction as
-        | "driver_owes_company"
-        | "company_owes_driver"
-        | "settled"
-        | undefined;
-      const direction =
-        (payment.direction as "received_from_driver" | "paid_to_driver" | null) ??
-        (groupDirection === "driver_owes_company"
-          ? "received_from_driver"
-          : "paid_to_driver");
-      const list = paymentsByGroup.get(payment.hire_group_id as string) ?? [];
-      list.push({
-        amount_gbp: Number(payment.amount_gbp ?? 0),
-        direction,
-      });
-      paymentsByGroup.set(payment.hire_group_id as string, list);
-    }
-  }
-
   const rows: HireOpenBalanceRow[] = [];
   for (const group of groups ?? []) {
     const direction = group.settlement_balance_direction as
@@ -560,13 +532,8 @@ export async function listHireOpenBalancesAction(): Promise<
       | "settled";
     if (direction === "settled") continue;
 
-    const signed = signedSettlementBalanceGbp(direction, Number(group.settlement_balance_gbp ?? 0));
-    const paymentInputs = (paymentsByGroup.get(group.id as string) ?? []).map((payment) => ({
-      amountGbp: payment.amount_gbp,
-      direction: payment.direction,
-    }));
-    const openBalanceGbp = remainingOpenBalanceGbp(signed, paymentInputs);
-    if (openBalanceDirection(openBalanceGbp) === "settled") continue;
+    const openBalanceGbp = Math.round(Math.abs(Number(group.settlement_balance_gbp ?? 0)) * 100) / 100;
+    if (openBalanceGbp <= 0.005) continue;
 
     const vehicle = group.vehicles as { vrm?: string } | null;
     rows.push({
@@ -577,8 +544,8 @@ export async function listHireOpenBalancesAction(): Promise<
         (group.driver_licence_number as string | null)?.trim() ||
         null,
       terminatedAt: (group.terminated_at as string | null) ?? null,
-      settlementDirection: openBalanceDirection(openBalanceGbp),
-      openBalanceGbp: Math.abs(openBalanceGbp),
+      settlementDirection: direction,
+      openBalanceGbp,
       driverDocumentsRetainUntil: (group.driver_documents_retain_until as string | null) ?? null,
     });
   }
@@ -738,18 +705,21 @@ export async function recordHireBalancePaymentAction(input: {
   const paymentAccountId =
     input.paymentAccountId?.trim() ||
     ((group.default_payment_account_id as string | null) ?? null);
-  if (!paymentAccountId) {
+  const accountRequired = settlementPaymentMethodRequiresAccount(method);
+  if (accountRequired && !paymentAccountId) {
     return { ok: false, error: "Select the payment account used for this settlement." };
   }
 
-  const { data: account } = await supabase
-    .from("company_payment_accounts")
-    .select("id")
-    .eq("id", paymentAccountId)
-    .eq("parent_company_id", group.parent_company_id as string)
-    .eq("is_active", true)
-    .maybeSingle();
-  if (!account?.id) return { ok: false, error: "Payment account not found." };
+  if (accountRequired) {
+    const { data: account } = await supabase
+      .from("company_payment_accounts")
+      .select("id")
+      .eq("id", paymentAccountId)
+      .eq("parent_company_id", group.parent_company_id as string)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (!account?.id) return { ok: false, error: "Payment account not found." };
+  }
 
   const direction = group.settlement_balance_direction as
     | "driver_owes_company"
@@ -763,11 +733,12 @@ export async function recordHireBalancePaymentAction(input: {
   const paymentDirection =
     direction === "driver_owes_company" ? "received_from_driver" : "paid_to_driver";
 
+  const roundedAmount = Math.round(amount * 100) / 100;
   const { error } = await supabase.from("vehicle_hire_balance_payments").insert({
     hire_group_id: input.hireGroupId.trim(),
-    amount_gbp: Math.round(amount * 100) / 100,
+    amount_gbp: roundedAmount,
     payment_method: method,
-    payment_account_id: paymentAccountId,
+    payment_account_id: accountRequired ? paymentAccountId : null,
     payment_reference: input.paymentReference?.trim() || null,
     direction: paymentDirection,
     payment_category: "settlement",
@@ -777,18 +748,9 @@ export async function recordHireBalancePaymentAction(input: {
   if (error) return { ok: false, error: error.message };
 
   const signed = signedSettlementBalanceGbp(direction, Number(group.settlement_balance_gbp ?? 0));
-  const { data: payments } = await supabase
-    .from("vehicle_hire_balance_payments")
-    .select("amount_gbp, direction")
-    .eq("hire_group_id", input.hireGroupId.trim());
-  const remaining = remainingOpenBalanceGbp(
-    signed,
-    (payments ?? []).map((payment) => ({
-      amountGbp: Number(payment.amount_gbp ?? 0),
-      direction:
-        (payment.direction as "received_from_driver" | "paid_to_driver" | null) ?? paymentDirection,
-    })),
-  );
+  const remaining = remainingOpenBalanceGbp(signed, [
+    { amountGbp: roundedAmount, direction: paymentDirection },
+  ]);
   const openDirection = openBalanceDirection(remaining);
   await supabase
     .from("vehicle_hire_groups")
@@ -841,7 +803,11 @@ export type DriverHireSettlementView = {
   settled: boolean;
   settlementDirection: "driver_owes_company" | "company_owes_driver" | "settled";
   openBalanceGbp: number;
-  payments: HireBalancePaymentRow[];
+  settlementBreakdown: HireSettlementBreakdown | null;
+  driverChargeLineItems: HireDriverChargeWorkspaceRow[];
+  payments: Array<
+    HireBalancePaymentRow & { direction: "received_from_driver" | "paid_to_driver" }
+  >;
 };
 
 /** Driver read-only settlement summary for ended hires. */
@@ -854,7 +820,7 @@ export async function loadDriverHireSettlementAction(
   const supabase = await createClient();
   const { data: group, error } = await supabase
     .from("vehicle_hire_groups")
-    .select("id, settlement_balance_gbp, settlement_balance_direction")
+    .select("id, settlement_balance_gbp, settlement_balance_direction, termination_settlement")
     .eq("id", hireGroupId.trim())
     .eq("driver_user_id", user.id)
     .maybeSingle();
@@ -867,52 +833,89 @@ export async function loadDriverHireSettlementAction(
     | "settled"
     | null) ?? "settled";
 
-  const { data: payments } = await supabase
-    .from("vehicle_hire_balance_payments")
-    .select("id, amount_gbp, payment_method, payment_reference, payment_account_id, direction, notes, paid_at")
-    .eq("hire_group_id", hireGroupId.trim())
-    .order("paid_at", { ascending: false });
+  const [{ data: payments }, { data: chargeRows }] = await Promise.all([
+    supabase
+      .from("vehicle_hire_balance_payments")
+      .select(
+        "id, amount_gbp, payment_method, payment_reference, payment_account_id, direction, notes, paid_at, payment_category",
+      )
+      .eq("hire_group_id", hireGroupId.trim())
+      .order("paid_at", { ascending: false }),
+    supabase
+      .from("vehicle_hire_driver_charge_line_items")
+      .select(
+        "id, hire_group_id, charge_type, amount_gbp, resolution, source_kind, source_id, description, created_at",
+      )
+      .eq("hire_group_id", hireGroupId.trim())
+      .order("created_at", { ascending: false }),
+  ]);
 
-  if (direction === "settled") {
-    return {
-      ok: true,
-      data: {
-        settled: true,
-        settlementDirection: "settled",
-        openBalanceGbp: 0,
-        payments: (payments ?? []).map((payment) => ({
-          id: payment.id as string,
-          amountGbp: Number(payment.amount_gbp ?? 0),
-          paymentMethod: payment.payment_method as string,
-          paymentReference: (payment.payment_reference as string | null) ?? null,
-          paymentAccountId: (payment.payment_account_id as string | null) ?? null,
-          paymentAccountName: null,
-          notes: (payment.notes as string | null) ?? null,
-          paidAt: payment.paid_at as string,
-        })),
-      },
-    };
-  }
+  const driverChargeLineItems: HireDriverChargeWorkspaceRow[] = mapDriverChargeLineItemsFromDb(
+    (chargeRows ?? []) as DriverChargeLineItemDbRow[],
+  ).map((item) => ({
+    id: item.id,
+    chargeType: item.chargeType,
+    chargeTypeLabel: hireDriverChargeTypeLabel(item.chargeType),
+    amountGbp: item.amountGbp,
+    resolution: item.resolution,
+    resolutionLabel: hireDriverChargeResolutionLabel(item.resolution),
+    description: item.description ?? null,
+    createdAt: item.createdAt ?? "",
+  }));
 
-  const signed = signedSettlementBalanceGbp(direction, Number(group.settlement_balance_gbp ?? 0));
-  const paymentDirection =
-    direction === "driver_owes_company" ? "received_from_driver" : "paid_to_driver";
-  const remaining = remainingOpenBalanceGbp(
-    signed,
-    (payments ?? []).map((payment) => ({
+  const settlementBalance = computeHireWorkspaceSettlementBalance({
+    settlementBalanceDirection: direction,
+    settlementBalanceGbp: Number(group.settlement_balance_gbp ?? 0),
+    balancePayments: (payments ?? []).map((payment) => ({
       amountGbp: Number(payment.amount_gbp ?? 0),
-      direction:
-        (payment.direction as "received_from_driver" | "paid_to_driver" | null) ?? paymentDirection,
+      direction: payment.direction as "received_from_driver" | "paid_to_driver",
     })),
-  );
-  const openDirection = openBalanceDirection(remaining);
+  });
+
+  const openDirection = settlementBalance?.settlementDirection ?? direction;
+  const openBalanceGbp = settlementBalance?.openBalanceGbp ?? 0;
+  const settled = settlementBalance?.settled ?? direction === "settled";
+
+  const rawTerminationSummary = group.termination_settlement as HireTerminationAccountsSummary | null;
+  const terminationSummary =
+    rawTerminationSummary && typeof rawTerminationSummary === "object" ? rawTerminationSummary : null;
+
+  const settlementPaymentsToDriverGbp = Math.round(
+    (payments ?? [])
+      .filter((payment) => payment.direction === "paid_to_driver")
+      .reduce((sum, payment) => sum + Number(payment.amount_gbp ?? 0), 0) * 100,
+  ) / 100;
+  const settlementPaymentsFromDriverGbp = Math.round(
+    (payments ?? [])
+      .filter((payment) => payment.direction === "received_from_driver")
+      .reduce((sum, payment) => sum + Number(payment.amount_gbp ?? 0), 0) * 100,
+  ) / 100;
+  const driverChargesOnBalanceGbp = Math.round(
+    driverChargeLineItems
+      .filter((item) => item.resolution === "add_to_balance")
+      .reduce((sum, item) => sum + item.amountGbp, 0) * 100,
+  ) / 100;
+  const settlementBreakdown =
+    settlementBalance && terminationSummary
+      ? buildHireSettlementBreakdown({
+          terminationSummary,
+          openBalanceGbp: settlementBalance.openBalanceGbp,
+          openDirection: settlementBalance.settlementDirection,
+          driverChargesGbp: driverChargesOnBalanceGbp,
+          settlementPaymentsToDriverGbp,
+          settlementPaymentsFromDriverGbp,
+          audience: "driver",
+        })
+      : null;
 
   return {
     ok: true,
     data: {
-      settled: openDirection === "settled",
+      settled,
       settlementDirection: openDirection,
-      openBalanceGbp: Math.abs(remaining),
+      openBalanceGbp,
+      settlementBreakdown,
+      driverChargeLineItems,
       payments: (payments ?? []).map((payment) => ({
         id: payment.id as string,
         amountGbp: Number(payment.amount_gbp ?? 0),
@@ -922,6 +925,8 @@ export async function loadDriverHireSettlementAction(
         paymentAccountName: null,
         notes: (payment.notes as string | null) ?? null,
         paidAt: payment.paid_at as string,
+        direction: (payment.direction as "received_from_driver" | "paid_to_driver") ?? "paid_to_driver",
+        paymentCategory: (payment.payment_category as string | null) ?? "settlement",
       })),
     },
   };
@@ -934,6 +939,7 @@ export type HireSettlementWorkspaceData = {
   terminatedAt: string | null;
   settlementDirection: "driver_owes_company" | "company_owes_driver" | "settled";
   openBalanceGbp: number;
+  settlementBreakdown: HireSettlementBreakdown | null;
   payments: HireBalancePaymentRow[];
   driverChargeLineItems: HireDriverChargeWorkspaceRow[];
   notes: HireBalanceNoteRow[];
@@ -953,7 +959,7 @@ export async function loadHireSettlementWorkspaceAction(hireGroupId: string): Pr
   const { data: group, error } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, status, terminated_at, settlement_balance_gbp, settlement_balance_direction, parent_company_id, default_payment_account_id, driver_email, driver_licence_number, vehicles(vrm)",
+      "id, status, terminated_at, settlement_balance_gbp, settlement_balance_direction, parent_company_id, default_payment_account_id, driver_email, driver_licence_number, termination_settlement, vehicles(vrm)",
     )
     .eq("id", hireGroupId.trim())
     .maybeSingle();
@@ -1054,28 +1060,45 @@ export async function loadHireSettlementWorkspaceAction(hireGroupId: string): Pr
   }));
 
   let openDirection = direction;
-  let openBalanceGbp = Number(group.settlement_balance_gbp ?? 0);
-
-  if (direction !== "settled") {
-    const signed = signedSettlementBalanceGbp(direction, openBalanceGbp);
-    const paymentDirection =
-      direction === "driver_owes_company" ? "received_from_driver" : "paid_to_driver";
-    const remaining = remainingOpenBalanceGbp(
-      signed,
-      (payments ?? []).map((payment) => ({
-        amountGbp: Number(payment.amount_gbp ?? 0),
-        direction:
-          (payment.direction as "received_from_driver" | "paid_to_driver" | null) ?? paymentDirection,
-      })),
-    );
-    openDirection = openBalanceDirection(remaining);
-    openBalanceGbp = Math.abs(remaining);
-  } else {
+  const openBalanceGbp =
+    direction === "settled"
+      ? 0
+      : Math.round(Math.abs(Number(group.settlement_balance_gbp ?? 0)) * 100) / 100;
+  if (direction === "settled") {
     openDirection = "settled";
-    openBalanceGbp = 0;
   }
 
   const vehicle = group.vehicles as { vrm?: string } | null;
+  const rawTerminationSummary = group.termination_settlement as HireTerminationAccountsSummary | null;
+  const terminationSummary =
+    rawTerminationSummary && typeof rawTerminationSummary === "object" ? rawTerminationSummary : null;
+
+  const settlementPaymentsToDriverGbp = Math.round(
+    (payments ?? [])
+      .filter((payment) => payment.direction === "paid_to_driver")
+      .reduce((sum, payment) => sum + Number(payment.amount_gbp ?? 0), 0) * 100,
+  ) / 100;
+  const settlementPaymentsFromDriverGbp = Math.round(
+    (payments ?? [])
+      .filter((payment) => payment.direction === "received_from_driver")
+      .reduce((sum, payment) => sum + Number(payment.amount_gbp ?? 0), 0) * 100,
+  ) / 100;
+  const driverChargesOnBalanceGbp = Math.round(
+    driverChargeLineItems
+      .filter((item) => item.resolution === "add_to_balance")
+      .reduce((sum, item) => sum + item.amountGbp, 0) * 100,
+  ) / 100;
+  const settlementBreakdown =
+    terminationSummary && openDirection !== "settled"
+      ? buildHireSettlementBreakdown({
+          terminationSummary,
+          openBalanceGbp,
+          openDirection,
+          driverChargesGbp: driverChargesOnBalanceGbp,
+          settlementPaymentsToDriverGbp,
+          settlementPaymentsFromDriverGbp,
+        })
+      : null;
 
   return {
     ok: true,
@@ -1089,6 +1112,7 @@ export async function loadHireSettlementWorkspaceAction(hireGroupId: string): Pr
       terminatedAt: (group.terminated_at as string | null) ?? null,
       settlementDirection: openDirection,
       openBalanceGbp,
+      settlementBreakdown,
       payments: mappedPayments,
       driverChargeLineItems,
       notes: (notes ?? []).map((note) => ({

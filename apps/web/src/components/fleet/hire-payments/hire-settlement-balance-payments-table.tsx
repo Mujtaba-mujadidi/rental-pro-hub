@@ -4,6 +4,8 @@ import type { HireBalancePaymentRow } from "@/app/actions/rental-hire-terminatio
 import { formatUkDateTime } from "@/lib/datetime/uk";
 import {
   hireLedgerPaymentTypeLabel,
+  hireSettlementLedgerNetGbp,
+  hireSettlementLedgerNetLabel,
   summarizeHireSettlementLedger,
   type HireSettlementLedgerSummary,
 } from "@/lib/fleet/hire-payments-ledger";
@@ -21,11 +23,24 @@ export type HireSettlementBalancePaymentRow = HireBalancePaymentRow & {
   direction: "received_from_driver" | "paid_to_driver";
 };
 
-function LedgerTotals({ summary }: { summary: HireSettlementLedgerSummary }) {
+function LedgerTotals({
+  summary,
+  audience = "staff",
+}: {
+  summary: HireSettlementLedgerSummary;
+  audience?: "staff" | "driver";
+}) {
+  const isDriver = audience === "driver";
+  const netGbp = hireSettlementLedgerNetGbp(summary, audience);
+  const netPositive = netGbp > 0.005;
+  const netNegative = netGbp < -0.005;
+
   return (
     <div className="grid gap-3 border-b border-rph-border bg-rph-chrome/40 px-4 py-3 sm:grid-cols-3">
       <div>
-        <p className="text-[10px] font-medium uppercase tracking-wide text-rph-fg-muted">Money in</p>
+        <p className="text-[10px] font-medium uppercase tracking-wide text-rph-fg-muted">
+          {isDriver ? "You paid" : "Money in"}
+        </p>
         <p className="mt-0.5 text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
           {formatGbp(summary.totalReceivedGbp)}
         </p>
@@ -36,18 +51,33 @@ function LedgerTotals({ summary }: { summary: HireSettlementLedgerSummary }) {
         ) : null}
       </div>
       <div>
-        <p className="text-[10px] font-medium uppercase tracking-wide text-rph-fg-muted">Money out</p>
+        <p className="text-[10px] font-medium uppercase tracking-wide text-rph-fg-muted">
+          {isDriver ? "You received" : "Money out"}
+        </p>
         <p className="mt-0.5 text-sm font-semibold tabular-nums text-rph-fg">
           {formatGbp(summary.totalPaidGbp)}
         </p>
       </div>
       <div>
         <p className="text-[10px] font-medium uppercase tracking-wide text-rph-fg-muted">
-          Net for this hire
+          {hireSettlementLedgerNetLabel(audience)}
         </p>
-        <p className="mt-0.5 text-sm font-semibold tabular-nums text-rph-fg">
-          {formatGbp(summary.netCashGbp)}
+        <p
+          className={`mt-0.5 text-sm font-semibold tabular-nums ${
+            isDriver && netPositive ? "text-emerald-700 dark:text-emerald-300" : "text-rph-fg"
+          }`}
+        >
+          {formatGbp(Math.abs(netGbp))}
+          {isDriver && netNegative ? (
+            <span className="ml-1 text-xs font-normal text-rph-fg-muted">paid</span>
+          ) : null}
+          {isDriver && netPositive ? (
+            <span className="ml-1 text-xs font-normal text-rph-fg-muted">received</span>
+          ) : null}
         </p>
+        {isDriver && !netPositive && !netNegative ? (
+          <p className="text-[10px] text-rph-fg-muted">No net movement</p>
+        ) : null}
       </div>
     </div>
   );
@@ -56,19 +86,26 @@ function LedgerTotals({ summary }: { summary: HireSettlementLedgerSummary }) {
 export function HireSettlementBalancePaymentsTable({
   payments,
   contractEnded = false,
+  audience = "staff",
 }: {
   payments: HireSettlementBalancePaymentRow[];
   contractEnded?: boolean;
+  audience?: "staff" | "driver";
 }) {
   if (!payments.length) return null;
 
   const summary = summarizeHireSettlementLedger(payments);
+  const isDriver = audience === "driver";
 
   return (
     <section className="overflow-hidden rounded-xl border border-rph-border">
       <div className="border-b border-rph-border bg-rph-chrome px-4 py-3">
         <h2 className="text-sm font-semibold text-rph-fg">
-          {contractEnded ? "Money in and out (after contract end)" : "Payments after contract end"}
+          {contractEnded
+            ? isDriver
+              ? "Payments after contract end"
+              : "Money in and out (after contract end)"
+            : "Payments after contract end"}
         </h2>
         <p className="rph-muted mt-0.5 text-xs">
           {contractEnded
@@ -76,7 +113,7 @@ export function HireSettlementBalancePaymentsTable({
             : "Payments recorded after the contract ended."}
         </p>
       </div>
-      <LedgerTotals summary={summary} />
+      <LedgerTotals summary={summary} audience={audience} />
       <table className="min-w-full text-sm">
         <thead className="bg-rph-chrome/60 text-left text-xs uppercase tracking-wide text-rph-fg-muted">
           <tr>
@@ -103,7 +140,7 @@ export function HireSettlementBalancePaymentsTable({
                         : "bg-rph-chrome text-rph-fg-secondary"
                     }`}
                   >
-                    {isIn ? "In" : "Out"}
+                    {isIn ? (isDriver ? "You paid" : "In") : isDriver ? "You received" : "Out"}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-rph-fg-secondary">
@@ -111,6 +148,7 @@ export function HireSettlementBalancePaymentsTable({
                     direction: payment.direction,
                     paymentCategory: payment.paymentCategory,
                     notes: payment.notes,
+                    audience,
                   })}
                 </td>
                 <td className="px-4 py-3 font-medium tabular-nums text-rph-fg">

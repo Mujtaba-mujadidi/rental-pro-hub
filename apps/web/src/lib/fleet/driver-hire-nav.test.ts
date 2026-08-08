@@ -70,19 +70,32 @@ describe("resolveDriverMyHireRedirectPath", () => {
   it("maps legacy tab query params to workspace sections", () => {
     expect(resolveDriverMyHireRedirectPath("g1", "payments")).toBe("/driver/hires/g1/payments");
     expect(resolveDriverMyHireRedirectPath("g1", "details")).toBe("/driver/hires/g1/details");
+    expect(resolveDriverMyHireRedirectPath("g1", "checkout")).toBe("/driver/hires/g1/checkout");
+    expect(resolveDriverMyHireRedirectPath("g1", "checkin")).toBe("/driver/hires/g1/checkin");
+    expect(resolveDriverMyHireRedirectPath("g1", "settlement")).toBe("/driver/hires/g1/settlement");
   });
 });
 
 describe("driverHireWorkspaceNav", () => {
-  it("shows checkout but not check-in while hire is active", () => {
+  it("mirrors staff tab order for active hires", () => {
     const labels = driverHireWorkspaceNav("g1", "active").map((item) => item.label);
-    expect(labels).toContain("Checkout");
-    expect(labels).not.toContain("Check-in");
+    expect(labels).toEqual(["Overview", "Checkout", "Payments", "Details"]);
   });
 
-  it("shows check-in only after the contract has ended", () => {
-    expect(driverHireWorkspaceNav("g1", "terminated").map((item) => item.label)).toContain("Check-in");
-    expect(driverHireWorkspaceNav("g1", "completed").map((item) => item.label)).toContain("Check-in");
+  it("mirrors staff tab order for ended hires", () => {
+    const labels = driverHireWorkspaceNav("g1", "terminated").map((item) => item.label);
+    expect(labels).toEqual([
+      "Overview",
+      "Checkout",
+      "Check-in",
+      "Settlement",
+      "Payments & settlement",
+      "Details",
+    ]);
+  });
+
+  it("does not include check-in while hire is active", () => {
+    expect(driverHireWorkspaceNav("g1", "active").map((item) => item.label)).not.toContain("Check-in");
     expect(driverHireWorkspaceNav("g1", "reserved").map((item) => item.label)).not.toContain("Check-in");
   });
 });

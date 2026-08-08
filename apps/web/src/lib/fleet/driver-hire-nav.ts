@@ -94,6 +94,9 @@ export function resolveDriverMyHireRedirectPath(
   const id = hireGroupId.trim();
   if (tab === "payments") return `/driver/hires/${id}/payments`;
   if (tab === "details") return `/driver/hires/${id}/details`;
+  if (tab === "checkout") return `/driver/hires/${id}/checkout`;
+  if (tab === "checkin") return `/driver/hires/${id}/checkin`;
+  if (tab === "settlement") return `/driver/hires/${id}/settlement`;
   return `/driver/hires/${id}`;
 }
 

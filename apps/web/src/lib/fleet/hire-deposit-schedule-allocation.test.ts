@@ -53,23 +53,30 @@ describe("depositRentScheduleCreditGbp", () => {
 });
 
 describe("reconcileEndedHirePaymentsWithDepositCredit", () => {
-  it("clears accrued rent balance after deposit was applied at termination", () => {
-    const enriched = enrichHirePaymentRows([rentRow], "2026-07-28");
-    const summary = summarizeHirePayments([rentRow], "2026-07-28");
-    expect(summary.balanceGbp).toBe(130);
+  it("skips duplicate deposit credit already persisted on the schedule", () => {
+    const rowWithDepositCredit = {
+      ...rentRow,
+      paymentStatus: "approved" as const,
+      approvedAmountGbp: 130,
+    };
+    const enriched = enrichHirePaymentRows([rowWithDepositCredit], "2026-07-28");
+    const summary = summarizeHirePayments([rowWithDepositCredit], "2026-07-28");
+    expect(summary.balanceGbp).toBe(0);
 
     const reconciled = reconcileEndedHirePaymentsWithDepositCredit({
       rows: enriched,
       summary,
       disposition: "apply_to_balance",
-      terminationSummary: { depositGbp: 200, signedRentBalanceGbp: 130 },
+      terminationSummary: {
+        depositGbp: 200,
+        signedRentBalanceGbp: 130,
+        accruedRentPaidGbp: 0,
+      },
       accrualYmd: "2026-07-28",
     });
 
     expect(reconciled.summary.balanceGbp).toBe(0);
-    expect(reconciled.summary.totalPaidGbp).toBe(130);
     expect(reconciled.rows[0]?.paidGbp).toBe(130);
-    expect(reconciled.rows[0]?.balanceGbp).toBe(0);
   });
 });
 

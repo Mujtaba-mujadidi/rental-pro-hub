@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   billedPeriodsForDuration,
   buildHireTerminationAccountsSummary,
+  formatHireDurationWeeksAndDays,
+  hireDepositDispositionLabel,
+  hireProRataRentAdjustmentGbp,
   netSettlementAfterDeposit,
   resolveSettlementBalanceDirection,
+  settlementBalanceLabel,
 } from "@/lib/fleet/hire-termination-summary";
 
 describe("hire-termination-summary", () => {
@@ -11,6 +15,29 @@ describe("hire-termination-summary", () => {
     expect(billedPeriodsForDuration("daily", 10)).toBe(10);
     expect(billedPeriodsForDuration("weekly", 10)).toBe(2);
     expect(billedPeriodsForDuration("monthly", 45)).toBe(2);
+  });
+
+  it("formats hire duration as weeks and days", () => {
+    expect(formatHireDurationWeeksAndDays(7)).toBe("1 week");
+    expect(formatHireDurationWeeksAndDays(11)).toBe("1 week and 4 days");
+    expect(formatHireDurationWeeksAndDays(4)).toBe("4 days");
+  });
+
+  it("separates pro-rata adjustment from discounts", () => {
+    expect(
+      hireProRataRentAdjustmentGbp({
+        rentGrossAccruedGbp: 200,
+        totalDiscountGbp: 0,
+        accruedRentDueGbp: 157.14,
+      }),
+    ).toBe(42.86);
+    expect(
+      hireProRataRentAdjustmentGbp({
+        rentGrossAccruedGbp: 200,
+        totalDiscountGbp: 20,
+        accruedRentDueGbp: 137.14,
+      }),
+    ).toBe(42.86);
   });
 
   it("resolves balance direction", () => {
@@ -48,6 +75,24 @@ describe("hire-termination-summary", () => {
         disposition: "forfeit",
       }),
     ).toBe(0);
+  });
+
+  it("labels settlement balance for staff and driver audiences", () => {
+    expect(settlementBalanceLabel("company_owes_driver", 242.86, "staff")).toBe(
+      "You owe driver £242.86",
+    );
+    expect(settlementBalanceLabel("company_owes_driver", 242.86, "driver")).toBe(
+      "Owed to you: £242.86",
+    );
+    expect(settlementBalanceLabel("driver_owes_company", 100, "staff")).toBe("Driver owes £100.00");
+    expect(settlementBalanceLabel("driver_owes_company", 100, "driver")).toBe("You owe £100.00");
+    expect(settlementBalanceLabel("settled", 0, "driver")).toBe("All clear — nothing owed");
+  });
+
+  it("labels deposit disposition for staff and driver audiences", () => {
+    expect(hireDepositDispositionLabel("hold_pending", "staff")).toContain("decide later");
+    expect(hireDepositDispositionLabel("hold_pending", "driver")).toContain("rental company");
+    expect(hireDepositDispositionLabel("refund_full", "driver")).toBe("Full deposit returned to you");
   });
 
   it("builds accounts summary including rent credit", () => {

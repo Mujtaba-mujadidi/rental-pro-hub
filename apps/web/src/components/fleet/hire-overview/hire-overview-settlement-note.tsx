@@ -3,6 +3,7 @@
 import type { HireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
 import type { HireTerminationAccountsSummary } from "@/lib/fleet/hire-termination-summary";
 import { settlementBalanceLabel } from "@/lib/fleet/hire-termination-summary";
+import { driverHireWorkspaceHref } from "@/lib/fleet/driver-hire-workspace-nav";
 import { formatGbp } from "@/lib/fleet/maintenance";
 import Link from "next/link";
 
@@ -27,8 +28,13 @@ export function HireOverviewSettlementNote({
 }) {
   const paymentsHref =
     audience === "driver"
-      ? `/driver/hires/${hireGroupId}/payments`
+      ? driverHireWorkspaceHref(hireGroupId, "payments")
       : `/rental/hires/${hireGroupId}/payments`;
+  const settlementHref =
+    audience === "driver"
+      ? driverHireWorkspaceHref(hireGroupId, "settlement")
+      : `/rental/hires/${hireGroupId}/settlement`;
+  const paymentsLabel = audience === "driver" ? "Payments & settlement" : "Payments";
   const settled = settlementBalance?.settled === true;
 
   return (
@@ -42,6 +48,7 @@ export function HireOverviewSettlementNote({
               {settlementBalanceLabel(
                 terminationSummary.balanceDirection,
                 Math.abs(terminationSummary.netSettlementGbp),
+                audience,
               )}
             </span>
           </li>
@@ -55,9 +62,19 @@ export function HireOverviewSettlementNote({
                 ? settlementBalanceLabel(
                     settlementBalance.settlementDirection,
                     settlementBalance.openBalanceGbp,
+                    audience,
                   )
                 : "—"}
           </span>
+          {!settled ? (
+            <>
+              {" "}
+              — see{" "}
+              <Link href={settlementHref} className="rph-link-inline">
+                Settlement
+              </Link>
+            </>
+          ) : null}
         </li>
         {depositPendingReview && (depositGbp ?? 0) > 0 ? (
           <li>
@@ -77,16 +94,23 @@ export function HireOverviewSettlementNote({
         ) : null}
         {hasPostEndPrepaidPayments ? (
           <li>
-            Some rent was paid in advance for weeks after the end date. See Payments for refunds or
-            how it was settled.
+            Some rent was paid in advance for weeks after the end date. See{" "}
+            <Link href={paymentsHref} className="rph-link-inline">
+              {paymentsLabel}
+            </Link>{" "}
+            for refunds or how it was settled.
           </li>
         ) : null}
         <li>
-          Refunds, deposit returns, and damage charges are listed on the{" "}
+          Refunds, deposit returns, and damage charges are listed on{" "}
           <Link href={paymentsHref} className="rph-link-inline">
-            Payments
+            {paymentsLabel}
           </Link>{" "}
-          page — not in the rent totals above.
+          and{" "}
+          <Link href={settlementHref} className="rph-link-inline">
+            Settlement
+          </Link>{" "}
+          — not in the rent totals above.
         </li>
       </ul>
     </section>
