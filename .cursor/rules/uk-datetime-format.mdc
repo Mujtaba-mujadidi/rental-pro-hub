@@ -7,9 +7,11 @@ alwaysApply: true
 
 Always display dates and times in UK format via `apps/web/src/lib/datetime/uk.ts`.
 
-- Calendar / DB `date` columns (`YYYY-MM-DD`): `formatUkDate` or `formatUkDateLong`
-- Timestamps (`created_at`, etc.): `formatUkDateTime`
-- E-sign / legal stamps with seconds: `formatUkDateTimeSeconds` or existing `formatEsignSignedAt`
+- Calendar / DB `date` columns (`YYYY-MM-DD`): `formatUkDate` → `17/07/2026`
+- Timestamps (`created_at`, etc.): `formatUkDateTime` → `17/07/2026, 21:16`
+- Calendar date + fixed time: `formatUkCalendarDateTime` / `formatUkDateAtTime` → `17/07/2026, 09:00`
+- Inclusive ranges: `formatUkDateRange` → `01/07/2026 – 07/07/2026`
+- E-sign / legal stamps with seconds: `formatUkDateTimeSeconds` or `formatEsignSignedAt` → `17/07/2026, 21:16:42`
 
 Do **not** use:
 

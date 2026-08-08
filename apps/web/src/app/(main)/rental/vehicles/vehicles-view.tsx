@@ -12,9 +12,8 @@ import {
 } from "@/lib/fleet/vehicle-expiry-attention";
 import { vehicleWorkspaceHref } from "@/lib/fleet/vehicle-workspace-nav";
 import { formatUkDate } from "@/lib/datetime/uk";
-import { formatGbp } from "@/lib/fleet/maintenance";
-import type { FleetVehiclePnlSummary } from "@/app/actions/rental-vehicle-financials";
 import type { CompanyNotificationSettings } from "@/lib/settings/notification-settings";
+import { RphSelect } from "@/components/forms/rph-select";
 import { VehicleExpiryPills } from "./vehicle-expiry-indicators";
 import { ADD_VEHICLE_DRAFT_KEY, AddVehicleModal, type AddVehicleCreatedResult } from "./add-vehicle-modal";
 
@@ -29,7 +28,6 @@ export function VehiclesView({
   notifySettings,
   canManage,
   canDelete: _canDelete,
-  pnlByVehicle,
   initialSubcompanyId = null,
   /** When set (e.g. subcompany workspace), filter is locked and chrome stays in-workspace. */
   lockedSubcompanyId = null,
@@ -39,7 +37,6 @@ export function VehiclesView({
   notifySettings: CompanyNotificationSettings;
   canManage: boolean;
   canDelete: boolean;
-  pnlByVehicle?: Map<string, FleetVehiclePnlSummary>;
   initialSubcompanyId?: string | null;
   lockedSubcompanyId?: string | null;
 }) {
@@ -104,6 +101,11 @@ export function VehiclesView({
     [vehicles, notifySettings],
   );
 
+  const openVehicleInNewTab = Boolean(lockedId);
+  const vehicleLinkProps = openVehicleInNewTab
+    ? ({ target: "_blank", rel: "noopener noreferrer" } as const)
+    : {};
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -145,6 +147,7 @@ export function VehiclesView({
               <Link
                 href={`${vehicleWorkspaceHref(docUploadNotice.vehicleId, "details")}#documents`}
                 className="rph-link inline-block text-sm"
+                {...vehicleLinkProps}
               >
                 Upload documents for {docUploadNotice.vrm}
               </Link>
@@ -217,36 +220,35 @@ export function VehiclesView({
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
-        <select
-          className="rph-input sm:max-w-[12rem]"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-        >
-          <option value="all">All statuses</option>
-          {VEHICLE_STATUSES.map((st) => (
-            <option key={st} value={st}>
-              {VEHICLE_STATUS_LABELS[st]}
-            </option>
-          ))}
-        </select>
+        <div className="w-full min-w-0 sm:max-w-[12rem]">
+          <RphSelect
+            value={statusFilter}
+            aria-label="Filter by status"
+            options={[
+              { value: "all", label: "All statuses" },
+              ...VEHICLE_STATUSES.map((st) => ({ value: st, label: VEHICLE_STATUS_LABELS[st] })),
+            ]}
+            onValueChange={setStatusFilter}
+          />
+        </div>
         {!lockedId && subcompanies.length > 1 ? (
-          <select
-            className="rph-input sm:max-w-[14rem]"
-            value={subcompanyFilter}
-            onChange={(e) => {
-              const next = e.target.value;
-              setSubcompanyFilter(next);
-              router.replace(next === "all" ? "/rental/vehicles" : `/rental/vehicles?subcompanyId=${next}`);
-            }}
-          >
-            <option value="all">All subcompanies</option>
-            {subcompanies.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name ?? "—"}
-                {s.is_primary ? " (Main)" : ""}
-              </option>
-            ))}
-          </select>
+          <div className="w-full min-w-0 sm:max-w-[14rem]">
+            <RphSelect
+              value={subcompanyFilter}
+              aria-label="Filter by subcompany"
+              options={[
+                { value: "all", label: "All subcompanies" },
+                ...subcompanies.map((s) => ({
+                  value: s.id,
+                  label: `${s.name ?? "—"}${s.is_primary ? " (Main)" : ""}`,
+                })),
+              ]}
+              onValueChange={(next) => {
+                setSubcompanyFilter(next);
+                router.replace(next === "all" ? "/rental/vehicles" : `/rental/vehicles?subcompanyId=${next}`);
+              }}
+            />
+          </div>
         ) : null}
       </div>
 
@@ -263,9 +265,6 @@ export function VehiclesView({
                 <th className="px-4 py-3 font-semibold">Vehicle</th>
                 <th className="px-4 py-3 font-semibold">Subcompany</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
-                <th className="px-4 py-3 font-semibold">Purchase</th>
-                <th className="px-4 py-3 font-semibold">Sale</th>
-                <th className="px-4 py-3 font-semibold">P&amp;L</th>
                 <th className="px-4 py-3 font-semibold">Documents</th>
                 <th className="px-4 py-3 font-semibold">Expiry</th>
                 <th className="px-4 py-3 font-semibold" />
@@ -279,13 +278,6 @@ export function VehiclesView({
                 const attention = vehicleExpiryAttentionItems(v, notifySettings);
                 const expiryTone = worstVehicleExpiryTone(attention);
                 const motItem = attention.find((i) => i.kind === "mot");
-                const pnl = pnlByVehicle?.get(v.id);
-                const pnlDisplay =
-                  pnl?.netPnlGbp != null
-                    ? formatGbp(pnl.netPnlGbp)
-                    : pnl?.bookPositionGbp != null
-                      ? formatGbp(pnl.bookPositionGbp)
-                      : "—";
                 return (
                   <tr
                     key={v.id}
@@ -298,7 +290,7 @@ export function VehiclesView({
                     }`}
                   >
                     <td data-label="VRM" className="rph-table-primary px-4 py-3 font-mono font-semibold text-rph-fg">
-                      <Link href={workspaceHref} className="hover:underline">
+                      <Link href={workspaceHref} className="hover:underline" {...vehicleLinkProps}>
                         {v.vrm}
                       </Link>
                     </td>
@@ -318,23 +310,15 @@ export function VehiclesView({
                         </span>
                       </div>
                     </td>
-                    <td data-label="Purchase" className="px-4 py-3 text-rph-fg-secondary">
-                      <span className="rph-table-cell-value">
-                        {pnl?.purchaseGbp != null ? formatGbp(pnl.purchaseGbp) : "—"}
-                      </span>
-                    </td>
-                    <td data-label="Sale" className="px-4 py-3 text-rph-fg-secondary">
-                      <span className="rph-table-cell-value">
-                        {pnl?.saleGbp != null ? formatGbp(pnl.saleGbp) : "—"}
-                      </span>
-                    </td>
-                    <td data-label="P&amp;L" className="px-4 py-3 font-medium text-rph-fg-secondary">
-                      <span className="rph-table-cell-value">{pnlDisplay}</span>
-                    </td>
                     <td data-label="Documents" className="px-4 py-3">
                       <div className="rph-table-cell-value">
                         {missing.length ? (
-                          <Link href={`${detailsHref}#documents`} className="flex flex-wrap justify-end gap-1" title="Add missing documents">
+                          <Link
+                            href={`${detailsHref}#documents`}
+                            className="flex flex-wrap justify-end gap-1"
+                            title="Add missing documents"
+                            {...vehicleLinkProps}
+                          >
                             {missing.map((t) => (
                               <span
                                 key={t}
@@ -366,7 +350,7 @@ export function VehiclesView({
                       </div>
                     </td>
                     <td data-label="" className="rph-table-actions px-4 py-3 text-right">
-                      <Link href={workspaceHref} className={btnGhost}>
+                      <Link href={workspaceHref} className={btnGhost} {...vehicleLinkProps}>
                         {canManage ? "Open" : "View"}
                       </Link>
                     </td>

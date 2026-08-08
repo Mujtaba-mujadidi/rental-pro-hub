@@ -2,6 +2,41 @@ import type { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type Admin = ReturnType<typeof createSupabaseAdminClient>;
 
+export const COMPANY_LOGOS_BUCKET = "company-logos";
+
+export type CompanyLogoStorageClient = {
+  storage: {
+    from: (bucket: string) => {
+      createSignedUrl: (
+        path: string,
+        expiresIn: number,
+      ) => Promise<{
+        data: { signedUrl: string } | null;
+        error: { message: string } | null;
+      }>;
+    };
+  };
+};
+
+export function normalizeCompanyLogoStoragePath(path: string | null | undefined): string | null {
+  const trimmed = path?.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/^\/+/, "");
+}
+
+/** True when the storage path is `{companyId}/logo.*` with no path traversal. */
+export function isCompanyLogoPathOwned(path: string, companyId: string): boolean {
+  const normalized = normalizeCompanyLogoStoragePath(path);
+  const company = companyId.trim();
+  if (!normalized || !company) return false;
+  if (normalized.includes("..")) return false;
+  const prefix = `${company}/`;
+  if (!normalized.toLowerCase().startsWith(prefix.toLowerCase())) return false;
+  const remainder = normalized.slice(prefix.length);
+  if (!remainder || remainder.includes("/")) return false;
+  return true;
+}
+
 /** PDF header box (points). Logo is scaled to fit inside; aspect ratio preserved. */
 export const CONTRACT_HEADER_LOGO_MAX_WIDTH = 140;
 export const CONTRACT_HEADER_LOGO_MAX_HEIGHT = 36;
@@ -90,4 +125,67 @@ export async function loadCompanyLogoForContractPdf(
   }
 
   return { bytes, contentType };
+}
+
+export async function createCompanyLogoSignedUrlForSession(
+  supabase: CompanyLogoStorageClient,
+  logoStoragePath: string | null | undefined,
+  companyId: string,
+  expiresInSeconds = 3600,
+): Promise<string | null> {
+  const path = normalizeCompanyLogoStoragePath(logoStoragePath);
+  if (!path) return null;
+  if (!isCompanyLogoPathOwned(path, companyId)) {
+    console.warn("[company-logo] refusing signed URL for path outside tenant folder", path);
+    return null;
+  }
+  const { data, error } = await supabase.storage.from(COMPANY_LOGOS_BUCKET).createSignedUrl(path, expiresInSeconds);
+  if (error || !data?.signedUrl) {
+    console.warn("[company-logo] session signed URL failed", path, error?.message);
+    return null;
+  }
+  return data.signedUrl;
+}
+
+export async function createCompanyLogoSignedUrl(
+  admin: Admin,
+  logoStoragePath: string | null | undefined,
+  companyId: string,
+  expiresInSeconds = 3600,
+): Promise<string | null> {
+  const path = normalizeCompanyLogoStoragePath(logoStoragePath);
+  if (!path) return null;
+  if (!isCompanyLogoPathOwned(path, companyId)) {
+    console.warn("[company-logo] refusing signed URL for path outside tenant folder", path);
+    return null;
+  }
+  const { data, error } = await admin.storage.from(COMPANY_LOGOS_BUCKET).createSignedUrl(path, expiresInSeconds);
+  if (error || !data?.signedUrl) {
+    console.warn("[company-logo] admin signed URL failed", path, error?.message);
+    return null;
+  }
+  return data.signedUrl;
+}
+
+/** Prefer the authenticated session client (storage RLS); fall back to service role when available. */
+export async function resolveCompanyLogoDisplayUrl(
+  supabase: CompanyLogoStorageClient,
+  logoStoragePath: string | null | undefined,
+  companyId: string,
+  admin?: Admin | null,
+  expiresInSeconds = 3600,
+): Promise<string | null> {
+  const fromSession = await createCompanyLogoSignedUrlForSession(
+    supabase,
+    logoStoragePath,
+    companyId,
+    expiresInSeconds,
+  );
+  if (fromSession) return fromSession;
+  if (!admin) return null;
+  try {
+    return await createCompanyLogoSignedUrl(admin, logoStoragePath, companyId, expiresInSeconds);
+  } catch {
+    return null;
+  }
 }

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { loadSubcompanySwitcherListAction } from "@/app/actions/rental-subcompany-workspace";
 import { getSubcompanyWorkspaceShell } from "@/lib/rental/load-subcompany-workspace-shell";
@@ -37,7 +38,9 @@ export default async function SubcompanyWorkspaceLayout({
 
   return (
     <SubcompanyWorkspaceProvider shell={result.shell}>
-      <SubcompanyWorkspaceTopBar subcompanies={switcher} />
+      <Suspense fallback={<div className="rph-chrome -mx-3 -mt-3 mb-5 h-20 animate-pulse border-b px-3" />}>
+        <SubcompanyWorkspaceTopBar subcompanies={switcher} />
+      </Suspense>
       {children}
     </SubcompanyWorkspaceProvider>
   );

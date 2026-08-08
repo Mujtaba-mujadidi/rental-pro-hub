@@ -7,7 +7,7 @@
 
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
 import { can, canReadRentals } from "@/lib/auth/rental-permissions";
-import { formatUkDate, formatUkDateTimeSeconds, ukTodayYmd } from "@/lib/datetime/uk";
+import { formatUkDate, formatUkDateRange, formatUkDateTimeSeconds, ukTodayYmd } from "@/lib/datetime/uk";
 import { hireContractEndYmd } from "@/lib/fleet/hire-income";
 import {
   driverDocumentsRetentionWarning as getDriverDocumentsRetentionWarning,
@@ -497,9 +497,7 @@ async function buildPaymentsPageData(
       periodLabel:
         row.rowKind === "deposit"
           ? "Deposit"
-          : row.periodStart === row.periodEnd
-            ? row.periodStart
-            : `${row.periodStart} – ${row.periodEnd}`,
+          : formatUkDateRange(row.periodStart, row.periodEnd),
       discounts: discountRows.map((d) => ({
         id: d.id,
         amountGbp: Number(d.amount_gbp),

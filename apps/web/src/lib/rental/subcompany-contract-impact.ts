@@ -91,6 +91,20 @@ export function detectSubcompanySnapshotDrift(
   const changes: SubcompanyFieldChange[] = [];
 
   for (const field of CONTRACT_IMPACT_FIELDS) {
+    if (field === "logo_storage_path") {
+      const livePath = norm((live as { logo_storage_path?: string | null }).logo_storage_path);
+      const snapPath = norm(snap.logo_storage_path);
+      if (livePath !== snapPath) {
+        changes.push({
+          field,
+          label: FIELD_LABELS[field],
+          from: snapPath ? "(set)" : null,
+          to: livePath ? "(set)" : null,
+        });
+      }
+      continue;
+    }
+
     const liveVal = valueForField(live, field);
     let snapVal: string | null;
 
@@ -115,8 +129,6 @@ export function detectSubcompanySnapshotDrift(
         continue;
       }
       snapVal = valueForField(snap, field);
-    } else if (field === "logo_storage_path") {
-      snapVal = norm(snap.logo_storage_path) ? "(set)" : null;
     } else if (
       (field === "primary_contact_first_name" ||
         field === "primary_contact_last_name" ||

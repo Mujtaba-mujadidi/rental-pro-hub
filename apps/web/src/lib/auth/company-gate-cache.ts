@@ -26,7 +26,7 @@ function companyGateTag(companyId: string) {
 /**
  * Cross-request cache for rental gate fields (name, deletion, contract, onboarding).
  * Uses service role so it can run inside `unstable_cache` (no cookies).
- * TTL is short; mutations call `revalidateCompanyGate`.
+ * Populated on first request after login; busted immediately via `revalidateCompanyGate` on contract/onboarding changes.
  */
 export function getCachedCompanyGate(companyId: string): Promise<CompanyGateSnapshot> {
   const id = companyId.trim();

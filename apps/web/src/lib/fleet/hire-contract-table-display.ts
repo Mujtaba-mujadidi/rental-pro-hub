@@ -2,6 +2,8 @@ import {
   deriveHireEnvelopePreparationStatus,
   type HireEnvelopeReadyRow,
 } from "@/lib/fleet/hire-envelope-readiness";
+import { formatUkCalendarDateTime, formatUkDateTime } from "@/lib/datetime/uk";
+import { HIRE_PDF_DEFAULT_START_TIME, normalizeHireTime } from "@/lib/fleet/hire-pdf-details";
 
 export type HireTableStatusTone = "neutral" | "pending" | "success" | "warning" | "error";
 
@@ -25,6 +27,36 @@ export function driverAccessTableStatus(status: string): HireTableStatus {
       tone: "neutral",
     }
   );
+}
+
+/** Primary hire-group status for contracts tables (fleet hires list, vehicle rentals). */
+export function hireGroupTableStatus(
+  status: string,
+  options?: { wizardStep?: number },
+): HireTableStatus {
+  if (status === "draft") {
+    const step = options?.wizardStep;
+    return {
+      label: step != null ? `Draft · step ${step}` : "Draft",
+      tone: "neutral",
+    };
+  }
+  switch (status) {
+    case "active":
+      return { label: "On rent", tone: "success" };
+    case "reserved":
+      return { label: "Reserved", tone: "pending" };
+    case "pending_signature":
+      return { label: "Pending signature", tone: "pending" };
+    case "terminated":
+      return { label: "Contract ended", tone: "warning" };
+    case "completed":
+      return { label: "Hire completed", tone: "success" };
+    case "cancelled":
+      return { label: "Cancelled", tone: "error" };
+    default:
+      return { label: status.replace(/_/g, " "), tone: "neutral" };
+  }
 }
 
 export function hireEsignTableStatus(input: {
@@ -92,4 +124,33 @@ export function hireTableStatusToneClass(tone: HireTableStatusTone): string {
     default:
       return "border-rph-border bg-rph-chrome/50 text-rph-fg-secondary";
   }
+}
+
+export type HireContractTableDateRow = {
+  activated_at: string | null;
+  start_date: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  scheduled_end_date: string | null;
+  terminated_at: string | null;
+  ended_at: string | null;
+};
+
+/** Hires table — when the hire actually started (or is scheduled to). */
+export function hireContractTableStartLabel(row: HireContractTableDateRow): string {
+  if (row.activated_at) return formatUkDateTime(row.activated_at);
+  if (row.start_date) {
+    return `Scheduled ${formatUkCalendarDateTime(
+      row.start_date,
+      normalizeHireTime(row.start_time, HIRE_PDF_DEFAULT_START_TIME),
+    )}`;
+  }
+  return "—";
+}
+
+/** Hires table — when the hire actually ended (termination or check-in complete). */
+export function hireContractTableEndLabel(row: HireContractTableDateRow): string {
+  if (row.terminated_at) return formatUkDateTime(row.terminated_at);
+  if (row.ended_at) return formatUkDateTime(row.ended_at);
+  return "—";
 }

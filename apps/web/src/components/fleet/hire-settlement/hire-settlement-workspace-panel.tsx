@@ -7,6 +7,7 @@ import {
   type HireBalancePaymentRow,
   type HireSettlementWorkspaceData,
 } from "@/app/actions/rental-hire-termination";
+import { RphSelect } from "@/components/forms/rph-select";
 import { formatGbp } from "@/lib/fleet/maintenance";
 import { settlementBalanceLabel } from "@/lib/fleet/hire-termination-summary";
 import { formatUkDateTime } from "@/lib/datetime/uk";
@@ -230,30 +231,28 @@ export function HireSettlementWorkspacePanel({
               value={paymentAmount}
               onChange={(event) => setPaymentAmount(event.target.value)}
             />
-            <select
-              className="rph-input w-full"
+            <RphSelect
               value={paymentMethod}
-              onChange={(event) => setPaymentMethod(event.target.value)}
-            >
-              {Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <select
-              className="rph-input w-full"
-              value={paymentAccountId}
-              onChange={(event) => setPaymentAccountId(event.target.value)}
-            >
-              <option value="">Select payment account…</option>
-              {data.paymentAccounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name}
-                  {account.isDefault ? " (hire default)" : ""}
-                </option>
-              ))}
-            </select>
+              aria-label="Payment method"
+              options={Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => ({
+                value,
+                label,
+              }))}
+              onValueChange={setPaymentMethod}
+            />
+            <RphSelect
+              value={paymentAccountId || "__none__"}
+              placeholder="Select payment account…"
+              aria-label="Payment account"
+              options={[
+                { value: "__none__", label: "Select payment account…" },
+                ...data.paymentAccounts.map((account) => ({
+                  value: account.id,
+                  label: `${account.name}${account.isDefault ? " (hire default)" : ""}`,
+                })),
+              ]}
+              onValueChange={(value) => setPaymentAccountId(value === "__none__" ? "" : value)}
+            />
             <input
               className="rph-input w-full"
               placeholder="Reference"

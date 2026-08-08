@@ -7,6 +7,7 @@ import {
 } from "@/app/actions/rental-vehicle-financials";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { VehiclePurchaseFormFields } from "@/components/fleet/vehicle-purchase-form-fields";
 import { formatUkDate } from "@/lib/datetime/uk";
@@ -461,33 +462,28 @@ export function VehicleFinancialsView({
             />
           </Field>
           <Field label="Payment method (optional)">
-            <select
-              className="rph-input"
-              value={saleForm.payment_method_id}
-              onChange={(e) => setSaleForm((f) => ({ ...f, payment_method_id: e.target.value }))}
-            >
-              <option value="">—</option>
-              {activeMethods.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
+            <FormModalSelect
+              value={saleForm.payment_method_id || "__none__"}
+              aria-label="Payment method"
+              options={[
+                { value: "__none__", label: "—" },
+                ...activeMethods.map((m) => ({ value: m.id, label: m.name })),
+              ]}
+              onValueChange={(value) =>
+                setSaleForm((f) => ({ ...f, payment_method_id: value === "__none__" ? "" : value }))
+              }
+            />
           </Field>
           {paymentMethodRequiresAccount(saleMethod) ? (
             <Field label="Payment account">
-              <select
-                className="rph-input"
+              <FormModalSelect
                 value={saleForm.payment_account_id}
-                onChange={(e) => setSaleForm((f) => ({ ...f, payment_account_id: e.target.value }))}
-                required
-              >
-                {activeAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
+                aria-label="Payment account"
+                options={activeAccounts.map((a) => ({ value: a.id, label: a.name }))}
+                onValueChange={(value) =>
+                  setSaleForm((f) => ({ ...f, payment_account_id: value }))
+                }
+              />
             </Field>
           ) : null}
           <Field label="Reference (optional)">

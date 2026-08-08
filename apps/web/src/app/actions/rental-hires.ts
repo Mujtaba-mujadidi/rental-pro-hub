@@ -34,6 +34,7 @@ import {
 } from "@/app/actions/rental-driver-links";
 import { loadDriverLabelsMap } from "@/lib/fleet/driver-labels";
 import { buildSubcompanyLegalSnapshot } from "@/lib/rental/subcompany-legal-snapshot";
+import { cancelOpenSubcompanyDocumentRequirementsForHire } from "@/lib/rental/subcompany-hire-document-requirements";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -521,6 +522,8 @@ export async function cancelHireGroupAction(
     .from("vehicle_hire_groups")
     .update({ status: "cancelled", ended_at: now })
     .eq("id", group.id);
+
+  await cancelOpenSubcompanyDocumentRequirementsForHire(admin, group.id as string, user.id);
 
   if (group.vehicle_id) {
     await releaseVehicleIfNoBlockingHire(admin, group.vehicle_id as string, group.id as string);

@@ -1,8 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
 import { getRentalSessionLifecycleCached } from "@/lib/auth/rental-lifecycle";
-import { loadPendingContractRenewal } from "@/lib/companies/pending-contract-renewal";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getPendingContractRenewalCached } from "@/lib/companies/pending-contract-renewal";
 import { AwaitingContractClient } from "./awaiting-contract-client";
 
 type SearchParams = { signError?: string };
@@ -34,8 +33,7 @@ export default async function RentalAwaitingContractPage({
     dashboardAccess = life.kind === "rental" && life.contractActive && life.renewalSignaturePending;
 
     try {
-      const admin = createSupabaseAdminClient();
-      const pending = await loadPendingContractRenewal(admin, companyId);
+      const pending = await getPendingContractRenewalCached(companyId);
       renewalSignaturePending = Boolean(pending);
       signReady = pending?.signReady ?? false;
       signBlockedReason = pending?.signBlockedReason ?? null;

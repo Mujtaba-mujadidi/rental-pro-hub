@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { deviceGroupOptionLabel, type DeviceGroup } from "@/lib/fleet-tracking/mapping";
 
@@ -108,35 +109,31 @@ export function ManualDeviceLinkModal({
     >
       <div className="space-y-4">
         <Field label="Vehicle">
-          <select
-            className="rph-input"
+          <FormModalSelect
             value={vehicleId}
             disabled={pending || !vehicles.length || lockVehicle}
-            onChange={(event) => setVehicleId(event.target.value)}
-          >
-            {!vehicles.length ? <option value="">No unmatched vehicles</option> : null}
-            {vehicles.map((vehicle) => (
-              <option key={vehicle.id} value={vehicle.id}>
-                {vehicleOptionLabel(vehicle)}
-              </option>
-            ))}
-          </select>
+            placeholder={vehicles.length ? undefined : "No unmatched vehicles"}
+            aria-label="Vehicle"
+            options={vehicles.map((vehicle) => ({
+              value: vehicle.id,
+              label: vehicleOptionLabel(vehicle),
+            }))}
+            onValueChange={setVehicleId}
+          />
         </Field>
 
         <Field label="Tracker device group">
-          <select
-            className="rph-input"
+          <FormModalSelect
             value={deviceBaseVrm}
             disabled={pending || !deviceGroups.length}
-            onChange={(event) => setDeviceBaseVrm(event.target.value)}
-          >
-            {!deviceGroups.length ? <option value="">No unmatched devices</option> : null}
-            {deviceGroups.map((group) => (
-              <option key={group.baseVrm} value={group.baseVrm}>
-                {deviceGroupOptionLabel(group)}
-              </option>
-            ))}
-          </select>
+            placeholder={deviceGroups.length ? undefined : "No unmatched devices"}
+            aria-label="Tracker device group"
+            options={deviceGroups.map((group) => ({
+              value: group.baseVrm,
+              label: deviceGroupOptionLabel(group),
+            }))}
+            onValueChange={setDeviceBaseVrm}
+          />
         </Field>
 
         {selectedGroup ? (

@@ -1,15 +1,10 @@
-import { FleetHiresView } from "@/app/(main)/rental/hires/fleet-hires-view";
-import { getSubcompanyWorkspaceShell } from "@/lib/rental/load-subcompany-workspace-shell";
-import { notFound } from "next/navigation";
+import { redirect } from "next/navigation";
 
-export default async function SubcompanyHiresPage({
+export default async function LegacySubcompanyHiresPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const shell = await getSubcompanyWorkspaceShell(id);
-  if (!shell.ok) notFound();
-
-  return <FleetHiresView lockedSubcompanyId={shell.shell.subcompany.id} />;
+  redirect(`/rental/subcompany/${id}?section=hires`);
 }

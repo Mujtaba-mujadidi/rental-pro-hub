@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { revalidateCompanyGate } from "@/lib/auth/company-gate-cache";
+import { revalidateProfileBundle } from "@/lib/auth/profile-bundle-cache";
 import { requireSuperAdmin } from "@/lib/auth/profile";
 import { createInitialCompanyContract, type InitialContractCommercial } from "@/app/actions/admin-companies";
 import { notifyCompanyFinanceRoles } from "@/lib/platform-notifications";
@@ -115,7 +117,7 @@ export async function completeNewLegalEntityTransitionAction(
 
   const { data: mems } = await admin
     .from("user_company_memberships")
-    .select("id")
+    .select("id, user_id")
     .eq("parent_company_id", oldParentId)
     .eq("status", "active");
   for (const m of mems ?? []) {
@@ -173,6 +175,12 @@ export async function completeNewLegalEntityTransitionAction(
     from_company_id: oldParentId,
     to_company_id: newId,
   });
+
+  revalidateCompanyGate(oldParentId);
+  revalidateCompanyGate(newId);
+  for (const m of mems ?? []) {
+    revalidateProfileBundle(m.user_id as string);
+  }
 
   revalidatePath("/super-admin/companies");
   revalidatePath("/super-admin/contract-changes");

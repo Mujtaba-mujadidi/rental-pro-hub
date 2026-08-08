@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState, useTransition } fr
 import { useRouter } from "next/navigation";
 import { inviteRentalStaffAction } from "@/app/actions/rental-staff";
 import type { CompanyMembershipRole } from "@/lib/auth/profile";
+import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
 
@@ -334,17 +335,17 @@ export function InviteStaffModal({
             <label htmlFor="invite-staff-role" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
               Role
             </label>
-            <select
-              id="invite-staff-role"
+            <FormModalSelect
               value={role}
-              onChange={(e) => setRole(e.target.value as CompanyMembershipRole)}
-              className={inputClass()}
-            >
-              <option value="admin">Admin</option>
-              <option value="operations">Operations</option>
-              <option value="finance">Finance</option>
-              <option value="viewer">Viewer</option>
-            </select>
+              aria-label="Role"
+              options={[
+                { value: "admin", label: "Admin" },
+                { value: "operations", label: "Operations" },
+                { value: "finance", label: "Finance" },
+                { value: "viewer", label: "Viewer" },
+              ]}
+              onValueChange={(v) => setRole(v as CompanyMembershipRole)}
+            />
           </div>
 
           {role === "admin" ? (

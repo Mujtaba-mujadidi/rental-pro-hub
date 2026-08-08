@@ -12,6 +12,7 @@ import {
   type HireInspectionPaymentAccountOption,
   type HireInspectionPayload,
 } from "@/app/actions/hire-inspections";
+import { RphSelect } from "@/components/forms/rph-select";
 import { FormModalStepProgress } from "@/components/forms/form-modal-step-progress";
 import { HireInspectionCompletedView } from "@/components/fleet/hire-inspection/hire-inspection-completed-view";
 import { HireInspectionPhotosSection } from "@/components/fleet/hire-inspection/hire-inspection-photos-section";
@@ -127,23 +128,27 @@ function HireInspectionDamageForm({
       <p className="text-sm text-rph-fg-secondary">{panelLabel}</p>
       <label className="block text-sm">
         <span className="rph-muted mb-1 block text-xs">Type</span>
-        <select className="rph-input" value={damageType} onChange={(e) => onDamageTypeChange(e.target.value as HireDamageType)}>
-          {HIRE_DAMAGE_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {hireDamageTypeLabel(t)}
-            </option>
-          ))}
-        </select>
+        <RphSelect
+          value={damageType}
+          aria-label="Damage type"
+          options={HIRE_DAMAGE_TYPES.map((t) => ({
+            value: t,
+            label: hireDamageTypeLabel(t),
+          }))}
+          onValueChange={(value) => onDamageTypeChange(value as HireDamageType)}
+        />
       </label>
       <label className="block text-sm">
         <span className="rph-muted mb-1 block text-xs">Severity</span>
-        <select className="rph-input" value={severity} onChange={(e) => onSeverityChange(e.target.value as HireDamageSeverity)}>
-          {HIRE_DAMAGE_SEVERITIES.map((s) => (
-            <option key={s} value={s}>
-              {hireDamageSeverityLabel(s)}
-            </option>
-          ))}
-        </select>
+        <RphSelect
+          value={severity}
+          aria-label="Damage severity"
+          options={HIRE_DAMAGE_SEVERITIES.map((s) => ({
+            value: s,
+            label: hireDamageSeverityLabel(s),
+          }))}
+          onValueChange={(value) => onSeverityChange(value as HireDamageSeverity)}
+        />
       </label>
       <label className="block text-sm">
         <span className="rph-muted mb-1 block text-xs">Notes</span>

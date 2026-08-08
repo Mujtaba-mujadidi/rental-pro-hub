@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { revalidateCompanyGate } from "@/lib/auth/company-gate-cache";
+import { revalidateProfileBundlesForCompany } from "@/lib/auth/profile-bundle-cache";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 /**
@@ -33,10 +35,16 @@ async function runOffboardingExpiry() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  const ids = (data ?? []).map((r) => (r as { id: string }).id);
+  for (const companyId of ids) {
+    revalidateCompanyGate(companyId);
+    await revalidateProfileBundlesForCompany(companyId);
+  }
+
   return NextResponse.json({
     ok: true,
-    updated: (data ?? []).length,
-    ids: (data ?? []).map((r) => (r as { id: string }).id),
+    updated: ids.length,
+    ids,
   });
 }
 

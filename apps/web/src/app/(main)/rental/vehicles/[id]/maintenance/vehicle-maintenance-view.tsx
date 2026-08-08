@@ -14,6 +14,7 @@ import {
   type VehicleMaintenancePageData,
 } from "@/app/actions/rental-maintenance";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
+import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { formatUkDate } from "@/lib/datetime/uk";
 import {
@@ -620,13 +621,16 @@ export function VehicleMaintenanceView({
           </label>
           <label className="block space-y-1">
             <span className="text-xs font-medium text-rph-fg-muted">Category</span>
-            <select
-              className="rph-input"
+            <FormModalSelect
               value={form.category}
-              onChange={(e) => {
-                const category = e.target.value as MaintenanceCategory;
+              aria-label="Category"
+              options={MAINTENANCE_CATEGORIES.map((c) => ({
+                value: c,
+                label: MAINTENANCE_CATEGORY_LABELS[c],
+              }))}
+              onValueChange={(category) => {
                 setForm((p) => {
-                  const next = { ...p, category };
+                  const next = { ...p, category: category as MaintenanceCategory };
                   if (category === "mot") {
                     const start = p.mot_date || p.occurred_on;
                     next.mot_date = start;
@@ -643,13 +647,7 @@ export function VehicleMaintenanceView({
                   return next;
                 });
               }}
-            >
-              {MAINTENANCE_CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {MAINTENANCE_CATEGORY_LABELS[c]}
-                </option>
-              ))}
-            </select>
+            />
           </label>
           <label className="block space-y-1 sm:col-span-2">
             <span className="text-xs font-medium text-rph-fg-muted">Description</span>
@@ -691,18 +689,24 @@ export function VehicleMaintenanceView({
           </label>
           <label className="block space-y-1">
             <span className="text-xs font-medium text-rph-fg-muted">Paid by (staff)</span>
-            <select
-              className="rph-input"
-              value={form.paid_by_user_id}
-              onChange={(e) => setForm((p) => ({ ...p, paid_by_user_id: e.target.value, paid_by_label: "" }))}
-            >
-              <option value="">Other / not listed</option>
-              {initial.staff.map((s: MaintenanceStaffOption) => (
-                <option key={s.user_id} value={s.user_id}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
+            <FormModalSelect
+              value={form.paid_by_user_id || "__none__"}
+              aria-label="Paid by (staff)"
+              options={[
+                { value: "__none__", label: "Other / not listed" },
+                ...initial.staff.map((s: MaintenanceStaffOption) => ({
+                  value: s.user_id,
+                  label: s.label,
+                })),
+              ]}
+              onValueChange={(value) =>
+                setForm((p) => ({
+                  ...p,
+                  paid_by_user_id: value === "__none__" ? "" : value,
+                  paid_by_label: "",
+                }))
+              }
+            />
           </label>
           {!form.paid_by_user_id ? (
             <label className="block space-y-1 sm:col-span-2">
@@ -716,34 +720,36 @@ export function VehicleMaintenanceView({
           ) : null}
           <label className="block space-y-1">
             <span className="text-xs font-medium text-rph-fg-muted">Payment method</span>
-            <select
-              className="rph-input"
-              value={form.payment_method_id}
-              onChange={(e) => setForm((p) => ({ ...p, payment_method_id: e.target.value }))}
-            >
-              {!activeMethods.length ? <option value="">No methods configured</option> : null}
-              {activeMethods.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
+            <FormModalSelect
+              value={form.payment_method_id || "__none__"}
+              aria-label="Payment method"
+              options={
+                activeMethods.length
+                  ? activeMethods.map((m) => ({ value: m.id, label: m.name }))
+                  : [{ value: "__none__", label: "No methods configured", disabled: true }]
+              }
+              disabled={!activeMethods.length}
+              onValueChange={(value) =>
+                setForm((p) => ({ ...p, payment_method_id: value === "__none__" ? "" : value }))
+              }
+            />
           </label>
           {needsAccount ? (
             <label className="block space-y-1">
               <span className="text-xs font-medium text-rph-fg-muted">Payment account</span>
-              <select
-                className="rph-input"
-                value={form.payment_account_id}
-                onChange={(e) => setForm((p) => ({ ...p, payment_account_id: e.target.value }))}
-              >
-                {!activeAccounts.length ? <option value="">No accounts configured</option> : null}
-                {activeAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
+              <FormModalSelect
+                value={form.payment_account_id || "__none__"}
+                aria-label="Payment account"
+                options={
+                  activeAccounts.length
+                    ? activeAccounts.map((a) => ({ value: a.id, label: a.name }))
+                    : [{ value: "__none__", label: "No accounts configured", disabled: true }]
+                }
+                disabled={!activeAccounts.length}
+                onValueChange={(value) =>
+                  setForm((p) => ({ ...p, payment_account_id: value === "__none__" ? "" : value }))
+                }
+              />
             </label>
           ) : (
             <p className="self-end text-xs text-rph-fg-muted">Cash — no account needed.</p>

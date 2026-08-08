@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { APP_NAME } from "@rph/shared";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -10,6 +10,7 @@ import { RentalCompanyPageHeader } from "@/components/shell/rental-company-page-
 import { RentalRenewalSignatureBanner } from "@/components/shell/rental-renewal-signature-banner";
 import { UserAccountMenu } from "@/components/shell/user-account-menu";
 import { rentalContractCopy } from "@/lib/rental-contract-copy";
+import { parseSubcompanyWorkspaceSectionParam } from "@/lib/rental/subcompany-workspace-nav";
 import { ADMIN_AGREEMENT_CHANGE_REQUESTS_NAV } from "@/lib/admin/contract-change-display";
 
 const SIDEBAR_COLLAPSED_KEY = "rph-sidebar-collapsed-opt7";
@@ -27,6 +28,7 @@ function buildBreadcrumbs(
   pathname: string,
   variant: ShellVariant,
   driverCurrentHireGroupId?: string | null,
+  subcompanySection?: string | null,
 ): Crumb[] {
   if (variant === "rental_company") {
     if (pathname === "/rental") {
@@ -42,6 +44,10 @@ function buildBreadcrumbs(
           { label: "Subcompany", href: "/rental/subcompany" },
           { label: "Workspace", href: `/rental/subcompany/${subcompanyId}` },
         ];
+        const fromQuery = parseSubcompanyWorkspaceSectionParam(subcompanySection);
+        if (fromQuery) {
+          return [...base, { label: fromQuery.charAt(0).toUpperCase() + fromQuery.slice(1) }];
+        }
         if (!parts[3]) return [...base, { label: "Overview" }];
         const section = parts[3];
         return [...base, { label: section.charAt(0).toUpperCase() + section.slice(1) }];
@@ -357,6 +363,7 @@ export function Option7Shell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   // Always start expanded so SSR HTML matches the first client render; restore preference after mount.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -386,8 +393,14 @@ export function Option7Shell({
   const closeMobileNav = useCallback(() => setMobileNavOpen(false), []);
 
   const crumbs = useMemo(
-    () => buildBreadcrumbs(pathname, variant, driverCurrentHireGroupId),
-    [pathname, variant, driverCurrentHireGroupId],
+    () =>
+      buildBreadcrumbs(
+        pathname,
+        variant,
+        driverCurrentHireGroupId,
+        pathname.startsWith("/rental/subcompany/") ? searchParams.get("section") : null,
+      ),
+    [pathname, variant, driverCurrentHireGroupId, searchParams],
   );
 
   const myHireHref = driverCurrentHireGroupId

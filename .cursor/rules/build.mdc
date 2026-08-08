@@ -83,7 +83,7 @@ New UI must reuse existing components and visual language. Do not create one-off
 | --- | --- |
 | Form / wizard modal | `FormModalShell` (`@/components/forms/form-modal-shell`) |
 | Confirmation / destructive prompt | `ConfirmDialog` (`@/components/confirm-dialog`) — not `window.confirm` |
-| Form dropdown | `FormModalSelect` (`@/components/forms/form-modal-select`) or matching Radix Select styling |
+| Dropdown / select | **`RphSelect`** (`@/components/forms/rph-select`) on pages and tables; **`FormModalSelect`** inside modals. Menu opens **below** the field, aligned to the **bottom-right** (`side="bottom"`, `align="end"`). **Never** use native `<select>` or bespoke Radix Select markup. |
 | Pending / success / error | `ActionStatusOverlay` (`@/components/action-status-overlay`) |
 | Form fields | `rph-input`, `FormModalField`, existing label / meta utilities |
 | Buttons | `rph-btn-*` and modal footer helpers from `@/components/forms/form-modal-actions` |

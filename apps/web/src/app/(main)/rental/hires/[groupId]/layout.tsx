@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { requireRentalCompanyArea } from "@/lib/auth/profile";
+import { getAppProfile } from "@/lib/auth/profile";
 import { canReadRentals } from "@/lib/auth/rental-permissions";
 import { getHireWorkspaceShell, loadHireSwitcherList } from "@/lib/fleet/load-hire-workspace-shell";
 import { HireWorkspaceProvider } from "./hire-workspace-provider";
@@ -12,8 +12,8 @@ export default async function HireWorkspaceLayout({
   children: React.ReactNode;
   params: Promise<{ groupId: string }>;
 }) {
-  const { profile } = await requireRentalCompanyArea();
-  if (!canReadRentals(profile)) notFound();
+  const profile = await getAppProfile();
+  if (!profile || !canReadRentals(profile)) notFound();
 
   const { groupId } = await params;
   const [shell, hiresList] = await Promise.all([getHireWorkspaceShell(groupId), loadHireSwitcherList()]);

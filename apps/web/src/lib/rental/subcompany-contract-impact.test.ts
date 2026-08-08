@@ -78,6 +78,21 @@ describe("detectSubcompanySnapshotDrift", () => {
     const snap = buildSubcompanyLegalSnapshot(liveBase);
     expect(detectSubcompanySnapshotDrift(liveBase, snap)).toEqual([]);
   });
+
+  it("detects logo replacement when both snapshots had a logo", () => {
+    const snap = buildSubcompanyLegalSnapshot({
+      ...liveBase,
+      logo_storage_path: "company/sub/old.png",
+    });
+    const live = {
+      ...liveBase,
+      logo_storage_path: "company/sub/new.png",
+    };
+    const changes = detectSubcompanySnapshotDrift(live, snap);
+    expect(changes).toEqual([
+      { field: "logo_storage_path", label: "Logo", from: "(set)", to: "(set)" },
+    ]);
+  });
 });
 
 describe("buildSubcompanyChangeSummary / lessorDisplayName", () => {
@@ -97,39 +112,48 @@ describe("buildSubcompanyChangeSummary / lessorDisplayName", () => {
 describe("subcompany workspace nav", () => {
   it("builds hrefs and parses sections", () => {
     const nav = subcompanyWorkspaceNav("s1");
-    expect(nav[0]).toEqual({ href: "/rental/subcompany/s1", label: "Overview", match: "exact" });
-    expect(nav.find((i) => i.label === "Vehicles")).toEqual({
-      href: "/rental/subcompany/s1/vehicles",
-      label: "Vehicles",
-      match: "prefix",
+    expect(nav[0]).toEqual({
+      href: "/rental/subcompany/s1",
+      label: "Overview",
+      section: "",
     });
-    expect(nav.find((i) => i.label === "Hires")?.href).toBe("/rental/subcompany/s1/hires");
-    expect(nav.find((i) => i.label === "Staff")?.external).toBe(true);
-    expect(subcompanyWorkspaceHref("s1", "details")).toBe("/rental/subcompany/s1/details");
-    expect(subcompanyWorkspaceHref("s1", "vehicles")).toBe("/rental/subcompany/s1/vehicles");
-    expect(parseSubcompanyWorkspaceSection("/rental/subcompany/s1/details", "s1")).toBe("details");
-    expect(parseSubcompanyWorkspaceSection("/rental/subcompany/s1/vehicles", "s1")).toBe("vehicles");
-    expect(parseSubcompanyWorkspaceSection("/rental/subcompany/s1/hires", "s1")).toBe("hires");
-    expect(parseSubcompanyWorkspaceSection("/rental/subcompany/s1", "s1")).toBe("");
+    expect(nav.find((i) => i.label === "Vehicles")).toEqual({
+      href: "/rental/subcompany/s1?section=vehicles",
+      label: "Vehicles",
+      section: "vehicles",
+    });
+    expect(nav.find((i) => i.label === "Hires")?.href).toBe("/rental/subcompany/s1?section=hires");
+    expect(nav.find((i) => i.label === "Staff")).toBeUndefined();
+    expect(subcompanyWorkspaceHref("s1", "details")).toBe("/rental/subcompany/s1?section=details");
+    expect(subcompanyWorkspaceHref("s1", "vehicles")).toBe("/rental/subcompany/s1?section=vehicles");
+    expect(parseSubcompanyWorkspaceSection("/rental/subcompany/s1", "s1", "details")).toBe("details");
+    expect(parseSubcompanyWorkspaceSection("/rental/subcompany/s1", "s1", "vehicles")).toBe("vehicles");
+    expect(parseSubcompanyWorkspaceSection("/rental/subcompany/s1", "s1", "hires")).toBe("hires");
+    expect(parseSubcompanyWorkspaceSection("/rental/subcompany/s1", "s1", null)).toBe("");
+    expect(parseSubcompanyWorkspaceSection("/rental/subcompany/s1/details", "s1", null)).toBe("details");
     expect(parseSubcompanyWorkspaceId("/rental/subcompany/abc")).toBe("abc");
     expect(parseSubcompanyWorkspaceId("/rental/subcompany")).toBeNull();
   });
 
   it("marks internal nav active", () => {
-    const details = { href: "/rental/subcompany/s1/details", label: "Details", match: "prefix" as const };
-    expect(isSubcompanyWorkspaceNavItemActive("/rental/subcompany/s1/details", details)).toBe(true);
-    const vehicles = {
-      href: "/rental/subcompany/s1/vehicles",
-      label: "Vehicles",
-      match: "prefix" as const,
+    const details = {
+      href: "/rental/subcompany/s1?section=details",
+      label: "Details",
+      section: "details" as const,
     };
-    expect(isSubcompanyWorkspaceNavItemActive("/rental/subcompany/s1/vehicles", vehicles)).toBe(true);
+    expect(isSubcompanyWorkspaceNavItemActive("details", details)).toBe(true);
+    const vehicles = {
+      href: "/rental/subcompany/s1?section=vehicles",
+      label: "Vehicles",
+      section: "vehicles" as const,
+    };
+    expect(isSubcompanyWorkspaceNavItemActive("vehicles", vehicles)).toBe(true);
     const staff = {
       href: "/rental/staff",
       label: "Staff",
-      match: "exact" as const,
+      section: "" as const,
       external: true,
     };
-    expect(isSubcompanyWorkspaceNavItemActive("/rental/staff", staff)).toBe(false);
+    expect(isSubcompanyWorkspaceNavItemActive("vehicles", staff)).toBe(false);
   });
 });

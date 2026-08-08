@@ -4,8 +4,11 @@ import { useCallback, useState, useTransition } from "react";
 import {
   loadAffectedHireDocumentsForImpactAction,
   recordSubcompanyContractImpactAnswerAction,
-  type AffectedHireDocument,
 } from "@/app/actions/rental-subcompany-workspace";
+import {
+  affectedHireDocumentKey,
+  type AffectedHireDocument,
+} from "@/lib/rental/subcompany-hire-document-impact";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { FormModalStepProgress } from "@/components/forms/form-modal-step-progress";
@@ -19,8 +22,8 @@ const btnPrimary =
 const btnGhost =
   "flex h-11 shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-raised px-4 text-sm font-medium text-rph-fg-secondary hover:bg-rph-chrome disabled:opacity-50";
 
-function docKey(doc: { hireGroupId: string; documentKind: string }) {
-  return `${doc.hireGroupId}:${doc.documentKind}`;
+function docKey(doc: AffectedHireDocument) {
+  return affectedHireDocumentKey(doc);
 }
 
 /**
@@ -79,7 +82,7 @@ export function SubcompanyContractImpactModal({
 
   const goToDocuments = useCallback(() => {
     startTransition(async () => {
-      const res = await loadAffectedHireDocumentsForImpactAction(subcompanyId);
+      const res = await loadAffectedHireDocumentsForImpactAction(subcompanyId, changedFields);
       if (!res.ok) {
         setError(res.error);
         return;
@@ -89,7 +92,7 @@ export function SubcompanyContractImpactModal({
       setError(null);
       setStep(1);
     });
-  }, [subcompanyId]);
+  }, [subcompanyId, changedFields]);
 
   function toggle(key: string) {
     setSelected((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
@@ -174,8 +177,8 @@ export function SubcompanyContractImpactModal({
               Do any rental-related contracts need to be changed?
             </p>
             <p className="rph-muted text-sm">
-              Choosing yes flags the selected hire documents so they can be re-issued or re-signed. Nothing is sent to
-              drivers now.
+              Choosing yes flags the selected hire documents so they can be re-issued or re-signed. Only active,
+              on-rent hires with issued PDFs are listed — ended contracts are excluded. Nothing is sent to drivers now.
             </p>
           </div>
         ) : (

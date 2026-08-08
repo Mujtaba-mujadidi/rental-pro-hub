@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { requireRentalCompanyArea } from "@/lib/auth/profile";
+import { getAppProfile } from "@/lib/auth/profile";
 import { canWriteMaintenance } from "@/lib/auth/rental-permissions";
 import { getVehicleWorkspaceShell } from "@/lib/fleet/load-vehicle-workspace-shell";
 import { loadVehicleSwitcherList } from "@/app/actions/rental-vehicles";
@@ -14,7 +14,7 @@ export default async function VehicleWorkspaceLayout({
   children: React.ReactNode;
   params: Promise<{ id: string }>;
 }) {
-  const { profile } = await requireRentalCompanyArea();
+  const profile = await getAppProfile();
   const { id } = await params;
   const [data, fleet] = await Promise.all([getVehicleWorkspaceShell(id), loadVehicleSwitcherList()]);
   if (!data.ok) notFound();
@@ -35,7 +35,7 @@ export default async function VehicleWorkspaceLayout({
   return (
     <VehicleWorkspaceProvider vehicleId={id} initialShell={initialShell}>
       <VehicleWorkspaceTopBar fleet={fleet} />
-      <VehicleDocAttentionBanner canConfirm={canWriteMaintenance(profile)} />
+      <VehicleDocAttentionBanner canConfirm={profile ? canWriteMaintenance(profile) : false} />
       {children}
     </VehicleWorkspaceProvider>
   );

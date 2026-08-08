@@ -1,9 +1,7 @@
 export type SubcompanyWorkspaceNavItem = {
   href: string;
   label: string;
-  match: "exact" | "prefix";
-  /** Links that leave the subcompany workspace (e.g. Staff). */
-  external?: boolean;
+  section: SubcompanyWorkspaceSection;
 };
 
 export type SubcompanyWorkspaceSection = "" | "details" | "activity" | "vehicles" | "hires";
@@ -13,23 +11,28 @@ const INTERNAL_SECTIONS = new Set<string>(["details", "activity", "vehicles", "h
 export function subcompanyWorkspaceNav(subcompanyId: string): SubcompanyWorkspaceNavItem[] {
   const base = `/rental/subcompany/${subcompanyId}`;
   return [
-    { href: base, label: "Overview", match: "exact" },
-    { href: `${base}/details`, label: "Details", match: "prefix" },
-    { href: `${base}/vehicles`, label: "Vehicles", match: "prefix" },
-    { href: `${base}/hires`, label: "Hires", match: "prefix" },
-    { href: "/rental/staff", label: "Staff", match: "exact", external: true },
-    { href: `${base}/activity`, label: "Activity", match: "prefix" },
+    { href: base, label: "Overview", section: "" },
+    { href: `${base}?section=details`, label: "Details", section: "details" },
+    { href: `${base}?section=vehicles`, label: "Vehicles", section: "vehicles" },
+    { href: `${base}?section=hires`, label: "Hires", section: "hires" },
+    { href: `${base}?section=activity`, label: "Activity", section: "activity" },
   ];
 }
 
-export function subcompanyWorkspaceHref(subcompanyId: string, path: SubcompanyWorkspaceSection = "") {
-  return path ? `/rental/subcompany/${subcompanyId}/${path}` : `/rental/subcompany/${subcompanyId}`;
+export function subcompanyWorkspaceHref(subcompanyId: string, section: SubcompanyWorkspaceSection = "") {
+  const base = `/rental/subcompany/${subcompanyId}`;
+  return section ? `${base}?section=${section}` : base;
 }
 
+/** Active section from `?section=` (preferred) or legacy `/…/details` path segments. */
 export function parseSubcompanyWorkspaceSection(
   pathname: string,
   subcompanyId: string,
+  searchSection?: string | null,
 ): SubcompanyWorkspaceSection {
+  const fromSearch = parseSubcompanyWorkspaceSectionParam(searchSection);
+  if (fromSearch) return fromSearch;
+
   const base = `/rental/subcompany/${subcompanyId}`;
   if (pathname === base) return "";
   if (!pathname.startsWith(`${base}/`)) return "";
@@ -38,17 +41,24 @@ export function parseSubcompanyWorkspaceSection(
   return "";
 }
 
+export function parseSubcompanyWorkspaceSectionParam(
+  raw: string | null | undefined,
+): SubcompanyWorkspaceSection {
+  const section = raw?.trim() ?? "";
+  if (!section) return "";
+  if (INTERNAL_SECTIONS.has(section)) return section as SubcompanyWorkspaceSection;
+  return "";
+}
+
 export function parseSubcompanyWorkspaceId(pathname: string): string | null {
-  const m = pathname.match(/^\/rental\/subcompany\/([^/]+)/);
+  const m = pathname.match(/^\/rental\/subcompany\/([^/?]+)/);
   if (!m?.[1] || m[1] === "") return null;
   return m[1];
 }
 
 export function isSubcompanyWorkspaceNavItemActive(
-  pathname: string,
+  activeSection: SubcompanyWorkspaceSection,
   item: SubcompanyWorkspaceNavItem,
 ): boolean {
-  if (item.external) return false;
-  if (item.match === "exact") return pathname === item.href;
-  return pathname === item.href || pathname.startsWith(`${item.href}/`);
+  return activeSection === item.section;
 }

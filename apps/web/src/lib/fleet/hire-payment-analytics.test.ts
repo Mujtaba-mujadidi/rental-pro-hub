@@ -30,7 +30,7 @@ const rows: HirePaymentAnalyticsRow[] = [
     periodStart: "2026-07-01",
     periodEnd: "2026-07-07",
     rowKind: "rent",
-    periodLabel: "1 Jul – 7 Jul 2026",
+    periodLabel: "01/07/2026 – 07/07/2026",
     netDueGbp: 250,
     paidGbp: 250,
     balanceGbp: 0,
@@ -43,7 +43,7 @@ const rows: HirePaymentAnalyticsRow[] = [
     periodStart: "2026-07-08",
     periodEnd: "2026-07-14",
     rowKind: "rent",
-    periodLabel: "8 Jul – 14 Jul 2026",
+    periodLabel: "08/07/2026 – 14/07/2026",
     netDueGbp: 250,
     paidGbp: 0,
     balanceGbp: 250,
@@ -56,7 +56,7 @@ const rows: HirePaymentAnalyticsRow[] = [
     periodStart: "2026-07-15",
     periodEnd: "2026-07-21",
     rowKind: "rent",
-    periodLabel: "15 Jul – 21 Jul 2026",
+    periodLabel: "15/07/2026 – 21/07/2026",
     netDueGbp: 250,
     paidGbp: 0,
     balanceGbp: 250,
@@ -118,7 +118,7 @@ describe("hire-payment-analytics", () => {
       id: "w4",
       periodStart: "2026-08-27",
       periodEnd: "2026-09-02",
-      periodLabel: "27 Aug – 2 Sept 2026",
+      periodLabel: "27/08/2026 – 02/09/2026",
       paymentStatus: "rejected",
       accrued: false,
     };
@@ -157,7 +157,7 @@ describe("hire-payment-analytics", () => {
         fromStatus: "not_received",
         toStatus: "pending_approval",
         actorRole: "driver",
-        periodLabel: "8 Jul – 14 Jul 2026",
+        periodLabel: "08/07/2026 – 14/07/2026",
         submittedAmountGbp: 250,
       }),
     ).toContain("Driver submitted");
@@ -166,7 +166,7 @@ describe("hire-payment-analytics", () => {
         fromStatus: "pending_approval",
         toStatus: "approved",
         actorRole: "company_staff",
-        periodLabel: "8 Jul – 14 Jul 2026",
+        periodLabel: "08/07/2026 – 14/07/2026",
       }),
     ).toContain("approved");
   });

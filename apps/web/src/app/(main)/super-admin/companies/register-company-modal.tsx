@@ -10,6 +10,8 @@ import {
 } from "@/app/actions/contract-terms";
 import { TermsRichViewer } from "@/app/(main)/super-admin/settings/contract-terms/terms-rich-editor";
 import { CompanyStepProgress } from "@/components/forms/company-step-progress";
+import { FormModalSelect } from "@/components/forms/form-modal-select";
+import { rphSelectTriggerClass } from "@/components/forms/rph-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
@@ -36,32 +38,17 @@ function inputClass(invalid?: boolean) {
   ].join(" ");
 }
 
-/** Native `<select>`: strip OS chevron and show a centered icon (matches text inputs). */
-function selectClass(invalid?: boolean) {
+function modalSelectClass(invalid?: boolean) {
   return [
-    "w-full appearance-none rounded-lg border bg-white py-2.5 pl-3 pr-10 text-sm text-zinc-900 outline-none focus:ring-2 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100",
+    rphSelectTriggerClass,
     invalid
       ? "border-red-500 focus:border-red-500 focus:ring-red-500/25"
       : "border-zinc-300 focus:border-rph-rail focus:ring-rph-rail/20",
   ].join(" ");
 }
 
-function SelectChevron() {
-  return (
-    <svg
-      className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500 dark:text-zinc-400"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
+const PRICING_PRESET_NONE = "__none__";
+const TERMS_VERSION_UNSET = "__unset__";
 
 /** Matches `contract_pricing_presets.pricing_model_type` check constraint. */
 const PRICING_MODEL_OPTIONS: { value: string; label: string }[] = [
@@ -725,31 +712,26 @@ export function RegisterCompanyModal({
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1 sm:col-span-2">
                   <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Pricing preset</label>
-                  <div className="relative">
-                    <select
-                      value={draft.pricing_preset_id}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        const pr = presets.find((p) => p.id === v);
-                        setDraft((d) => ({
-                          ...d,
-                          pricing_preset_id: v,
-                          ...(pr?.pricing_model_type
-                            ? { pricing_model: String(pr.pricing_model_type).trim() }
-                            : {}),
-                        }));
-                      }}
-                      className={selectClass()}
-                    >
-                      <option value="">None — set pricing model and amounts yourself</option>
-                      {presets.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                    <SelectChevron />
-                  </div>
+                  <FormModalSelect
+                    value={draft.pricing_preset_id || PRICING_PRESET_NONE}
+                    aria-label="Pricing preset"
+                    triggerClassName={modalSelectClass()}
+                    options={[
+                      { value: PRICING_PRESET_NONE, label: "None — set pricing model and amounts yourself" },
+                      ...presets.map((p) => ({ value: p.id, label: p.name })),
+                    ]}
+                    onValueChange={(value) => {
+                      const v = value === PRICING_PRESET_NONE ? "" : value;
+                      const pr = presets.find((p) => p.id === v);
+                      setDraft((d) => ({
+                        ...d,
+                        pricing_preset_id: v,
+                        ...(pr?.pricing_model_type
+                          ? { pricing_model: String(pr.pricing_model_type).trim() }
+                          : {}),
+                      }));
+                    }}
+                  />
                   <p className="text-xs text-zinc-500 dark:text-zinc-400">
                     Optional saved template (amounts, currency, billing rhythm) from Super admin → Contract pricing presets.
                     If you use one, you do not pick pricing model separately—it is defined by that preset.
@@ -762,27 +744,27 @@ export function RegisterCompanyModal({
                         <label htmlFor="reg-terms-version" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                           Terms &amp; conditions (published) *
                         </label>
-                        <div className="relative">
-                          <select
-                            id="reg-terms-version"
-                            value={draft.terms_catalog_version_id}
-                            onChange={(e) => {
-                              patch("terms_catalog_version_id", e.target.value);
-                              setTcReviewOpen(false);
-                              setTcReview(null);
-                              setTcReviewErr(null);
-                            }}
-                            className={selectClass(!draft.terms_catalog_version_id.trim())}
-                          >
-                            <option value="">Select version…</option>
-                            {publishedTerms.map((t) => (
-                              <option key={t.id} value={t.id}>
-                                {t.version_label} — {t.title}
-                              </option>
-                            ))}
-                          </select>
-                          <SelectChevron />
-                        </div>
+                        <FormModalSelect
+                          value={draft.terms_catalog_version_id || TERMS_VERSION_UNSET}
+                          aria-label="Terms and conditions version"
+                          triggerClassName={modalSelectClass(!draft.terms_catalog_version_id.trim())}
+                          options={[
+                            { value: TERMS_VERSION_UNSET, label: "Select version…" },
+                            ...publishedTerms.map((t) => ({
+                              value: t.id,
+                              label: `${t.version_label} — ${t.title}`,
+                            })),
+                          ]}
+                          onValueChange={(value) => {
+                            patch(
+                              "terms_catalog_version_id",
+                              value === TERMS_VERSION_UNSET ? "" : value,
+                            );
+                            setTcReviewOpen(false);
+                            setTcReview(null);
+                            setTcReviewErr(null);
+                          }}
+                        />
                       </div>
                       <button
                         type="button"
@@ -866,24 +848,24 @@ export function RegisterCompanyModal({
                     </>
                   ) : (
                     <>
-                      <div className="relative">
-                        <select
-                          id="reg-pricing-model"
-                          value={draft.pricing_model}
-                          onChange={(e) => patch("pricing_model", e.target.value)}
-                          className={selectClass()}
-                        >
-                          {!PRICING_MODEL_OPTIONS.some((o) => o.value === draft.pricing_model) && draft.pricing_model ? (
-                            <option value={draft.pricing_model}>{draft.pricing_model} (current value)</option>
-                          ) : null}
-                          {PRICING_MODEL_OPTIONS.map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
-                        <SelectChevron />
-                      </div>
+                      <FormModalSelect
+                        value={draft.pricing_model}
+                        aria-label="Pricing model"
+                        triggerClassName={modalSelectClass()}
+                        options={[
+                          ...(!PRICING_MODEL_OPTIONS.some((o) => o.value === draft.pricing_model) &&
+                          draft.pricing_model
+                            ? [
+                                {
+                                  value: draft.pricing_model,
+                                  label: `${draft.pricing_model} (current value)`,
+                                },
+                              ]
+                            : []),
+                          ...PRICING_MODEL_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+                        ]}
+                        onValueChange={(value) => patch("pricing_model", value)}
+                      />
                       <p className="text-xs text-zinc-500 dark:text-zinc-400">
                         Only when no preset is selected: how recurring charges are structured on the contract. Default is a
                         single flat fee per billing period (
@@ -894,19 +876,18 @@ export function RegisterCompanyModal({
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Billing frequency</label>
-                  <div className="relative">
-                    <select
-                      value={draft.billing_frequency}
-                      onChange={(e) => patch("billing_frequency", e.target.value)}
-                      className={selectClass()}
-                    >
-                      <option value="monthly">Monthly</option>
-                      <option value="weekly">Weekly</option>
-                      <option value="quarterly">Quarterly</option>
-                      <option value="annual">Annual</option>
-                    </select>
-                    <SelectChevron />
-                  </div>
+                  <FormModalSelect
+                    value={draft.billing_frequency}
+                    aria-label="Billing frequency"
+                    triggerClassName={modalSelectClass()}
+                    options={[
+                      { value: "monthly", label: "Monthly" },
+                      { value: "weekly", label: "Weekly" },
+                      { value: "quarterly", label: "Quarterly" },
+                      { value: "annual", label: "Annual" },
+                    ]}
+                    onValueChange={(value) => patch("billing_frequency", value)}
+                  />
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Start date</label>
@@ -1007,19 +988,17 @@ export function RegisterCompanyModal({
                 <label htmlFor="co-status" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                   Account status
                 </label>
-                <div className="relative">
-                  <select
-                    id="co-status"
-                    value={draft.status}
-                    onChange={(e) => patch("status", e.target.value)}
-                    className={selectClass()}
-                  >
-                    <option value="active">Active</option>
-                    <option value="pending">Pending</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
-                  <SelectChevron />
-                </div>
+                <FormModalSelect
+                  value={draft.status}
+                  aria-label="Account status"
+                  triggerClassName={modalSelectClass()}
+                  options={[
+                    { value: "active", label: "Active" },
+                    { value: "pending", label: "Pending" },
+                    { value: "inactive", label: "Inactive" },
+                  ]}
+                  onValueChange={(value) => patch("status", value)}
+                />
               </div>
               <div className="space-y-1">
                 <label htmlFor="co-notes" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">

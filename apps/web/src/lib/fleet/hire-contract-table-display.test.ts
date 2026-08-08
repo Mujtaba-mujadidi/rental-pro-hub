@@ -1,5 +1,77 @@
 import { describe, expect, it } from "vitest";
-import { hireEsignTableStatus } from "@/lib/fleet/hire-contract-table-display";
+import {
+  hireContractTableEndLabel,
+  hireContractTableStartLabel,
+  hireEsignTableStatus,
+  hireGroupTableStatus,
+} from "@/lib/fleet/hire-contract-table-display";
+
+describe("hireGroupTableStatus", () => {
+  it("labels ended hires clearly", () => {
+    expect(hireGroupTableStatus("terminated").label).toBe("Contract ended");
+    expect(hireGroupTableStatus("completed").label).toBe("Hire completed");
+    expect(hireGroupTableStatus("active").label).toBe("On rent");
+  });
+
+  it("includes wizard step for drafts", () => {
+    expect(hireGroupTableStatus("draft", { wizardStep: 4 }).label).toBe("Draft · step 4");
+  });
+});
+
+describe("hire contract table date labels", () => {
+  it("uses standard UK datetime for actual start/end timestamps", () => {
+    expect(
+      hireContractTableStartLabel({
+        activated_at: "2026-07-17T08:00:00.000Z",
+        start_date: null,
+        start_time: null,
+        end_time: null,
+        scheduled_end_date: null,
+        terminated_at: null,
+        ended_at: null,
+      }),
+    ).toBe("17/07/2026, 09:00");
+
+    expect(
+      hireContractTableEndLabel({
+        activated_at: null,
+        start_date: null,
+        start_time: null,
+        end_time: null,
+        scheduled_end_date: null,
+        terminated_at: "2026-07-20T11:30:00.000Z",
+        ended_at: null,
+      }),
+    ).toBe("20/07/2026, 12:30");
+  });
+
+  it("does not show scheduled contract end under Ended for active hires", () => {
+    const row = {
+      activated_at: "2026-07-17T08:00:00.000Z",
+      start_date: "2026-07-17",
+      start_time: "09:00",
+      end_time: "09:00",
+      scheduled_end_date: "2027-07-28",
+      terminated_at: null,
+      ended_at: null,
+    };
+    expect(hireContractTableEndLabel(row)).toBe("—");
+  });
+
+  it("formats scheduled start with the same calendar datetime style", () => {
+    expect(
+      hireContractTableStartLabel({
+        activated_at: null,
+        start_date: "2027-07-28",
+        start_time: "09:00",
+        end_time: null,
+        scheduled_end_date: null,
+        terminated_at: null,
+        ended_at: null,
+      }),
+    ).toBe("Scheduled 28/07/2027, 09:00");
+  });
+});
 
 describe("hireEsignTableStatus", () => {
   it("shows awaiting hirer after bundle is sent", () => {

@@ -1,23 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { fitImageWithinBox } from "@/lib/companies/company-logo";
+import { isCompanyLogoPathOwned } from "@/lib/companies/company-logo";
 
-describe("fitImageWithinBox", () => {
-  it("returns max box for non-positive source", () => {
-    expect(fitImageWithinBox(0, 100, 140, 36)).toEqual({ width: 140, height: 36 });
-    expect(fitImageWithinBox(100, -1, 140, 36)).toEqual({ width: 140, height: 36 });
+describe("isCompanyLogoPathOwned", () => {
+  const company = "11111111-1111-1111-1111-111111111111";
+
+  it("accepts tenant-owned company logo paths", () => {
+    expect(isCompanyLogoPathOwned(`${company}/logo.png`, company)).toBe(true);
+    expect(isCompanyLogoPathOwned(`/${company}/logo.jpg`, company)).toBe(true);
   });
 
-  it("does not upscale smaller images", () => {
-    expect(fitImageWithinBox(70, 18, 140, 36)).toEqual({ width: 70, height: 18 });
-  });
-
-  it("scales down to fit width or height", () => {
-    const wide = fitImageWithinBox(280, 36, 140, 36);
-    expect(wide.width).toBeCloseTo(140);
-    expect(wide.height).toBeCloseTo(18);
-
-    const tall = fitImageWithinBox(70, 72, 140, 36);
-    expect(tall.height).toBeCloseTo(36);
-    expect(tall.width).toBeCloseTo(35);
+  it("rejects subcompany paths, traversal, and empty values", () => {
+    expect(isCompanyLogoPathOwned(`${company}/sub/logo.png`, company)).toBe(false);
+    expect(isCompanyLogoPathOwned(`${company}/../x.png`, company)).toBe(false);
+    expect(isCompanyLogoPathOwned("", company)).toBe(false);
   });
 });

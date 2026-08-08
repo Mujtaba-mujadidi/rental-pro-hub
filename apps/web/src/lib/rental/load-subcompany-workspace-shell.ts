@@ -6,7 +6,8 @@ import {
   SUBCOMPANY_SELECT,
   type SubcompanyWorkspaceShell,
 } from "@/lib/rental/subcompany";
-import { createSubcompanyLogoSignedUrl } from "@/lib/rental/subcompany-logo";
+import { resolveSubcompanyWorkspaceLogoDisplayUrl } from "@/lib/rental/subcompany-logo";
+import { reconcileEndedHireSubcompanyDocumentRequirements } from "@/lib/rental/subcompany-hire-document-requirements";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -68,6 +69,16 @@ async function fetchSubcompanyWorkspaceShell(
     logo_storage_path: (data as { logo_storage_path?: string | null }).logo_storage_path ?? null,
   });
 
+  try {
+    const admin = createSupabaseAdminClient();
+    await reconcileEndedHireSubcompanyDocumentRequirements(admin, {
+      subcompanyId: id,
+      parentCompanyId,
+    });
+  } catch {
+    // Non-fatal — shell still loads.
+  }
+
   let openRequirementCount = 0;
   const { count, error: reqErr } = await supabase
     .from("subcompany_hire_document_requirements")
@@ -79,16 +90,34 @@ async function fetchSubcompanyWorkspaceShell(
   }
 
   let logoSignedUrl: string | null = null;
-  if (subcompany.logo_storage_path) {
+  let companyLogoPath: string | null = null;
+  if (subcompany.is_primary) {
+    const { data: company } = await supabase
+      .from("companies")
+      .select("logo_storage_path")
+      .eq("id", parentCompanyId)
+      .maybeSingle();
+    companyLogoPath = (company?.logo_storage_path as string | null) ?? null;
+  }
+
+  const logoOnFile = Boolean(subcompany.logo_storage_path?.trim() || companyLogoPath?.trim());
+  if (logoOnFile) {
+    let admin: ReturnType<typeof createSupabaseAdminClient> | null = null;
     try {
-      logoSignedUrl = await createSubcompanyLogoSignedUrl(
-        createSupabaseAdminClient(),
-        subcompany.logo_storage_path,
-        { parentCompanyId, subcompanyId: id },
-      );
+      admin = createSupabaseAdminClient();
     } catch {
-      logoSignedUrl = null;
+      admin = null;
     }
+    logoSignedUrl = await resolveSubcompanyWorkspaceLogoDisplayUrl(
+      supabase,
+      {
+        subcompanyLogoPath: subcompany.logo_storage_path,
+        companyLogoPath,
+        parentCompanyId,
+        subcompanyId: id,
+      },
+      admin,
+    );
   }
 
   const canWrite = canWriteSubcompany(profile);
@@ -101,6 +130,7 @@ async function fetchSubcompanyWorkspaceShell(
       canDeactivate: canWrite && !subcompany.is_primary,
       openRequirementCount,
       logoSignedUrl,
+      logoOnFile,
     },
   };
 }

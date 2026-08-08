@@ -11,7 +11,9 @@ import {
 import { useVehicleWorkspace } from "@/app/(main)/rental/vehicles/[id]/vehicle-workspace-provider";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
+import { RphSelect } from "@/components/forms/rph-select";
 import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
 import {
   vehicleExpiryAttentionItems,
@@ -699,17 +701,15 @@ export function VehicleDetailsView({
               />
             </Field>
             <Field label="Status">
-              <select
-                className="rph-input"
+              <FormModalSelect
                 value={form.status}
-                onChange={(e) => setForm((p) => ({ ...p, status: e.target.value as VehicleStatus }))}
-              >
-                {VEHICLE_STATUSES.map((st) => (
-                  <option key={st} value={st}>
-                    {VEHICLE_STATUS_LABELS[st]}
-                  </option>
-                ))}
-              </select>
+                aria-label="Status"
+                options={VEHICLE_STATUSES.map((st) => ({
+                  value: st,
+                  label: VEHICLE_STATUS_LABELS[st],
+                }))}
+                onValueChange={(value) => setForm((p) => ({ ...p, status: value as VehicleStatus }))}
+              />
             </Field>
             <Field label="Make *">
               <input className="rph-input" value={form.make} onChange={(e) => setForm((p) => ({ ...p, make: e.target.value }))} />
@@ -890,15 +890,17 @@ export function VehicleDetailsView({
               Move {vehicle.vrm} to another subcompany. This writes an audit entry.
             </p>
             <Field label="Destination">
-              <select className="rph-input" value={transferTo} onChange={(e) => setTransferTo(e.target.value)}>
-                {subcompanies
+              <RphSelect
+                value={transferTo}
+                aria-label="Destination subcompany"
+                options={subcompanies
                   .filter((s) => s.id !== vehicle.subcompany_id)
-                  .map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name ?? "Untitled"}
-                    </option>
-                  ))}
-              </select>
+                  .map((s) => ({
+                    value: s.id,
+                    label: s.name ?? "Untitled",
+                  }))}
+                onValueChange={setTransferTo}
+              />
             </Field>
             <Field label="Notes (optional)">
               <input className="rph-input" value={transferNotes} onChange={(e) => setTransferNotes(e.target.value)} />

@@ -1,33 +1,28 @@
 import Link from "next/link";
-import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
-import { createClient } from "@/lib/supabase/server";
+import { getAppProfile, getSessionUser } from "@/lib/auth/profile";
+import { getRentalSessionLifecycleCached } from "@/lib/auth/rental-lifecycle";
 import { rentalContractCopy } from "@/lib/rental-contract-copy";
 import { RentalDisplayNameSetting } from "./rental-display-name-setting";
 
 export default async function RentalCompanyHomePage() {
-  const { profile } = await requireRentalCompanyArea();
   const user = await getSessionUser();
-  const supabase = await createClient();
-  const companyId = profile.company_id ?? "";
+  const profile = await getAppProfile();
+  if (!user || !profile) return null;
 
-  const { data: company } = await supabase
-    .from("companies")
-    .select("name")
-    .eq("id", companyId)
-    .maybeSingle();
-
+  const life = await getRentalSessionLifecycleCached(user.id, user.email);
+  const companyName = life.kind === "rental" ? life.companyName : null;
   const personalLabel =
-    profile.display_name?.trim() || user?.email?.split("@")[0]?.trim() || "User";
+    profile.display_name?.trim() || user.email?.split("@")[0]?.trim() || "User";
 
   return (
     <div className="space-y-4">
       <h1 className="rph-h1">Company dashboard</h1>
       <p className="rph-lead">
         Signed in as <span className="rph-strong">{personalLabel}</span>
-        {company?.name ? (
+        {companyName ? (
           <>
             {" "}
-            · <span className="rph-strong">{company.name}</span>
+            · <span className="rph-strong">{companyName}</span>
           </>
         ) : null}
       </p>

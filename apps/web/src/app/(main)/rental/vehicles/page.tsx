@@ -1,5 +1,3 @@
-import { requireRentalCompanyArea } from "@/lib/auth/profile";
-import { loadFleetPnlSummariesAction } from "@/app/actions/rental-vehicle-financials";
 import { loadVehiclesPageData } from "@/app/actions/rental-vehicles";
 import { VehiclesView } from "./vehicles-view";
 
@@ -8,18 +6,12 @@ export default async function RentalVehiclesPage({
 }: {
   searchParams: Promise<{ subcompanyId?: string }>;
 }) {
-  await requireRentalCompanyArea();
   const { subcompanyId } = await searchParams;
   const data = await loadVehiclesPageData();
 
   if ("error" in data) {
     return <p className="rph-alert-error text-sm">{data.error}</p>;
   }
-
-  const pnlRes = await loadFleetPnlSummariesAction(data.vehicles.map((v) => v.id));
-  const pnlByVehicle = new Map(
-    pnlRes.ok ? pnlRes.summaries.map((s) => [s.vehicleId, s]) : [],
-  );
 
   return (
     <VehiclesView
@@ -28,7 +20,6 @@ export default async function RentalVehiclesPage({
       notifySettings={data.notifySettings}
       canManage={data.canManage}
       canDelete={data.canDelete}
-      pnlByVehicle={pnlByVehicle}
       initialSubcompanyId={subcompanyId?.trim() || null}
     />
   );

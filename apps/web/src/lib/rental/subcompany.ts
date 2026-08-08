@@ -33,6 +33,8 @@ export type SubcompanyWorkspaceShell = {
   canDeactivate: boolean;
   openRequirementCount: number;
   logoSignedUrl: string | null;
+  /** True when a logo exists on the subcompany row or the parent company (primary only). */
+  logoOnFile: boolean;
 };
 
 export const SUBCOMPANY_SELECT =

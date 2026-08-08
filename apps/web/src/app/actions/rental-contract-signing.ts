@@ -2,7 +2,7 @@
 
 import { headers } from "next/headers";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
-import { loadPendingContractRenewal } from "@/lib/companies/pending-contract-renewal";
+import { getPendingContractRenewalCached } from "@/lib/companies/pending-contract-renewal";
 import { resendEnvelopeForSignature } from "@/lib/esign/envelope";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -20,7 +20,7 @@ async function loadPendingRenewalForSession() {
     return { ok: false as const, error: e instanceof Error ? e.message : "Server configuration error." };
   }
 
-  const pending = await loadPendingContractRenewal(admin, companyId);
+  const pending = await getPendingContractRenewalCached(companyId);
   if (!pending) return { ok: false as const, error: "No renewal contract is waiting for signature." };
 
   return { ok: true as const, user, companyId, pending, admin };

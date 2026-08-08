@@ -11,18 +11,23 @@ export function FleetHiresView({
   initialSubcompanyId = null,
   /** When set (e.g. subcompany workspace), filter is locked and chrome stays in-workspace. */
   lockedSubcompanyId = null,
+  initialRows,
+  initialCanWrite,
 }: {
   initialSubcompanyId?: string | null;
   lockedSubcompanyId?: string | null;
+  initialRows?: HireContractTableRow[];
+  initialCanWrite?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
-  const [rows, setRows] = useState<HireContractTableRow[]>([]);
-  const [canWrite, setCanWrite] = useState(false);
+  const [rows, setRows] = useState<HireContractTableRow[]>(initialRows ?? []);
+  const [canWrite, setCanWrite] = useState(initialCanWrite ?? false);
   const [error, setError] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editDraftId, setEditDraftId] = useState<string | null>(null);
   const lockedId = lockedSubcompanyId?.trim() || null;
   const [subcompanyFilter] = useState<string | null>(lockedId ?? initialSubcompanyId);
+  const hasInitialRows = initialRows !== undefined;
 
   const reload = useCallback(() => {
     startTransition(async () => {
@@ -38,8 +43,10 @@ export function FleetHiresView({
   }, []);
 
   useEffect(() => {
-    reload();
-  }, [reload]);
+    if (!hasInitialRows) {
+      reload();
+    }
+  }, [hasInitialRows, reload]);
 
   useHireContractsRealtime(reload);
 
@@ -82,7 +89,8 @@ export function FleetHiresView({
       <HireContractsTable
         rows={visibleRows}
         canWrite={canWrite}
-        busy={pending}
+        busy={pending && !hasInitialRows}
+        hideSubcompanyColumn={Boolean(lockedId)}
         onNewContract={openNew}
         onOpenDraft={openDraft}
         onRefresh={reload}

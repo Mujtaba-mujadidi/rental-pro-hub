@@ -1,3 +1,4 @@
+import { revalidateProfileBundle } from "@/lib/auth/profile-bundle-cache";
 import type { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type AdminClient = ReturnType<typeof createSupabaseAdminClient>;
@@ -123,6 +124,8 @@ export async function ensureRentalCompanyMembership(
 
   // Never leave a company contact with a driver profile row.
   await admin.from("driver_profiles").delete().eq("user_id", opts.userId);
+
+  revalidateProfileBundle(opts.userId);
 
   return { ok: true };
 }

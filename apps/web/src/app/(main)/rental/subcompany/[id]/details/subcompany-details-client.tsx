@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import {
+  getSubcompanyLogoPreviewUrlAction,
   removeSubcompanyLogoAction,
   updateSubcompanyAction,
   uploadSubcompanyLogoAction,
@@ -96,9 +97,30 @@ export function SubcompanyDetailsClient() {
   const [pending, startTransition] = useTransition();
 
   const [logoError, setLogoError] = useState<string | null>(null);
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(shell.logoSignedUrl);
   const [removeLogoConfirmOpen, setRemoveLogoConfirmOpen] = useState(false);
+  const [logoAction, setLogoAction] = useState<"upload" | "remove" | null>(null);
   const [logoPending, startLogoTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (logoPending) return;
+    setLogoPreviewUrl(shell.logoSignedUrl);
+    if (shell.logoSignedUrl || !shell.logoOnFile) {
+      return;
+    }
+    let cancelled = false;
+    void getSubcompanyLogoPreviewUrlAction(subcompany.id).then((res) => {
+      if (cancelled) return;
+      if (res.ok) {
+        setLogoPreviewUrl(res.url);
+        setLogoError(null);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [subcompany.id, shell.logoOnFile, shell.logoSignedUrl, logoPending]);
 
   const [impactFields, setImpactFields] = useState<SubcompanyFieldChange[] | null>(null);
 
@@ -138,42 +160,59 @@ export function SubcompanyDetailsClient() {
   const uploadLogo = useCallback(
     (file: File) => {
       const hadLogo = Boolean(subcompany.logo_storage_path);
+      const localPreview = URL.createObjectURL(file);
+      setLogoPreviewUrl(localPreview);
+      setLogoError(null);
+      setLogoAction("upload");
       const formData = new FormData();
       formData.set("logo", file);
       startLogoTransition(async () => {
-        const res = await uploadSubcompanyLogoAction(subcompany.id, formData);
-        if (fileInputRef.current) fileInputRef.current.value = "";
-        if (!res.ok) {
-          setLogoError(res.error);
-          return;
-        }
-        setLogoError(null);
-        refreshShell();
-        if (res.promptContractImpact) {
-          setImpactFields([
-            { field: "logo_storage_path", label: "Logo", from: hadLogo ? "(set)" : null, to: "(set)" },
-          ]);
+        try {
+          const res = await uploadSubcompanyLogoAction(subcompany.id, formData);
+          if (fileInputRef.current) fileInputRef.current.value = "";
+          if (!res.ok) {
+            setLogoError(res.error);
+            setLogoPreviewUrl(shell.logoSignedUrl);
+            return;
+          }
+          setLogoError(null);
+          refreshShell();
+          if (res.promptContractImpact) {
+            setImpactFields([
+              { field: "logo_storage_path", label: "Logo", from: hadLogo ? "(set)" : null, to: "(set)" },
+            ]);
+          }
+        } finally {
+          URL.revokeObjectURL(localPreview);
+          setLogoAction(null);
         }
       });
     },
-    [subcompany.id, subcompany.logo_storage_path, refreshShell],
+    [subcompany.id, subcompany.logo_storage_path, refreshShell, shell.logoSignedUrl],
   );
 
   const removeLogo = useCallback(() => {
+    setLogoPreviewUrl(null);
+    setLogoError(null);
+    setLogoAction("remove");
     startLogoTransition(async () => {
-      const res = await removeSubcompanyLogoAction(subcompany.id);
-      setRemoveLogoConfirmOpen(false);
-      if (!res.ok) {
-        setLogoError(res.error);
-        return;
-      }
-      setLogoError(null);
-      refreshShell();
-      if (res.promptContractImpact) {
-        setImpactFields([{ field: "logo_storage_path", label: "Logo", from: "(set)", to: null }]);
+      try {
+        const res = await removeSubcompanyLogoAction(subcompany.id);
+        setRemoveLogoConfirmOpen(false);
+        if (!res.ok) {
+          setLogoError(res.error);
+          setLogoPreviewUrl(shell.logoSignedUrl);
+          return;
+        }
+        refreshShell();
+        if (res.promptContractImpact) {
+          setImpactFields([{ field: "logo_storage_path", label: "Logo", from: "(set)", to: null }]);
+        }
+      } finally {
+        setLogoAction(null);
       }
     });
-  }, [subcompany.id, refreshShell]);
+  }, [subcompany.id, refreshShell, shell.logoSignedUrl]);
 
   const address = formatSubcompanyAddressLines(subcompany);
   const contactName = [subcompany.primary_contact_first_name, subcompany.primary_contact_last_name]
@@ -211,14 +250,27 @@ export function SubcompanyDetailsClient() {
           <p className="rph-muted mt-1 text-sm">Shown on hire agreements and permission letters.</p>
           {logoError ? <p className="rph-alert-error mt-3 text-sm">{logoError}</p> : null}
           <div className="mt-3 flex flex-wrap items-center gap-4">
-            <div className="flex h-24 w-40 items-center justify-center rounded-lg border border-rph-border bg-rph-raised p-2">
-              {shell.logoSignedUrl ? (
+            <div className="relative flex h-24 w-40 items-center justify-center rounded-lg border border-rph-border bg-rph-raised p-2">
+              {logoPending ? (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-lg bg-rph-raised/95">
+                  <span
+                    className="h-6 w-6 animate-spin rounded-full border-2 border-rph-rail/30 border-t-rph-rail"
+                    aria-hidden
+                  />
+                  <span className="rph-muted text-xs">
+                    {logoAction === "remove" ? "Removing…" : "Uploading…"}
+                  </span>
+                </div>
+              ) : null}
+              {logoPreviewUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={shell.logoSignedUrl}
+                  src={logoPreviewUrl}
                   alt={`${subcompany.name} logo`}
-                  className="max-h-20 w-auto object-contain"
+                  className={`max-h-20 w-auto object-contain ${logoPending ? "opacity-40" : ""}`}
                 />
+              ) : shell.logoOnFile ? (
+                <span className="rph-muted text-xs">Loading logo…</span>
               ) : (
                 <span className="rph-muted text-xs">No logo</span>
               )}

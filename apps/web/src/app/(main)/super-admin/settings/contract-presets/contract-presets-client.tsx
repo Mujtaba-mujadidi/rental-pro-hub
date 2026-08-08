@@ -1,6 +1,7 @@
 "use client";
 
 import { savePricingPresetAction, type PricingPresetRow } from "@/app/actions/contract-presets";
+import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
 import { useRouter } from "next/navigation";
@@ -413,18 +414,12 @@ export function ContractPresetsClient({
               <strong className="font-medium text-slate-600 dark:text-slate-300">Not</strong> the payment calendar — this is{" "}
               <em>how</em> the amount is calculated (fixed fee, per vehicle, tiers, etc.).
             </p>
-            <select
-              id="preset-pricing-model"
-              className={inputClass}
+            <FormModalSelect
               value={form.pricing_model_type}
-              onChange={(e) => patchForm("pricing_model_type", e.target.value)}
-            >
-              {PRICING_MODELS.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
+              aria-label="Pricing model"
+              options={PRICING_MODELS.map((m) => ({ value: m.value, label: m.label }))}
+              onValueChange={(value) => patchForm("pricing_model_type", value)}
+            />
           </div>
           <div>
             <label className={labelClass} htmlFor="preset-billing-frequency">
@@ -433,35 +428,26 @@ export function ContractPresetsClient({
             <p className={hintClass}>
               How often you charge (invoice rhythm): weekly, monthly, quarterly, etc. Separate from the pricing model above.
             </p>
-            <select
-              id="preset-billing-frequency"
-              className={inputClass}
-              value={form.billing_frequency}
-              onChange={(e) => patchForm("billing_frequency", e.target.value)}
-            >
-              {BILLING_FREQUENCIES.map((f) => (
-                <option key={f.value || "unset"} value={f.value}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
+            <FormModalSelect
+              value={form.billing_frequency || "__unset__"}
+              aria-label="Billing period"
+              options={BILLING_FREQUENCIES.map((f) => ({
+                value: f.value || "__unset__",
+                label: f.label,
+              }))}
+              onValueChange={(value) => patchForm("billing_frequency", value === "__unset__" ? "" : value)}
+            />
           </div>
           <div>
             <label className={labelClass} htmlFor="preset-currency">
               Currency
             </label>
-            <select
-              id="preset-currency"
-              className={inputClass}
+            <FormModalSelect
               value={form.currency}
-              onChange={(e) => patchForm("currency", e.target.value)}
-            >
-              {CURRENCIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+              aria-label="Currency"
+              options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+              onValueChange={(value) => patchForm("currency", value)}
+            />
           </div>
           <div>
             <label className={labelClass} htmlFor="preset-monthly">

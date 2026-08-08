@@ -1,17 +1,22 @@
 "use client";
 
-import { formatHireContractEndLabel, formatHireContractStartLabel } from "@/lib/fleet/hire-pdf-details";
-import { formatUkDateTimeSeconds } from "@/lib/datetime/uk";
 import type { HireContractTableRow } from "@/app/actions/rental-hire-wizard";
 import { cancelHireGroupAction, ensureHireGroupEnvelopesPreparedAction, loadHireGroupAuditTrailAction, regenerateHireGroupContractsAction } from "@/app/actions/rental-hires";
 import { sendHireGroupSigningBundleAction } from "@/app/actions/rental-hire-signing";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
+import { RphSelect, rphSelectRowsTriggerClass } from "@/components/forms/rph-select";
 import { HireGroupAuditModal } from "@/components/fleet/hire-group-audit-modal";
-import { hireTableStatusToneClass, type HireTableStatusTone } from "@/lib/fleet/hire-contract-table-display";
+import { hireTableStatusToneClass, hireGroupTableStatus, hireContractTableStartLabel, hireContractTableEndLabel, type HireTableStatusTone } from "@/lib/fleet/hire-contract-table-display";
 import { hireCancelConfirmCopy, hireRegenerateContractsConfirmCopy, type HireGroupAuditRow } from "@/lib/fleet/hire-audit";
 import Link from "next/link";
-import { useCallback, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  HIRE_CONTRACT_PAGE_SIZES,
+  HIRE_CONTRACT_STATUS_FILTER_OPTIONS,
+  hireContractMatchesStatusFilter,
+  type HireContractStatusFilter,
+} from "@/lib/fleet/hire-contract-table-filters";
 import { HireContractRowActionsMenu } from "./hire-contract-row-actions-menu";
 
 type Props = {
@@ -23,27 +28,20 @@ type Props = {
   busy?: boolean;
   /** When set, hide vehicle column (vehicle workspace rentals tab). */
   vehicleScoped?: boolean;
+  /** When set, hide rental company column (e.g. subcompany workspace hires tab). */
+  hideSubcompanyColumn?: boolean;
 };
 
-function statusLabel(row: HireContractTableRow): string {
-  if (row.status === "draft") return `Draft · step ${row.wizard_step}`;
-  return row.status.replace(/_/g, " ");
+function hireStatusDisplay(row: HireContractTableRow) {
+  return hireGroupTableStatus(row.status, { wizardStep: row.wizard_step });
 }
 
 function startLabel(row: HireContractTableRow): string {
-  if (row.activated_at) return formatUkDateTimeSeconds(row.activated_at);
-  if (row.start_date) {
-    return `Scheduled ${formatHireContractStartLabel(row.start_date, row.start_time)}`;
-  }
-  return "—";
+  return hireContractTableStartLabel(row);
 }
 
 function endLabel(row: HireContractTableRow): string {
-  if (row.terminated_at) return formatUkDateTimeSeconds(row.terminated_at);
-  if (row.scheduled_end_date) {
-    return formatHireContractEndLabel(row.scheduled_end_date, row.end_time);
-  }
-  return "—";
+  return hireContractTableEndLabel(row);
 }
 
 function WorkflowStatusPill({ label, tone }: { label: string; tone: HireTableStatusTone }) {
@@ -52,6 +50,119 @@ function WorkflowStatusPill({ label, tone }: { label: string; tone: HireTableSta
     <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${hireTableStatusToneClass(tone)}`}>
       {label}
     </span>
+  );
+}
+
+function HireStatusCell({ row }: { row: HireContractTableRow }) {
+  return (
+    <div className="space-y-1">
+      <WorkflowStatusPill {...hireStatusDisplay(row)} />
+      {row.lifecycle_label ? (
+        <p className="text-xs text-rph-fg-muted">{row.lifecycle_label}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function DriverCell({ row }: { row: HireContractTableRow }) {
+  const contact = row.driver_email ?? row.driver_licence_number;
+  if (!row.driver_name && !contact) return <span className="text-rph-fg-muted">—</span>;
+  return (
+    <div>
+      {row.driver_name ? <p className="font-medium text-rph-fg">{row.driver_name}</p> : null}
+      {contact ? (
+        <p className={`text-rph-fg-secondary ${row.driver_name ? "text-xs" : "text-sm"}`}>{contact}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function driverSearchHaystack(row: HireContractTableRow): string {
+  return [
+    row.driver_name,
+    row.driver_email,
+    row.driver_licence_number,
+    row.subcompany_name,
+    row.vehicle_vrm,
+    row.vehicle_label,
+    row.status,
+    hireStatusDisplay(row).label,
+    row.driver_access_label,
+    row.esign_label,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function HireContractPaginationBar({
+  pageIndex,
+  pageCount,
+  pageSize,
+  total,
+  fromRow,
+  toRow,
+  disabled,
+  onPrevious,
+  onNext,
+  onPageSizeChange,
+  className = "",
+}: {
+  pageIndex: number;
+  pageCount: number;
+  pageSize: number;
+  total: number;
+  fromRow: number;
+  toRow: number;
+  disabled?: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+  onPageSizeChange: (size: number) => void;
+  className?: string;
+}) {
+  if (total === 0) return null;
+  return (
+    <div
+      className={`flex shrink-0 items-center justify-between gap-3 border-t border-rph-border bg-rph-raised/95 px-4 py-2.5 backdrop-blur-sm ${className}`.trim()}
+    >
+      <p className="rph-muted shrink-0 text-xs">
+        Showing {fromRow.toLocaleString("en-GB")}–{toRow.toLocaleString("en-GB")} of{" "}
+        {total.toLocaleString("en-GB")}
+      </p>
+      <div className="flex shrink-0 items-center gap-2 overflow-x-auto [scrollbar-width:thin]">
+        <button
+          type="button"
+          className="rph-btn-ghost h-9 shrink-0 px-3 text-sm"
+          disabled={disabled || pageIndex <= 0}
+          onClick={onPrevious}
+        >
+          Previous
+        </button>
+        <span className="rph-muted shrink-0 whitespace-nowrap text-xs">
+          Page {pageIndex + 1} of {pageCount}
+        </span>
+        <button
+          type="button"
+          className="rph-btn-ghost h-9 shrink-0 px-3 text-sm"
+          disabled={disabled || pageIndex >= pageCount - 1}
+          onClick={onNext}
+        >
+          Next
+        </button>
+        <span className="rph-muted shrink-0 whitespace-nowrap text-xs">Rows</span>
+        <RphSelect
+          value={String(pageSize)}
+          disabled={disabled}
+          aria-label="Rows per page"
+          triggerClassName={rphSelectRowsTriggerClass}
+          options={HIRE_CONTRACT_PAGE_SIZES.map((size) => ({
+            value: String(size),
+            label: String(size),
+          }))}
+          onValueChange={(value) => onPageSizeChange(Number(value))}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -70,16 +181,18 @@ type RowActionsProps = {
 function HireContractMobileCard({
   row,
   vehicleScoped,
+  hideSubcompanyColumn,
   actions,
 }: {
   row: HireContractTableRow;
   vehicleScoped?: boolean;
+  hideSubcompanyColumn?: boolean;
   actions: RowActionsProps;
 }) {
-  const title = vehicleScoped ? row.driver_label ?? "Hire contract" : row.vehicle_vrm ?? "—";
+  const title = vehicleScoped ? row.driver_name ?? row.driver_email ?? "Hire contract" : row.vehicle_vrm ?? "—";
   const subtitle = vehicleScoped
-    ? null
-    : [row.vehicle_label, row.driver_label].filter(Boolean).join(" · ") || null;
+    ? row.driver_email ?? row.driver_licence_number
+    : [row.vehicle_label, row.driver_name ?? row.driver_email].filter(Boolean).join(" · ") || null;
 
   return (
     <article className="rph-card p-4">
@@ -94,13 +207,19 @@ function HireContractMobileCard({
           )}
           {subtitle ? <p className="mt-0.5 text-sm text-rph-fg-secondary">{subtitle}</p> : null}
           <div className="mt-2">
-            <span className="rph-pill capitalize">{statusLabel(row)}</span>
+            <HireStatusCell row={row} />
           </div>
         </div>
         <HireContractRowActionsMenu {...actions} />
       </div>
 
       <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+        {!hideSubcompanyColumn && row.subcompany_name ? (
+          <div className="col-span-2">
+            <dt className="text-xs font-medium uppercase tracking-wide text-rph-fg-muted">Rental company</dt>
+            <dd className="mt-0.5 text-rph-fg-secondary">{row.subcompany_name}</dd>
+          </div>
+        ) : null}
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-rph-fg-muted">Started</dt>
           <dd className="mt-0.5 text-rph-fg-secondary">{startLabel(row)}</dd>
@@ -116,8 +235,8 @@ function HireContractMobileCard({
           </dd>
         </div>
         {row.lifecycle_label ? (
-          <div>
-            <dt className="text-xs font-medium uppercase tracking-wide text-rph-fg-muted">Workflow</dt>
+          <div className="col-span-2">
+            <dt className="text-xs font-medium uppercase tracking-wide text-rph-fg-muted">Next step</dt>
             <dd className="mt-1">
               <WorkflowStatusPill label={row.lifecycle_label} tone={row.lifecycle_tone} />
             </dd>
@@ -173,8 +292,13 @@ export function HireContractsTable({
   onRefresh,
   busy,
   vehicleScoped,
+  hideSubcompanyColumn,
 }: Props) {
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<HireContractStatusFilter>("all");
+  const [subcompanyFilter, setSubcompanyFilter] = useState("all");
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pageSize, setPageSize] = useState(25);
   const [actionPending, startAction] = useTransition();
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -192,7 +316,7 @@ export function HireContractsTable({
   const [overlay, setOverlay] = useState<ActionStatusOverlayState | null>(null);
 
   const openAudit = useCallback((row: HireContractTableRow) => {
-    const label = [row.vehicle_vrm, row.driver_label].filter(Boolean).join(" · ") || "Hire contract";
+    const label = [row.vehicle_vrm, row.driver_name ?? row.driver_email].filter(Boolean).join(" · ") || "Hire contract";
     setAuditTitle(`${label} — audit trail`);
     setAuditEvents([]);
     setAuditError(null);
@@ -237,26 +361,52 @@ export function HireContractsTable({
     setRegenerateTarget(null);
   }, [actionPending]);
 
+  const subcompanyOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of rows) {
+      if (row.subcompany_id && row.subcompany_name) {
+        map.set(row.subcompany_id, row.subcompany_name);
+      }
+    }
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1], "en-GB"));
+  }, [rows]);
+
+  useEffect(() => {
+    setPageIndex(0);
+  }, [search, statusFilter, subcompanyFilter]);
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return rows;
-    return rows.filter((r) => {
-      const hay = [
-        r.vehicle_vrm,
-        r.vehicle_label,
-        r.driver_label,
-        r.status,
-        statusLabel(r),
-        r.driver_access_status,
-        r.driver_access_label,
-        r.esign_label,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return hay.includes(term);
+    return rows.filter((row) => {
+      if (!hireContractMatchesStatusFilter(row.status, statusFilter)) return false;
+      if (
+        !hideSubcompanyColumn &&
+        subcompanyFilter !== "all" &&
+        row.subcompany_id !== subcompanyFilter
+      ) {
+        return false;
+      }
+      if (term && !driverSearchHaystack(row).includes(term)) return false;
+      return true;
     });
-  }, [rows, search]);
+  }, [rows, search, statusFilter, subcompanyFilter, hideSubcompanyColumn]);
+
+  const total = filtered.length;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const safePageIndex = Math.min(pageIndex, pageCount - 1);
+
+  useEffect(() => {
+    setPageIndex((current) => Math.min(current, Math.max(0, pageCount - 1)));
+  }, [pageCount]);
+
+  const paginated = useMemo(
+    () => filtered.slice(safePageIndex * pageSize, safePageIndex * pageSize + pageSize),
+    [filtered, safePageIndex, pageSize],
+  );
+  const fromRow = total === 0 ? 0 : safePageIndex * pageSize + 1;
+  const toRow = Math.min((safePageIndex + 1) * pageSize, total);
+  const hasFilters =
+    search.trim().length > 0 || statusFilter !== "all" || subcompanyFilter !== "all";
 
   function prepareForSignature(row: HireContractTableRow) {
     setActionError(null);
@@ -323,54 +473,122 @@ export function HireContractsTable({
   };
 
   const tableBusy = busy || actionPending || overlay?.phase === "pending";
+  const tableColumnCount =
+    (vehicleScoped ? 0 : 1) + (hideSubcompanyColumn ? 0 : 1) + 7 + 1;
+
+  function clearFilters() {
+    setSearch("");
+    setStatusFilter("all");
+    setSubcompanyFilter("all");
+    setPageIndex(0);
+  }
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <input
-            className="rph-input w-full max-w-md"
-            placeholder="Search contracts…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="rph-btn-ghost" disabled={tableBusy} onClick={onRefresh}>
-            Refresh
-          </button>
-          {canWrite ? (
-            <button type="button" className="rph-btn-primary" disabled={tableBusy} onClick={onNewContract}>
-              New contract
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            <input
+              className="rph-input w-full min-w-[12rem] max-w-md"
+              placeholder="Search vehicle, driver, company…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <div className="w-full min-w-[10rem] sm:max-w-[12rem]">
+              <RphSelect
+                value={statusFilter}
+                aria-label="Filter by status"
+                options={HIRE_CONTRACT_STATUS_FILTER_OPTIONS.map((option) => ({
+                  value: option.value,
+                  label: option.label,
+                }))}
+                onValueChange={(value) => setStatusFilter(value as HireContractStatusFilter)}
+              />
+            </div>
+            {!hideSubcompanyColumn && subcompanyOptions.length > 1 ? (
+              <div className="w-full min-w-[10rem] sm:max-w-[14rem]">
+                <RphSelect
+                  value={subcompanyFilter}
+                  aria-label="Filter by rental company"
+                  options={[
+                    { value: "all", label: "All rental companies" },
+                    ...subcompanyOptions.map(([id, name]) => ({ value: id, label: name })),
+                  ]}
+                  onValueChange={setSubcompanyFilter}
+                />
+              </div>
+            ) : null}
+            {hasFilters ? (
+              <button type="button" className="rph-btn-ghost h-10 px-3 text-sm" onClick={clearFilters}>
+                Clear filters
+              </button>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="rph-btn-ghost" disabled={tableBusy} onClick={onRefresh}>
+              Refresh
             </button>
-          ) : null}
+            {canWrite ? (
+              <button type="button" className="rph-btn-primary" disabled={tableBusy} onClick={onNewContract}>
+                New contract
+              </button>
+            ) : null}
+          </div>
         </div>
+        {total > 0 ? (
+          <p className="rph-muted text-xs">
+            {hasFilters ? `${total.toLocaleString("en-GB")} matching contracts` : `${total.toLocaleString("en-GB")} contracts`}
+          </p>
+        ) : null}
       </div>
 
       {actionError ? <p className="rph-alert-error text-sm">{actionError}</p> : null}
 
-      <div className="space-y-3 lg:hidden">
-        {!filtered.length ? (
-          <p className="rph-muted py-8 text-center text-sm">No contracts found.</p>
-        ) : (
-          filtered.map((r) => (
-            <HireContractMobileCard
-              key={r.id}
-              row={r}
-              vehicleScoped={vehicleScoped}
-              actions={rowActionsProps(r, canWrite, tableBusy, actionHandlers)}
-            />
-          ))
-        )}
+      <div className="lg:hidden">
+        <div className="space-y-3 pb-3">
+          {!paginated.length ? (
+            <p className="rph-muted py-8 text-center text-sm">
+              {hasFilters ? "No contracts match your filters." : "No contracts found."}
+            </p>
+          ) : (
+            paginated.map((r) => (
+              <HireContractMobileCard
+                key={r.id}
+                row={r}
+                vehicleScoped={vehicleScoped}
+                hideSubcompanyColumn={hideSubcompanyColumn}
+                actions={rowActionsProps(r, canWrite, tableBusy, actionHandlers)}
+              />
+            ))
+          )}
+        </div>
+        <HireContractPaginationBar
+          className="sticky bottom-0 z-20 -mx-4 border-rph-border sm:mx-0 sm:rounded-b-xl"
+          {...{
+            pageIndex: safePageIndex,
+            pageCount,
+            pageSize,
+            total,
+            fromRow,
+            toRow,
+            disabled: tableBusy,
+            onPrevious: () => setPageIndex((p) => Math.max(0, p - 1)),
+            onNext: () => setPageIndex((p) => Math.min(pageCount - 1, p + 1)),
+            onPageSizeChange: (size: number) => {
+              setPageSize(size);
+              setPageIndex(0);
+            },
+          }}
+        />
       </div>
 
-      <div className="hidden space-y-1 lg:block">
-        <div className="-mx-4 overflow-x-auto overscroll-x-contain scroll-px-4 px-4 sm:mx-0 sm:px-0 [scrollbar-width:thin]">
-          <div className="min-w-[52rem] rounded-xl border border-rph-border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-rph-border bg-rph-chrome/60 text-left text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">
+      <div className="hidden lg:flex lg:max-h-[min(70vh,42rem)] lg:flex-col lg:overflow-hidden lg:rounded-xl lg:border lg:border-rph-border">
+          <div className="min-h-0 flex-1 overflow-auto [scrollbar-width:thin]">
+            <table className="w-full min-w-[52rem] text-sm">
+              <thead className="sticky top-0 z-10 border-b border-rph-border bg-rph-chrome/95 text-left text-xs font-semibold uppercase tracking-wide text-rph-fg-muted backdrop-blur-sm">
+                <tr>
                   {!vehicleScoped ? <th className="px-4 py-2.5">Vehicle</th> : null}
+                  {!hideSubcompanyColumn ? <th className="px-4 py-2.5">Rental company</th> : null}
                   <th className="px-4 py-2.5">Driver</th>
                   <th className="px-4 py-2.5">Started</th>
                   <th className="px-4 py-2.5">Ended</th>
@@ -378,22 +596,18 @@ export function HireContractsTable({
                   <th className="px-4 py-2.5">Status</th>
                   <th className="px-4 py-2.5">Driver access</th>
                   <th className="px-4 py-2.5">E-sign</th>
-                  <th className="px-4 py-2.5">Workflow</th>
-                  <th className="w-24 min-w-24 p-0" aria-hidden />
-                  <th className="sticky right-0 z-20 min-w-[6.5rem] bg-rph-chrome/95 px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(0,0,0,0.25)] backdrop-blur-sm">
-                    Actions
-                  </th>
+                  <th className="px-4 py-2.5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-rph-border">
-                {!filtered.length ? (
+                {!paginated.length ? (
                   <tr>
-                    <td colSpan={vehicleScoped ? 10 : 11} className="px-4 py-8 text-center text-rph-fg-muted">
-                      No contracts found.
+                    <td colSpan={tableColumnCount} className="px-4 py-8 text-center text-rph-fg-muted">
+                      {hasFilters ? "No contracts match your filters." : "No contracts found."}
                     </td>
                   </tr>
                 ) : (
-                  filtered.map((r) => (
+                  paginated.map((r) => (
                     <tr key={r.id} className="group bg-rph-raised/30 hover:bg-rph-chrome/40">
                         {!vehicleScoped ? (
                           <td className="px-4 py-3">
@@ -412,14 +626,19 @@ export function HireContractsTable({
                             ) : null}
                           </td>
                         ) : null}
-                        <td className="px-4 py-3 text-rph-fg-secondary">{r.driver_label ?? "—"}</td>
+                        {!hideSubcompanyColumn ? (
+                          <td className="px-4 py-3 text-rph-fg-secondary">{r.subcompany_name ?? "—"}</td>
+                        ) : null}
+                        <td className="px-4 py-3">
+                          <DriverCell row={r} />
+                        </td>
                         <td className="px-4 py-3 text-rph-fg-secondary">{startLabel(r)}</td>
                         <td className="px-4 py-3 text-rph-fg-secondary">{endLabel(r)}</td>
                         <td className="px-4 py-3 text-rph-fg-secondary">
                           {r.rent_amount_gbp > 0 ? `£${r.rent_amount_gbp.toFixed(2)} / ${r.rent_cadence}` : "—"}
                         </td>
                         <td className="px-4 py-3">
-                          <span className="rph-pill capitalize">{statusLabel(r)}</span>
+                          <HireStatusCell row={r} />
                         </td>
                         <td className="px-4 py-3">
                           <WorkflowStatusPill label={r.driver_access_label} tone={r.driver_access_tone} />
@@ -427,15 +646,7 @@ export function HireContractsTable({
                         <td className="px-4 py-3">
                           <WorkflowStatusPill label={r.esign_label} tone={r.esign_tone} />
                         </td>
-                        <td className="px-4 py-3">
-                          {r.lifecycle_label ? (
-                            <WorkflowStatusPill label={r.lifecycle_label} tone={r.lifecycle_tone} />
-                          ) : (
-                            <span className="text-rph-fg-muted">—</span>
-                          )}
-                        </td>
-                        <td className="w-24 min-w-24 p-0" aria-hidden />
-                        <td className="sticky right-0 z-20 min-w-[6.5rem] bg-rph-raised/95 px-4 py-3 text-right shadow-[-8px_0_12px_-8px_rgba(0,0,0,0.25)] backdrop-blur-sm group-hover:bg-rph-chrome/40">
+                        <td className="px-4 py-3 text-right">
                           <HireContractRowActionsMenu
                             {...rowActionsProps(r, canWrite, tableBusy, actionHandlers)}
                           />
@@ -446,7 +657,23 @@ export function HireContractsTable({
               </tbody>
             </table>
           </div>
-        </div>
+          <HireContractPaginationBar
+            {...{
+              pageIndex: safePageIndex,
+              pageCount,
+              pageSize,
+              total,
+              fromRow,
+              toRow,
+              disabled: tableBusy,
+              onPrevious: () => setPageIndex((p) => Math.max(0, p - 1)),
+              onNext: () => setPageIndex((p) => Math.min(pageCount - 1, p + 1)),
+              onPageSizeChange: (size: number) => {
+                setPageSize(size);
+                setPageIndex(0);
+              },
+            }}
+          />
       </div>
 
       <HireGroupAuditModal

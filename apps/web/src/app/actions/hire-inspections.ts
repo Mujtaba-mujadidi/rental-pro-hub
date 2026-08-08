@@ -28,6 +28,7 @@ import { getVehicleLiveTrackAction, setVehicleTrackerMileageAction } from "@/app
 import { isFleetTrackingEnabled } from "@/lib/fleet-tracking/credentials";
 import { milesToMetres, trackOdometerMatchesMiles } from "@/lib/fleet-tracking/units";
 import { syncVehicleStatusForHireGroup } from "@/lib/fleet/sync-vehicle-hire-status";
+import { cancelOpenSubcompanyDocumentRequirementsForHire } from "@/lib/rental/subcompany-hire-document-requirements";
 import { isValidHireFuelLevelPercent } from "@/lib/fleet/hire-fuel-level";
 import {
   HIRE_DAMAGE_SEVERITIES,
@@ -1156,6 +1157,7 @@ export async function completeHireCheckinAction(
 
   if (hireError) return { ok: false, error: hireError.message };
 
+  await cancelOpenSubcompanyDocumentRequirementsForHire(admin, hireGroupId, userId);
   await syncVehicleStatusForHireGroup(admin, hireGroupId);
   await logHireGroupEvent(admin, {
     hireGroupId,

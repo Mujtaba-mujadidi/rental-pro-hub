@@ -306,7 +306,7 @@ export async function setMembershipSubcompanyScopeAction(
   const supabase = await createClient();
   const { data: row, error: gErr } = await supabase
     .from("user_company_memberships")
-    .select("id, parent_company_id, role")
+    .select("id, user_id, parent_company_id, role")
     .eq("id", mid)
     .maybeSingle();
   if (gErr) return { ok: false, error: gErr.message };
@@ -335,6 +335,7 @@ export async function setMembershipSubcompanyScopeAction(
     if (sErr) return { ok: false, error: sErr.message };
     const delMsg = await deleteSubcompanyPerms();
     if (delMsg) return { ok: false, error: delMsg };
+    revalidateProfileBundle(row.user_id);
     revalidatePath("/rental/staff");
     return { ok: true };
   }
@@ -368,6 +369,7 @@ export async function setMembershipSubcompanyScopeAction(
     }
   }
 
+  revalidateProfileBundle(row.user_id);
   revalidatePath("/rental/staff");
   return { ok: true };
 }

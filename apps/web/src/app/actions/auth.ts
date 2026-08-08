@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { resolveAppHomePath } from "@/lib/auth/driver-redirect";
+import { primeRentalSessionCaches } from "@/lib/auth/session-cache-prime";
 import {
   MIN_DRIVER_AGE_YEARS,
   normalizeUkPostcode,
@@ -48,6 +49,8 @@ export async function signInAction(
   }
 
   revalidatePath("/", "layout");
+
+  await primeRentalSessionCaches(signedInUser.id);
 
   const next = String(formData.get("next") ?? "").trim();
   if (next.startsWith("/") && !next.startsWith("//")) {

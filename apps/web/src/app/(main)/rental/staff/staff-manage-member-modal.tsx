@@ -1,6 +1,5 @@
 "use client";
 
-import * as Select from "@radix-ui/react-select";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import {
@@ -10,6 +9,7 @@ import {
 } from "@/app/actions/rental-staff";
 import type { CompanyMembershipRole } from "@/lib/auth/profile";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
 
@@ -31,35 +31,6 @@ const STATUSES: { value: StaffMember["status"]; label: string }[] = [
   { value: "invited", label: "Invited" },
   { value: "suspended", label: "Suspended" },
 ];
-
-/** Popper below trigger, trailing edges aligned; z above modal (280) and confirm (300). */
-const modalSelectTriggerClass =
-  "flex h-10 w-full min-w-0 cursor-pointer items-center justify-between gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-900 shadow-sm outline-none transition-colors hover:border-slate-400 hover:bg-slate-50/80 focus:border-rph-rail focus:ring-2 focus:ring-rph-rail/20 data-[state=open]:border-rph-rail/70 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800/80 dark:focus:border-rph-rail-softer dark:focus:ring-rph-rail-soft/30 dark:data-[state=open]:border-rph-rail-softer";
-
-const modalSelectContentClass =
-  "z-[320] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-900";
-
-const modalSelectItemClass =
-  "relative flex cursor-pointer select-none items-center rounded-md py-2 pl-8 pr-3 text-sm text-slate-800 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[highlighted]:bg-slate-100 data-[highlighted]:text-slate-900 dark:text-slate-200 dark:data-[highlighted]:bg-slate-800 dark:data-[highlighted]:text-slate-100";
-
-const modalSelectItemIndicatorWrap =
-  "absolute left-2 flex h-4 w-4 items-center justify-center text-slate-600 dark:text-slate-400";
-
-function IconChevronDown() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-
-function IconCheck() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
-  );
-}
 
 const btnPrimary =
   "inline-flex min-h-10 items-center justify-center rounded-lg border border-rph-rail bg-rph-rail px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rph-rail-hover disabled:opacity-50 dark:border-rph-rail-soft dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer";
@@ -513,46 +484,13 @@ export function StaffManageMemberModal({
                   </p>
                   <div className="block">
                     <span className="mb-1.5 block text-sm font-semibold text-slate-800 dark:text-slate-200">Membership status</span>
-                    <Select.Root
+                    <FormModalSelect
                       value={localStatus}
                       disabled={pending || roleBlocked}
+                      aria-label="Membership status"
+                      options={STATUSES}
                       onValueChange={(v) => setLocalStatus(v as StaffMember["status"])}
-                    >
-                      <Select.Trigger
-                        className={modalSelectTriggerClass}
-                        title={roleBlocked ? "You cannot change another owner’s status." : undefined}
-                        aria-label="Membership status"
-                      >
-                        <Select.Value />
-                        <Select.Icon className="shrink-0 text-slate-500 dark:text-slate-400">
-                          <IconChevronDown />
-                        </Select.Icon>
-                      </Select.Trigger>
-                      <Select.Portal>
-                        <Select.Content
-                          className={modalSelectContentClass}
-                          position="popper"
-                          side="bottom"
-                          align="end"
-                          sideOffset={6}
-                          alignOffset={0}
-                          collisionPadding={12}
-                        >
-                          <Select.Viewport className="px-1">
-                            {STATUSES.map((s) => (
-                              <Select.Item key={s.value} value={s.value} className={modalSelectItemClass}>
-                                <span className={modalSelectItemIndicatorWrap}>
-                                  <Select.ItemIndicator>
-                                    <IconCheck />
-                                  </Select.ItemIndicator>
-                                </span>
-                                <Select.ItemText>{s.label}</Select.ItemText>
-                              </Select.Item>
-                            ))}
-                          </Select.Viewport>
-                        </Select.Content>
-                      </Select.Portal>
-                    </Select.Root>
+                    />
                   </div>
                   <button type="button" className={btnPrimary} disabled={pending || !statusDirty || roleBlocked} onClick={saveStatus}>
                     Save status
@@ -568,48 +506,16 @@ export function StaffManageMemberModal({
                   </p>
                   <div className="block">
                     <span className="mb-1.5 block text-sm font-semibold text-slate-800 dark:text-slate-200">Role</span>
-                    <Select.Root
+                    <FormModalSelect
                       value={roleBlocked ? member.role : localRole}
                       disabled={pending || roleBlocked}
+                      aria-label="Role"
+                      options={ROLES.map((r) => ({
+                        value: r,
+                        label: r.charAt(0).toUpperCase() + r.slice(1),
+                      }))}
                       onValueChange={(v) => onRoleSelectChange(v as CompanyMembershipRole)}
-                    >
-                      <Select.Trigger
-                        className={modalSelectTriggerClass}
-                        title={
-                          roleBlocked ? "Only that user (or an owner) can change their owner role." : undefined
-                        }
-                        aria-label="Role"
-                      >
-                        <Select.Value className="capitalize" />
-                        <Select.Icon className="shrink-0 text-slate-500 dark:text-slate-400">
-                          <IconChevronDown />
-                        </Select.Icon>
-                      </Select.Trigger>
-                      <Select.Portal>
-                        <Select.Content
-                          className={modalSelectContentClass}
-                          position="popper"
-                          side="bottom"
-                          align="end"
-                          sideOffset={6}
-                          alignOffset={0}
-                          collisionPadding={12}
-                        >
-                          <Select.Viewport className="px-1">
-                            {ROLES.map((r) => (
-                              <Select.Item key={r} value={r} className={modalSelectItemClass}>
-                                <span className={modalSelectItemIndicatorWrap}>
-                                  <Select.ItemIndicator>
-                                    <IconCheck />
-                                  </Select.ItemIndicator>
-                                </span>
-                                <Select.ItemText className="capitalize">{r}</Select.ItemText>
-                              </Select.Item>
-                            ))}
-                          </Select.Viewport>
-                        </Select.Content>
-                      </Select.Portal>
-                    </Select.Root>
+                    />
                   </div>
                 </div>
               ) : null}

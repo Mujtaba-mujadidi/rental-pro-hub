@@ -7,6 +7,8 @@ describe("isSubcompanyLogoPathOwned", () => {
 
   it("accepts tenant-owned logo paths", () => {
     expect(isSubcompanyLogoPathOwned(`${parent}/${sub}/logo.png`, parent, sub)).toBe(true);
+    expect(isSubcompanyLogoPathOwned(`/${parent}/${sub}/logo.png`, parent, sub)).toBe(true);
+    expect(isSubcompanyLogoPathOwned(`${parent.toUpperCase()}/${sub}/logo.png`, parent, sub)).toBe(true);
   });
 
   it("rejects other tenants, traversal, and empty values", () => {

@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   daysFromTodayToExpiry,
+  formatUkCalendarDateTime,
   formatUkDate,
   formatUkDateLong,
+  formatUkDateRange,
   formatUkDateTime,
   formatUkDateTimeSeconds,
 } from "@/lib/datetime/uk";
@@ -15,8 +17,8 @@ describe("formatUkDate", () => {
     expect(formatUkDate("", "n/a")).toBe("n/a");
   });
 
-  it("formats YYYY-MM-DD as UK short date in UTC", () => {
-    expect(formatUkDate("2026-07-17")).toBe("17 Jul 2026");
+  it("formats YYYY-MM-DD as numeric UK date in UTC", () => {
+    expect(formatUkDate("2026-07-17")).toBe("17/07/2026");
   });
 
   it("returns empty for unparseable values", () => {
@@ -26,12 +28,32 @@ describe("formatUkDate", () => {
 });
 
 describe("formatUkDateLong", () => {
-  it("formats YYYY-MM-DD with long month", () => {
-    expect(formatUkDateLong("2026-07-17")).toBe("17 July 2026");
+  it("matches numeric formatUkDate output", () => {
+    expect(formatUkDateLong("2026-07-17")).toBe("17/07/2026");
   });
 
   it("returns empty for null", () => {
     expect(formatUkDateLong(null)).toBe("—");
+  });
+});
+
+describe("formatUkCalendarDateTime", () => {
+  it("formats YYYY-MM-DD with numeric date and 24h time", () => {
+    expect(formatUkCalendarDateTime("2027-07-28", "09:00")).toBe("28/07/2027, 09:00");
+  });
+
+  it("returns empty for missing date", () => {
+    expect(formatUkCalendarDateTime(null, "09:00")).toBe("—");
+  });
+});
+
+describe("formatUkDateRange", () => {
+  it("formats an inclusive range", () => {
+    expect(formatUkDateRange("2026-07-01", "2026-07-07")).toBe("01/07/2026 – 07/07/2026");
+  });
+
+  it("returns a single date when start and end match", () => {
+    expect(formatUkDateRange("2026-07-01", "2026-07-01")).toBe("01/07/2026");
   });
 });
 
@@ -42,7 +64,7 @@ describe("formatUkDateTime", () => {
 
   it("formats an ISO instant in Europe/London with 24h time", () => {
     // 20:16 UTC in July = 21:16 BST
-    expect(formatUkDateTime("2026-07-17T20:16:00.000Z")).toBe("17 Jul 2026, 21:16");
+    expect(formatUkDateTime("2026-07-17T20:16:00.000Z")).toBe("17/07/2026, 21:16");
   });
 });
 

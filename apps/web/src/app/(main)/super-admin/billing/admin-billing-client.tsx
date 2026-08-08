@@ -6,6 +6,7 @@ import {
   validateInvoicePaymentAction,
 } from "@/app/actions/admin-billing";
 import { applyInvoiceDiscountAction, createBillingAmendmentAction, applyBillingAmendmentAction } from "@/app/actions/billing-adjustments";
+import { RphSelect } from "@/components/forms/rph-select";
 import { formatUkDate } from "@/lib/datetime/uk";
 import { rentalContractCopy } from "@/lib/rental-contract-copy";
 import { useRouter } from "next/navigation";
@@ -38,6 +39,8 @@ type SchedRow = {
   billing_schedules: { parent_company_id: string; contract_id: string | null };
 };
 
+const DECISION_UNSET = "__unset__";
+
 export function AdminBillingClient({
   submissions,
   scheduledItems,
@@ -49,6 +52,8 @@ export function AdminBillingClient({
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [decisions, setDecisions] = useState<Record<string, string>>({});
+  const [amountType, setAmountType] = useState("fixed");
 
   return (
     <div className="space-y-10">
@@ -113,8 +118,14 @@ export function AdminBillingClient({
                   className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap"
                   onSubmit={(e) => {
                     e.preventDefault();
+                    const decision = decisions[s.id] ?? DECISION_UNSET;
+                    if (decision === DECISION_UNSET) {
+                      setErr("Select a decision.");
+                      return;
+                    }
                     const fd = new FormData(e.currentTarget);
                     fd.set("submission_id", s.id);
+                    fd.set("decision", decision);
                     setMsg(null);
                     setErr(null);
                     startTransition(() => {
@@ -130,11 +141,20 @@ export function AdminBillingClient({
                     });
                   }}
                 >
-                  <select name="decision" required className="rph-input-auth text-sm">
-                    <option value="">Decision…</option>
-                    <option value="confirmed_paid">Confirm paid</option>
-                    <option value="rejected">Reject</option>
-                  </select>
+                  <RphSelect
+                    value={decisions[s.id] ?? DECISION_UNSET}
+                    placeholder="Decision…"
+                    aria-label="Decision"
+                    triggerClassName="rph-input-auth text-sm"
+                    options={[
+                      { value: DECISION_UNSET, label: "Decision…" },
+                      { value: "confirmed_paid", label: "Confirm paid" },
+                      { value: "rejected", label: "Reject" },
+                    ]}
+                    onValueChange={(value) =>
+                      setDecisions((prev) => ({ ...prev, [s.id]: value }))
+                    }
+                  />
                   <input
                     name="confirmed_payment_method"
                     placeholder="Confirmed method (if paid)"
@@ -221,10 +241,17 @@ export function AdminBillingClient({
           }}
         >
           <input name="invoice_id" placeholder="Invoice UUID" className="rph-input-auth text-sm sm:col-span-2" required />
-          <select name="amount_type" className="rph-input-auth text-sm">
-            <option value="fixed">Fixed amount</option>
-            <option value="percent">Percent</option>
-          </select>
+          <RphSelect
+            name="amount_type"
+            value={amountType}
+            aria-label="Amount type"
+            triggerClassName="rph-input-auth text-sm"
+            options={[
+              { value: "fixed", label: "Fixed amount" },
+              { value: "percent", label: "Percent" },
+            ]}
+            onValueChange={setAmountType}
+          />
           <input name="amount_value" placeholder="Value" className="rph-input-auth text-sm" required />
           <input name="reason" placeholder="Reason (required)" className="rph-input-auth text-sm sm:col-span-2" required />
           <button type="submit" disabled={pending} className="rounded-lg bg-slate-800 px-3 py-2 text-sm text-white dark:bg-slate-200 dark:text-slate-900">

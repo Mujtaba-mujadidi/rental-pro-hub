@@ -2,12 +2,31 @@
  * UK (en-GB) date/time display helpers.
  * Use these for all user-facing dates — never rely on the browser default locale.
  *
- * - Calendar dates from DB (`date` / YYYY-MM-DD): {@link formatUkDate}
- * - Timestamps (ISO with time): {@link formatUkDateTime}
- * - Long prose dates: {@link formatUkDateLong}
+ * Display style is numeric throughout:
+ * - Date: `17/07/2026`
+ * - Date + time: `17/07/2026, 21:16`
+ * - Date + time + seconds: `17/07/2026, 21:16:42`
  */
 
 const LOCALE = "en-GB";
+
+const UK_DATE_NUMERIC: Intl.DateTimeFormatOptions = {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+};
+
+const UK_DATETIME_NUMERIC: Intl.DateTimeFormatOptions = {
+  ...UK_DATE_NUMERIC,
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+};
+
+const UK_DATETIME_SECONDS_NUMERIC: Intl.DateTimeFormatOptions = {
+  ...UK_DATETIME_NUMERIC,
+  second: "2-digit",
+};
 
 /** Today's calendar date in UK (YYYY-MM-DD) for hire start / fleet status logic. */
 export function ukTodayYmd(): string {
@@ -31,82 +50,82 @@ function parseCalendarDay(value: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+function formatCalendarDayNumeric(d: Date): string {
+  return d.toLocaleDateString(LOCALE, { ...UK_DATE_NUMERIC, timeZone: "UTC" });
+}
+
+function formatInstantDateNumeric(d: Date): string {
+  return d.toLocaleDateString(LOCALE, { ...UK_DATE_NUMERIC, timeZone: "Europe/London" });
+}
+
 /**
- * Short UK date: `17 Jul 2026`.
- * Pass a YYYY-MM-DD string for date-only columns; ISO timestamps also work (local calendar day).
+ * UK date (numeric): `17/07/2026`.
+ * Pass YYYY-MM-DD for date-only columns; ISO timestamps use the Europe/London calendar day.
  */
 export function formatUkDate(value: string | Date | null | undefined, empty = "—"): string {
   if (value == null || value === "") return empty;
   if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value.trim()) && !value.includes("T")) {
     const d = parseCalendarDay(value);
     if (!d) return empty;
-    return d.toLocaleDateString(LOCALE, {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      timeZone: "UTC",
-    });
+    return formatCalendarDayNumeric(d);
   }
   const d = parseInstant(value);
   if (!d) return empty;
-  return d.toLocaleDateString(LOCALE, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-/** Long UK date: `17 July 2026` (good for licence expiry / prose). */
-export function formatUkDateLong(value: string | Date | null | undefined, empty = "—"): string {
-  if (value == null || value === "") return empty;
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value.trim()) && !value.includes("T")) {
-    const d = parseCalendarDay(value);
-    if (!d) return empty;
-    return d.toLocaleDateString(LOCALE, {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-      timeZone: "UTC",
-    });
-  }
-  const d = parseInstant(value);
-  if (!d) return empty;
-  return d.toLocaleDateString(LOCALE, {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  return formatInstantDateNumeric(d);
 }
 
 /**
- * UK date + time: `17 Jul 2026, 21:16` (24-hour).
- * Use for created_at / transferred_at / signed_at style timestamps.
+ * Numeric UK date — same output as {@link formatUkDate}.
+ * Kept for call sites that distinguish “long” display intent (e.g. licence expiry).
  */
-/** Calendar date at a fixed UK time, e.g. `17 July 2026 at 09:00`. */
+export function formatUkDateLong(value: string | Date | null | undefined, empty = "—"): string {
+  return formatUkDate(value, empty);
+}
+
+/** Calendar date + fixed time: `17/07/2026, 09:00`. */
 export function formatUkDateAtTime(
   dateYmd: string | null | undefined,
   time24: string,
   empty = "—",
 ): string {
-  const datePart = formatUkDateLong(dateYmd, "");
-  if (!datePart) return empty;
-  const t = time24.trim();
-  return t ? `${datePart} at ${t}` : datePart;
+  return formatUkCalendarDateTime(dateYmd, time24, empty);
 }
 
+/** Calendar date + fixed time: `17/07/2026, 09:00`. */
+export function formatUkCalendarDateTime(
+  dateYmd: string | null | undefined,
+  time24: string,
+  empty = "—",
+): string {
+  const datePart = formatUkDate(dateYmd, "");
+  if (!datePart) return empty;
+  const t = time24.trim();
+  return t ? `${datePart}, ${t}` : datePart;
+}
+
+/** Inclusive calendar range: `01/07/2026 – 07/07/2026`. */
+export function formatUkDateRange(
+  startYmd: string | null | undefined,
+  endYmd: string | null | undefined,
+  empty = "—",
+): string {
+  const start = formatUkDate(startYmd, "");
+  if (!start) return empty;
+  if (!endYmd || endYmd === startYmd) return start;
+  const end = formatUkDate(endYmd, "");
+  if (!end) return start;
+  return `${start} – ${end}`;
+}
+
+/**
+ * UK date + time (numeric): `17/07/2026, 21:16` (24-hour, Europe/London).
+ * Use for created_at / transferred_at / signed_at style timestamps.
+ */
 export function formatUkDateTime(value: string | Date | null | undefined, empty = "—"): string {
   if (value == null || value === "") return empty;
   const d = parseInstant(value);
   if (!d) return empty;
-  return d.toLocaleString(LOCALE, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Europe/London",
-  });
+  return d.toLocaleString(LOCALE, { ...UK_DATETIME_NUMERIC, timeZone: "Europe/London" });
 }
 
 /**
@@ -117,16 +136,7 @@ export function formatUkDateTimeSeconds(value: string | Date | null | undefined,
   if (value == null || value === "") return empty;
   const d = parseInstant(value);
   if (!d) return empty;
-  return d.toLocaleString(LOCALE, {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-    timeZone: "Europe/London",
-  });
+  return d.toLocaleString(LOCALE, { ...UK_DATETIME_SECONDS_NUMERIC, timeZone: "Europe/London" });
 }
 
 function utcStartOfDayMs(d: Date): number {

@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
-import {
-  loadSubcompanyOverviewAction,
-  type SubcompanyOverviewStats,
-} from "@/app/actions/rental-subcompany-workspace";
+import { useState, useTransition } from "react";
+import { dismissSubcompanyDocumentRequirementAction } from "@/app/actions/rental-subcompany-workspace";
 import { formatUkDateTime } from "@/lib/datetime/uk";
+import type {
+  SubcompanyOverviewStats,
+} from "@/lib/rental/load-subcompany-section-data";
 import { formatSubcompanyAddressLines } from "@/lib/rental/subcompany-legal-snapshot";
-import { subcompanyWorkspaceHref, subcompanyWorkspaceNav } from "@/lib/rental/subcompany-workspace-nav";
+import { subcompanyWorkspaceHref } from "@/lib/rental/subcompany-workspace-nav";
 import {
   SUBCOMPANY_DOCUMENT_KIND_LABELS,
   type SubcompanyOpenRequirement,
@@ -16,34 +16,37 @@ import {
 import { SUBCOMPANY_STATUS_LABELS } from "./subcompany-status-chip";
 import { useSubcompanyWorkspace } from "./subcompany-workspace-provider";
 
-export function SubcompanyOverviewClient() {
-  const { shell } = useSubcompanyWorkspace();
+export function SubcompanyOverviewClient({
+  stats,
+  openRequirements,
+}: {
+  stats: SubcompanyOverviewStats;
+  openRequirements: SubcompanyOpenRequirement[];
+}) {
+  const { shell, refreshShell } = useSubcompanyWorkspace();
   const subcompany = shell.subcompany;
-  const [pending, startTransition] = useTransition();
-  const [stats, setStats] = useState<SubcompanyOverviewStats | null>(null);
-  const [openRequirements, setOpenRequirements] = useState<SubcompanyOpenRequirement[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [pendingDismissId, setPendingDismissId] = useState<string | null>(null);
+  const [dismissError, setDismissError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
 
-  useEffect(() => {
+  function dismissRequirement(requirementId: string) {
+    setDismissError(null);
+    setPendingDismissId(requirementId);
     startTransition(async () => {
-      const res = await loadSubcompanyOverviewAction(subcompany.id);
+      const res = await dismissSubcompanyDocumentRequirementAction(requirementId);
+      setPendingDismissId(null);
       if (!res.ok) {
-        setError(res.error);
+        setDismissError(res.error);
         return;
       }
-      setStats(res.stats);
-      setOpenRequirements(res.openRequirements);
-      setError(null);
+      refreshShell();
     });
-  }, [subcompany.id]);
+  }
 
   const address = formatSubcompanyAddressLines(subcompany);
   const contactName = [subcompany.primary_contact_first_name, subcompany.primary_contact_last_name]
     .filter(Boolean)
     .join(" ");
-  const relatedLinks = subcompanyWorkspaceNav(subcompany.id).filter(
-    (item) => item.label === "Vehicles" || item.label === "Hires" || item.label === "Staff",
-  );
 
   return (
     <div className="space-y-6">
@@ -55,8 +58,6 @@ export function SubcompanyOverviewClient() {
         </p>
       </div>
 
-      {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
-
       {openRequirements.length ? (
         <div className="rph-alert-warn text-sm">
           <p className="font-semibold">
@@ -64,13 +65,30 @@ export function SubcompanyOverviewClient() {
               ? "1 hire document needs updating after a details change."
               : `${openRequirements.length} hire documents need updating after a details change.`}
           </p>
-          <ul className="mt-2 space-y-1">
+          <p className="mt-1 text-sm">
+            Only active on-rent hires with generated or signed PDFs need updates. Ended contracts are cleared
+            automatically — dismiss any remaining flags that were raised in error.
+          </p>
+          {dismissError ? <p className="mt-2 text-sm text-red-600">{dismissError}</p> : null}
+          <ul className="mt-2 space-y-2">
             {openRequirements.map((req) => (
-              <li key={req.id}>
-                <Link href={req.href} className="rph-link">
-                  {req.label}
-                </Link>
-                <span> · {SUBCOMPANY_DOCUMENT_KIND_LABELS[req.documentKind]}</span>
+              <li key={req.id} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>
+                  <Link href={req.href} className="rph-link">
+                    {req.label}
+                  </Link>
+                  <span> · {SUBCOMPANY_DOCUMENT_KIND_LABELS[req.documentKind]}</span>
+                </span>
+                {shell.canWrite ? (
+                  <button
+                    type="button"
+                    className="rph-btn-ghost px-2 py-1 text-xs disabled:opacity-50"
+                    disabled={isPending && pendingDismissId === req.id}
+                    onClick={() => dismissRequirement(req.id)}
+                  >
+                    {isPending && pendingDismissId === req.id ? "Dismissing…" : "Not needed"}
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -91,7 +109,7 @@ export function SubcompanyOverviewClient() {
         <div className="rph-card p-4">
           <p className="rph-meta font-semibold uppercase tracking-wide">Vehicles</p>
           <p className="mt-2 text-lg font-semibold text-rph-fg">
-            {stats ? stats.vehicleCount.toLocaleString("en-GB") : pending ? "…" : "—"}
+            {stats.vehicleCount.toLocaleString("en-GB")}
           </p>
           <Link href={subcompanyWorkspaceHref(subcompany.id, "vehicles")} className="rph-link mt-1 inline-block text-sm">
             View fleet
@@ -101,11 +119,11 @@ export function SubcompanyOverviewClient() {
         <div className="rph-card p-4">
           <p className="rph-meta font-semibold uppercase tracking-wide">Hires</p>
           <p className="mt-2 text-lg font-semibold text-rph-fg">
-            {stats ? stats.activeHireCount.toLocaleString("en-GB") : pending ? "…" : "—"}
+            {stats.activeHireCount.toLocaleString("en-GB")}
             <span className="rph-muted text-sm font-normal"> active</span>
           </p>
           <p className="rph-muted mt-1 text-sm">
-            {stats ? `${stats.totalHireCount.toLocaleString("en-GB")} total` : "—"}
+            {stats.totalHireCount.toLocaleString("en-GB")} total
           </p>
           <Link href={subcompanyWorkspaceHref(subcompany.id, "hires")} className="rph-link mt-1 inline-block text-sm">
             View hires
@@ -115,7 +133,7 @@ export function SubcompanyOverviewClient() {
         <div className="rph-card p-4">
           <p className="rph-meta font-semibold uppercase tracking-wide">Contract updates</p>
           <p className="mt-2 text-lg font-semibold text-rph-fg">
-            {stats ? stats.openRequirementCount.toLocaleString("en-GB") : shell.openRequirementCount}
+            {stats.openRequirementCount.toLocaleString("en-GB")}
           </p>
           <p className="rph-muted mt-1 text-sm">Hire documents flagged for re-issue.</p>
         </div>
@@ -133,17 +151,6 @@ export function SubcompanyOverviewClient() {
           <p className="mt-2 text-sm font-semibold text-rph-fg">{contactName || "—"}</p>
           <p className="rph-muted text-sm">{subcompany.primary_contact_email}</p>
           <p className="rph-muted text-sm">{subcompany.primary_contact_phone}</p>
-        </div>
-      </div>
-
-      <div className="rph-panel p-4">
-        <p className="rph-meta font-semibold uppercase tracking-wide">Related lists</p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {relatedLinks.map((item) => (
-            <Link key={item.href} href={item.href} className="rph-pill">
-              {item.label}
-            </Link>
-          ))}
         </div>
       </div>
     </div>

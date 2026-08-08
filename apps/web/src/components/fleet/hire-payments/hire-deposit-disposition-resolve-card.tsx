@@ -1,5 +1,6 @@
 "use client";
 
+import { RphSelect } from "@/components/forms/rph-select";
 import { resolveHireDepositDispositionAction } from "@/app/actions/rental-hire-termination";
 import {
   availableSettlementResolutions,
@@ -120,19 +121,18 @@ export function HireDepositDispositionResolveCard({
         <label className="text-sm font-medium text-rph-fg" htmlFor="deposit-disposition">
           Deposit action
         </label>
-        <select
-          id="deposit-disposition"
-          className="rph-input w-full"
+        <RphSelect
           value={depositDisposition}
-          onChange={(event) => setDepositDisposition(event.target.value as HireDepositDisposition)}
-        >
-          {depositOptions.map((option) => (
-            <option key={option.value} value={option.value} disabled={!option.allowed}>
-              {option.label}
-              {!option.allowed && option.disabledReason ? ` — ${option.disabledReason}` : ""}
-            </option>
-          ))}
-        </select>
+          aria-label="Deposit action"
+          options={depositOptions.map((option) => ({
+            value: option.value,
+            label:
+              option.label +
+              (!option.allowed && option.disabledReason ? ` — ${option.disabledReason}` : ""),
+            disabled: !option.allowed,
+          }))}
+          onValueChange={(value) => setDepositDisposition(value as HireDepositDisposition)}
+        />
       </div>
 
       {depositDisposition === "refund_partial" ? (
@@ -177,20 +177,17 @@ export function HireDepositDispositionResolveCard({
             <label className="text-sm font-medium text-rph-fg" htmlFor="settlement-resolution">
               How to clear the balance
             </label>
-            <select
-              id="settlement-resolution"
-              className="rph-input w-full"
+            <RphSelect
               value={settlementResolution}
-              onChange={(event) =>
-                setSettlementResolution(event.target.value as HireSettlementResolution)
+              aria-label="How to clear the balance"
+              options={settlementResolutions.map((resolution) => ({
+                value: resolution,
+                label: settlementResolutionLabel(resolution),
+              }))}
+              onValueChange={(value) =>
+                setSettlementResolution(value as HireSettlementResolution)
               }
-            >
-              {settlementResolutions.map((resolution) => (
-                <option key={resolution} value={resolution}>
-                  {settlementResolutionLabel(resolution)}
-                </option>
-              ))}
-            </select>
+            />
           </div>
 
           {settlementResolution === "paid_now" ? (
@@ -199,18 +196,15 @@ export function HireDepositDispositionResolveCard({
                 <label className="text-sm font-medium text-rph-fg" htmlFor="settlement-method">
                   Payment method
                 </label>
-                <select
-                  id="settlement-method"
-                  className="rph-input w-full"
+                <RphSelect
                   value={settlementPaymentMethod}
-                  onChange={(event) => setSettlementPaymentMethod(event.target.value)}
-                >
-                  {HIRE_DEPOSIT_REFUND_METHODS.map((method) => (
-                    <option key={method} value={method}>
-                      {method.replace(/_/g, " ")}
-                    </option>
-                  ))}
-                </select>
+                  aria-label="Payment method"
+                  options={HIRE_DEPOSIT_REFUND_METHODS.map((method) => ({
+                    value: method,
+                    label: method.replace(/_/g, " "),
+                  }))}
+                  onValueChange={setSettlementPaymentMethod}
+                />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-rph-fg" htmlFor="settlement-reference">

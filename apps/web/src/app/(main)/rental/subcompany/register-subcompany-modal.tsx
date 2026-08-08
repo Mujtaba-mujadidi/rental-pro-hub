@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useMemo, useState, useTransition } from "react";
 import { registerSubcompanyAction } from "@/app/actions/rental-subcompanies";
+import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
 
@@ -355,11 +356,16 @@ export function RegisterSubcompanyModal({
         <div className="space-y-4">
           <div className="space-y-1 sm:max-w-xs">
             <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Status</label>
-            <select value={draft.status} onChange={(e) => patch("status", e.target.value)} className={inputClass()}>
-              <option value="active">Active</option>
-              <option value="pending">Pending</option>
-              <option value="inactive">Inactive</option>
-            </select>
+            <FormModalSelect
+              value={draft.status}
+              aria-label="Status"
+              options={[
+                { value: "active", label: "Active" },
+                { value: "pending", label: "Pending" },
+                { value: "inactive", label: "Inactive" },
+              ]}
+              onValueChange={(v) => patch("status", v)}
+            />
           </div>
           <div className="space-y-1">
             <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Internal notes</label>

@@ -1,10 +1,16 @@
 "use server";
 
+import { cache } from "react";
 import { revalidatePath } from "next/cache";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
 import { canWriteRentals, canWriteSubcompany } from "@/lib/auth/rental-permissions";
 import { logSubcompanyEvent, type SubcompanyAuditRow } from "@/lib/rental/subcompany-audit";
+import {
+  loadSubcompanyAuditTrailData,
+  loadSubcompanyOverviewData,
+  type SubcompanyOverviewStats,
+} from "@/lib/rental/load-subcompany-section-data";
 import {
   buildSubcompanyChangeSummary,
   detectSubcompanySnapshotDrift,
@@ -13,9 +19,18 @@ import {
   sanitizeSubcompanyUpdatePatch,
   type SubcompanyFieldChange,
 } from "@/lib/rental/subcompany-contract-impact";
+import {
+  collectAffectedHireDocuments,
+  CONTRACT_IMPACT_HIRE_STATUSES,
+  hireQualifiesForSubcompanyDocumentImpact,
+  mapHireForDocumentImpact,
+  resolveHireVrm,
+  type AffectedHireDocument,
+} from "@/lib/rental/subcompany-hire-document-impact";
 import { buildSubcompanyLegalSnapshot } from "@/lib/rental/subcompany-legal-snapshot";
 import {
   processSubcompanyLogoForStorage,
+  resolveSubcompanyWorkspaceLogoDisplayUrl,
   SUBCOMPANY_LOGOS_BUCKET,
 } from "@/lib/rental/subcompany-logo";
 import {
@@ -31,13 +46,9 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 const LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const LOGO_MAX_BYTES = 5 * 1024 * 1024;
 
-const AFFECTED_HIRE_STATUSES = ["draft", "pending_signature", "reserved", "active"] as const;
-
 function revalidateSubcompany(id: string) {
   revalidatePath("/rental/subcompany");
   revalidatePath(`/rental/subcompany/${id}`);
-  revalidatePath(`/rental/subcompany/${id}/details`);
-  revalidatePath(`/rental/subcompany/${id}/activity`);
 }
 
 async function loadSubcompanyOrError(
@@ -66,6 +77,12 @@ export type SubcompanySwitcherOption = {
 export async function loadSubcompanySwitcherListAction(): Promise<
   SubcompanySwitcherOption[] | { error: string }
 > {
+  return fetchSubcompanySwitcherList();
+}
+
+const fetchSubcompanySwitcherList = cache(async (): Promise<
+  SubcompanySwitcherOption[] | { error: string }
+> => {
   const { profile } = await requireRentalCompanyArea();
   const companyId = profile.company_id?.trim();
   if (!companyId) return { error: "No active company." };
@@ -85,7 +102,7 @@ export async function loadSubcompanySwitcherListAction(): Promise<
     isPrimary: Boolean(r.is_primary),
     status: String(r.status ?? "active"),
   }));
-}
+});
 
 export async function loadSubcompanyWorkspaceShellAction(
   subcompanyId: string,
@@ -99,15 +116,52 @@ async function countAffectedHiresWithDrift(
 ): Promise<boolean> {
   const { data: hires } = await supabase
     .from("vehicle_hire_groups")
-    .select("id, subcompany_legal_snapshot")
+    .select("id, status, subcompany_legal_snapshot")
     .eq("subcompany_id", subcompany.id)
-    .in("status", [...AFFECTED_HIRE_STATUSES]);
+    .in("status", [...CONTRACT_IMPACT_HIRE_STATUSES]);
+  if (!hires?.length) return false;
 
-  for (const h of hires ?? []) {
+  const hireIds = hires.map((hire) => hire.id as string);
+  const [{ data: agreements }, { data: inspections }] = await Promise.all([
+    supabase
+      .from("vehicle_hire_agreements")
+      .select("hire_group_id, signed_at, signed_storage_path, esign_envelope_id")
+      .in("hire_group_id", hireIds),
+    supabase.from("vehicle_hire_inspections").select("hire_group_id, status").in("hire_group_id", hireIds),
+  ]);
+
+  const agreementsByHire = new Map<string, typeof agreements>();
+  for (const agreement of agreements ?? []) {
+    const hireGroupId = agreement.hire_group_id as string;
+    const list = agreementsByHire.get(hireGroupId) ?? [];
+    list.push(agreement);
+    agreementsByHire.set(hireGroupId, list);
+  }
+
+  const inspectionsByHire = new Map<string, { status: string }[]>();
+  for (const inspection of inspections ?? []) {
+    const hireGroupId = inspection.hire_group_id as string;
+    const list = inspectionsByHire.get(hireGroupId) ?? [];
+    list.push({ status: String(inspection.status ?? "") });
+    inspectionsByHire.set(hireGroupId, list);
+  }
+
+  for (const hire of hires) {
+    const mapped = mapHireForDocumentImpact({
+      id: hire.id as string,
+      status: String(hire.status ?? ""),
+      subcompany_legal_snapshot: (hire.subcompany_legal_snapshot ?? null) as Record<string, unknown> | null,
+      vrm: "Vehicle",
+      agreements: (agreementsByHire.get(hire.id as string) ?? []) as Parameters<
+        typeof mapHireForDocumentImpact
+      >[0]["agreements"],
+      inspections: inspectionsByHire.get(hire.id as string) ?? [],
+    });
+    if (!hireQualifiesForSubcompanyDocumentImpact(mapped)) continue;
     if (
       hasContractImpactDrift(
         subcompany,
-        (h.subcompany_legal_snapshot ?? {}) as Record<string, unknown>,
+        (hire.subcompany_legal_snapshot ?? {}) as Record<string, unknown>,
       )
     ) {
       return true;
@@ -294,6 +348,51 @@ export async function uploadSubcompanyLogoAction(
   return { ok: true, promptContractImpact };
 }
 
+export async function getSubcompanyLogoPreviewUrlAction(
+  subcompanyId: string,
+): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const { profile } = await requireRentalCompanyArea();
+  const companyId = profile.company_id?.trim();
+  if (!companyId) return { ok: false, error: "No active company." };
+
+  const supabase = await createClient();
+  const loaded = await loadSubcompanyOrError(supabase, companyId, subcompanyId);
+  if (!loaded.ok) return loaded;
+
+  let companyLogoPath: string | null = null;
+  if (loaded.row.is_primary) {
+    const { data: company } = await supabase
+      .from("companies")
+      .select("logo_storage_path")
+      .eq("id", companyId)
+      .maybeSingle();
+    companyLogoPath = (company?.logo_storage_path as string | null) ?? null;
+  }
+
+  const logoOnFile = Boolean(loaded.row.logo_storage_path?.trim() || companyLogoPath?.trim());
+  if (!logoOnFile) return { ok: false, error: "No logo on file." };
+
+  let admin: ReturnType<typeof createSupabaseAdminClient> | null = null;
+  try {
+    admin = createSupabaseAdminClient();
+  } catch {
+    admin = null;
+  }
+
+  const url = await resolveSubcompanyWorkspaceLogoDisplayUrl(
+    supabase,
+    {
+      subcompanyLogoPath: loaded.row.logo_storage_path,
+      companyLogoPath,
+      parentCompanyId: companyId,
+      subcompanyId: loaded.row.id,
+    },
+    admin,
+  );
+  if (!url) return { ok: false, error: "Could not load logo preview." };
+  return { ok: true, url };
+}
+
 export async function removeSubcompanyLogoAction(
   subcompanyId: string,
 ): Promise<{ ok: true; promptContractImpact: boolean } | { ok: false; error: string }> {
@@ -341,15 +440,9 @@ export async function removeSubcompanyLogoAction(
   return { ok: true, promptContractImpact };
 }
 
-export type AffectedHireDocument = {
-  hireGroupId: string;
-  agreementId: string | null;
-  documentKind: "hire_agreement" | "permission_letter";
-  label: string;
-};
-
 export async function loadAffectedHireDocumentsForImpactAction(
   subcompanyId: string,
+  changedFields: SubcompanyFieldChange[] = [],
 ): Promise<{ ok: true; documents: AffectedHireDocument[] } | { ok: false; error: string }> {
   const { profile } = await requireRentalCompanyArea();
   const companyId = profile.company_id?.trim();
@@ -361,43 +454,61 @@ export async function loadAffectedHireDocumentsForImpactAction(
 
   const { data: hires, error } = await supabase
     .from("vehicle_hire_groups")
-    .select(
-      "id, status, subcompany_legal_snapshot, vehicles(vrm), vehicle_hire_agreements(id, contract_length_kind, status)",
-    )
+    .select("id, status, subcompany_legal_snapshot, vehicles(vrm)")
     .eq("subcompany_id", loaded.row.id)
-    .in("status", [...AFFECTED_HIRE_STATUSES]);
+    .in("status", [...CONTRACT_IMPACT_HIRE_STATUSES]);
   if (error) return { ok: false, error: error.message };
 
-  const documents: AffectedHireDocument[] = [];
-  for (const h of hires ?? []) {
-    const snap = (h.subcompany_legal_snapshot ?? {}) as Record<string, unknown>;
-    if (!hasContractImpactDrift(loaded.row, snap)) continue;
+  const hireIds = (hires ?? []).map((hire) => hire.id as string);
 
-    const vrm =
-      (h.vehicles as { vrm?: string } | null)?.vrm ??
-      ((Array.isArray(h.vehicles) ? h.vehicles[0] : null) as { vrm?: string } | null)?.vrm ??
-      "Vehicle";
-    const agreements = (h.vehicle_hire_agreements ?? []) as {
-      id: string;
-      contract_length_kind: string;
-      status: string;
-    }[];
-    const liveAgreements = agreements.filter((a) => a.status !== "superseded" && a.status !== "cancelled");
-    for (const a of liveAgreements) {
-      documents.push({
-        hireGroupId: h.id as string,
-        agreementId: a.id,
-        documentKind: "hire_agreement",
-        label: `${vrm} · Hire agreement (${a.contract_length_kind.replace(/_/g, " ")})`,
-      });
-    }
-    documents.push({
-      hireGroupId: h.id as string,
-      agreementId: null,
-      documentKind: "permission_letter",
-      label: `${vrm} · Permission letter`,
-    });
+  const [{ data: agreements }, { data: inspections }] = await Promise.all([
+    hireIds.length
+      ? supabase
+          .from("vehicle_hire_agreements")
+          .select(
+            "id, hire_group_id, contract_length_kind, status, signed_at, signed_storage_path, esign_envelope_id",
+          )
+          .in("hire_group_id", hireIds)
+      : Promise.resolve({ data: [] as const, error: null }),
+    hireIds.length
+      ? supabase
+          .from("vehicle_hire_inspections")
+          .select("id, hire_group_id, kind, status")
+          .in("hire_group_id", hireIds)
+      : Promise.resolve({ data: [] as const, error: null }),
+  ]);
+
+  const inspectionsByHire = new Map<string, { status: string }[]>();
+  for (const inspection of inspections ?? []) {
+    const hireGroupId = inspection.hire_group_id as string;
+    const list = inspectionsByHire.get(hireGroupId) ?? [];
+    list.push({ status: String(inspection.status ?? "") });
+    inspectionsByHire.set(hireGroupId, list);
   }
+
+  const agreementRows = (agreements ?? []) as Parameters<typeof collectAffectedHireDocuments>[0]["agreements"];
+  const hireRows = (hires ?? []).map((hire) =>
+    mapHireForDocumentImpact({
+      id: hire.id as string,
+      status: String(hire.status ?? ""),
+      subcompany_legal_snapshot: (hire.subcompany_legal_snapshot ?? null) as Record<string, unknown> | null,
+      vrm: resolveHireVrm(hire.vehicles),
+      agreements: agreementRows.filter((row) => row.hire_group_id === hire.id),
+      inspections: inspectionsByHire.get(hire.id as string) ?? [],
+    }),
+  );
+
+  const documents = collectAffectedHireDocuments({
+    liveSubcompany: loaded.row,
+    hires: hireRows,
+    agreements: agreementRows,
+    inspections: (inspections ?? []) as {
+      id: string;
+      hire_group_id: string;
+      kind: "checkout" | "checkin";
+      status: string;
+    }[],
+  });
 
   return { ok: true, documents };
 }
@@ -450,6 +561,7 @@ export async function recordSubcompanyContractImpactAnswerAction(input: {
       hire_group_id: d.hireGroupId,
       document_kind: d.documentKind,
       agreement_id: d.agreementId,
+      inspection_id: d.inspectionId,
       status: "required",
     }));
     const { error: reqErr } = await admin.from("subcompany_hire_document_requirements").insert(rows);
@@ -482,49 +594,8 @@ export async function loadSubcompanyAuditTrailAction(
   const { profile } = await requireRentalCompanyArea();
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
-
-  const supabase = await createClient();
-  const loaded = await loadSubcompanyOrError(supabase, companyId, subcompanyId);
-  if (!loaded.ok) return loaded;
-
-  const { data, error } = await supabase
-    .from("subcompany_events")
-    .select("id, event_type, actor_user_id, actor_role, summary, metadata, created_at")
-    .eq("subcompany_id", loaded.row.id)
-    .order("created_at", { ascending: false })
-    .limit(200);
-  if (error) return { ok: false, error: error.message };
-
-  return {
-    ok: true,
-    events: (data ?? []).map((e) => ({
-      id: e.id as string,
-      event_type: e.event_type as SubcompanyAuditRow["event_type"],
-      actor_user_id: (e.actor_user_id as string | null) ?? null,
-      actor_role: (e.actor_role as string | null) ?? null,
-      summary: e.summary as string,
-      metadata: (e.metadata ?? {}) as Record<string, unknown>,
-      created_at: e.created_at as string,
-    })),
-  };
+  return loadSubcompanyAuditTrailData(companyId, subcompanyId);
 }
-
-export type SubcompanyOverviewStats = {
-  vehicleCount: number;
-  activeHireCount: number;
-  pendingHireCount: number;
-  totalHireCount: number;
-  openRequirementCount: number;
-};
-
-export type OpenDocumentRequirement = {
-  id: string;
-  hireGroupId: string;
-  documentKind: string;
-  agreementId: string | null;
-  label: string;
-  href: string;
-};
 
 export async function loadSubcompanyOverviewAction(
   subcompanyId: string,
@@ -540,84 +611,12 @@ export async function loadSubcompanyOverviewAction(
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
 
-  const supabase = await createClient();
-  const loaded = await loadSubcompanyOrError(supabase, companyId, subcompanyId);
-  if (!loaded.ok) return loaded;
-
-  const [
-    { count: vehicleCount },
-    { count: activeHireCount },
-    { count: pendingHireCount },
-    { count: totalHireCount },
-    { data: reqs },
-  ] = await Promise.all([
-    supabase
-      .from("vehicles")
-      .select("id", { count: "exact", head: true })
-      .eq("subcompany_id", loaded.row.id),
-    supabase
-      .from("vehicle_hire_groups")
-      .select("id", { count: "exact", head: true })
-      .eq("subcompany_id", loaded.row.id)
-      .eq("status", "active"),
-    supabase
-      .from("vehicle_hire_groups")
-      .select("id", { count: "exact", head: true })
-      .eq("subcompany_id", loaded.row.id)
-      .in("status", ["pending_signature", "reserved"]),
-    supabase
-      .from("vehicle_hire_groups")
-      .select("id", { count: "exact", head: true })
-      .eq("subcompany_id", loaded.row.id),
-    supabase
-      .from("subcompany_hire_document_requirements")
-      .select("id, hire_group_id, document_kind, agreement_id")
-      .eq("subcompany_id", loaded.row.id)
-      .eq("status", "required")
-      .order("created_at", { ascending: true }),
-  ]);
-
-  const hireIds = [...new Set((reqs ?? []).map((r) => r.hire_group_id as string))];
-  const labelByHire = new Map<string, string>();
-  if (hireIds.length) {
-    const { data: hireRows } = await supabase
-      .from("vehicle_hire_groups")
-      .select("id, vehicles(vrm)")
-      .in("id", hireIds);
-    for (const h of hireRows ?? []) {
-      const v = h.vehicles as { vrm?: string } | { vrm?: string }[] | null;
-      const vrm = Array.isArray(v) ? v[0]?.vrm : v?.vrm;
-      labelByHire.set(h.id as string, vrm?.trim() || "Hire");
-    }
-  }
-
-  const openRequirements = (reqs ?? []).map((r) => {
-    const hireGroupId = r.hire_group_id as string;
-    const documentKind = r.document_kind as "hire_agreement" | "permission_letter";
-    const base = labelByHire.get(hireGroupId) ?? "Hire";
-    return {
-      id: r.id as string,
-      hireGroupId,
-      documentKind,
-      agreementId: (r.agreement_id as string | null) ?? null,
-      label:
-        documentKind === "permission_letter"
-          ? `${base} · Permission letter`
-          : `${base} · Hire agreement`,
-      href: `/rental/hires/${hireGroupId}/details`,
-    };
-  });
-
+  const res = await loadSubcompanyOverviewData(companyId, subcompanyId);
+  if (!res.ok) return res;
   return {
     ok: true,
-    stats: {
-      vehicleCount: vehicleCount ?? 0,
-      activeHireCount: activeHireCount ?? 0,
-      pendingHireCount: pendingHireCount ?? 0,
-      totalHireCount: totalHireCount ?? 0,
-      openRequirementCount: openRequirements.length,
-    },
-    openRequirements,
+    stats: res.data.stats,
+    openRequirements: res.data.openRequirements,
   };
 }
 
@@ -662,8 +661,9 @@ export async function refreshHireSubcompanySnapshotAction(
 
 export async function completeSubcompanyDocumentRequirementAction(input: {
   hireGroupId: string;
-  documentKind: "hire_agreement" | "permission_letter";
+  documentKind: import("@/lib/rental/subcompany-workspace-types").SubcompanyDocumentKind;
   agreementId?: string | null;
+  inspectionId?: string | null;
   completedVia: "supersede_resign" | "regenerate_unsigned";
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const { profile, user } = await requireRentalCompanyArea();
@@ -691,6 +691,14 @@ export async function completeSubcompanyDocumentRequirementAction(input: {
 
   if (input.agreementId) {
     q = q.eq("agreement_id", input.agreementId);
+  } else if (input.documentKind === "hire_agreement" || input.documentKind === "permission_letter") {
+    q = q.is("agreement_id", null);
+  }
+
+  if (input.inspectionId) {
+    q = q.eq("inspection_id", input.inspectionId);
+  } else if (input.documentKind.startsWith("inspection_")) {
+    return { ok: false, error: "Missing inspection id for inspection report requirement." };
   }
 
   const { error } = await q;
@@ -698,6 +706,70 @@ export async function completeSubcompanyDocumentRequirementAction(input: {
 
   revalidatePath("/rental/hires");
   revalidatePath("/rental/subcompany");
+  return { ok: true };
+}
+
+export async function dismissSubcompanyDocumentRequirementAction(
+  requirementId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { profile, user } = await requireRentalCompanyArea();
+  const writable = await assertRentalCompanyWritable(profile);
+  if (!writable.ok) return writable;
+  if (!canWriteSubcompany(profile)) {
+    return { ok: false, error: "You do not have permission." };
+  }
+  const companyId = profile.company_id?.trim();
+  if (!companyId) return { ok: false, error: "No active company." };
+
+  const supabase = await createClient();
+  const { data: row, error: loadErr } = await supabase
+    .from("subcompany_hire_document_requirements")
+    .select("id, subcompany_id, status, hire_group_id, document_kind")
+    .eq("id", requirementId.trim())
+    .maybeSingle();
+  if (loadErr) return { ok: false, error: loadErr.message };
+  if (!row) return { ok: false, error: "Document flag not found." };
+  if (row.status !== "required") return { ok: true };
+
+  const loaded = await loadSubcompanyOrError(supabase, companyId, row.subcompany_id as string);
+  if (!loaded.ok) return loaded;
+
+  let admin: ReturnType<typeof createSupabaseAdminClient>;
+  try {
+    admin = createSupabaseAdminClient();
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Server configuration error." };
+  }
+
+  const { error } = await admin
+    .from("subcompany_hire_document_requirements")
+    .update({
+      status: "cancelled",
+      completed_at: new Date().toISOString(),
+      completed_by: user.id,
+    })
+    .eq("id", row.id)
+    .eq("status", "required");
+  if (error) return { ok: false, error: error.message };
+
+  await logSubcompanyEvent(admin, {
+    subcompanyId: loaded.row.id,
+    parentCompanyId: companyId,
+    eventType: "contracts_impact_answered",
+    summary: "Dismissed a document update flag that is no longer needed.",
+    actorUserId: user.id,
+    actorRole: profile.membership_role ?? profile.company_role,
+    metadata: {
+      requirement_id: row.id,
+      hire_group_id: row.hire_group_id,
+      document_kind: row.document_kind,
+      dismissed: true,
+    },
+  });
+
+  revalidatePath("/rental/hires");
+  revalidatePath("/rental/subcompany");
+  revalidateSubcompany(loaded.row.id);
   return { ok: true };
 }
 

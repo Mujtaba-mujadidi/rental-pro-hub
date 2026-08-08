@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
-import { loadPendingContractRenewal } from "@/lib/companies/pending-contract-renewal";
+import { getPendingContractRenewalCached } from "@/lib/companies/pending-contract-renewal";
 import { issueInAppRecipientSigningLink } from "@/lib/esign/envelope";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -20,7 +20,7 @@ export default async function RentalContractRenewalSignPage() {
     redirect("/rental/awaiting-contract?signError=Signing%20is%20temporarily%20unavailable.");
   }
 
-  const pending = await loadPendingContractRenewal(admin, companyId);
+  const pending = await getPendingContractRenewalCached(companyId);
   if (!pending?.envelopeId || !pending.signReady) {
     const msg = encodeURIComponent(pending?.signBlockedReason ?? "Contract not ready for signature.");
     redirect(`/rental/awaiting-contract?signError=${msg}`);

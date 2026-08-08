@@ -7,7 +7,7 @@ import { accStatusLabel, weeklyMileageWindowUnix } from "@/lib/fleet-tracking/sm
 
 describe("formatLicenceDate", () => {
   it("formats or returns empty", () => {
-    expect(formatLicenceDate("2026-07-17")).toBe("17 July 2026");
+    expect(formatLicenceDate("2026-07-17")).toBe("17/07/2026");
     expect(formatLicenceDate(null)).toBe("—");
   });
 });

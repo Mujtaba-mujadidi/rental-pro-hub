@@ -18,7 +18,7 @@ const lookups: DriverHireDisplayLookups = {
 
 describe("formatDriverHireContractStartLabel", () => {
   it("uses contract start date with default hire time", () => {
-    expect(formatDriverHireContractStartLabel("2026-07-23")).toBe("23 July 2026 at 09:00");
+    expect(formatDriverHireContractStartLabel("2026-07-23")).toBe("23/07/2026, 09:00");
   });
 
   it("returns dash when start date is missing", () => {

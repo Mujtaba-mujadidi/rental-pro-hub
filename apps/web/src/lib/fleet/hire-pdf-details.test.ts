@@ -22,11 +22,11 @@ describe("normalizeHireStartTime", () => {
 
 describe("formatHireContractStartLabel", () => {
   it("uses the stored start time when provided", () => {
-    expect(formatHireContractStartLabel("2026-07-23", "14:30")).toBe("23 July 2026 at 14:30");
+    expect(formatHireContractStartLabel("2026-07-23", "14:30")).toBe("23/07/2026, 14:30");
   });
 
   it("falls back to the default hire start time", () => {
-    expect(formatHireContractStartLabel("2026-07-23")).toBe("23 July 2026 at 09:00");
+    expect(formatHireContractStartLabel("2026-07-23")).toBe("23/07/2026, 09:00");
   });
 });
 
@@ -44,10 +44,10 @@ describe("normalizeHireEndTime", () => {
 
 describe("formatHireContractEndLabel", () => {
   it("uses the stored end time when provided", () => {
-    expect(formatHireContractEndLabel("2026-12-31", "16:30")).toBe("31 December 2026 at 16:30");
+    expect(formatHireContractEndLabel("2026-12-31", "16:30")).toBe("31/12/2026, 16:30");
   });
 
   it("falls back to the default hire end time", () => {
-    expect(formatHireContractEndLabel("2026-12-31")).toBe("31 December 2026 at 17:00");
+    expect(formatHireContractEndLabel("2026-12-31")).toBe("31/12/2026, 17:00");
   });
 });

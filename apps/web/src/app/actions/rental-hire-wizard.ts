@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidateHireWorkspaceCache } from "@/lib/fleet/hire-workspace-cache";
 import { revalidatePath } from "next/cache";
 import { requireRentalCompanyArea, getSessionUser } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
@@ -49,6 +50,7 @@ import {
 } from "@/lib/fleet/sync-vehicle-hire-status";
 import { mapHireInspectionCompletionByGroup } from "@/lib/fleet/hire-inspection-status";
 import { buildSubcompanyLegalSnapshot } from "@/lib/rental/subcompany-legal-snapshot";
+import { loadDriverLabelsMap } from "@/lib/fleet/driver-labels";
 import {
   canStartCheckin,
   canStartCheckout,
@@ -64,6 +66,7 @@ export type HireContractTableRow = {
   status: string;
   wizard_step: number;
   terminated_at: string | null;
+  ended_at: string | null;
   driver_access_status: string;
   driver_access_label: string;
   driver_access_tone: HireTableStatus["tone"];
@@ -71,6 +74,10 @@ export type HireContractTableRow = {
   esign_tone: HireTableStatus["tone"];
   vehicle_vrm: string | null;
   vehicle_label: string | null;
+  subcompany_name: string | null;
+  driver_name: string | null;
+  driver_email: string | null;
+  driver_licence_number: string | null;
   driver_label: string | null;
   start_date: string | null;
   start_time: string | null;
@@ -138,9 +145,10 @@ function hireDraftPayloadFromRow(
   };
 }
 
-function revalidateHires() {
+function revalidateHires(opts?: { groupId?: string; companyId?: string }) {
   revalidatePath("/rental/hires");
   revalidatePath("/rental/vehicles");
+  revalidateHireWorkspaceCache(opts?.groupId, opts?.companyId);
 }
 
 function formFromRow(row: Record<string, unknown>): HireWizardFormState {
@@ -191,7 +199,7 @@ export async function listHireContractsAction(
   let groupsQuery = supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, vehicle_id, subcompany_id, status, wizard_step, driver_access_status, start_date, start_time, end_time, activated_at, rent_amount_gbp, rent_cadence, driver_licence_number, driver_email, updated_at, signing_bundle_sent_at, terminated_at, vehicles(vrm, make, model)",
+      "id, vehicle_id, subcompany_id, status, wizard_step, driver_access_status, driver_user_id, start_date, start_time, end_time, activated_at, rent_amount_gbp, rent_cadence, driver_licence_number, driver_email, updated_at, signing_bundle_sent_at, terminated_at, ended_at, vehicles(vrm, make, model), subcompanies(name)",
     )
     .eq("parent_company_id", companyId)
     .neq("status", "cancelled");
@@ -205,6 +213,16 @@ export async function listHireContractsAction(
   if (error) return { ok: false, error: error.message };
 
   const groupIds = (data ?? []).map((g) => g.id as string);
+  const driverIds = (data ?? []).map((g) => g.driver_user_id as string | null).filter(Boolean) as string[];
+  let driverLabels = new Map<string, string>();
+  try {
+    if (driverIds.length) {
+      driverLabels = await loadDriverLabelsMap(createSupabaseAdminClient(), driverIds);
+    }
+  } catch {
+    /* driver names optional when admin client unavailable */
+  }
+
   const agreementsByGroup = new Map<string, HireAgreementEnvelopeSource[]>();
   const inspectionByGroup = new Map<string, { checkoutCompleted: boolean; checkinCompleted: boolean }>();
 
@@ -249,10 +267,32 @@ export async function listHireContractsAction(
     const vehicle = (g as { vehicles?: { vrm?: string; make?: string; model?: string } | null }).vehicles;
     const vrm = vehicle?.vrm ?? null;
     const vehicleLabel = vehicle ? [vehicle.make, vehicle.model].filter(Boolean).join(" ") : null;
-    const driverLabel =
-      (g.driver_email as string | null) ?? (g.driver_licence_number as string | null) ?? null;
+    const nestedSubcompany = (g as { subcompanies?: { name?: string | null } | { name?: string | null }[] | null })
+      .subcompanies;
+    const subcompanyName = Array.isArray(nestedSubcompany)
+      ? nestedSubcompany[0]?.name
+      : nestedSubcompany?.name;
+    const driverUserId = (g.driver_user_id as string | null) ?? null;
+    const driverEmail = (g.driver_email as string | null)?.trim() || null;
+    const driverLicence = (g.driver_licence_number as string | null)?.trim() || null;
+    const profileLabel = driverUserId ? driverLabels.get(driverUserId) : undefined;
+    const driverName =
+      profileLabel && profileLabel !== "Driver" && !profileLabel.includes("@") ? profileLabel : null;
+    const driverLabel = driverName ?? driverEmail ?? driverLicence;
     if (term) {
-      const hay = [vrm, vehicleLabel, driverLabel, g.status, g.id].filter(Boolean).join(" ").toLowerCase();
+      const hay = [
+        vrm,
+        vehicleLabel,
+        subcompanyName,
+        driverName,
+        driverEmail,
+        driverLicence,
+        g.status,
+        g.id,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
       if (!hay.includes(term)) continue;
     }
     const agreements = agreementsByGroup.get(g.id as string) ?? [];
@@ -304,9 +344,6 @@ export async function listHireContractsAction(
     if (isCheckoutDue({ status, checkoutCompleted: inspection.checkoutCompleted })) {
       lifecycleLabel = "Awaiting checkout";
       lifecycleTone = "warning";
-    } else if (canTerminateHire(status)) {
-      lifecycleLabel = "On rent";
-      lifecycleTone = "success";
     } else if (
       canStartCheckin({
         status,
@@ -322,6 +359,7 @@ export async function listHireContractsAction(
       vehicle_id: (g.vehicle_id as string | null) ?? null,
       status: g.status as string,
       terminated_at: (g.terminated_at as string | null) ?? null,
+      ended_at: (g.ended_at as string | null) ?? null,
       wizard_step: Number(g.wizard_step ?? 1),
       driver_access_status: (g.driver_access_status as string) ?? "not_requested",
       driver_access_label: driverAccess.label,
@@ -330,6 +368,10 @@ export async function listHireContractsAction(
       esign_tone: esignStatus.tone,
       vehicle_vrm: vrm,
       vehicle_label: vehicleLabel,
+      subcompany_name: subcompanyName?.trim() || null,
+      driver_name: driverName,
+      driver_email: driverEmail,
+      driver_licence_number: driverLicence,
       driver_label: driverLabel,
       start_date: (g.start_date as string | null) ?? null,
       start_time: (g.start_time as string | null) ?? null,
@@ -404,7 +446,7 @@ export async function createHireDraftAction(): Promise<{ ok: true; id: string } 
     /* audit optional */
   }
 
-  revalidateHires();
+  revalidateHires({ groupId: data.id as string, companyId: profile.company_id?.trim() ?? undefined });
   return { ok: true, id: data.id as string };
 }
 
@@ -625,7 +667,7 @@ export async function saveHireDraftStepAction(input: {
     metadata: { step: input.step, vehicle_id: nextVehicleId },
   });
 
-  revalidateHires();
+  revalidateHires({ groupId: input.hireGroupId, companyId: profile.company_id?.trim() ?? undefined });
   return { ok: true };
 }
 
@@ -833,7 +875,7 @@ export async function requestDriverAccessForHireAction(
         driver_profile_confirmed: false,
       })
       .eq("id", hireGroupId);
-    revalidateHires();
+    revalidateHires({ groupId: hireGroupId, companyId: profile.company_id?.trim() ?? undefined });
     return { ok: true, driverExists: false };
   }
 
@@ -944,7 +986,7 @@ export async function requestDriverAccessForHireAction(
 
   await syncVehicleStatusForHireGroup(admin, hireGroupId);
 
-  revalidateHires();
+  revalidateHires({ groupId: hireGroupId, companyId: profile.company_id?.trim() ?? undefined });
   return { ok: true, driverExists: true, accessRequestId };
 }
 
@@ -983,7 +1025,7 @@ export async function sendDriverRegistrationInviteForHireAction(
     .update({ driver_email: to, driver_access_status: "awaiting_registration" })
     .eq("id", hireGroupId);
 
-  revalidateHires();
+  revalidateHires({ groupId: hireGroupId, companyId: profile.company_id?.trim() ?? undefined });
   return { ok: true };
 }
 
@@ -1016,7 +1058,7 @@ export async function advanceHireWizardStepAction(
       return { ok: false, error: "Use Amend contract to go back and edit hire details." };
     }
   } else if (step === currentStep) {
-    revalidateHires();
+    revalidateHires({ groupId: hireGroupId, companyId: profile.company_id?.trim() ?? undefined });
     return { ok: true };
   }
   if (step === 6 && !group.driver_profile_confirmed) {
@@ -1029,7 +1071,7 @@ export async function advanceHireWizardStepAction(
     .eq("id", hireGroupId);
   if (error) return { ok: false, error: error.message };
 
-  revalidateHires();
+  revalidateHires({ groupId: hireGroupId, companyId: profile.company_id?.trim() ?? undefined });
   return { ok: true };
 }
 
@@ -1086,7 +1128,7 @@ export async function amendHireContractDraftAction(
     actorUserId: user.id,
   });
 
-  revalidateHires();
+  revalidateHires({ groupId: hireGroupId, companyId: profile.company_id?.trim() ?? undefined });
   revalidatePath("/driver/hire-requests");
   return { ok: true };
 }
@@ -1230,7 +1272,7 @@ export async function confirmDriverProfileForHireAction(
     /* audit optional */
   }
 
-  revalidateHires();
+  revalidateHires({ groupId: hireGroupId, companyId: profile.company_id?.trim() ?? undefined });
   return { ok: true };
 }
 
@@ -1349,7 +1391,7 @@ export async function finalizeHireContractsAction(
     metadata: { envelope_ids: envelopeIds },
   });
 
-  revalidateHires();
+  revalidateHires({ groupId: hireGroupId, companyId: profile.company_id?.trim() ?? undefined });
   return { ok: true, envelopeIds };
 }
 export async function respondToHireAccessRequestAction(
@@ -1430,7 +1472,10 @@ export async function respondToHireAccessRequestAction(
     await syncVehicleStatusForHireGroup(admin, req.hire_group_id as string);
   }
 
-  revalidateHires();
+  revalidateHires({
+    groupId: (req.hire_group_id as string | null) ?? undefined,
+    companyId: (req.parent_company_id as string | null) ?? undefined,
+  });
   revalidatePath("/driver/hire-requests");
   return { ok: true };
 }

@@ -11,6 +11,7 @@ import {
 } from "@/app/actions/rental-onboarding";
 import { inviteRentalStaffAction } from "@/app/actions/rental-staff";
 import type { CompanyMembershipRole } from "@/lib/auth/profile";
+import { RphSelect } from "@/components/forms/rph-select";
 import { CompanyStepProgress } from "@/components/forms/company-step-progress";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 
@@ -439,17 +440,18 @@ export function RentalOnboardingWizard({
                   <label htmlFor="onb-invite-role" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                     Role
                   </label>
-                  <select
-                    id="onb-invite-role"
-                    className={inputClass()}
+                  <RphSelect
                     value={inviteRole}
-                    onChange={(e) => setInviteRole(e.target.value as CompanyMembershipRole)}
-                  >
-                    <option value="admin">Admin</option>
-                    <option value="operations">Operations</option>
-                    <option value="finance">Finance</option>
-                    <option value="viewer">Viewer</option>
-                  </select>
+                    aria-label="Role"
+                    triggerClassName={inputClass()}
+                    options={[
+                      { value: "admin", label: "Admin" },
+                      { value: "operations", label: "Operations" },
+                      { value: "finance", label: "Finance" },
+                      { value: "viewer", label: "Viewer" },
+                    ]}
+                    onValueChange={(value) => setInviteRole(value as CompanyMembershipRole)}
+                  />
                 </div>
               </div>
             </div>

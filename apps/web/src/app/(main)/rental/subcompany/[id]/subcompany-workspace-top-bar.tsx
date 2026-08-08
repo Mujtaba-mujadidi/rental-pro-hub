@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   isSubcompanyWorkspaceNavItemActive,
   parseSubcompanyWorkspaceSection,
@@ -21,8 +21,9 @@ export function SubcompanyWorkspaceTopBar({
   const { shell } = useSubcompanyWorkspace();
   const subcompany = shell.subcompany;
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
-  const section = parseSubcompanyWorkspaceSection(pathname, subcompany.id);
+  const section = parseSubcompanyWorkspaceSection(pathname, subcompany.id, searchParams.get("section"));
   const items = subcompanyWorkspaceNav(subcompany.id);
 
   const [open, setOpen] = useState(false);
@@ -142,16 +143,16 @@ export function SubcompanyWorkspaceTopBar({
         </div>
       </div>
 
-      {/* Row 2: section pills — Staff leaves the workspace */}
+      {/* Row 2: section pills */}
       <nav
         className="-mx-3 mt-2 overflow-x-auto overscroll-x-contain px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         aria-label="Subcompany sections"
       >
         <div className="flex w-max gap-1 pb-0.5">
           {items.map((item) => {
-            const active = isSubcompanyWorkspaceNavItemActive(pathname, item);
+            const active = isSubcompanyWorkspaceNavItemActive(section, item);
             return (
-              <Link key={item.href} href={item.href} className={active ? "rph-pill-active" : "rph-pill"}>
+              <Link key={item.href} href={item.href} scroll={false} className={active ? "rph-pill-active" : "rph-pill"}>
                 {item.label}
               </Link>
             );

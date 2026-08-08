@@ -1,6 +1,5 @@
 "use client";
 
-import * as Select from "@radix-ui/react-select";
 import {
   flexRender,
   getCoreRowModel,
@@ -16,6 +15,7 @@ import {
 import { getAdminDriversPageAction } from "@/app/actions/admin-drivers-list";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { RphSelect, rphSelectRowsTriggerClass } from "@/components/forms/rph-select";
 import { driverIsBlocked, type AdminDriverListRow } from "@/lib/admin/driver-list-shared";
 import type { DriverListStatusFilter } from "@/lib/admin/drivers-query";
 import { responsiveTableCellProps } from "@/lib/ui/responsive-table";
@@ -42,33 +42,6 @@ const thBtn =
   "inline-flex items-center gap-0.5 font-semibold text-slate-900 hover:text-slate-600 dark:text-slate-100 dark:hover:text-slate-300";
 
 const PAGE_SIZES = [10, 25, 50, 100] as const;
-
-const selectTriggerClass =
-  "flex h-10 w-full min-w-[8.5rem] cursor-pointer items-center justify-between gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-900 shadow-sm outline-none transition-colors hover:border-slate-400 hover:bg-slate-50/80 focus:border-rph-rail focus:ring-2 focus:ring-rph-rail/20 data-[state=open]:border-rph-rail/70 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800/80 dark:focus:border-rph-rail-softer dark:focus:ring-rph-rail-soft/30 dark:data-[state=open]:border-rph-rail-softer";
-
-const selectContentClass =
-  "z-[200] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-900";
-
-const selectItemClass =
-  "relative flex cursor-pointer select-none items-center rounded-md py-2 pl-8 pr-3 text-sm text-slate-800 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[highlighted]:bg-slate-100 data-[highlighted]:text-slate-900 dark:text-slate-200 dark:data-[highlighted]:bg-slate-800 dark:data-[highlighted]:text-slate-100";
-
-const selectItemIndicatorWrap = "absolute left-2 flex h-4 w-4 items-center justify-center text-slate-600 dark:text-slate-400";
-
-function IconChevronDown({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-
-function IconCheck({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
-  );
-}
 
 const STATUS_LABELS: Record<DriverListStatusFilter, string> = {
   all: "All",
@@ -486,78 +459,29 @@ export function AdminDriversTable() {
 
         <div className="shrink-0 sm:w-[11rem]">
           <span className={toolbarFieldLabel}>Status</span>
-          <Select.Root value={statusFilter} onValueChange={(v) => setStatusFilter(v as DriverListStatusFilter)}>
-            <Select.Trigger className={selectTriggerClass} aria-label="Filter by status">
-              <Select.Value>{STATUS_LABELS[statusFilter]}</Select.Value>
-              <Select.Icon className="shrink-0 text-slate-500 dark:text-slate-400">
-                <IconChevronDown />
-              </Select.Icon>
-            </Select.Trigger>
-            <Select.Portal>
-              <Select.Content
-                className={selectContentClass}
-                position="popper"
-                side="bottom"
-                sideOffset={6}
-                align="start"
-                collisionPadding={16}
-              >
-                <Select.Viewport className="px-1">
-                  {(["all", "active", "blocked"] as const).map((value) => (
-                    <Select.Item key={value} value={value} className={selectItemClass}>
-                      <span className={selectItemIndicatorWrap}>
-                        <Select.ItemIndicator>
-                          <IconCheck />
-                        </Select.ItemIndicator>
-                      </span>
-                      <Select.ItemText>{STATUS_LABELS[value]}</Select.ItemText>
-                    </Select.Item>
-                  ))}
-                </Select.Viewport>
-              </Select.Content>
-            </Select.Portal>
-          </Select.Root>
+          <RphSelect
+            value={statusFilter}
+            aria-label="Filter by status"
+            options={(["all", "active", "blocked"] as const).map((value) => ({
+              value,
+              label: STATUS_LABELS[value],
+            }))}
+            onValueChange={(v) => setStatusFilter(v as DriverListStatusFilter)}
+          />
         </div>
 
-        <div className="shrink-0 sm:w-[7.5rem]">
+        <div className="shrink-0">
           <span className={toolbarFieldLabel}>Rows</span>
-          <Select.Root
+          <RphSelect
             value={String(pageSize)}
+            aria-label="Rows per page"
+            triggerClassName={rphSelectRowsTriggerClass}
+            options={PAGE_SIZES.map((n) => ({ value: String(n), label: String(n) }))}
             onValueChange={(v) => {
               setPageSize(Number(v));
               setPageIndex(0);
             }}
-          >
-            <Select.Trigger className={selectTriggerClass} aria-label="Rows per page">
-              <Select.Value>{pageSize}</Select.Value>
-              <Select.Icon className="shrink-0 text-slate-500 dark:text-slate-400">
-                <IconChevronDown />
-              </Select.Icon>
-            </Select.Trigger>
-            <Select.Portal>
-              <Select.Content
-                className={selectContentClass}
-                position="popper"
-                side="bottom"
-                sideOffset={6}
-                align="start"
-                collisionPadding={16}
-              >
-                <Select.Viewport className="px-1">
-                  {PAGE_SIZES.map((n) => (
-                    <Select.Item key={n} value={String(n)} className={selectItemClass}>
-                      <span className={selectItemIndicatorWrap}>
-                        <Select.ItemIndicator>
-                          <IconCheck />
-                        </Select.ItemIndicator>
-                      </span>
-                      <Select.ItemText>{n}</Select.ItemText>
-                    </Select.Item>
-                  ))}
-                </Select.Viewport>
-              </Select.Content>
-            </Select.Portal>
-          </Select.Root>
+          />
         </div>
       </div>
 

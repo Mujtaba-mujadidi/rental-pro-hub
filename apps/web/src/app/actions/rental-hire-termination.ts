@@ -46,6 +46,7 @@ import {
 import type { HireTerminationRentBillingMode } from "@/lib/fleet/hire-termination-billing";
 import { HIRE_TERMINATION_RENT_BILLING_MODES } from "@/lib/fleet/hire-termination-billing";
 import { syncVehicleStatusForHireGroup } from "@/lib/fleet/sync-vehicle-hire-status";
+import { cancelOpenSubcompanyDocumentRequirementsForHire } from "@/lib/rental/subcompany-hire-document-requirements";
 import { revalidateVehicleFinancialsForHireGroup } from "@/app/actions/rental-vehicle-financials";
 import {
   computeDepositResolutionSettlement,
@@ -447,6 +448,7 @@ export async function terminateHireGroupAction(input: {
     .in("status", ["reserved", "active"]);
 
   await syncVehicleStatusForHireGroup(admin, input.hireGroupId.trim());
+  await cancelOpenSubcompanyDocumentRequirementsForHire(admin, input.hireGroupId.trim(), user.id);
 
   await logHireGroupEvent(admin, {
     hireGroupId: input.hireGroupId.trim(),

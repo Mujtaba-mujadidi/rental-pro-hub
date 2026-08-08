@@ -26,7 +26,7 @@ function profileBundleTag(userId: string) {
 
 /**
  * Cross-request cache for the signed-in user's profile + active memberships.
- * Avoids repeating the same two DB round-trips on every tab click.
+ * Populated on first authenticated request; busted via `revalidateProfileBundle` on staff/profile changes.
  */
 export function getCachedProfileBundle(userId: string): Promise<ProfileBundle> {
   const id = userId.trim();
@@ -61,4 +61,22 @@ export function revalidateProfileBundle(userId: string | null | undefined) {
   const id = userId?.trim();
   if (!id) return;
   revalidateTag(profileBundleTag(id), { expire: 0 });
+}
+
+/** Bust profile bundles for all members of a company (offboarding, legal entity change, etc.). */
+export async function revalidateProfileBundlesForCompany(companyId: string | null | undefined) {
+  const id = companyId?.trim();
+  if (!id) return;
+  try {
+    const admin = createSupabaseAdminClient();
+    const { data: mems } = await admin
+      .from("user_company_memberships")
+      .select("user_id")
+      .eq("parent_company_id", id);
+    for (const m of mems ?? []) {
+      revalidateProfileBundle(m.user_id as string);
+    }
+  } catch {
+    /* service role missing — skip batch bust */
+  }
 }

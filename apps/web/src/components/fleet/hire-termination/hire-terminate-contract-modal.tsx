@@ -5,6 +5,7 @@ import {
   terminateHireGroupAction,
   type HireTerminationPreview,
 } from "@/app/actions/rental-hire-termination";
+import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import {
   formModalBtnContinue,
@@ -567,23 +568,22 @@ export function HireTerminateContractModal({
                     <label className="block text-sm font-medium text-rph-fg" htmlFor="deposit-disposition">
                       Deposit decision
                     </label>
-                    <select
-                      id="deposit-disposition"
-                      className="rph-input w-full"
+                    <FormModalSelect
                       value={depositDisposition}
-                      onChange={(event) =>
-                        setDepositDisposition(event.target.value as HireDepositDisposition)
-                      }
-                    >
-                      {depositOptions.map((option) => (
-                        <option key={option.value} value={option.value} disabled={!option.allowed}>
-                          {option.label}
-                          {!option.allowed && option.disabledReason
+                      aria-label="Deposit decision"
+                      options={depositOptions.map((option) => ({
+                        value: option.value,
+                        label:
+                          option.label +
+                          (!option.allowed && option.disabledReason
                             ? ` — ${option.disabledReason}`
-                            : ""}
-                        </option>
-                      ))}
-                    </select>
+                            : ""),
+                        disabled: !option.allowed,
+                      }))}
+                      onValueChange={(value) =>
+                        setDepositDisposition(value as HireDepositDisposition)
+                      }
+                    />
                   </div>
 
                   {depositDisposition === "hold_pending" ? (
@@ -709,18 +709,15 @@ export function HireTerminateContractModal({
                     <label className="rph-meta mb-1 block" htmlFor="settlement-payment-method">
                       Payment method
                     </label>
-                    <select
-                      id="settlement-payment-method"
-                      className="rph-input w-full"
+                    <FormModalSelect
                       value={settlementPaymentMethod}
-                      onChange={(event) => setSettlementPaymentMethod(event.target.value)}
-                    >
-                      {HIRE_DEPOSIT_REFUND_METHODS.map((method) => (
-                        <option key={method} value={method}>
-                          {method.replace(/_/g, " ")}
-                        </option>
-                      ))}
-                    </select>
+                      aria-label="Payment method"
+                      options={HIRE_DEPOSIT_REFUND_METHODS.map((method) => ({
+                        value: method,
+                        label: method.replace(/_/g, " "),
+                      }))}
+                      onValueChange={setSettlementPaymentMethod}
+                    />
                   </div>
                   <div className="sm:col-span-2">
                     <label className="rph-meta mb-1 block" htmlFor="settlement-payment-reference">

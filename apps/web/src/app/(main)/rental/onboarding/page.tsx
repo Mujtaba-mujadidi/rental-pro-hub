@@ -1,11 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
-import { redirectIfRentalOnboardingComplete } from "@/lib/auth/rental-onboarding";
 import { RentalOnboardingWizard } from "./rental-onboarding-wizard";
 
 export default async function RentalOnboardingPage() {
   const { profile } = await requireRentalCompanyArea();
-  await redirectIfRentalOnboardingComplete(profile.company_id);
 
   const companyId = profile.company_id?.trim();
   if (!companyId) {

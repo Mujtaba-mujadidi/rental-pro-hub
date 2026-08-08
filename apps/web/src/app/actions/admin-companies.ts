@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { revalidateCompanyGate } from "@/lib/auth/company-gate-cache";
+import { revalidateProfileBundlesForCompany } from "@/lib/auth/profile-bundle-cache";
 import { requireSuperAdmin } from "@/lib/auth/profile";
 import { useLegacyBootstrapContractSigning } from "@/lib/esign/legacy-bootstrap";
 import { preparePlatformCompanyContractEnvelope } from "@/lib/esign/adapters/platform-company-contract";
@@ -778,6 +779,7 @@ export async function startCompanyOffboardingAction(companyId: string): Promise<
     if (termErr) console.warn("[startCompanyOffboardingAction] terminate contract", termErr.message);
 
     revalidateCompanyGate(trimmed);
+    await revalidateProfileBundlesForCompany(trimmed);
     revalidatePath("/super-admin/companies");
     return { ok: true };
   } catch (e) {
@@ -838,6 +840,7 @@ export async function reactivateCompanyAction(companyId: string): Promise<Compan
     if (ctrErr) console.warn("[reactivateCompanyAction] contract reset", ctrErr.message);
 
     revalidateCompanyGate(trimmed);
+    await revalidateProfileBundlesForCompany(trimmed);
     revalidatePath("/super-admin/companies");
     revalidatePath("/rental");
     return { ok: true };

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getCachedProfileBundle } from "@/lib/auth/profile-bundle-cache";
+import { loadRentalSessionLifecycleFromCompany } from "@/lib/auth/rental-lifecycle";
 import { isSuperAdminEmail } from "@/lib/auth/roles";
-import { getRentalSessionLifecycle } from "@/lib/auth/rental-lifecycle";
 import {
   DRIVER_ONBOARDING_COLUMNS,
   driverOnboardingComplete,
@@ -25,15 +26,29 @@ export async function resolveAppHomePath(
   userId: string,
   email: string | undefined,
 ): Promise<AppHomePath> {
-  const { data: profile } = await supabase.from("profiles").select("role, company_id").eq("id", userId).maybeSingle();
+  if (isSuperAdminEmail(email)) {
+    return "/super-admin";
+  }
 
-  // Env-based super admin OR profile row (so login works even if SUPER_ADMIN_EMAIL is unset/mismatched).
-  if (isSuperAdminEmail(email) || profile?.role === "super_admin") {
+  const bundle = await getCachedProfileBundle(userId);
+  const profile = bundle.row;
+
+  if (profile?.role === "super_admin") {
     return "/super-admin";
   }
 
   if (profile?.role === "rental_company") {
-    const life = await getRentalSessionLifecycle(supabase, userId, email);
+    const preferred = profile.company_id?.trim() ?? null;
+    const activeParent =
+      preferred && bundle.memberships.some((m) => m.parent_company_id === preferred)
+        ? preferred
+        : (bundle.memberships[0]?.parent_company_id ?? null);
+
+    if (!activeParent) {
+      return "/rental";
+    }
+
+    const life = await loadRentalSessionLifecycleFromCompany(activeParent);
     if (life.kind !== "rental") {
       return "/rental";
     }

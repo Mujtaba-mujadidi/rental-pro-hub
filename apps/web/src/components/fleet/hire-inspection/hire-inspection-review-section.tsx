@@ -4,6 +4,7 @@ import type {
   HireInspectionPaymentAccountOption,
   HireInspectionPayload,
 } from "@/app/actions/hire-inspections";
+import { RphSelect } from "@/components/forms/rph-select";
 import { buildHireInspectionDiff } from "@/lib/fleet/hire-inspection-lifecycle";
 import {
   HIRE_INSPECTION_DAMAGE_CHARGE_RESOLUTIONS,
@@ -258,25 +259,26 @@ export function HireInspectionReviewSection({
                         </label>
                         <label className="space-y-1 text-xs">
                           <span className="font-medium text-rph-fg-muted">Resolution</span>
-                          <select
-                            className="rph-input w-full"
-                            value={damage.chargeResolution ?? ""}
-                            onChange={(event) => {
-                              const value = event.target.value;
+                          <RphSelect
+                            value={damage.chargeResolution || "__none__"}
+                            placeholder="Select…"
+                            aria-label="Resolution"
+                            options={[
+                              { value: "__none__", label: "Select…" },
+                              ...HIRE_INSPECTION_DAMAGE_CHARGE_RESOLUTIONS.map((resolution) => ({
+                                value: resolution,
+                                label: RESOLUTION_LABELS[resolution],
+                              })),
+                            ]}
+                            onValueChange={(value) => {
                               onDamageChargeChange(damage.id, {
                                 chargeGbp: damage.chargeGbp,
-                                chargeResolution: (value ||
-                                  null) as HireInspectionDamageChargeResolution | null,
+                                chargeResolution: (value === "__none__"
+                                  ? null
+                                  : value) as HireInspectionDamageChargeResolution | null,
                               });
                             }}
-                          >
-                            <option value="">Select…</option>
-                            {HIRE_INSPECTION_DAMAGE_CHARGE_RESOLUTIONS.map((resolution) => (
-                              <option key={resolution} value={resolution}>
-                                {RESOLUTION_LABELS[resolution]}
-                              </option>
-                            ))}
-                          </select>
+                          />
                         </label>
                       </div>
                     )}
@@ -312,33 +314,33 @@ export function HireInspectionReviewSection({
               <div className="grid gap-2 sm:grid-cols-2">
                 <label className="space-y-1 text-xs">
                   <span className="font-medium text-rph-fg-muted">Method</span>
-                  <select
-                    className="rph-input w-full"
+                  <RphSelect
                     value={damagePaymentMethod}
-                    onChange={(event) => onDamagePaymentMethodChange(event.target.value)}
-                  >
-                    {Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
+                    aria-label="Payment method"
+                    options={Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => ({
+                      value,
+                      label,
+                    }))}
+                    onValueChange={onDamagePaymentMethodChange}
+                  />
                 </label>
                 <label className="space-y-1 text-xs">
                   <span className="font-medium text-rph-fg-muted">Payment account</span>
-                  <select
-                    className="rph-input w-full"
-                    value={damagePaymentAccountId}
-                    onChange={(event) => onDamagePaymentAccountChange(event.target.value)}
-                  >
-                    <option value="">Select account…</option>
-                    {paymentAccounts.map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {account.name}
-                        {account.isDefault ? " (hire default)" : ""}
-                      </option>
-                    ))}
-                  </select>
+                  <RphSelect
+                    value={damagePaymentAccountId || "__none__"}
+                    placeholder="Select account…"
+                    aria-label="Payment account"
+                    options={[
+                      { value: "__none__", label: "Select account…" },
+                      ...paymentAccounts.map((account) => ({
+                        value: account.id,
+                        label: `${account.name}${account.isDefault ? " (hire default)" : ""}`,
+                      })),
+                    ]}
+                    onValueChange={(value) =>
+                      onDamagePaymentAccountChange(value === "__none__" ? "" : value)
+                    }
+                  />
                 </label>
                 <label className="space-y-1 text-xs sm:col-span-2">
                   <span className="font-medium text-rph-fg-muted">Reference (optional)</span>

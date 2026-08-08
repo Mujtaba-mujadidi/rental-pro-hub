@@ -7,6 +7,7 @@ import { createVehicleAction, uploadVehicleDocumentAction } from "@/app/actions/
 import { recordVehiclePurchaseOnCreateAction } from "@/app/actions/rental-vehicle-financials";
 import { VehiclePurchaseFormFields } from "@/components/fleet/vehicle-purchase-form-fields";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
+import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
 import { formatGbp } from "@/lib/fleet/maintenance";
@@ -496,14 +497,15 @@ export function AddVehicleModal({
       {step === 0 ? (
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Subcompany *">
-            <select className="rph-input" value={fields.subcompany_id} onChange={(e) => setField("subcompany_id", e.target.value)}>
-              {subcompanies.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name ?? "Untitled"}
-                  {s.is_primary ? " (primary)" : ""}
-                </option>
-              ))}
-            </select>
+            <FormModalSelect
+              value={fields.subcompany_id}
+              aria-label="Subcompany"
+              options={subcompanies.map((s) => ({
+                value: s.id,
+                label: `${s.name ?? "Untitled"}${s.is_primary ? " (primary)" : ""}`,
+              }))}
+              onValueChange={(value) => setField("subcompany_id", value)}
+            />
           </Field>
           <Field label="VRM *">
             <input
@@ -524,17 +526,15 @@ export function AddVehicleModal({
             <input className="rph-input" value={fields.colour} onChange={(e) => setField("colour", e.target.value)} />
           </Field>
           <Field label="Status">
-            <select
-              className="rph-input"
+            <FormModalSelect
               value={fields.status}
-              onChange={(e) => setField("status", e.target.value as VehicleStatus)}
-            >
-              {VEHICLE_STATUSES.map((st) => (
-                <option key={st} value={st}>
-                  {VEHICLE_STATUS_LABELS[st]}
-                </option>
-              ))}
-            </select>
+              aria-label="Status"
+              options={VEHICLE_STATUSES.map((st) => ({
+                value: st,
+                label: VEHICLE_STATUS_LABELS[st],
+              }))}
+              onValueChange={(value) => setField("status", value as VehicleStatus)}
+            />
           </Field>
           <div className="sm:col-span-2">
             <Field label="Notes">

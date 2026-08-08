@@ -1,5 +1,10 @@
-import { SubcompanyActivityClient } from "./subcompany-activity-client";
+import { redirect } from "next/navigation";
 
-export default function SubcompanyActivityPage() {
-  return <SubcompanyActivityClient />;
+export default async function LegacySubcompanyActivityPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  redirect(`/rental/subcompany/${id}?section=activity`);
 }

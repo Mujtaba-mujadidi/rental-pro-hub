@@ -1,5 +1,6 @@
 "use client";
 
+import { RphSelect } from "@/components/forms/rph-select";
 import { recordHireBalancePaymentAction } from "@/app/actions/rental-hire-termination";
 import type { HireBalancePaymentAccountOption } from "@/app/actions/rental-hire-termination";
 import { settlementBalanceLabel } from "@/lib/fleet/hire-termination-summary";
@@ -138,34 +139,32 @@ export function HireSettlementBalancePaymentCard({
 
         <label className="space-y-1">
           <span className="text-xs font-medium text-rph-fg-muted">Method</span>
-          <select
-            className="rph-input w-full"
+          <RphSelect
             value={paymentMethod}
-            onChange={(event) => setPaymentMethod(event.target.value)}
-          >
-            {Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
+            aria-label="Payment method"
+            options={Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => ({
+              value,
+              label,
+            }))}
+            onValueChange={setPaymentMethod}
+          />
         </label>
 
         <label className="space-y-1 sm:col-span-2">
           <span className="text-xs font-medium text-rph-fg-muted">Payment account</span>
-          <select
-            className="rph-input w-full"
-            value={paymentAccountId}
-            onChange={(event) => setPaymentAccountId(event.target.value)}
-          >
-            <option value="">Select payment account…</option>
-            {paymentAccounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.name}
-                {account.isDefault ? " (hire default)" : ""}
-              </option>
-            ))}
-          </select>
+          <RphSelect
+            value={paymentAccountId || "__none__"}
+            placeholder="Select payment account…"
+            aria-label="Payment account"
+            options={[
+              { value: "__none__", label: "Select payment account…" },
+              ...paymentAccounts.map((account) => ({
+                value: account.id,
+                label: `${account.name}${account.isDefault ? " (hire default)" : ""}`,
+              })),
+            ]}
+            onValueChange={(value) => setPaymentAccountId(value === "__none__" ? "" : value)}
+          />
         </label>
 
         <label className="space-y-1 sm:col-span-2">

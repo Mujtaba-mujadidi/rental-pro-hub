@@ -2,6 +2,7 @@
 
 import type { HirePaymentPageRow } from "@/app/actions/hire-payments";
 import { HirePaymentRowActions } from "@/components/fleet/hire-payments/hire-payment-row-actions";
+import { RphSelect } from "@/components/forms/rph-select";
 import { formatUkDate, ukTodayYmd } from "@/lib/datetime/uk";
 import { hireTableStatusToneClass } from "@/lib/fleet/hire-contract-table-display";
 import {
@@ -128,20 +129,15 @@ export function HirePaymentScheduleTable({
             onChange={(e) => setSearch(e.target.value)}
           />
         </label>
-        <label className="space-y-1">
+        <div className="min-w-[10rem] space-y-1">
           <span className="text-xs font-medium text-rph-fg-muted">Status</span>
-          <select
-            className="rph-input"
+          <RphSelect
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-          >
-            {statusFilterOptions.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            aria-label="Filter by status"
+            options={statusFilterOptions}
+            onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}
+          />
+        </div>
       </div>
 
       {readOnly ? (

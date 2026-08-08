@@ -567,37 +567,69 @@ export async function loadVehicleSwitcherList(): Promise<VehicleSwitcherOption[]
   }
 }
 
-export async function loadVehiclesPageData(): Promise<VehiclesPageData | { error: string }> {
+export async function loadVehiclesPageData(options?: {
+  subcompanyId?: string;
+}): Promise<VehiclesPageData | { error: string }> {
   const { profile } = await requireRentalCompanyArea();
   const parentCompanyId = profile.company_id?.trim();
   if (!parentCompanyId) return { error: "No active company." };
 
+  const subcompanyId = options?.subcompanyId?.trim() || null;
   const supabase = await createClient();
-  const [
-    { data: vehicles, error: vErr },
-    { data: subs, error: sErr },
-    { data: docRows, error: dErr },
-    notifySettings,
-  ] = await Promise.all([
-    supabase
-      .from("vehicles")
-      .select(
-        "id, parent_company_id, subcompany_id, vrm, make, model, colour, first_reg_date, first_reg_uk_date, fuel_type, seats, cc, mot_expiry, tax_expiry, phv_licence_no, phv_licence_expiry, licensing_authority_name, status, vehicle_age_limit_years, service_due_at, current_mileage, next_service_mileage, notes, created_at, updated_at, subcompanies(name)",
-      )
-      .eq("parent_company_id", parentCompanyId)
-      .order("vrm", { ascending: true }),
-    supabase
-      .from("subcompanies")
-      .select("id, name, is_primary")
-      .eq("parent_company_id", parentCompanyId)
-      .order("created_at", { ascending: true }),
-    supabase.from("vehicle_documents").select("vehicle_id, doc_type").eq("parent_company_id", parentCompanyId),
+
+  let vehicleQuery = supabase
+    .from("vehicles")
+    .select(
+      "id, parent_company_id, subcompany_id, vrm, make, model, colour, first_reg_date, first_reg_uk_date, fuel_type, seats, cc, mot_expiry, tax_expiry, phv_licence_no, phv_licence_expiry, licensing_authority_name, status, vehicle_age_limit_years, service_due_at, current_mileage, next_service_mileage, notes, created_at, updated_at, subcompanies(name)",
+    )
+    .eq("parent_company_id", parentCompanyId)
+    .order("vrm", { ascending: true });
+
+  if (subcompanyId) {
+    vehicleQuery = vehicleQuery.eq("subcompany_id", subcompanyId);
+  }
+
+  const subsQuery = subcompanyId
+    ? supabase
+        .from("subcompanies")
+        .select("id, name, is_primary")
+        .eq("id", subcompanyId)
+        .eq("parent_company_id", parentCompanyId)
+        .maybeSingle()
+    : supabase
+        .from("subcompanies")
+        .select("id, name, is_primary")
+        .eq("parent_company_id", parentCompanyId)
+        .order("created_at", { ascending: true });
+
+  const [{ data: vehicles, error: vErr }, subsResult, notifySettings] = await Promise.all([
+    vehicleQuery,
+    subsQuery,
     loadCompanyNotifySettings(supabase, parentCompanyId),
   ]);
 
+  const subsList: { id: string; name: string | null; is_primary: boolean | null }[] = subcompanyId
+    ? subsResult.data
+      ? [subsResult.data as { id: string; name: string | null; is_primary: boolean | null }]
+      : []
+    : ((subsResult.data ?? []) as { id: string; name: string | null; is_primary: boolean | null }[]);
+  const sErr = subsResult.error;
+
   if (vErr) return { error: vErr.message };
   if (sErr) return { error: sErr.message };
-  if (dErr) return { error: dErr.message };
+
+  const vehicleIds = (vehicles ?? []).map((v) => v.id as string);
+  let docRows: { vehicle_id: string; doc_type: string }[] = [];
+  if (vehicleIds.length) {
+    let docQuery = supabase
+      .from("vehicle_documents")
+      .select("vehicle_id, doc_type")
+      .eq("parent_company_id", parentCompanyId)
+      .in("vehicle_id", vehicleIds);
+    const { data, error: dErr } = await docQuery;
+    if (dErr) return { error: dErr.message };
+    docRows = (data ?? []) as { vehicle_id: string; doc_type: string }[];
+  }
 
   const typesByVehicle = new Map<string, string[]>();
   for (const row of docRows ?? []) {
@@ -622,7 +654,7 @@ export async function loadVehiclesPageData(): Promise<VehiclesPageData | { error
 
   return {
     vehicles: rows,
-    subcompanies: (subs ?? []).map((s) => ({
+    subcompanies: subsList.map((s) => ({
       id: s.id,
       name: s.name,
       is_primary: Boolean(s.is_primary),
