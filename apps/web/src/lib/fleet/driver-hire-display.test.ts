@@ -12,7 +12,7 @@ const lookups: DriverHireDisplayLookups = {
   ]),
   companiesById: new Map([["co-1", { name: "Acme Rentals" }]]),
   subcompaniesById: new Map([
-    ["sub-1", { legalName: "Acme London Ltd", companyName: "Acme London" }],
+    ["sub-1", { legalName: "Acme London Ltd", displayName: "Acme London", name: "London branch" }],
   ]),
 };
 
@@ -27,17 +27,17 @@ describe("formatDriverHireContractStartLabel", () => {
 });
 
 describe("resolveDriverHireCompanyName", () => {
-  it("uses linked subcompany trading name first", () => {
+  it("uses subcompany legal name and never parent company when subcompany is set", () => {
     expect(
       resolveDriverHireCompanyName({
         parentCompanyId: "co-1",
         subcompanyId: "sub-1",
         lookups,
       }),
-    ).toBe("Acme London");
+    ).toBe("Acme London Ltd");
   });
 
-  it("falls back to parent company name", () => {
+  it("falls back to parent company name only without subcompany", () => {
     expect(
       resolveDriverHireCompanyName({
         parentCompanyId: "co-1",

@@ -42,7 +42,7 @@ describe("parseHireAccessSnapshot", () => {
       { title: "Hire terms", body: "<p>Terms</p>", versionLabel: "v1" },
     );
 
-    expect(display.companyName).toBe("Acme Rentals");
+    expect(display.companyName).toBe("Acme Ltd");
     expect(display.subcompanyLegalName).toBe("Acme Ltd");
     expect(display.vehicleVrm).toBe("AB12 CDE");
     expect(display.vehicleDetailRows.some((r) => r.label === "Colour" && r.value === "BLUE")).toBe(true);

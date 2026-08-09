@@ -2,6 +2,7 @@ import { formatUkDate } from "@/lib/datetime/uk";
 import { computeContractEndDate } from "@/lib/fleet/hire-lifecycle";
 import type { HireAccessVehicleSnapshot } from "@/lib/fleet/hire-access-vehicle-fields";
 import { formatHireContractStartLabel } from "@/lib/fleet/hire-pdf-details";
+import { resolveHireLessorDisplayName } from "@/lib/fleet/hire-lessor-display";
 import type { ContractLengthKind, RentCadence } from "@/lib/fleet/hire-types";
 
 export const CONTRACT_LENGTH_LABELS: Record<ContractLengthKind, string> = {
@@ -20,6 +21,8 @@ type SnapshotVehicle = HireAccessVehicleSnapshot | null;
 type SnapshotCompany = { name?: string } | null;
 type SnapshotSubcompany = {
   legal_name?: string;
+  display_name?: string | null;
+  name?: string;
   company_number?: string;
   registered_address_line1?: string;
   registered_address_line2?: string;
@@ -122,6 +125,7 @@ export function parseHireAccessSnapshot(
   const company = (hireSummary.companies ?? null) as SnapshotCompany;
   const subcompany = (hireSummary.subcompanies ?? null) as SnapshotSubcompany;
   const embeddedTerms = (hireSummary.company_hire_terms_versions ?? null) as SnapshotTerms;
+  const snapshot = (hireSummary.subcompany_legal_snapshot ?? null) as Record<string, unknown> | null;
 
   const startDate = typeof hireSummary.start_date === "string" ? hireSummary.start_date : null;
   const startTime = typeof hireSummary.start_time === "string" ? hireSummary.start_time : null;
@@ -133,7 +137,12 @@ export function parseHireAccessSnapshot(
   const termsVersionLabel = termsPreview?.versionLabel ?? embeddedTerms?.version_label ?? null;
 
   return {
-    companyName: company?.name?.trim() || companyNameFallback,
+    companyName: resolveHireLessorDisplayName({
+      snapshot,
+      subcompany,
+      parentCompanyName: company?.name ?? companyNameFallback,
+      hasSubcompany: Boolean(subcompany),
+    }),
     subcompanyLegalName: subcompany?.legal_name?.trim() || null,
     subcompanyCompanyNumber: subcompany?.company_number?.trim() || null,
     subcompanyAddress: formatAddress([

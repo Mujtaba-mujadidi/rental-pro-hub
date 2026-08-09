@@ -1,5 +1,6 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { HIRE_ACCESS_VEHICLE_SELECT } from "@/lib/fleet/hire-access-vehicle-fields";
+import { resolveHireLessorDisplayName } from "@/lib/fleet/hire-lessor-display";
 
 export type HireAccessTermsPreview = {
   title: string;
@@ -8,7 +9,7 @@ export type HireAccessTermsPreview = {
 };
 
 const HIRE_GROUP_DETAIL_SELECT =
-  `hire_terms_version_id, start_date, start_time, end_time, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, draft_snapshot, companies(name), vehicles(${HIRE_ACCESS_VEHICLE_SELECT}), subcompanies(legal_name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode), company_hire_terms_versions(title, body, version_label)`;
+  `hire_terms_version_id, start_date, start_time, end_time, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, draft_snapshot, subcompany_legal_snapshot, companies(name), vehicles(${HIRE_ACCESS_VEHICLE_SELECT}), subcompanies(legal_name, display_name, name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode), company_hire_terms_versions(title, body, version_label)`;
 
 export function hireAccessSnapshotIsSparse(snapshot: Record<string, unknown>): boolean {
   return (
@@ -66,14 +67,19 @@ export async function enrichHireAccessSnapshot(
     };
   }
 
-  let companyName = (summary.companies as { name?: string } | undefined)?.name?.trim() || null;
-  if (!companyName && parentCompanyId) {
-    const { data: company } = await admin.from("companies").select("name").eq("id", parentCompanyId).maybeSingle();
-    companyName = company?.name?.trim() || null;
-    if (companyName) summary = { ...summary, companies: { name: companyName } };
-  }
+  let companyName: string | null = null;
+  const parentCompanyName =
+    (summary.companies as { name?: string } | undefined)?.name?.trim() || null;
 
-  if (!hireGroupId) return { hireSummary: summary, termsPreview, companyName };
+  if (!hireGroupId) {
+    if (!parentCompanyId) {
+      return { hireSummary: summary, termsPreview, companyName };
+    }
+    const { data: company } = await admin.from("companies").select("name").eq("id", parentCompanyId).maybeSingle();
+    companyName = company?.name?.trim() || parentCompanyName;
+    if (companyName) summary = { ...summary, companies: { name: companyName } };
+    return { hireSummary: summary, termsPreview, companyName };
+  }
 
   const { data: hg } = await admin
     .from("vehicle_hire_groups")
@@ -93,6 +99,7 @@ export async function enrichHireAccessSnapshot(
       "deposit_gbp",
       "include_deposit",
       "draft_snapshot",
+      "subcompany_legal_snapshot",
       "companies",
       "vehicles",
       "subcompanies",
@@ -102,9 +109,20 @@ export async function enrichHireAccessSnapshot(
     }
   }
 
-  if (!companyName) {
-    companyName = (summary.companies as { name?: string } | undefined)?.name?.trim() || null;
-  }
+  const subcompany = (summary.subcompanies ?? hg.subcompanies ?? null) as {
+    legal_name?: string;
+    display_name?: string | null;
+    name?: string;
+  } | null;
+  const snapshot = (summary.subcompany_legal_snapshot ?? hg.subcompany_legal_snapshot ?? null) as
+    | Record<string, unknown>
+    | null;
+  companyName = resolveHireLessorDisplayName({
+    snapshot,
+    subcompany,
+    parentCompanyName,
+    hasSubcompany: Boolean(subcompany),
+  });
 
   if (!termsPreview && includeTerms) {
     const fromJoin = hg.company_hire_terms_versions as

@@ -10,6 +10,7 @@ import {
   sendDriverRegistrationInviteEmail,
   sendHireDriverAccessEmail,
 } from "@/lib/fleet/hire-access-mail";
+import { loadHireLessorDisplayName } from "@/lib/fleet/hire-lessor-display";
 import {
   driverAccessTableStatus,
   hireEsignTableStatus,
@@ -955,15 +956,15 @@ export async function requestDriverAccessForHireAction(
     })
     .eq("id", hireGroupId);
 
-  const { data: company } = await admin.from("companies").select("name").eq("id", group.parent_company_id).maybeSingle();
   const vehicle = hireSnapshot.vehicles as { vrm?: string; make?: string; model?: string } | undefined;
   const driverName = [driver.first_name, driver.last_name].filter(Boolean).join(" ").trim() || "Driver";
+  const lessorName = await loadHireLessorDisplayName(admin, hireGroupId);
   const email = driver.account_email?.trim();
   if (email) {
     const mail = await sendHireDriverAccessEmail({
       to: email,
       driverName,
-      companyName: company?.name ?? "Rental company",
+      companyName: lessorName,
       vehicleLabel: [vehicle?.make, vehicle?.model].filter(Boolean).join(" ") || "Vehicle",
       vrm: vehicle?.vrm ?? "—",
       startDate: (group.start_date as string) ?? "",
@@ -1005,17 +1006,18 @@ export async function sendDriverRegistrationInviteForHireAction(
   const supabase = await createClient();
   const { data: group } = await supabase
     .from("vehicle_hire_groups")
-    .select("id, parent_company_id, status, companies(name)")
+    .select("id, parent_company_id, subcompany_id, status")
     .eq("id", hireGroupId)
     .maybeSingle();
   if (!group || group.parent_company_id !== profile.company_id || group.status !== "draft") {
     return { ok: false, error: "Draft not found." };
   }
 
-  const companyName = ((group as { companies?: { name?: string } }).companies?.name) ?? "Rental company";
+  const admin = createSupabaseAdminClient();
+  const lessorName = await loadHireLessorDisplayName(admin, hireGroupId);
   const mail = await sendDriverRegistrationInviteEmail({
     to,
-    companyName,
+    companyName: lessorName,
     signupUrl: `${getPublicSiteUrl()}/signup?role=driver`,
   });
   if (!mail.ok) return mail;

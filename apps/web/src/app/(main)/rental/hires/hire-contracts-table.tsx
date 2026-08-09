@@ -6,6 +6,7 @@ import { sendHireGroupSigningBundleAction } from "@/app/actions/rental-hire-sign
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { RphSelect, rphSelectRowsTriggerClass } from "@/components/forms/rph-select";
+import { RphFilterToolbar } from "@/components/ui/rph-toolbar";
 import { HireGroupAuditModal } from "@/components/fleet/hire-group-audit-modal";
 import { hireTableStatusToneClass, hireGroupTableStatus, hireContractTableStartLabel, hireContractTableEndLabel, type HireTableStatusTone } from "@/lib/fleet/hire-contract-table-display";
 import { hireCancelConfirmCopy, hireRegenerateContractsConfirmCopy, type HireGroupAuditRow } from "@/lib/fleet/hire-audit";
@@ -486,55 +487,56 @@ export function HireContractsTable({
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-            <input
-              className="rph-input w-full min-w-[12rem] max-w-md"
-              placeholder="Search vehicle, driver, company…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+        <RphFilterToolbar
+          actions={
+            <>
+              <button type="button" className="rph-btn-ghost" disabled={tableBusy} onClick={onRefresh}>
+                Refresh
+              </button>
+              {canWrite ? (
+                <button type="button" className="rph-btn-primary" disabled={tableBusy} onClick={onNewContract}>
+                  New contract
+                </button>
+              ) : null}
+            </>
+          }
+        >
+          <input
+            className="rph-input w-full min-w-[12rem] max-w-md"
+            placeholder="Search vehicle, driver, company…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <div className="w-full min-w-[10rem] sm:max-w-[12rem]">
+            <RphSelect
+              value={statusFilter}
+              aria-label="Filter by status"
+              options={HIRE_CONTRACT_STATUS_FILTER_OPTIONS.map((option) => ({
+                value: option.value,
+                label: option.label,
+              }))}
+              onValueChange={(value) => setStatusFilter(value as HireContractStatusFilter)}
             />
-            <div className="w-full min-w-[10rem] sm:max-w-[12rem]">
+          </div>
+          {!hideSubcompanyColumn && subcompanyOptions.length > 1 ? (
+            <div className="w-full min-w-[10rem] sm:max-w-[14rem]">
               <RphSelect
-                value={statusFilter}
-                aria-label="Filter by status"
-                options={HIRE_CONTRACT_STATUS_FILTER_OPTIONS.map((option) => ({
-                  value: option.value,
-                  label: option.label,
-                }))}
-                onValueChange={(value) => setStatusFilter(value as HireContractStatusFilter)}
+                value={subcompanyFilter}
+                aria-label="Filter by rental company"
+                options={[
+                  { value: "all", label: "All rental companies" },
+                  ...subcompanyOptions.map(([id, name]) => ({ value: id, label: name })),
+                ]}
+                onValueChange={setSubcompanyFilter}
               />
             </div>
-            {!hideSubcompanyColumn && subcompanyOptions.length > 1 ? (
-              <div className="w-full min-w-[10rem] sm:max-w-[14rem]">
-                <RphSelect
-                  value={subcompanyFilter}
-                  aria-label="Filter by rental company"
-                  options={[
-                    { value: "all", label: "All rental companies" },
-                    ...subcompanyOptions.map(([id, name]) => ({ value: id, label: name })),
-                  ]}
-                  onValueChange={setSubcompanyFilter}
-                />
-              </div>
-            ) : null}
-            {hasFilters ? (
-              <button type="button" className="rph-btn-ghost h-10 px-3 text-sm" onClick={clearFilters}>
-                Clear filters
-              </button>
-            ) : null}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" className="rph-btn-ghost" disabled={tableBusy} onClick={onRefresh}>
-              Refresh
+          ) : null}
+          {hasFilters ? (
+            <button type="button" className="rph-btn-ghost h-10 px-3 text-sm" onClick={clearFilters}>
+              Clear filters
             </button>
-            {canWrite ? (
-              <button type="button" className="rph-btn-primary" disabled={tableBusy} onClick={onNewContract}>
-                New contract
-              </button>
-            ) : null}
-          </div>
-        </div>
+          ) : null}
+        </RphFilterToolbar>
         {total > 0 ? (
           <p className="rph-muted text-xs">
             {hasFilters ? `${total.toLocaleString("en-GB")} matching contracts` : `${total.toLocaleString("en-GB")} contracts`}

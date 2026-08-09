@@ -12,6 +12,7 @@ import { useDriverHireAccessRealtime } from "@/hooks/use-hire-realtime";
 import type { HireAccessDisplay } from "@/lib/fleet/hire-access-display";
 import { hireTableStatusToneClass, type HireTableStatusTone } from "@/lib/fleet/hire-contract-table-display";
 import { formatUkDateTime } from "@/lib/datetime/uk";
+import { RphPageHeader } from "@/components/ui/rph-toolbar";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
@@ -141,21 +142,23 @@ export function DriverHireRequestsClient() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="rph-h1">Hire requests</h1>
-          {pendingCount > 0 || signingCount > 0 ? (
+      <RphPageHeader
+        title="Hire requests"
+        meta={
+          pendingCount > 0 || signingCount > 0 ? (
             <p className="rph-meta mt-1 text-sm">
               {pendingCount > 0 ? `${pendingCount} pending approval${pendingCount === 1 ? "" : "s"}` : null}
               {pendingCount > 0 && signingCount > 0 ? " · " : null}
               {signingCount > 0 ? `${signingCount} ready to sign` : null}
             </p>
-          ) : null}
-        </div>
-        <button type="button" className="rph-btn-ghost" disabled={pending || rows === null} onClick={reload}>
-          Refresh
-        </button>
-      </div>
+          ) : null
+        }
+        actions={
+          <button type="button" className="rph-btn-ghost" disabled={pending || rows === null} onClick={reload}>
+            Refresh
+          </button>
+        }
+      />
       <p className="rph-muted text-sm">
         Review access requests from rental companies on the same row. Once access is approved and the contract is sent,
         return here to sign or continue signing.

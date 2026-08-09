@@ -9,6 +9,7 @@ import { HireOverviewSettlementNote } from "@/components/fleet/hire-overview/hir
 import { HireDashboardPaymentChart } from "@/components/fleet/hire-dashboard/hire-dashboard-payment-chart";
 import { HireDashboardAttentionList } from "@/components/fleet/hire-dashboard/hire-dashboard-attention-list";
 import { HireDepositPendingBanner } from "@/components/fleet/hire-dashboard/hire-deposit-pending-banner";
+import { RphPageHeader } from "@/components/ui/rph-toolbar";
 import type { ReactNode } from "react";
 
 export function HireOverviewView({
@@ -30,17 +31,15 @@ export function HireOverviewView({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="rph-h1">Overview</h1>
-          <p className="rph-muted mt-1 text-sm">
-            {contractEnded
-              ? "Summary of this ended rental and its payments."
-              : "Summary of this active rental and payments so far."}
-          </p>
-        </div>
-        {headerActions ? <div className="flex flex-wrap gap-2">{headerActions}</div> : null}
-      </div>
+      <RphPageHeader
+        title="Overview"
+        description={
+          contractEnded
+            ? "Summary of this ended rental and its payments."
+            : "Summary of this active rental and payments so far."
+        }
+        actions={headerActions}
+      />
 
       <HireOverviewHeader context={context} health={data.health} audience={audience} />
 

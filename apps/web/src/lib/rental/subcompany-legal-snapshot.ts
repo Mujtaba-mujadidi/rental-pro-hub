@@ -95,11 +95,58 @@ export function snapshotString(
   return t || null;
 }
 
+export type HireLessorNameSource = {
+  legal_name?: string | null;
+  display_name?: string | null;
+  name?: string | null;
+};
+
+/** Resolve lessor display name from snapshot and/or live subcompany fields (never parent company). */
+export function resolveLessorNameFromFields(input: {
+  snapshot?: Record<string, unknown> | null;
+  subcompany?: HireLessorNameSource | null;
+}): string | null {
+  if (input.snapshot) {
+    const fromSnapshot =
+      snapshotString(input.snapshot, "legal_name") ||
+      snapshotString(input.snapshot, "display_name") ||
+      snapshotString(input.snapshot, "name");
+    if (fromSnapshot) return fromSnapshot;
+  }
+  if (input.subcompany) {
+    const fromSubcompany =
+      input.subcompany.legal_name?.trim() ||
+      input.subcompany.display_name?.trim() ||
+      input.subcompany.name?.trim();
+    if (fromSubcompany) return fromSubcompany;
+  }
+  return null;
+}
+
+/**
+ * Driver-facing / subcompany hire branding — uses subcompany snapshot or entity only.
+ * Parent company name is used only for legacy hires with no subcompany.
+ */
+export function resolveHireLessorDisplayName(input: {
+  snapshot?: Record<string, unknown> | null;
+  subcompany?: HireLessorNameSource | null;
+  parentCompanyName?: string | null;
+  hasSubcompany?: boolean;
+}): string {
+  const resolved = resolveLessorNameFromFields({
+    snapshot: input.snapshot,
+    subcompany: input.subcompany,
+  });
+  if (resolved) return resolved;
+  if (!input.hasSubcompany && input.parentCompanyName?.trim()) {
+    return input.parentCompanyName.trim();
+  }
+  return "Rental company";
+}
+
 export function lessorDisplayNameFromSnapshot(snap: Record<string, unknown> | null | undefined): string {
   return (
-    snapshotString(snap, "legal_name") ||
-    snapshotString(snap, "display_name") ||
-    snapshotString(snap, "name") ||
+    resolveLessorNameFromFields({ snapshot: snap }) ||
     "Lessor"
   );
 }

@@ -3,6 +3,7 @@
 import { listHireOpenBalancesAction, type HireOpenBalanceRow } from "@/app/actions/rental-hire-termination";
 import { settlementBalanceLabel } from "@/lib/fleet/hire-termination-summary";
 import { formatUkDateTime } from "@/lib/datetime/uk";
+import { RphPageHeader } from "@/components/ui/rph-toolbar";
 import Link from "next/link";
 import { useCallback, useEffect, useState, useTransition } from "react";
 
@@ -30,17 +31,15 @@ export function FleetBalancesView() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="rph-h1">Open balances</h1>
-          <p className="rph-muted mt-1 text-sm">
-            Settlement balances after contracts end. Open a hire to record notes and phased payments.
-          </p>
-        </div>
-        <button type="button" className="rph-btn-ghost" disabled={pending} onClick={reload}>
-          Refresh
-        </button>
-      </div>
+      <RphPageHeader
+        title="Open balances"
+        description="Settlement balances after contracts end. Open a hire to record notes and phased payments."
+        actions={
+          <button type="button" className="rph-btn-ghost" disabled={pending} onClick={reload}>
+            Refresh
+          </button>
+        }
+      />
 
       {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
 

@@ -1,4 +1,5 @@
 import { formatHireContractStartLabel } from "@/lib/fleet/hire-pdf-details";
+import { resolveHireLessorDisplayName } from "@/lib/rental/subcompany-legal-snapshot";
 
 export type DriverHireVehicleSnapshot = {
   vrm?: string | null;
@@ -12,7 +13,8 @@ export type DriverHireCompanyLookup = {
 
 export type DriverHireSubcompanyLookup = {
   legalName?: string | null;
-  companyName?: string | null;
+  displayName?: string | null;
+  name?: string | null;
 };
 
 export type DriverHireDisplayLookups = {
@@ -39,16 +41,23 @@ export function resolveDriverHireCompanyName(input: {
     : null;
   const parentCompany = input.lookups.companiesById.get(input.parentCompanyId);
 
-  const linkedName = subcompany?.companyName?.trim();
-  if (linkedName) return linkedName;
+  if (input.subcompanyId) {
+    return resolveHireLessorDisplayName({
+      subcompany: subcompany
+        ? {
+            legal_name: subcompany.legalName,
+            display_name: subcompany.displayName,
+            name: subcompany.name,
+          }
+        : null,
+      hasSubcompany: true,
+    });
+  }
 
-  const parentName = parentCompany?.name?.trim();
-  if (parentName) return parentName;
-
-  const legalName = subcompany?.legalName?.trim();
-  if (legalName) return legalName;
-
-  return "Rental company";
+  return resolveHireLessorDisplayName({
+    parentCompanyName: parentCompany?.name,
+    hasSubcompany: false,
+  });
 }
 
 export function resolveDriverHireVehicleDisplay(

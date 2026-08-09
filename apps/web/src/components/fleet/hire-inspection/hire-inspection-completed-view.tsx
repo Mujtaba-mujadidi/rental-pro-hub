@@ -1,5 +1,6 @@
 "use client";
 
+import { RphSectionHeader } from "@/components/ui/rph-toolbar";
 import { useState } from "react";
 import { HireInspectionLazyImage } from "@/components/fleet/hire-inspection/hire-inspection-lazy-image";
 import { HireInspectionPdfExportButton } from "@/components/fleet/hire-inspection/hire-inspection-pdf-export-button";
@@ -51,21 +52,24 @@ export function HireInspectionCompletedView({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <RphSectionHeader
+        actions={
+          <HireInspectionPdfExportButton hireGroupId={hireGroupId} kind={kind} vehicleLabel={vehicleLabel} />
+        }
+      >
         <div className="flex flex-wrap gap-2">
-        {TAB_LABELS.map((label, index) => (
-          <button
-            key={label}
-            type="button"
-            className={`rph-pill ${tab === index ? "rph-pill-active" : ""}`}
-            onClick={() => setTab(index)}
-          >
-            {label}
-          </button>
-        ))}
+          {TAB_LABELS.map((label, index) => (
+            <button
+              key={label}
+              type="button"
+              className={`rph-pill ${tab === index ? "rph-pill-active" : ""}`}
+              onClick={() => setTab(index)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-        <HireInspectionPdfExportButton hireGroupId={hireGroupId} kind={kind} vehicleLabel={vehicleLabel} />
-      </div>
+      </RphSectionHeader>
 
       {tab === 0 ? (
         <section className="rph-card space-y-3 p-4">

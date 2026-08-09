@@ -11,6 +11,7 @@ import {
   type FleetTrackingSettings,
   type WeeklyMileageRow,
 } from "@/app/actions/fleet-tracking";
+import { RphSectionHeader } from "@/components/ui/rph-toolbar";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { ManualDeviceLinkModal } from "@/app/(main)/rental/fleet-tracking/manual-device-link-modal";
 import type { MappingSuggestion, DeviceGroup } from "@/lib/fleet-tracking/mapping";
@@ -396,35 +397,36 @@ export function FleetTrackingClient({ canManage }: { canManage: boolean }) {
 
       <div role="tabpanel" hidden={tab !== "mapping"} className={tab === "mapping" ? "space-y-4" : undefined}>
         <section className="rph-card space-y-4 p-4 sm:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Device mapping</h2>
-              <p className="rph-meta mt-1">
-                Matches ignore spaces and case. When both <span className="font-mono">VRM</span> and{" "}
-                <span className="font-mono">VRM-imob</span> exist, the immobiliser device is primary.
-              </p>
-            </div>
-            {canManage ? (
-              <button
-                type="button"
-                className="rph-btn-ghost inline-flex items-center gap-2"
-                disabled={busy || suggestionsLoading}
-                onClick={() => loadSuggestions()}
-              >
-                {suggestionsLoading ? (
-                  <>
-                    <span
-                      className="h-4 w-4 animate-spin rounded-full border-2 border-rph-border border-t-rph-rail"
-                      aria-hidden
-                    />
-                    Suggesting…
-                  </>
-                ) : (
-                  "Suggest mappings"
-                )}
-              </button>
-            ) : null}
-          </div>
+          <RphSectionHeader
+            actions={
+              canManage ? (
+                <button
+                  type="button"
+                  className="rph-btn-ghost inline-flex items-center gap-2"
+                  disabled={busy || suggestionsLoading}
+                  onClick={() => loadSuggestions()}
+                >
+                  {suggestionsLoading ? (
+                    <>
+                      <span
+                        className="h-4 w-4 animate-spin rounded-full border-2 border-rph-border border-t-rph-rail"
+                        aria-hidden
+                      />
+                      Suggesting…
+                    </>
+                  ) : (
+                    "Suggest mappings"
+                  )}
+                </button>
+              ) : null
+            }
+          >
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Device mapping</h2>
+            <p className="rph-meta mt-1">
+              Matches ignore spaces and case. When both <span className="font-mono">VRM</span> and{" "}
+              <span className="font-mono">VRM-imob</span> exist, the immobiliser device is primary.
+            </p>
+          </RphSectionHeader>
 
           <div className="relative min-h-[8rem]">
             {suggestionsLoading ? <SectionLoader label="Matching devices to fleet VRMs…" /> : null}
@@ -716,15 +718,16 @@ export function FleetTrackingClient({ canManage }: { canManage: boolean }) {
           </div>
 
           <div className="space-y-4 border-t border-rph-border pt-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-semibold text-rph-fg">Weekly mileage</h3>
-                <p className="rph-meta mt-0.5">Last 7 days from the tracker (primary device only), shown in miles.</p>
-              </div>
-              <button type="button" className="rph-btn-ghost" disabled={busy} onClick={loadWeekly}>
-                Load report
-              </button>
-            </div>
+            <RphSectionHeader
+              actions={
+                <button type="button" className="rph-btn-ghost" disabled={busy} onClick={loadWeekly}>
+                  Load report
+                </button>
+              }
+            >
+              <h3 className="text-sm font-semibold text-rph-fg">Weekly mileage</h3>
+              <p className="rph-meta mt-0.5">Last 7 days from the tracker (primary device only), shown in miles.</p>
+            </RphSectionHeader>
             {weekly ? (
               <>
                 <p className="rph-meta">

@@ -40,7 +40,7 @@ export function HireSignedDocumentsView({ title, subtitle, documents, backHref, 
 
   return (
     <div className="-m-4 flex min-h-0 flex-col md:-m-6">
-      <div className="flex shrink-0 flex-wrap items-end justify-between gap-3 border-b border-rph-border bg-rph-raised px-4 py-3 md:px-6">
+      <div className="flex shrink-0 flex-col gap-3 border-b border-rph-border bg-rph-raised px-4 py-3 sm:flex-row sm:items-end sm:justify-between md:px-6">
         <div className="min-w-0">
           {backHref && backLabel ? (
             <Link href={backHref} className="text-sm font-medium text-rph-link hover:text-rph-link-hover">

@@ -12,6 +12,7 @@ import {
 import { ukTodayYmd } from "@/lib/datetime/uk";
 import { CONTRACT_LENGTH_LABELS } from "@/lib/fleet/hire-access-display";
 import { formatHireContractEndLabel, formatHireContractStartLabel } from "@/lib/fleet/hire-pdf-details";
+import { resolveHireLessorDisplayName } from "@/lib/fleet/hire-lessor-display";
 import type { ContractLengthKind } from "@/lib/fleet/hire-types";
 import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
 import {
@@ -437,7 +438,7 @@ async function loadCompanyCardForHire(input: {
     const { data: subcompany } = await client
       .from("subcompanies")
       .select(
-        "legal_name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode, companies(name)",
+        "name, display_name, legal_name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode",
       )
       .eq("id", input.subcompanyId)
       .maybeSingle();
@@ -451,8 +452,14 @@ async function loadCompanyCardForHire(input: {
         subcompany.registered_county as string | null,
         subcompany.registered_postcode as string | null,
       ]);
-      const linkedCompany = subcompany.companies as { name?: string } | null;
-      if (linkedCompany?.name?.trim()) companyName = linkedCompany.name.trim();
+      companyName = resolveHireLessorDisplayName({
+        subcompany: {
+          legal_name: subcompany.legal_name as string | null,
+          display_name: subcompany.display_name as string | null,
+          name: subcompany.name as string | null,
+        },
+        hasSubcompany: true,
+      });
     }
   } else {
     const { data: company } = await client

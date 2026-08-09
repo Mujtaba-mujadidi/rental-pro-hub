@@ -20,6 +20,7 @@ import { HireSettlementBreakdownPanel } from "@/components/fleet/hire-settlement
 import { HireDriverChargesTable } from "@/components/fleet/hire-payments/hire-driver-charges-table";
 import { summarizeHireSettlementLedger } from "@/lib/fleet/hire-payments-ledger";
 import { useHirePaymentsRealtime } from "@/hooks/use-hire-realtime";
+import { RphPageHeader } from "@/components/ui/rph-toolbar";
 import { useCallback, useEffect, useState, useTransition } from "react";
 
 export function HirePaymentsView({
@@ -74,17 +75,15 @@ export function HirePaymentsView({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="rph-h1">Payments</h1>
-          <p className="rph-muted mt-1 text-sm">
-            {contractEnded
-              ? "This hire has ended. See the summary, money in/out, and rent for the contract below."
-              : "Record and approve rent payments for this hire. Totals are for weeks started so far, not the full contract."}
-          </p>
-        </div>
-        {!contractEnded && data.canSubmitPayment ? (
-          <div className="shrink-0 self-start">
+      <RphPageHeader
+        title="Payments"
+        description={
+          contractEnded
+            ? "This hire has ended. See the summary, money in/out, and rent for the contract below."
+            : "Record and approve rent payments for this hire. Totals are for weeks started so far, not the full contract."
+        }
+        actions={
+          !contractEnded && data.canSubmitPayment ? (
             <HirePaymentComposer
               hireGroupId={hireGroupId}
               scheduleBalanceGbp={data.summary.scheduleBalanceGbp}
@@ -105,9 +104,9 @@ export function HirePaymentsView({
               }}
               busy={pending}
             />
-          </div>
-        ) : null}
-      </div>
+          ) : null
+        }
+      />
 
       <HirePaymentsAccountOverview
         contractEnded={contractEnded}

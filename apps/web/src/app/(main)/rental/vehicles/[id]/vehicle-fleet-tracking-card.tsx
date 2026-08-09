@@ -1,5 +1,7 @@
 "use client";
 
+import { RphSectionHeader } from "@/components/ui/rph-toolbar";
+
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { ManualDeviceLinkModal } from "@/app/(main)/rental/fleet-tracking/manual-device-link-modal";
@@ -233,26 +235,27 @@ export function VehicleFleetTrackingCard({
   return (
     <>
       <div className="rph-card space-y-4 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p className="rph-meta font-semibold uppercase tracking-wide">Fleet Tracking</p>
-            <p className="rph-muted mt-0.5 text-xs">Live data from SmartCar Tracker</p>
-            {sourceLine ? (
-              <p className="mt-1 text-xs font-medium text-rph-fg-secondary">{sourceLine}</p>
-            ) : null}
-            {secondaryNote ? <p className="rph-meta mt-0.5 text-xs">{secondaryNote}</p> : null}
-          </div>
-          {!initialLoading ? (
-            <button
-              type="button"
-              className="rph-btn-ghost h-8 px-3 text-xs"
-              disabled={refreshPending || setPending}
-              onClick={refresh}
-            >
-              Refresh
-            </button>
+        <RphSectionHeader
+          actions={
+            !initialLoading ? (
+              <button
+                type="button"
+                className="rph-btn-ghost h-8 px-3 text-xs"
+                disabled={refreshPending || setPending}
+                onClick={refresh}
+              >
+                Refresh
+              </button>
+            ) : null
+          }
+        >
+          <p className="rph-meta font-semibold uppercase tracking-wide">Fleet Tracking</p>
+          <p className="rph-muted mt-0.5 text-xs">Live data from SmartCar Tracker</p>
+          {sourceLine ? (
+            <p className="mt-1 text-xs font-medium text-rph-fg-secondary">{sourceLine}</p>
           ) : null}
-        </div>
+          {secondaryNote ? <p className="rph-meta mt-0.5 text-xs">{secondaryNote}</p> : null}
+        </RphSectionHeader>
 
         {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
         {setMsg ? <p className="text-sm text-emerald-700 dark:text-emerald-300">{setMsg}</p> : null}

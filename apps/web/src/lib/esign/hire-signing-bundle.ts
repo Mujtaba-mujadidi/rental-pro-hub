@@ -6,6 +6,7 @@ import { completeSigning } from "@/lib/esign/envelope";
 import { fieldsForRole } from "@/lib/esign/roles";
 import { CONTRACT_LENGTH_LABELS, formatRentLabel } from "@/lib/fleet/hire-access-display";
 import { sendHireSigningBundleEmail } from "@/lib/fleet/hire-signing-mail";
+import { loadHireLessorDisplayName } from "@/lib/fleet/hire-lessor-display";
 import {
   countUnsignedHireBundleAgreements,
   hireBundleSigningComplete,
@@ -125,10 +126,10 @@ export async function loadHireBundleSigningPayload(
     .maybeSingle();
   if (gErr || !group?.id) return { ok: false, error: gErr?.message ?? "Hire not found." };
 
-  const [{ data: company }, { data: driver }, agreements] = await Promise.all([
-    admin.from("companies").select("name").eq("id", group.parent_company_id).maybeSingle(),
+  const [{ data: driver }, agreements, lessorName] = await Promise.all([
     admin.from("driver_profiles").select("first_name, last_name, account_email").eq("user_id", group.driver_user_id).maybeSingle(),
     loadBundleAgreements(admin, hireGroupId),
+    loadHireLessorDisplayName(admin, hireGroupId),
   ]);
 
   if (!driver?.account_email?.trim()) {
@@ -149,7 +150,7 @@ export async function loadHireBundleSigningPayload(
 
   const payload: HireBundleSigningPayload = {
     hireGroupId: group.id as string,
-    companyName: (company?.name as string) ?? "Rental company",
+    companyName: lessorName,
     vehicleVrm: vrm,
     hirerEmail: driver.account_email.trim(),
     hirerName,
@@ -408,9 +409,9 @@ export async function sendHireGroupSigningBundle(
   const unsignedCount = countUnsignedHireBundleAgreements(envelopeRows);
   const agreements = await loadBundleAgreements(admin, hireGroupId);
 
-  const [{ data: company }, { data: driver }] = await Promise.all([
-    admin.from("companies").select("name").eq("id", group.parent_company_id).maybeSingle(),
+  const [{ data: driver }, lessorName] = await Promise.all([
     admin.from("driver_profiles").select("first_name, last_name, account_email").eq("user_id", group.driver_user_id).maybeSingle(),
+    loadHireLessorDisplayName(admin, hireGroupId),
   ]);
   if (!driver?.account_email?.trim()) {
     return { ok: false, error: "Driver email is required." };
@@ -464,7 +465,7 @@ export async function sendHireGroupSigningBundle(
   const vrm = ((group as { vehicles?: { vrm?: string; make?: string; model?: string } | null }).vehicles?.vrm ?? "vehicle") as string;
   const vehicle = (group as { vehicles?: { vrm?: string; make?: string; model?: string } | null }).vehicles;
   const vehicleLabel = vehicle ? [vehicle.make, vehicle.model].filter(Boolean).join(" ").trim() || "Vehicle" : "Vehicle";
-  const companyName = (company?.name as string) ?? "Rental company";
+  const companyName = lessorName;
   const driverName =
     [driver.first_name, driver.last_name].filter(Boolean).join(" ").trim() || driver.account_email.trim();
   const rentLabel =

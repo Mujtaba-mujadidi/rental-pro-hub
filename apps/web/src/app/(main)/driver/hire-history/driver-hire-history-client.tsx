@@ -6,6 +6,7 @@ import { hireTableStatusToneClass } from "@/lib/fleet/hire-contract-table-displa
 import { driverHireStatusTone } from "@/lib/fleet/driver-hire-nav";
 import { driverHireWorkspaceHref } from "@/lib/fleet/driver-hire-workspace-nav";
 import { useDriverHireAccessRealtime } from "@/hooks/use-hire-realtime";
+import { RphPageHeader } from "@/components/ui/rph-toolbar";
 import Link from "next/link";
 import { useCallback, useEffect, useTransition } from "react";
 import { useState } from "react";
@@ -102,18 +103,20 @@ export function DriverHireHistoryClient() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="rph-h1">Hire history</h1>
-          <p className="rph-muted mt-1 text-sm">
-            Past hires with rental companies. Use <span className="font-medium text-rph-fg">Open hire</span> to
-            view payments, settlement, and checkout records.
-          </p>
-        </div>
-        <button type="button" className="rph-btn-ghost" disabled={pending || rows === null} onClick={reload}>
-          Refresh
-        </button>
-      </div>
+      <RphPageHeader
+        title="Hire history"
+        description={
+          <>
+            Past hires with rental companies. Use <span className="font-medium text-rph-fg">Open hire</span> to view
+            payments, settlement, and checkout records.
+          </>
+        }
+        actions={
+          <button type="button" className="rph-btn-ghost" disabled={pending || rows === null} onClick={reload}>
+            Refresh
+          </button>
+        }
+      />
 
       {pending && rows === null ? <LoadingPanel label="Loading hire history…" /> : null}
       {error ? <p className="rph-alert-error text-sm">{error}</p> : null}

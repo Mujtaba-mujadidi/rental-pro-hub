@@ -101,10 +101,15 @@ async function loadDriverHireDisplayLookups(
     subcompanyIds.length
       ? admin
           .from("subcompanies")
-          .select("id, legal_name, companies(name)")
+          .select("id, legal_name, display_name, name")
           .in("id", subcompanyIds)
       : Promise.resolve({
-          data: [] as { id: string; legal_name?: string; companies?: { name?: string } | null }[],
+          data: [] as {
+            id: string;
+            legal_name?: string;
+            display_name?: string | null;
+            name?: string;
+          }[],
         }),
     companyIds.length
       ? admin.from("companies").select("id, name").in("id", companyIds)
@@ -118,16 +123,14 @@ async function loadDriverHireDisplayLookups(
     ]),
   );
   const subcompaniesById = new Map(
-    (subcompaniesRes.data ?? []).map((subcompany) => {
-      const linkedCompany = subcompany.companies as { name?: string } | null;
-      return [
-        subcompany.id,
-        {
-          legalName: subcompany.legal_name,
-          companyName: linkedCompany?.name ?? null,
-        },
-      ];
-    }),
+    (subcompaniesRes.data ?? []).map((subcompany) => [
+      subcompany.id,
+      {
+        legalName: subcompany.legal_name,
+        displayName: subcompany.display_name,
+        name: subcompany.name,
+      },
+    ]),
   );
   const companiesById = new Map(
     (companiesRes.data ?? []).map((company) => [company.id, { name: company.name }]),
