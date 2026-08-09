@@ -97,6 +97,12 @@ export type HireDetailsImportantDates = {
 
 export type HireInsuranceDetailsSummary = ReturnType<typeof mapHireInsuranceSummary>;
 
+export type HireSupersessionLink = {
+  hireGroupId: string;
+  direction: "supersedes" | "superseded_by";
+  lessorLabel: string;
+};
+
 export type HireDetailsPayload = {
   hireGroupId: string;
   company: HireDetailsCompanyCard;
@@ -113,11 +119,50 @@ export type HireDetailsPayload = {
   driverDocumentsRetentionWarning: string | null;
   driverDocumentsRetainUntilLabel: string | null;
   hireInsurance: HireInsuranceDetailsSummary;
+  hireSupersession: HireSupersessionLink | null;
 };
 
 function formatAddress(parts: (string | null | undefined)[]): string | null {
   const line = parts.filter(Boolean).join(", ").trim();
   return line || null;
+}
+
+async function loadHireSupersessionLink(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  group: {
+    supersedes_hire_group_id?: string | null;
+    superseded_by_hire_group_id?: string | null;
+  },
+): Promise<HireSupersessionLink | null> {
+  const supersededById = group.superseded_by_hire_group_id?.trim() || null;
+  const supersedesId = group.supersedes_hire_group_id?.trim() || null;
+  const relatedId = supersededById ?? supersedesId;
+  if (!relatedId) return null;
+
+  const { data: related, error } = await supabase
+    .from("vehicle_hire_groups")
+    .select("id, subcompany_id, subcompany_legal_snapshot, subcompanies(name)")
+    .eq("id", relatedId)
+    .maybeSingle();
+  if (error || !related) return null;
+
+  const nested = related.subcompanies as
+    | { legal_name?: string | null; display_name?: string | null; name?: string | null }
+    | { legal_name?: string | null; display_name?: string | null; name?: string | null }[]
+    | null;
+  const subcompany = Array.isArray(nested) ? nested[0] ?? null : nested;
+  const lessorLabel = resolveHireLessorDisplayName({
+    snapshot: (related.subcompany_legal_snapshot ?? null) as Record<string, unknown> | null,
+    subcompany,
+    parentCompanyName: null,
+    hasSubcompany: Boolean(related.subcompany_id),
+  });
+
+  return {
+    hireGroupId: related.id as string,
+    direction: supersededById ? "superseded_by" : "supersedes",
+    lessorLabel,
+  };
 }
 
 async function signVehicleDocUrl(
@@ -486,7 +531,7 @@ async function buildHireDetails(
   const { data: group, error } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      `id, status, parent_company_id, subcompany_id, driver_user_id, vehicle_id, start_date, start_time, end_time, activated_at, ended_at, terminated_at, driver_documents_retain_until, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, insurance_provided_by, companies(name), vehicles(vrm, make, model, colour, fuel_type, seats, cc, mot_expiry, tax_expiry, phv_licence_no, phv_licence_expiry, service_due_at), vehicle_hire_agreements(id, contract_length_kind, end_date, status, signed_at, esign_envelope_id)`,
+      `id, status, parent_company_id, subcompany_id, driver_user_id, vehicle_id, start_date, start_time, end_time, activated_at, ended_at, terminated_at, driver_documents_retain_until, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, insurance_provided_by, supersedes_hire_group_id, superseded_by_hire_group_id, companies(name), vehicles(vrm, make, model, colour, fuel_type, seats, cc, mot_expiry, tax_expiry, phv_licence_no, phv_licence_expiry, service_due_at), vehicle_hire_agreements(id, contract_length_kind, end_date, status, signed_at, esign_envelope_id)`,
     )
     .eq("id", hireGroupId.trim())
     .maybeSingle();
@@ -634,6 +679,8 @@ async function buildHireDetails(
     signedByEnvelope,
   });
 
+  const hireSupersession = await loadHireSupersessionLink(supabase, group);
+
   return {
     ok: true,
     data: {
@@ -662,6 +709,7 @@ async function buildHireDetails(
       driverDocumentsRetentionWarning: driverDocumentsRetentionWarningMessage,
       driverDocumentsRetainUntilLabel: retainUntilYmd ? formatUkDate(retainUntilYmd) : null,
       hireInsurance,
+      hireSupersession,
     },
   };
 }

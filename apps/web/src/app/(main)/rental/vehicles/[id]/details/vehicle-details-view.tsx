@@ -32,6 +32,7 @@ import {
   type VehicleStatus,
   type VehicleTransferRow,
 } from "@/lib/fleet/vehicles";
+import { vehicleDocumentHistoryLabel } from "@/lib/fleet/vehicle-historic-access";
 import {
   openTransferRequirementForVehicleDocType,
   type VehicleTransferOpenRequirement,
@@ -210,21 +211,27 @@ function DocFileIcon() {
 export function VehicleDetailsView({
   initialVehicle,
   initialDocuments,
+  initialDocumentHistory,
   initialTransfers,
   transferDocumentRequirements: initialTransferDocumentRequirements,
   subcompanies,
   notifySettings,
   canManage,
   canDelete,
+  readOnlyHistoric = false,
+  historicTransfer = null,
 }: {
   initialVehicle: VehicleRow;
   initialDocuments: VehicleDocumentRow[];
+  initialDocumentHistory: VehicleDocumentRow[];
   initialTransfers: VehicleTransferRow[];
   transferDocumentRequirements: VehicleTransferOpenRequirement[];
   subcompanies: SubOpt[];
   notifySettings: CompanyNotificationSettings;
   canManage: boolean;
   canDelete: boolean;
+  readOnlyHistoric?: boolean;
+  historicTransfer?: VehicleTransferRow | null;
 }) {
   const { refreshShell } = useVehicleWorkspace();
   const [pending, startTransition] = useTransition();
@@ -234,6 +241,7 @@ export function VehicleDetailsView({
   const [error, setError] = useState<string | null>(null);
   const [vehicle, setVehicle] = useState(initialVehicle);
   const [docs, setDocs] = useState(initialDocuments);
+  const [documentHistory, setDocumentHistory] = useState(initialDocumentHistory);
   const [transfers, setTransfers] = useState(initialTransfers);
   const [transferDocumentRequirements, setTransferDocumentRequirements] = useState(
     initialTransferDocumentRequirements,
@@ -250,17 +258,25 @@ export function VehicleDetailsView({
   useEffect(() => {
     setVehicle(initialVehicle);
     setDocs(initialDocuments);
+    setDocumentHistory(initialDocumentHistory);
     setTransfers(initialTransfers);
     setTransferDocumentRequirements(initialTransferDocumentRequirements);
     if (!editSection) setForm(fromVehicle(initialVehicle));
-  }, [initialVehicle, initialDocuments, initialTransfers, initialTransferDocumentRequirements, editSection]);
+  }, [
+    initialVehicle,
+    initialDocuments,
+    initialDocumentHistory,
+    initialTransfers,
+    initialTransferDocumentRequirements,
+    editSection,
+  ]);
 
   const missingDocs = vehicle.missing_docs ?? [];
   const fleetTransferRequirements = transferDocumentRequirements.filter((req) => req.vehicleDocType);
   const hireTransferRequirements = transferDocumentRequirements.filter((req) => req.href);
   const expiryAttention = vehicleExpiryAttentionItems(vehicle, notifySettings);
   const expiryTone = worstVehicleExpiryTone(expiryAttention);
-  const complianceDocs = docs.filter((d) => d.doc_type !== "photo");
+  const complianceDocs = (readOnlyHistoric ? documentHistory : docs).filter((d) => d.doc_type !== "photo");
   const otherDocs = complianceDocs.filter(
     (d) =>
       !REQUIRED_VEHICLE_DOC_TYPES.includes(d.doc_type as RequiredVehicleDocType) &&
@@ -449,7 +465,18 @@ export function VehicleDetailsView({
 
       {error && !editSection ? <p className="rph-alert-error text-sm">{error}</p> : null}
 
-      <VehicleExpiryAlert items={expiryAttention} tone={expiryTone} />
+      {readOnlyHistoric && historicTransfer ? (
+        <div className="rph-alert-warn text-sm">
+          <p className="font-semibold">Historic read-only view</p>
+          <p className="mt-1">
+            This vehicle was transferred to {historicTransfer.to_name ?? "another company"} on{" "}
+            {formatUkDateTime(historicTransfer.transferred_at)}. You can view ended hires and documents from when it
+            operated under {historicTransfer.from_name ?? "your company"}.
+          </p>
+        </div>
+      ) : null}
+
+      {!readOnlyHistoric ? <VehicleExpiryAlert items={expiryAttention} tone={expiryTone} /> : null}
 
       <div className="grid gap-4 xl:grid-cols-12">
         <section className="rph-card flex flex-col p-4 sm:p-5 xl:col-span-5">
@@ -539,7 +566,9 @@ export function VehicleDetailsView({
 
           <section id="documents" className="rph-card scroll-mt-6 p-4 sm:p-5">
             <div className="flex items-center justify-between gap-2">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Documents</h2>
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">
+              {readOnlyHistoric ? "Historic documents" : "Documents"}
+            </h2>
               <div className="flex flex-wrap items-center justify-end gap-1.5">
                 {fleetTransferRequirements.length ? (
                   <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
@@ -557,7 +586,11 @@ export function VehicleDetailsView({
                 ) : null}
               </div>
             </div>
-            <p className="rph-meta mt-1">Required: MOT, Logbook (V5C), and PHV/Taxi licence paper.</p>
+            <p className="rph-meta mt-1">
+              {readOnlyHistoric
+                ? "Superseded fleet documents from your assignment period."
+                : "Required: MOT, Logbook (V5C), and PHV/Taxi licence paper."}
+            </p>
             {transferDocumentRequirements.length ? (
               <div className="rph-alert-warn mt-3 text-sm">
                 <p className="font-semibold">
@@ -582,6 +615,7 @@ export function VehicleDetailsView({
                 ) : null}
               </div>
             ) : null}
+            {!readOnlyHistoric ? (
             <ul className="mt-3 divide-y divide-rph-border">
               {REQUIRED_VEHICLE_DOC_TYPES.map((docType) => {
                 const onFile = docOnFile(docs, docType);
@@ -652,8 +686,73 @@ export function VehicleDetailsView({
                 );
               })}
             </ul>
+            ) : documentHistory.length ? (
+              <ul className="mt-3 space-y-3">
+                {documentHistory.map((d) => {
+                  const transfer = d.vehicle_transfer_id
+                    ? transfers.find((t) => t.id === d.vehicle_transfer_id)
+                    : null;
+                  return (
+                    <li key={d.id} className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <DocFileIcon />
+                          <p className="text-sm font-semibold text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[d.doc_type]}</p>
+                        </div>
+                        <p className="rph-meta mt-1 pl-7">
+                          {d.file_name ?? "PDF on file"} · uploaded {formatUkDateTime(d.created_at)}
+                        </p>
+                        <p className="rph-meta pl-7">
+                          {vehicleDocumentHistoryLabel({
+                            versionStatus: d.version_status,
+                            createdAt: d.created_at,
+                            transferFromName: transfer?.from_name,
+                            transferToName: transfer?.to_name,
+                            transferredAt: transfer?.transferred_at,
+                          })}
+                        </p>
+                      </div>
+                      <VehicleDocRowMenu doc={d} canManage={false} removeDisabled onError={setError} />
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm text-rph-fg-muted">No historic fleet documents on file.</p>
+            )}
 
-            {otherDocs.length ? (
+            {!readOnlyHistoric && documentHistory.length ? (
+              <div className="mt-4 border-t border-rph-border pt-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Document history</h3>
+                <p className="rph-meta mt-1">Previous versions kept after subcompany transfers.</p>
+                <ul className="mt-3 space-y-3">
+                  {documentHistory.map((d) => {
+                    const transfer = d.vehicle_transfer_id
+                      ? transfers.find((t) => t.id === d.vehicle_transfer_id)
+                      : null;
+                    return (
+                      <li key={d.id} className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[d.doc_type]}</p>
+                          <p className="rph-meta">
+                            {d.file_name ?? "PDF"} · {formatUkDateTime(d.created_at)} ·{" "}
+                            {vehicleDocumentHistoryLabel({
+                              versionStatus: d.version_status,
+                              createdAt: d.created_at,
+                              transferFromName: transfer?.from_name,
+                              transferToName: transfer?.to_name,
+                              transferredAt: transfer?.transferred_at,
+                            })}
+                          </p>
+                        </div>
+                        <VehicleDocRowMenu doc={d} canManage={false} removeDisabled onError={setError} />
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : null}
+            {!readOnlyHistoric && otherDocs.length ? (
               <ul className="mt-2 space-y-3 border-t border-rph-border pt-3">
                 {otherDocs.map((d) => {
                   const transferRequirement = openTransferRequirementForVehicleDocType(

@@ -10,6 +10,10 @@ export function VehicleRentalsPageClient() {
     <VehicleRentalsTableView
       vehicleId={vehicleId}
       notifyDays={shell.notifySettings.notify_contract_expiry_days_before}
+      readOnlyHistoric={shell.access.kind === "historic"}
+      historicSubcompanyName={
+        shell.access.kind === "historic" ? shell.access.transfer.from_name ?? null : null
+      }
     />
   );
 }

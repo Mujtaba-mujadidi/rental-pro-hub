@@ -15,6 +15,7 @@ import {
 } from "@/components/fleet/hire-details/hire-details-doc-actions";
 import { getDriverHireVehicleDocumentUrlAction } from "@/app/actions/hire-details";
 import { HireInsuranceCard } from "@/components/fleet/hire-insurance/hire-insurance-card";
+import Link from "next/link";
 import { useState } from "react";
 
 const cardClass = "rph-card flex h-full flex-col p-3";
@@ -323,6 +324,28 @@ function StaffDetailsLayout({ data }: { data: HireDetailsPayload }) {
             ? ` Access until ${data.driverDocumentsRetainUntilLabel}.`
             : null}
         </p>
+      ) : null}
+      {data.hireSupersession ? (
+        <div className="rph-alert-ok text-sm">
+          <p>
+            {data.hireSupersession.direction === "supersedes" ? (
+              <>
+                This hire replaced an earlier contract under a different company.{" "}
+                <Link href={`/rental/hires/${data.hireSupersession.hireGroupId}`} className="rph-link">
+                  View previous hire ({data.hireSupersession.lessorLabel})
+                </Link>
+              </>
+            ) : (
+              <>
+                This hire was superseded by a replacement contract under{" "}
+                {data.hireSupersession.lessorLabel}.{" "}
+                <Link href={`/rental/hires/${data.hireSupersession.hireGroupId}`} className="rph-link">
+                  View replacement hire
+                </Link>
+              </>
+            )}
+          </p>
+        </div>
       ) : null}
       <div className="grid gap-3 xl:grid-cols-3">
         <CompanyDetailsCard company={data.company} />

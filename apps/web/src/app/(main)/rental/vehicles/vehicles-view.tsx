@@ -11,7 +11,8 @@ import {
   worstVehicleExpiryTone,
 } from "@/lib/fleet/vehicle-expiry-attention";
 import { vehicleWorkspaceHref } from "@/lib/fleet/vehicle-workspace-nav";
-import { formatUkDate } from "@/lib/datetime/uk";
+import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
+import type { TransferredOutVehicleSummary } from "@/lib/fleet/vehicle-historic-access";
 import type { CompanyNotificationSettings } from "@/lib/settings/notification-settings";
 import { RphSelect } from "@/components/forms/rph-select";
 import { VehicleExpiryPills } from "./vehicle-expiry-indicators";
@@ -24,6 +25,7 @@ type SubOpt = { id: string; name: string | null; is_primary: boolean };
 
 export function VehiclesView({
   vehicles,
+  transferredOutVehicles = [],
   subcompanies,
   notifySettings,
   canManage,
@@ -33,6 +35,7 @@ export function VehiclesView({
   lockedSubcompanyId = null,
 }: {
   vehicles: VehicleRow[];
+  transferredOutVehicles?: TransferredOutVehicleSummary[];
   subcompanies: SubOpt[];
   notifySettings: CompanyNotificationSettings;
   canManage: boolean;
@@ -361,6 +364,59 @@ export function VehiclesView({
           </table>
         </div>
       )}
+
+      {lockedId && transferredOutVehicles.length ? (
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold text-rph-fg">Transferred out</h2>
+            <p className="rph-meta mt-0.5">
+              Vehicles that left this company. Open for read-only historic hires and documents from your assignment
+              period.
+            </p>
+          </div>
+          <div className="rph-table-responsive">
+            <table className="min-w-full divide-y divide-rph-border text-sm">
+              <thead className="bg-rph-chrome text-left text-xs uppercase tracking-wide text-rph-fg-muted">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">VRM</th>
+                  <th className="px-4 py-3 font-semibold">Vehicle</th>
+                  <th className="px-4 py-3 font-semibold">Transferred to</th>
+                  <th className="px-4 py-3 font-semibold">Transferred</th>
+                  <th className="px-4 py-3 font-semibold" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-rph-border">
+                {transferredOutVehicles.map((row) => {
+                  const workspaceHref = vehicleWorkspaceHref(row.vehicleId);
+                  return (
+                    <tr key={row.vehicleId} className="bg-rph-raised">
+                      <td data-label="VRM" className="rph-table-primary px-4 py-3 font-mono font-semibold text-rph-fg">
+                        <Link href={workspaceHref} className="hover:underline" {...vehicleLinkProps}>
+                          {row.vrm}
+                        </Link>
+                      </td>
+                      <td data-label="Vehicle" className="px-4 py-3 text-rph-fg-secondary">
+                        {row.make} {row.model}
+                      </td>
+                      <td data-label="Transferred to" className="px-4 py-3 text-rph-fg-secondary">
+                        {row.transferredToSubcompanyName ?? "—"}
+                      </td>
+                      <td data-label="Transferred" className="px-4 py-3 text-rph-fg-secondary">
+                        {formatUkDateTime(row.transferredAt)}
+                      </td>
+                      <td data-label="" className="rph-table-actions px-4 py-3 text-right">
+                        <Link href={workspaceHref} className={btnGhost} {...vehicleLinkProps}>
+                          Historic view
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       {canManage ? (
         <AddVehicleModal

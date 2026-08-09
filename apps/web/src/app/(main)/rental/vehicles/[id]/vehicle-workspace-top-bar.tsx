@@ -8,6 +8,8 @@ import {
   VEHICLE_STATUS_LABELS,
   type VehicleStatus,
 } from "@/lib/fleet/vehicles";
+import { formatUkDateTime } from "@/lib/datetime/uk";
+import { isHistoricVehicleWorkspaceAccess } from "@/lib/fleet/load-vehicle-workspace-shell";
 import {
   isVehicleWorkspaceNavItemActive,
   parseVehicleWorkspaceSection,
@@ -179,6 +181,13 @@ export function VehicleWorkspaceTopBar({
           })}
         </div>
       </nav>
+
+      {isHistoricVehicleWorkspaceAccess(shell.access) ? (
+        <p className="rph-alert-warn mt-2 text-xs">
+          Historic read-only — transferred to {shell.access.transfer.to_name ?? "another company"} on{" "}
+          {formatUkDateTime(shell.access.transfer.transferred_at)}.
+        </p>
+      ) : null}
 
       {/* Mobile-only status / subcompany under nav */}
       <div className="mt-2 flex items-center gap-2 sm:hidden">

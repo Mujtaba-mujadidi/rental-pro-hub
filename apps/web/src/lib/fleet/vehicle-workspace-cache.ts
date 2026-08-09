@@ -19,6 +19,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 export type VehicleWorkspaceShellData = {
   vehicle: VehicleRow;
   documents: VehicleDocumentRow[];
+  documentHistory: VehicleDocumentRow[];
   transfers: VehicleTransferRow[];
   transferDocumentRequirements: VehicleTransferOpenRequirement[];
   subcompanies: { id: string; name: string | null; is_primary: boolean }[];
@@ -49,15 +50,16 @@ function isMissingVehicleDocVersionStatusColumn(error: { message?: string } | nu
 async function loadVehicleWorkspaceDocuments(
   admin: ReturnType<typeof createSupabaseAdminClient>,
   vehicleId: string,
+  versionStatus: "current" | "superseded" = "current",
 ): Promise<{ docs: VehicleDocumentRow[]; error: string | null }> {
   const baseSelect =
     "id, vehicle_id, doc_type, file_path, file_name, content_type, expiry_date, issued_date, notes, created_at";
 
   const versioned = await admin
     .from("vehicle_documents")
-    .select(`${baseSelect}, version_status`)
+    .select(`${baseSelect}, version_status, supersedes_document_id, vehicle_transfer_id`)
     .eq("vehicle_id", vehicleId)
-    .eq("version_status", "current")
+    .eq("version_status", versionStatus)
     .order("created_at", { ascending: false });
 
   if (!versioned.error) {
@@ -90,6 +92,7 @@ async function fetchVehicleWorkspaceShellData(
   const [
     { data: vehicle, error: vErr },
     docResult,
+    historicDocResult,
     { data: transfers, error: tErr },
     { data: transferRequirements, error: trErr },
     { data: subs, error: sErr },
@@ -102,6 +105,7 @@ async function fetchVehicleWorkspaceShellData(
       .eq("parent_company_id", parentCompanyId)
       .maybeSingle(),
     loadVehicleWorkspaceDocuments(admin, id),
+    loadVehicleWorkspaceDocuments(admin, id, "superseded"),
     admin
       .from("vehicle_transfers")
       .select("id, vehicle_id, from_subcompany_id, to_subcompany_id, transferred_at, notes")
@@ -130,6 +134,7 @@ async function fetchVehicleWorkspaceShellData(
 
   const docs = docResult.docs;
   const dErr = docResult.error;
+  const historicDocs = historicDocResult.docs;
 
   if (vErr || !vehicle) return null;
   if (dErr) {
@@ -164,6 +169,7 @@ async function fetchVehicleWorkspaceShellData(
       missing_docs: missingRequiredDocTypes((docs ?? []).map((d) => d.doc_type)),
     },
     documents: (docs ?? []) as VehicleDocumentRow[],
+    documentHistory: (historicDocs ?? []) as VehicleDocumentRow[],
     transfers: (transfers ?? []).map((t) => ({
       ...t,
       from_name: nameById.get(t.from_subcompany_id) ?? null,
@@ -189,7 +195,7 @@ export function getCachedVehicleWorkspaceShellData(
 
   const cached = unstable_cache(
     () => fetchVehicleWorkspaceShellData(id, parentCompanyId),
-    ["vehicle-workspace-shell-v3", id, parentCompanyId],
+    ["vehicle-workspace-shell-v4", id, parentCompanyId],
     { revalidate: 30, tags: [vehicleWorkspaceTag(id), vehicleSwitcherTag(parentCompanyId)] },
   );
   return cached();

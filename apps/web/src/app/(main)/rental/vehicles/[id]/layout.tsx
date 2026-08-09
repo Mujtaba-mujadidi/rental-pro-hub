@@ -25,10 +25,12 @@ export default async function VehicleWorkspaceLayout({
   const initialShell = {
     vehicle: data.vehicle,
     documents: data.documents,
+    documentHistory: data.documentHistory,
     transfers: data.transfers,
     transferDocumentRequirements: data.transferDocumentRequirements,
     subcompanies: data.subcompanies,
     notifySettings: data.notifySettings,
+    access: data.access,
     canManage: data.canManage,
     canDelete: data.canDelete,
   };

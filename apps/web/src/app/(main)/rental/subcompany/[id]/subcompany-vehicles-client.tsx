@@ -13,6 +13,7 @@ export function SubcompanyVehiclesClient({
   return (
     <VehiclesView
       vehicles={pageData.vehicles}
+      transferredOutVehicles={pageData.transferredOutVehicles}
       subcompanies={pageData.subcompanies}
       notifySettings={pageData.notifySettings}
       canManage={pageData.canManage}

@@ -9,9 +9,16 @@ import { HireContractWizardModal } from "@/app/(main)/rental/hires/hire-contract
 type Props = {
   vehicleId: string;
   notifyDays: number;
+  readOnlyHistoric?: boolean;
+  historicSubcompanyName?: string | null;
 };
 
-export function VehicleRentalsTableView({ vehicleId, notifyDays }: Props) {
+export function VehicleRentalsTableView({
+  vehicleId,
+  notifyDays: _notifyDays,
+  readOnlyHistoric = false,
+  historicSubcompanyName = null,
+}: Props) {
   const [pending, startTransition] = useTransition();
   const [rows, setRows] = useState<HireContractTableRow[]>([]);
   const [canWrite, setCanWrite] = useState(false);
@@ -40,6 +47,15 @@ export function VehicleRentalsTableView({ vehicleId, notifyDays }: Props) {
 
   return (
     <div className="space-y-4">
+      {readOnlyHistoric ? (
+        <div className="rph-alert-warn text-sm">
+          <p className="font-semibold">Historic hires only</p>
+          <p className="mt-1">
+            Showing ended hire contracts from when this vehicle operated under{" "}
+            {historicSubcompanyName ?? "your company"}. New rentals under the current operator are not shown.
+          </p>
+        </div>
+      ) : null}
       <div>
         <h2 className="text-sm font-semibold text-rph-fg">Hire contracts</h2>
         <p className="rph-meta mt-0.5">
@@ -49,7 +65,7 @@ export function VehicleRentalsTableView({ vehicleId, notifyDays }: Props) {
       {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
       <HireContractsTable
         rows={rows}
-        canWrite={canWrite}
+        canWrite={readOnlyHistoric ? false : canWrite}
         busy={pending}
         vehicleScoped
         onNewContract={() => {

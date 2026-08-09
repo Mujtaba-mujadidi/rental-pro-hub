@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { loadUserAccessibleSubcompanyIds } from "@/lib/auth/rental-subcompany-access";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
 import { canDeleteFleet, canManageFleet } from "@/lib/auth/rental-permissions";
@@ -26,6 +27,7 @@ import {
 import { getActiveHireForVehicle } from "@/app/actions/rental-hires";
 import { bareVehicleTransferBlockedByHire } from "@/lib/fleet/vehicle-transfer-readiness";
 import { vehicleTransferFleetDocKindForVehicleDocType } from "@/lib/fleet/vehicle-transfer-document-requirements";
+import type { TransferredOutVehicleSummary } from "@/lib/fleet/vehicle-historic-access";
 import type { VehicleSwitcherOption } from "@/lib/fleet/vehicle-workspace-cache";
 
 export type { VehicleSwitcherOption } from "@/lib/fleet/vehicle-workspace-cache";
@@ -597,11 +599,74 @@ export async function getVehicleDocumentUrlAction(documentId: string): Promise<V
 
 export type VehiclesPageData = {
   vehicles: VehicleRow[];
+  transferredOutVehicles: TransferredOutVehicleSummary[];
   subcompanies: { id: string; name: string | null; is_primary: boolean }[];
   notifySettings: CompanyNotificationSettings;
   canManage: boolean;
   canDelete: boolean;
 };
+
+async function loadTransferredOutVehicles(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  parentCompanyId: string,
+  subcompanyId: string,
+  accessibleSubcompanyIds: string[] | "all",
+): Promise<TransferredOutVehicleSummary[]> {
+  if (accessibleSubcompanyIds !== "all" && !accessibleSubcompanyIds.includes(subcompanyId)) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from("vehicle_transfers")
+    .select(
+      "vehicle_id, transferred_at, to_subcompany_id, vehicles!inner(id, subcompany_id, parent_company_id, vrm, make, model), to_subcompany:subcompanies!vehicle_transfers_to_subcompany_id_fkey(name)",
+    )
+    .eq("from_subcompany_id", subcompanyId)
+    .eq("vehicles.parent_company_id", parentCompanyId)
+    .order("transferred_at", { ascending: false });
+
+  if (error) {
+    console.error("transferred-out vehicles query failed", error.message);
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const rows: TransferredOutVehicleSummary[] = [];
+  for (const row of data ?? []) {
+    const nestedVehicle = row.vehicles as
+      | {
+          id: string;
+          subcompany_id: string;
+          vrm: string;
+          make: string;
+          model: string;
+        }
+      | {
+          id: string;
+          subcompany_id: string;
+          vrm: string;
+          make: string;
+          model: string;
+        }[]
+      | null;
+    const vehicle = Array.isArray(nestedVehicle) ? nestedVehicle[0] : nestedVehicle;
+    if (!vehicle || vehicle.subcompany_id === subcompanyId) continue;
+    if (seen.has(vehicle.id)) continue;
+    seen.add(vehicle.id);
+    const toSub = row.to_subcompany as { name: string | null } | { name: string | null }[] | null;
+    const toName = Array.isArray(toSub) ? toSub[0]?.name : toSub?.name;
+    rows.push({
+      vehicleId: vehicle.id,
+      vrm: vehicle.vrm,
+      make: vehicle.make,
+      model: vehicle.model,
+      transferredAt: row.transferred_at as string,
+      transferredToSubcompanyId: row.to_subcompany_id as string,
+      transferredToSubcompanyName: toName ?? null,
+    });
+  }
+  return rows;
+}
 
 /** Slim fleet list for the vehicle workspace switcher. */
 export async function loadVehicleSwitcherList(): Promise<VehicleSwitcherOption[] | { error: string }> {
@@ -651,11 +716,13 @@ export async function loadVehiclesPageData(options?: {
         .eq("parent_company_id", parentCompanyId)
         .order("created_at", { ascending: true });
 
-  const [{ data: vehicles, error: vErr }, subsResult, notifySettings] = await Promise.all([
-    vehicleQuery,
-    subsQuery,
-    loadCompanyNotifySettings(supabase, parentCompanyId),
-  ]);
+  const [{ data: vehicles, error: vErr }, subsResult, notifySettings, accessibleSubcompanyIds] =
+    await Promise.all([
+      vehicleQuery,
+      subsQuery,
+      loadCompanyNotifySettings(supabase, parentCompanyId),
+      loadUserAccessibleSubcompanyIds(profile),
+    ]);
 
   const subsList: { id: string; name: string | null; is_primary: boolean | null }[] = subcompanyId
     ? subsResult.data
@@ -670,15 +737,24 @@ export async function loadVehiclesPageData(options?: {
   const vehicleIds = (vehicles ?? []).map((v) => v.id as string);
   let docRows: { vehicle_id: string; doc_type: string }[] = [];
   if (vehicleIds.length) {
-    let docQuery = supabase
+    const { data, error: dErr } = await supabase
       .from("vehicle_documents")
       .select("vehicle_id, doc_type")
       .eq("parent_company_id", parentCompanyId)
+      .eq("version_status", "current")
       .in("vehicle_id", vehicleIds);
-    const { data, error: dErr } = await docQuery;
     if (dErr) return { error: dErr.message };
     docRows = (data ?? []) as { vehicle_id: string; doc_type: string }[];
   }
+
+  const transferredOutVehicles = subcompanyId
+    ? await loadTransferredOutVehicles(
+        supabase,
+        parentCompanyId,
+        subcompanyId,
+        accessibleSubcompanyIds,
+      )
+    : [];
 
   const typesByVehicle = new Map<string, string[]>();
   for (const row of docRows ?? []) {
@@ -703,6 +779,7 @@ export async function loadVehiclesPageData(options?: {
 
   return {
     vehicles: rows,
+    transferredOutVehicles,
     subcompanies: subsList.map((s) => ({
       id: s.id,
       name: s.name,

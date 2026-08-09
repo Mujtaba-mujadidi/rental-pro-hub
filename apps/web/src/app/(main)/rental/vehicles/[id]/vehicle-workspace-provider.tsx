@@ -50,8 +50,30 @@ function shellFromResult(
   result: Awaited<ReturnType<typeof loadVehicleDetailAction>>,
 ): VehicleWorkspaceShell | null {
   if (!result.ok) return null;
-  const { vehicle, documents, transfers, transferDocumentRequirements, subcompanies, notifySettings, canManage, canDelete } = result;
-  return { vehicle, documents, transfers, transferDocumentRequirements, subcompanies, notifySettings, canManage, canDelete };
+  const {
+    vehicle,
+    documents,
+    documentHistory,
+    transfers,
+    transferDocumentRequirements,
+    subcompanies,
+    notifySettings,
+    access,
+    canManage,
+    canDelete,
+  } = result;
+  return {
+    vehicle,
+    documents,
+    documentHistory,
+    transfers,
+    transferDocumentRequirements,
+    subcompanies,
+    notifySettings,
+    access,
+    canManage,
+    canDelete,
+  };
 }
 
 export function VehicleWorkspaceProvider({
