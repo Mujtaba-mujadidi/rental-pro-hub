@@ -21,7 +21,7 @@ export async function loadCompanyNotificationSettingsAction(): Promise<
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("companies")
-    .select("notify_mot_days_before, notify_tax_days_before, notify_phv_licence_days_before, notify_contract_expiry_days_before")
+    .select("notify_mot_days_before, notify_tax_days_before, notify_phv_licence_days_before, notify_contract_expiry_days_before, notify_insurance_days_before")
     .eq("id", companyId)
     .maybeSingle();
 
@@ -39,6 +39,7 @@ export async function saveCompanyNotificationSettingsAction(input: {
   notify_tax_days_before: number;
   notify_phv_licence_days_before: number;
   notify_contract_expiry_days_before: number;
+  notify_insurance_days_before: number;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const { profile } = await requireRentalCompanyArea();
   const writable = await assertRentalCompanyWritable(profile);
@@ -54,6 +55,7 @@ export async function saveCompanyNotificationSettingsAction(input: {
     notify_tax_days_before: clampNotifyDays(input.notify_tax_days_before),
     notify_phv_licence_days_before: clampNotifyDays(input.notify_phv_licence_days_before),
     notify_contract_expiry_days_before: clampNotifyDays(input.notify_contract_expiry_days_before),
+    notify_insurance_days_before: clampNotifyDays(input.notify_insurance_days_before),
   };
 
   const supabase = await createClient();

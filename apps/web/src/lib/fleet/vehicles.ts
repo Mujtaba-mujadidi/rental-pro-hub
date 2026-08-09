@@ -177,6 +177,9 @@ export type VehicleDocumentRow = {
   issued_date: string | null;
   notes: string | null;
   created_at: string;
+  version_status?: "current" | "superseded";
+  supersedes_document_id?: string | null;
+  vehicle_transfer_id?: string | null;
 };
 
 export type VehicleTransferRow = {

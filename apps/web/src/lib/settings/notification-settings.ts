@@ -5,11 +5,14 @@ export const DEFAULT_NOTIFY_TAX_DAYS = 5;
 export const DEFAULT_NOTIFY_PHV_LICENCE_DAYS = 28;
 export const DEFAULT_NOTIFY_CONTRACT_EXPIRY_DAYS = 28;
 
+export const DEFAULT_NOTIFY_INSURANCE_DAYS = 28;
+
 export type CompanyNotificationSettings = {
   notify_mot_days_before: number;
   notify_tax_days_before: number;
   notify_phv_licence_days_before: number;
   notify_contract_expiry_days_before: number;
+  notify_insurance_days_before: number;
 };
 
 export function defaultNotificationSettings(): CompanyNotificationSettings {
@@ -18,6 +21,7 @@ export function defaultNotificationSettings(): CompanyNotificationSettings {
     notify_tax_days_before: DEFAULT_NOTIFY_TAX_DAYS,
     notify_phv_licence_days_before: DEFAULT_NOTIFY_PHV_LICENCE_DAYS,
     notify_contract_expiry_days_before: DEFAULT_NOTIFY_CONTRACT_EXPIRY_DAYS,
+    notify_insurance_days_before: DEFAULT_NOTIFY_INSURANCE_DAYS,
   };
 }
 
@@ -48,5 +52,9 @@ export function parseCompanyNotificationSettings(
       typeof data?.notify_contract_expiry_days_before === "number"
         ? clampNotifyDays(data.notify_contract_expiry_days_before)
         : defaults.notify_contract_expiry_days_before,
+    notify_insurance_days_before:
+      typeof data?.notify_insurance_days_before === "number"
+        ? clampNotifyDays(data.notify_insurance_days_before)
+        : defaults.notify_insurance_days_before,
   };
 }

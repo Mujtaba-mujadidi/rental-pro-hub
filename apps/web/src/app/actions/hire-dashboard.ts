@@ -26,6 +26,9 @@ import {
   type HireContractProgress,
 } from "@/lib/fleet/hire-payment-analytics";
 import { buildHireLifecycleAttentionItems } from "@/lib/fleet/hire-lifecycle-attention";
+import { buildHireInsuranceAttentionItems } from "@/lib/fleet/hire-insurance-attention";
+import { isHireInsuranceProvidedBy, type HireInsuranceProvidedBy } from "@/lib/fleet/hire-insurance";
+import { parseCompanyNotificationSettings } from "@/lib/settings/notification-settings";
 import {
   hireDepositStatusLabel,
   summarizeHireFinancialClosure,
@@ -222,7 +225,7 @@ export async function loadHireDashboardAction(
   const { data: group } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "start_date, start_time, end_time, status, include_deposit, activated_at, terminated_at, ended_at, rent_cadence, rent_amount_gbp, deposit_gbp, driver_email, driver_licence_number, vehicles(vrm, make, model), vehicle_hire_agreements(end_date)",
+      "start_date, start_time, end_time, status, include_deposit, activated_at, terminated_at, ended_at, rent_cadence, rent_amount_gbp, deposit_gbp, driver_email, driver_licence_number, parent_company_id, insurance_provided_by, vehicles(vrm, make, model), vehicle_hire_agreements(end_date)",
     )
     .eq("id", hireGroupId.trim())
     .maybeSingle();
@@ -230,24 +233,54 @@ export async function loadHireDashboardAction(
   const hireStatus = (group?.status as string | null) ?? "";
   const vehicle = group?.vehicles as { vrm?: string; make?: string; model?: string } | null;
 
-  const { data: inspectionRows } = await supabase
-    .from("vehicle_hire_inspections")
-    .select("kind, status")
-    .eq("hire_group_id", hireGroupId.trim());
+  const [{ data: inspectionRows }, { data: insuranceRow }, { data: notifyCompany }] = await Promise.all([
+    supabase
+      .from("vehicle_hire_inspections")
+      .select("kind, status")
+      .eq("hire_group_id", hireGroupId.trim()),
+    supabase
+      .from("vehicle_hire_insurance")
+      .select("expiry_date")
+      .eq("hire_group_id", hireGroupId.trim())
+      .maybeSingle(),
+    group?.parent_company_id
+      ? supabase
+          .from("companies")
+          .select("notify_insurance_days_before")
+          .eq("id", group.parent_company_id as string)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
   const inspection = hireInspectionCompletionFromRows(
     (inspectionRows ?? []).map((row) => ({
       kind: row.kind as string,
       status: row.status as string,
     })),
   );
-  const lifecycleAttentionItems = buildHireLifecycleAttentionItems({
-    hireGroupId: hireGroupId.trim(),
-    status: hireStatus,
-    checkoutCompleted: inspection.checkoutCompleted,
-    checkinCompleted: inspection.checkinCompleted,
-    depositPendingReview: page.data.depositPendingReview,
-    depositGbp: page.data.depositGbp,
-  });
+  const notifySettings = parseCompanyNotificationSettings(notifyCompany ?? undefined);
+  const providedByRaw = (group?.insurance_provided_by as string | null) ?? null;
+  const insuranceProvidedBy: HireInsuranceProvidedBy | null =
+    providedByRaw && isHireInsuranceProvidedBy(providedByRaw) ? providedByRaw : null;
+  const lifecycleAttentionItems = [
+    ...buildHireLifecycleAttentionItems({
+      hireGroupId: hireGroupId.trim(),
+      status: hireStatus,
+      checkoutCompleted: inspection.checkoutCompleted,
+      checkinCompleted: inspection.checkinCompleted,
+      depositPendingReview: page.data.depositPendingReview,
+      depositGbp: page.data.depositGbp,
+    }),
+    ...buildHireInsuranceAttentionItems({
+      hireGroupId: hireGroupId.trim(),
+      audience: "staff",
+      providedBy: insuranceProvidedBy,
+      hasDocument: Boolean(insuranceRow),
+      expiryDate: (insuranceRow?.expiry_date as string | null) ?? null,
+      notifyDaysBefore: notifySettings.notify_insurance_days_before,
+      todayYmd: today,
+      hireStatus,
+    }),
+  ];
 
   const { data: agreements } = await supabase
     .from("vehicle_hire_agreements")
@@ -422,7 +455,7 @@ async function buildDriverDashboardData(
   const { data: group } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "start_date, start_time, end_time, status, activated_at, terminated_at, ended_at, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, driver_email, driver_licence_number, vehicle_hire_agreements(end_date)",
+      "start_date, start_time, end_time, status, activated_at, terminated_at, ended_at, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, driver_email, driver_licence_number, parent_company_id, insurance_provided_by, vehicle_hire_agreements(end_date)",
     )
     .eq("id", hireGroupId.trim())
     .eq("driver_user_id", user.id)
@@ -432,23 +465,53 @@ async function buildDriverDashboardData(
   const startDate = (group.start_date as string | null) ?? today;
   const hireStatus = (group.status as string | null) ?? shell.status;
 
-  const { data: inspectionRows } = await supabase
-    .from("vehicle_hire_inspections")
-    .select("kind, status")
-    .eq("hire_group_id", hireGroupId.trim());
+  const [{ data: inspectionRows }, { data: insuranceRow }, { data: notifyCompany }] = await Promise.all([
+    supabase
+      .from("vehicle_hire_inspections")
+      .select("kind, status")
+      .eq("hire_group_id", hireGroupId.trim()),
+    supabase
+      .from("vehicle_hire_insurance")
+      .select("expiry_date")
+      .eq("hire_group_id", hireGroupId.trim())
+      .maybeSingle(),
+    group.parent_company_id
+      ? supabase
+          .from("companies")
+          .select("notify_insurance_days_before")
+          .eq("id", group.parent_company_id as string)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
   const inspection = hireInspectionCompletionFromRows(
     (inspectionRows ?? []).map((row) => ({
       kind: row.kind as string,
       status: row.status as string,
     })),
   );
-  const lifecycleAttentionItems = buildHireLifecycleAttentionItems({
-    hireGroupId: hireGroupId.trim(),
-    status: hireStatus,
-    checkoutCompleted: inspection.checkoutCompleted,
-    checkinCompleted: inspection.checkinCompleted,
-    audience: "driver",
-  });
+  const notifySettings = parseCompanyNotificationSettings(notifyCompany ?? undefined);
+  const providedByRaw = (group.insurance_provided_by as string | null) ?? null;
+  const insuranceProvidedBy: HireInsuranceProvidedBy | null =
+    providedByRaw && isHireInsuranceProvidedBy(providedByRaw) ? providedByRaw : null;
+  const lifecycleAttentionItems = [
+    ...buildHireLifecycleAttentionItems({
+      hireGroupId: hireGroupId.trim(),
+      status: hireStatus,
+      checkoutCompleted: inspection.checkoutCompleted,
+      checkinCompleted: inspection.checkinCompleted,
+      audience: "driver",
+    }),
+    ...buildHireInsuranceAttentionItems({
+      hireGroupId: hireGroupId.trim(),
+      audience: "driver",
+      providedBy: insuranceProvidedBy,
+      hasDocument: Boolean(insuranceRow),
+      expiryDate: (insuranceRow?.expiry_date as string | null) ?? null,
+      notifyDaysBefore: notifySettings.notify_insurance_days_before,
+      todayYmd: today,
+      hireStatus,
+    }),
+  ];
   const analyticsRows = toAnalyticsRows(page.data.rows);
   const displayOptions = paymentDisplayOptions(page.data, "driver");
   const rowIds = analyticsRows.map((r) => r.id);

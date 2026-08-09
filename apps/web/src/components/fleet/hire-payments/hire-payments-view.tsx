@@ -17,6 +17,7 @@ import { HirePaymentsAccountOverview } from "@/components/fleet/hire-payments/hi
 import { HireDepositPendingBanner } from "@/components/fleet/hire-dashboard/hire-deposit-pending-banner";
 import { HireWorkspaceBalanceBanner } from "@/components/fleet/hire-dashboard/hire-workspace-balance-banner";
 import { HireSettlementBreakdownPanel } from "@/components/fleet/hire-settlement/hire-settlement-breakdown-panel";
+import { HireSettlementFinalizationBanner } from "@/components/fleet/hire-payments/hire-settlement-finalization-banner";
 import { HireDriverChargesTable } from "@/components/fleet/hire-payments/hire-driver-charges-table";
 import { summarizeHireSettlementLedger } from "@/lib/fleet/hire-payments-ledger";
 import { useHirePaymentsRealtime } from "@/hooks/use-hire-realtime";
@@ -119,10 +120,21 @@ export function HirePaymentsView({
         depositDispositionLabel={data.depositDispositionLabel}
         ledgerSummary={ledgerSummary}
         driverChargeLineItems={data.driverChargeLineItems}
+        canFinalizeSettlement={data.canFinalizeSettlement}
+      />
+
+      <HireSettlementFinalizationBanner
+        hireGroupId={hireGroupId}
+        contractEnded={contractEnded}
+        checkinCompleted={data.checkinCompleted}
       />
 
       {data.settlementBreakdown ? (
-        <HireSettlementBreakdownPanel breakdown={data.settlementBreakdown} />
+        <HireSettlementBreakdownPanel
+          breakdown={data.settlementBreakdown}
+          title={data.canFinalizeSettlement ? "Final settlement" : "Provisional balance"}
+          openBalanceLabel={data.canFinalizeSettlement ? "Final balance" : "Balance before final settlement"}
+        />
       ) : null}
 
       {data.driverChargeLineItems.length > 0 ? (
@@ -149,9 +161,10 @@ export function HirePaymentsView({
           depositGbp: data.depositGbp ?? 0,
           rentSettlementSettled: data.settlementBalance?.settled === true,
         }}
+        checkinCompleted={data.checkinCompleted}
       />
 
-      {data.depositPendingReview && data.terminationSummary && data.depositGbp != null && data.depositGbp > 0 ? (
+      {data.canResolveDeposit && data.terminationSummary && data.depositGbp != null && data.depositGbp > 0 ? (
         <HireDepositDispositionResolveCard
           hireGroupId={hireGroupId}
           terminationSummary={data.terminationSummary}

@@ -1,7 +1,23 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 export type HireInspectionCompletion = {
   checkoutCompleted: boolean;
   checkinCompleted: boolean;
 };
+
+export async function loadHireCheckinCompleted(
+  supabase: SupabaseClient,
+  hireGroupId: string,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from("vehicle_hire_inspections")
+    .select("id")
+    .eq("hire_group_id", hireGroupId.trim())
+    .eq("kind", "checkin")
+    .eq("status", "completed")
+    .maybeSingle();
+  return Boolean(data?.id);
+}
 
 export function hireInspectionCompletionFromRows(
   rows: readonly { kind: string; status: string }[],

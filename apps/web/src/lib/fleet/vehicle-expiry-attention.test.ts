@@ -23,6 +23,7 @@ describe("assessVehicleExpiries", () => {
     notify_tax_days_before: 5,
     notify_phv_licence_days_before: 28,
     notify_contract_expiry_days_before: 28,
+    notify_insurance_days_before: 28,
   };
 
   it("marks missing dates as ok with not-set message", () => {

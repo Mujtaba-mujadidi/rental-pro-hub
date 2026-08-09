@@ -29,6 +29,7 @@ describe("form-draft pure helpers", () => {
 describe("notification-settings", () => {
   it("defaults and clamps", () => {
     expect(defaultNotificationSettings().notify_mot_days_before).toBe(5);
+    expect(defaultNotificationSettings().notify_insurance_days_before).toBe(28);
     expect(clampNotifyDays(400)).toBe(365);
     expect(clampNotifyDays(Number.NaN)).toBe(0);
   });

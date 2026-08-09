@@ -55,10 +55,12 @@ export function HireSettlementBreakdownPanel({
   breakdown,
   title = "Balance breakdown",
   audience = "staff",
+  openBalanceLabel = "Still owed now",
 }: {
   breakdown: HireSettlementBreakdown;
   title?: string;
   audience?: HireUiAudience;
+  openBalanceLabel?: string;
 }) {
   const sections = groupHireSettlementBreakdownLines(breakdown.lines);
   const hint = openBalanceHint(breakdown.openDirection, audience);
@@ -92,7 +94,7 @@ export function HireSettlementBreakdownPanel({
       <footer className="flex flex-wrap items-end justify-between gap-3 border-t border-rph-border bg-rph-chrome px-4 py-4 sm:px-5">
         <div>
           <p className="text-[0.6875rem] font-semibold uppercase tracking-wider text-rph-fg-muted">
-            Still owed now
+            {openBalanceLabel}
           </p>
           {hint ? <p className="mt-1 text-xs text-rph-fg-secondary">{hint}</p> : null}
         </div>

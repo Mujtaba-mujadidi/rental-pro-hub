@@ -1,13 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import {
   deleteVehicleAction,
   deleteVehicleDocumentAction,
-  transferVehicleAction,
   updateVehicleAction,
   uploadVehicleDocumentAction,
 } from "@/app/actions/rental-vehicles";
+import { VehicleSubcompanyTransferModal } from "@/app/(main)/rental/vehicles/[id]/details/vehicle-subcompany-transfer-modal";
 import { useVehicleWorkspace } from "@/app/(main)/rental/vehicles/[id]/vehicle-workspace-provider";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -31,6 +32,10 @@ import {
   type VehicleStatus,
   type VehicleTransferRow,
 } from "@/lib/fleet/vehicles";
+import {
+  openTransferRequirementForVehicleDocType,
+  type VehicleTransferOpenRequirement,
+} from "@/lib/fleet/vehicle-transfer-document-requirements";
 import type { CompanyNotificationSettings } from "@/lib/settings/notification-settings";
 import { VehicleExpiryAlert } from "@/app/(main)/rental/vehicles/vehicle-expiry-indicators";
 import { VehicleDocRowMenu } from "./vehicle-doc-actions";
@@ -206,6 +211,7 @@ export function VehicleDetailsView({
   initialVehicle,
   initialDocuments,
   initialTransfers,
+  transferDocumentRequirements: initialTransferDocumentRequirements,
   subcompanies,
   notifySettings,
   canManage,
@@ -214,6 +220,7 @@ export function VehicleDetailsView({
   initialVehicle: VehicleRow;
   initialDocuments: VehicleDocumentRow[];
   initialTransfers: VehicleTransferRow[];
+  transferDocumentRequirements: VehicleTransferOpenRequirement[];
   subcompanies: SubOpt[];
   notifySettings: CompanyNotificationSettings;
   canManage: boolean;
@@ -228,13 +235,14 @@ export function VehicleDetailsView({
   const [vehicle, setVehicle] = useState(initialVehicle);
   const [docs, setDocs] = useState(initialDocuments);
   const [transfers, setTransfers] = useState(initialTransfers);
+  const [transferDocumentRequirements, setTransferDocumentRequirements] = useState(
+    initialTransferDocumentRequirements,
+  );
   const [form, setForm] = useState(() => fromVehicle(initialVehicle));
   const [editSection, setEditSection] = useState<EditSection | null>(null);
   const [discardConfirm, setDiscardConfirm] = useState(false);
   const [uploadBundles, setUploadBundles] = useState<DocUploadBundles>(emptyUploadBundles);
   const [transferOpen, setTransferOpen] = useState(false);
-  const [transferTo, setTransferTo] = useState("");
-  const [transferNotes, setTransferNotes] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [removeDocConfirm, setRemoveDocConfirm] = useState<{ id: string; label: string } | null>(null);
   const [docUploadExpiryConfirm, setDocUploadExpiryConfirm] = useState<DocUploadExpiryConfirm | null>(null);
@@ -243,10 +251,13 @@ export function VehicleDetailsView({
     setVehicle(initialVehicle);
     setDocs(initialDocuments);
     setTransfers(initialTransfers);
+    setTransferDocumentRequirements(initialTransferDocumentRequirements);
     if (!editSection) setForm(fromVehicle(initialVehicle));
-  }, [initialVehicle, initialDocuments, initialTransfers, editSection]);
+  }, [initialVehicle, initialDocuments, initialTransfers, initialTransferDocumentRequirements, editSection]);
 
   const missingDocs = vehicle.missing_docs ?? [];
+  const fleetTransferRequirements = transferDocumentRequirements.filter((req) => req.vehicleDocType);
+  const hireTransferRequirements = transferDocumentRequirements.filter((req) => req.href);
   const expiryAttention = vehicleExpiryAttentionItems(vehicle, notifySettings);
   const expiryTone = worstVehicleExpiryTone(expiryAttention);
   const complianceDocs = docs.filter((d) => d.doc_type !== "photo");
@@ -289,21 +300,6 @@ export function VehicleDetailsView({
       }
       setSaveOverlay(null);
       setEditSection(null);
-      await refresh();
-    });
-  }
-
-  function submitTransfer() {
-    if (!transferTo) return;
-    setError(null);
-    startTransition(async () => {
-      const res = await transferVehicleAction(vehicle.id, transferTo, transferNotes);
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      setTransferOpen(false);
-      setTransferNotes("");
       await refresh();
     });
   }
@@ -358,6 +354,13 @@ export function VehicleDetailsView({
     if (docType === "mot" && expiryYmd) fd.set("mot_expiry", expiryYmd);
     if (docType === "phv_taxi_licence_paper" && expiryYmd) fd.set("phv_licence_expiry", expiryYmd);
     for (const file of bundle.files) fd.append("files", file);
+    const transferRequirement = openTransferRequirementForVehicleDocType(transferDocumentRequirements, docType);
+    if (transferRequirement?.vehicleTransferId) {
+      fd.set("vehicle_transfer_id", transferRequirement.vehicleTransferId);
+    }
+    if (transferRequirement?.id) {
+      fd.set("transfer_requirement_id", transferRequirement.id);
+    }
     startTransition(async () => {
       const res = await uploadVehicleDocumentAction(fd);
       if (!res.ok) {
@@ -431,10 +434,7 @@ export function VehicleDetailsView({
               type="button"
               className={btnGhostTall}
               disabled={busy}
-              onClick={() => {
-                setTransferTo(subcompanies.find((s) => s.id !== vehicle.subcompany_id)?.id ?? "");
-                setTransferOpen(true);
-              }}
+              onClick={() => setTransferOpen(true)}
             >
               Transfer
             </button>
@@ -540,22 +540,57 @@ export function VehicleDetailsView({
           <section id="documents" className="rph-card scroll-mt-6 p-4 sm:p-5">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Documents</h2>
-              {missingDocs.length ? (
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-                  {missingDocs.length} missing
-                </span>
-              ) : (
-                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
-                  Complete
-                </span>
-              )}
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
+                {fleetTransferRequirements.length ? (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                    {fleetTransferRequirements.length} update{fleetTransferRequirements.length === 1 ? "" : "s"} required
+                  </span>
+                ) : null}
+                {missingDocs.length ? (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                    {missingDocs.length} missing
+                  </span>
+                ) : !fleetTransferRequirements.length ? (
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+                    Complete
+                  </span>
+                ) : null}
+              </div>
             </div>
             <p className="rph-meta mt-1">Required: MOT, Logbook (V5C), and PHV/Taxi licence paper.</p>
+            {transferDocumentRequirements.length ? (
+              <div className="rph-alert-warn mt-3 text-sm">
+                <p className="font-semibold">
+                  {transferDocumentRequirements.length === 1
+                    ? "1 document needs updating after the recent subcompany transfer."
+                    : `${transferDocumentRequirements.length} documents need updating after the recent subcompany transfer.`}
+                </p>
+                <p className="mt-1">
+                  Upload replacements below for fleet documents. Previous files are kept as superseded versions.
+                </p>
+                {hireTransferRequirements.length ? (
+                  <ul className="mt-2 space-y-1">
+                    {hireTransferRequirements.map((req) => (
+                      <li key={req.id}>
+                        <Link href={req.href!} className="rph-link">
+                          {req.label}
+                        </Link>
+                        <span className="text-rph-fg-secondary"> · update on the hire workspace</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
             <ul className="mt-3 divide-y divide-rph-border">
               {REQUIRED_VEHICLE_DOC_TYPES.map((docType) => {
                 const onFile = docOnFile(docs, docType);
                 const bundle = uploadBundles[docType];
                 const ready = bundle.files.length > 0;
+                const transferRequirement = openTransferRequirementForVehicleDocType(
+                  transferDocumentRequirements,
+                  docType,
+                );
                 return (
                   <li key={docType} className="py-3 first:pt-1">
                     <div className="flex items-start justify-between gap-3">
@@ -563,14 +598,22 @@ export function VehicleDetailsView({
                         <div className="flex items-center gap-2">
                           <DocFileIcon />
                           <p className="text-sm font-semibold text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[docType]}</p>
-                          {!onFile ? (
+                          {transferRequirement ? (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                              Update required
+                            </span>
+                          ) : !onFile ? (
                             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
                               Missing
                             </span>
                           ) : null}
                         </div>
                         <p className="rph-meta mt-1 pl-7">
-                          {onFile ? (onFile.file_name ?? "PDF on file") : "Not uploaded yet"}
+                          {transferRequirement
+                            ? "Upload a replacement after the subcompany transfer."
+                            : onFile
+                              ? (onFile.file_name ?? "PDF on file")
+                              : "Not uploaded yet"}
                         </p>
                       </div>
                       <VehicleDocRowMenu
@@ -612,14 +655,28 @@ export function VehicleDetailsView({
 
             {otherDocs.length ? (
               <ul className="mt-2 space-y-3 border-t border-rph-border pt-3">
-                {otherDocs.map((d) => (
+                {otherDocs.map((d) => {
+                  const transferRequirement = openTransferRequirementForVehicleDocType(
+                    transferDocumentRequirements,
+                    d.doc_type,
+                  );
+                  return (
                   <li key={d.id} className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <DocFileIcon />
                         <p className="text-sm font-semibold text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[d.doc_type]}</p>
+                        {transferRequirement ? (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                            Update required
+                          </span>
+                        ) : null}
                       </div>
-                      <p className="rph-meta mt-1 pl-7">{d.file_name ?? d.file_path}</p>
+                      <p className="rph-meta mt-1 pl-7">
+                        {transferRequirement
+                          ? "Upload a replacement after the subcompany transfer."
+                          : (d.file_name ?? d.file_path)}
+                      </p>
                     </div>
                     <VehicleDocRowMenu
                       doc={d}
@@ -634,7 +691,8 @@ export function VehicleDetailsView({
                       onError={setError}
                     />
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             ) : null}
           </section>
@@ -877,45 +935,17 @@ export function VehicleDetailsView({
         ) : null}
       </FormModalShell>
 
-      {transferOpen ? (
-        <div className="fixed inset-0 z-[400] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50" aria-hidden />
-          <div
-            role="dialog"
-            aria-modal="true"
-            className="relative z-[1] w-full max-w-md space-y-4 rounded-2xl border border-rph-border bg-rph-elevated p-6 shadow-2xl"
-          >
-            <h2 className="text-lg font-semibold text-rph-fg">Transfer vehicle</h2>
-            <p className="text-sm text-rph-fg-secondary">
-              Move {vehicle.vrm} to another subcompany. This writes an audit entry.
-            </p>
-            <Field label="Destination">
-              <RphSelect
-                value={transferTo}
-                aria-label="Destination subcompany"
-                options={subcompanies
-                  .filter((s) => s.id !== vehicle.subcompany_id)
-                  .map((s) => ({
-                    value: s.id,
-                    label: s.name ?? "Untitled",
-                  }))}
-                onValueChange={setTransferTo}
-              />
-            </Field>
-            <Field label="Notes (optional)">
-              <input className="rph-input" value={transferNotes} onChange={(e) => setTransferNotes(e.target.value)} />
-            </Field>
-            <div className="flex justify-end gap-2 pt-2">
-              <button type="button" className={btnGhost} disabled={busy} onClick={() => setTransferOpen(false)}>
-                Cancel
-              </button>
-              <button type="button" className={btnPrimary} disabled={busy || !transferTo} onClick={submitTransfer}>
-                {pending ? "Transferring…" : "Transfer"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <VehicleSubcompanyTransferModal
+        open={transferOpen}
+        vehicleId={vehicle.id}
+        vehicleVrm={vehicle.vrm}
+        fromSubcompanyId={vehicle.subcompany_id}
+        subcompanies={subcompanies}
+        onDone={async () => {
+          setTransferOpen(false);
+          await refresh();
+        }}
+      />
 
       <ConfirmDialog
         open={deleteConfirm}

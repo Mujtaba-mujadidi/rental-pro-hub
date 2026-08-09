@@ -11,6 +11,7 @@ export function VehicleDetailsPageClient() {
       initialVehicle={shell.vehicle}
       initialDocuments={shell.documents}
       initialTransfers={shell.transfers}
+      transferDocumentRequirements={shell.transferDocumentRequirements}
       subcompanies={shell.subcompanies}
       notifySettings={shell.notifySettings}
       canManage={shell.canManage}

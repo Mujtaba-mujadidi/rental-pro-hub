@@ -14,6 +14,7 @@ import { HirePaymentsAccountOverview } from "@/components/fleet/hire-payments/hi
 import { HireDepositPendingBanner } from "@/components/fleet/hire-dashboard/hire-deposit-pending-banner";
 import { HireWorkspaceBalanceBanner } from "@/components/fleet/hire-dashboard/hire-workspace-balance-banner";
 import { HirePaymentScheduleTable } from "@/components/fleet/hire-payments/hire-payment-schedule-table";
+import { HireSettlementFinalizationBanner } from "@/components/fleet/hire-payments/hire-settlement-finalization-banner";
 import { HireSettlementBreakdownPanel } from "@/components/fleet/hire-settlement/hire-settlement-breakdown-panel";
 import { HireDriverChargesTable } from "@/components/fleet/hire-payments/hire-driver-charges-table";
 import { summarizeHireSettlementLedger } from "@/lib/fleet/hire-payments-ledger";
@@ -71,10 +72,23 @@ export function DriverHirePaymentsSection({ hireGroupId }: { hireGroupId: string
         ledgerSummary={ledgerSummary}
         driverChargeLineItems={data.driverChargeLineItems}
         audience="driver"
+        canFinalizeSettlement={data.canFinalizeSettlement}
+      />
+
+      <HireSettlementFinalizationBanner
+        hireGroupId={hireGroupId}
+        contractEnded={contractEnded}
+        checkinCompleted={data.checkinCompleted}
+        audience="driver"
       />
 
       {data.settlementBreakdown ? (
-        <HireSettlementBreakdownPanel breakdown={data.settlementBreakdown} audience="driver" />
+        <HireSettlementBreakdownPanel
+          breakdown={data.settlementBreakdown}
+          audience="driver"
+          title={data.canFinalizeSettlement ? "Final settlement" : "Balance so far"}
+          openBalanceLabel={data.canFinalizeSettlement ? "Final balance" : "Balance before final settlement"}
+        />
       ) : null}
 
       <HireDriverChargesTable
@@ -112,6 +126,7 @@ export function DriverHirePaymentsSection({ hireGroupId }: { hireGroupId: string
           rentSettlementSettled: data.settlementBalance?.settled === true,
         }}
         audience="driver"
+        checkinCompleted={data.checkinCompleted}
       />
 
       <HireSettlementBalancePaymentsTable

@@ -1,4 +1,8 @@
 import type { ContractLengthKind, RentCadence } from "@/lib/fleet/hire-types";
+import {
+  isHireInsuranceProvidedBy,
+  type HireInsuranceProvidedBy,
+} from "@/lib/fleet/hire-insurance";
 
 export type HireWizardStep = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -22,6 +26,7 @@ export type HireWizardFormState = {
   hireTermsVersionId: string;
   driverLicenceNumber: string;
   driverEmail: string;
+  insuranceProvidedBy: HireInsuranceProvidedBy | "";
 };
 
 export function normalizeDrivingLicence(raw: string): string {
@@ -66,6 +71,9 @@ export function canAdvanceFromStep(step: HireWizardStep, form: HireWizardFormSta
     );
     if (!selected.length) return "Select at least one contract length.";
     if (form.contractLengths.custom && !form.customEndDate.trim()) return "Custom end date is required.";
+    if (!isHireInsuranceProvidedBy(form.insuranceProvidedBy)) {
+      return "Select who provides insurance for this hire.";
+    }
     return null;
   }
   if (step === 3) {

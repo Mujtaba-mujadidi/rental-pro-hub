@@ -26,6 +26,7 @@ export default async function VehicleWorkspaceLayout({
     vehicle: data.vehicle,
     documents: data.documents,
     transfers: data.transfers,
+    transferDocumentRequirements: data.transferDocumentRequirements,
     subcompanies: data.subcompanies,
     notifySettings: data.notifySettings,
     canManage: data.canManage,

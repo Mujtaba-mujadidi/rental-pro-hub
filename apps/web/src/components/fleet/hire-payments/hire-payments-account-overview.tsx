@@ -49,6 +49,7 @@ export function HirePaymentsAccountOverview({
   ledgerSummary,
   driverChargeLineItems = [],
   audience = "staff",
+  canFinalizeSettlement = false,
 }: {
   contractEnded: boolean;
   contractEndedAtLabel?: string | null;
@@ -61,6 +62,7 @@ export function HirePaymentsAccountOverview({
   ledgerSummary?: import("@/lib/fleet/hire-payments-ledger").HireSettlementLedgerSummary | null;
   driverChargeLineItems?: HireDriverChargeWorkspaceRow[];
   audience?: HireUiAudience;
+  canFinalizeSettlement?: boolean;
 }) {
   if (!contractEnded) {
     return (
@@ -87,7 +89,7 @@ export function HirePaymentsAccountOverview({
   const rentOutstandingGbp = Math.max(0, rentDueGbp - rentPaidGbp);
   const rentCreditGbp = Math.max(0, summary.creditGbp);
   const settlementSettled = settlementBalance?.settled === true;
-  const needsAction = !settlementSettled || depositPendingReview;
+  const needsAction = !settlementSettled || depositPendingReview || !canFinalizeSettlement;
   const isDriver = audience === "driver";
 
   return (
@@ -109,10 +111,14 @@ export function HirePaymentsAccountOverview({
           label={
             needsAction
               ? isDriver
-                ? depositPendingReview && settlementSettled
-                  ? "Deposit still being reviewed"
-                  : "Outstanding balance"
-                : "Action required"
+                ? !canFinalizeSettlement
+                  ? "Waiting for check-in"
+                  : depositPendingReview && settlementSettled
+                    ? "Deposit still being reviewed"
+                    : "Outstanding balance"
+                : !canFinalizeSettlement
+                  ? "Check-in required"
+                  : "Action required"
               : isDriver
                 ? "All accounts closed"
                 : "Accounts closed"
@@ -166,13 +172,17 @@ export function HirePaymentsAccountOverview({
         />
         {terminationSummary ? (
           <Metric
-            label="Money owed at end"
+            label={canFinalizeSettlement ? "Rent position at end" : "Rent position at end (provisional)"}
             value={settlementBalanceLabel(
               terminationSummary.balanceDirection,
               Math.abs(terminationSummary.netSettlementGbp),
               audience,
             )}
-            hint="Recorded when the contract was ended"
+            hint={
+              canFinalizeSettlement
+                ? "Recorded when the contract was ended"
+                : "Final balance is confirmed after vehicle check-in"
+            }
           />
         ) : null}
         {driverChargeLineItems.length > 0 ? (
@@ -183,7 +193,7 @@ export function HirePaymentsAccountOverview({
                 .filter((item) => item.resolution === "add_to_balance")
                 .reduce((sum, item) => sum + item.amountGbp, 0),
             )}
-            hint="Added to the final balance after contract end"
+            hint="Added to the balance after vehicle check-in"
           />
         ) : null}
       </div>

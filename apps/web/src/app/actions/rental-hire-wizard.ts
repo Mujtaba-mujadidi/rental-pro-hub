@@ -182,6 +182,10 @@ function formFromRow(row: Record<string, unknown>): HireWizardFormState {
     hireTermsVersionId: (row.hire_terms_version_id as string) ?? "",
     driverLicenceNumber: (row.driver_licence_number as string) ?? "",
     driverEmail: (row.driver_email as string) ?? "",
+    insuranceProvidedBy:
+      row.insurance_provided_by === "driver" || row.insurance_provided_by === "company"
+        ? row.insurance_provided_by
+        : "",
   };
 }
 
@@ -463,7 +467,7 @@ export async function loadHireDraftAction(
   const { data, error } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, parent_company_id, wizard_step, driver_access_status, driver_profile_confirmed, vehicle_id, start_date, start_time, end_time, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, default_payment_account_id, hire_terms_version_id, driver_licence_number, driver_email, draft_snapshot, status",
+      "id, parent_company_id, wizard_step, driver_access_status, driver_profile_confirmed, vehicle_id, start_date, start_time, end_time, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, default_payment_account_id, hire_terms_version_id, driver_licence_number, driver_email, insurance_provided_by, draft_snapshot, status",
     )
     .eq("id", hireGroupId)
     .maybeSingle();
@@ -488,7 +492,7 @@ export async function loadHireWizardShellAction(
       ? supabase
           .from("vehicle_hire_groups")
           .select(
-            "id, parent_company_id, wizard_step, driver_access_status, driver_profile_confirmed, vehicle_id, start_date, start_time, end_time, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, default_payment_account_id, hire_terms_version_id, driver_licence_number, driver_email, draft_snapshot, status",
+            "id, parent_company_id, wizard_step, driver_access_status, driver_profile_confirmed, vehicle_id, start_date, start_time, end_time, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, default_payment_account_id, hire_terms_version_id, driver_licence_number, driver_email, insurance_provided_by, draft_snapshot, status",
           )
           .eq("id", draftId)
           .maybeSingle()
@@ -642,6 +646,7 @@ export async function saveHireDraftStepAction(input: {
       hire_terms_version_id: input.form.hireTermsVersionId || null,
       driver_licence_number: normalizeDrivingLicence(input.form.driverLicenceNumber) || null,
       driver_email: input.form.driverEmail.trim() || null,
+      insurance_provided_by: input.form.insuranceProvidedBy || null,
       draft_snapshot: { contractLengths },
     })
     .eq("id", input.hireGroupId);

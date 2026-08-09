@@ -13,6 +13,13 @@ import { canReadRentals, canWriteRentals } from "@/lib/auth/rental-permissions";
 import { formatUkDate, ukTodayYmd } from "@/lib/datetime/uk";
 import { logHireGroupEvent } from "@/lib/fleet/hire-audit";
 import { driverDocumentsRetainUntilYmd } from "@/lib/fleet/hire-document-retention";
+import {
+  assertHireSettlementFinalizationAllowed,
+  assertProvisionalTerminationDeposit,
+  assertProvisionalTerminationSettlement,
+  provisionalTerminationSettlementResolution,
+} from "@/lib/fleet/hire-settlement-finalization";
+import { loadHireCheckinCompleted } from "@/lib/fleet/hire-inspection-status";
 import { canTerminateHire } from "@/lib/fleet/hire-lifecycle-attention";
 import {
   openBalanceDirection,
@@ -330,6 +337,12 @@ export async function terminateHireGroupAction(input: {
     return { ok: false, error: "The selected deposit option is not valid for this rent balance." };
   }
 
+  const depositBlock = assertProvisionalTerminationDeposit(
+    disposition,
+    preview.data.depositPaidGbp,
+  );
+  if (depositBlock) return { ok: false, error: depositBlock };
+
   if (preview.data.includeDeposit && requiresDepositDispositionReason(disposition)) {
     const reason = input.depositDispositionReason?.trim() ?? "";
     if (!reason) {
@@ -346,15 +359,12 @@ export async function terminateHireGroupAction(input: {
   const accounts = preview.data.accounts;
   const netSettlement = accounts.netSettlementGbp;
   const needsSettlementStep = settlementStepRequired(netSettlement);
-  const resolution = needsSettlementStep
-    ? parseSettlementResolution((input.settlementResolution ?? "").trim())
-    : null;
+  const resolution = provisionalTerminationSettlementResolution(netSettlement);
 
   if (needsSettlementStep) {
-    if (!resolution) return { ok: false, error: "Choose how to settle the outstanding balance." };
-    if (!availableSettlementResolutions(netSettlement).includes(resolution)) {
-      return { ok: false, error: "The selected settlement option is not valid." };
-    }
+    const requestedResolution = parseSettlementResolution((input.settlementResolution ?? "").trim());
+    const settlementBlock = assertProvisionalTerminationSettlement(requestedResolution, netSettlement);
+    if (settlementBlock) return { ok: false, error: settlementBlock };
   }
 
   let balanceState;
@@ -367,12 +377,12 @@ export async function terminateHireGroupAction(input: {
     return { ok: false, error: error instanceof Error ? error.message : "Invalid settlement." };
   }
 
-  const settlementPaymentMethod =
-    balanceState.recordPayment != null
-      ? parseRefundMethod((input.settlementPaymentMethod ?? "").trim())
-      : null;
-  if (balanceState.recordPayment != null && !settlementPaymentMethod) {
-    return { ok: false, error: "Select how the settlement payment was made." };
+  if (balanceState.recordPayment != null) {
+    return {
+      ok: false,
+      error:
+        "Settlement payments are recorded after vehicle check-in. End the contract with the balance left open.",
+    };
   }
 
   const paymentsPage = await loadHirePaymentsPageAction(input.hireGroupId);
@@ -409,19 +419,6 @@ export async function terminateHireGroupAction(input: {
     .eq("status", "active");
 
   if (updateError) return { ok: false, error: updateError.message };
-
-  if (balanceState.recordPayment && settlementPaymentMethod) {
-    const { error: paymentError } = await admin.from("vehicle_hire_balance_payments").insert({
-      hire_group_id: input.hireGroupId.trim(),
-      amount_gbp: balanceState.recordPayment.amountGbp,
-      payment_method: settlementPaymentMethod,
-      payment_reference: input.settlementPaymentReference?.trim() || null,
-      direction: balanceState.recordPayment.direction,
-      notes: "Settlement recorded at contract termination",
-      recorded_by_user_id: user.id,
-    });
-    if (paymentError) return { ok: false, error: paymentError.message };
-  }
 
   const depositScheduleCredit = depositRentScheduleCreditGbp({
     disposition,
@@ -469,34 +466,6 @@ export async function terminateHireGroupAction(input: {
       driverDocumentsRetainUntil: retainUntil,
     },
   });
-
-  if (balanceState.recordPayment && settlementPaymentMethod) {
-    const paidToDriver = balanceState.recordPayment.direction === "paid_to_driver";
-    await logHireGroupEvent(admin, {
-      hireGroupId: input.hireGroupId.trim(),
-      eventType: "settlement_refund_recorded",
-      summary: `Settlement ${paidToDriver ? "payment to" : "received from"} driver £${balanceState.recordPayment.amountGbp.toFixed(2)} via ${settlementPaymentMethod.replace(/_/g, " ")}.`,
-      actorRole: "company_staff",
-      actorUserId: user.id,
-      metadata: {
-        method: settlementPaymentMethod,
-        amountGbp: balanceState.recordPayment.amountGbp,
-        direction: balanceState.recordPayment.direction,
-        reference: input.settlementPaymentReference?.trim() || null,
-      },
-    });
-  }
-
-  if (balanceState.settlementDiscountGbp != null && balanceState.settlementDiscountGbp > 0) {
-    await logHireGroupEvent(admin, {
-      hireGroupId: input.hireGroupId.trim(),
-      eventType: "settlement_discount_recorded",
-      summary: `Outstanding balance of £${balanceState.settlementDiscountGbp.toFixed(2)} written off as discount.`,
-      actorRole: "company_staff",
-      actorUserId: user.id,
-      metadata: { amountGbp: balanceState.settlementDiscountGbp },
-    });
-  }
 
   await revalidateHireTermination(input.hireGroupId.trim());
   return { ok: true, checkInHref: `/rental/hires/${input.hireGroupId.trim()}/checkin` };
@@ -701,6 +670,10 @@ export async function recordHireBalancePaymentAction(input: {
     .maybeSingle();
   if (groupError) return { ok: false, error: groupError.message };
   if (!group) return { ok: false, error: "Hire not found." };
+
+  const checkinCompleted = await loadHireCheckinCompleted(supabase, input.hireGroupId.trim());
+  const finalizationBlock = assertHireSettlementFinalizationAllowed(checkinCompleted);
+  if (finalizationBlock) return { ok: false, error: finalizationBlock };
 
   const paymentAccountId =
     input.paymentAccountId?.trim() ||
@@ -1156,6 +1129,10 @@ export async function resolveHireDepositDispositionAction(input: {
     .maybeSingle();
   if (groupError) return { ok: false, error: groupError.message };
   if (!group) return { ok: false, error: "Hire not found." };
+
+  const checkinCompleted = await loadHireCheckinCompleted(supabase, input.hireGroupId.trim());
+  const finalizationBlock = assertHireSettlementFinalizationAllowed(checkinCompleted);
+  if (finalizationBlock) return { ok: false, error: finalizationBlock };
 
   const status = String(group.status ?? "");
   if (status !== "terminated" && status !== "completed") {

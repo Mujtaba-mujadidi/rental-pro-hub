@@ -16,7 +16,7 @@ export type HireSettlementBreakdownLine = {
 const SECTION_TITLES: Record<HireSettlementBreakdownSectionId, string> = {
   rent: "Rent",
   deposit: "Deposit & closing position",
-  adjustments: "Since contract end",
+  adjustments: "Vehicle return charges",
 };
 
 export function groupHireSettlementBreakdownLines(

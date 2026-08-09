@@ -5,7 +5,6 @@ import {
   terminateHireGroupAction,
   type HireTerminationPreview,
 } from "@/app/actions/rental-hire-termination";
-import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import {
   formModalBtnContinue,
@@ -15,26 +14,12 @@ import {
 import { FormModalStepProgress } from "@/components/forms/form-modal-step-progress";
 import { formatUkDate, formatUkDateTimeSeconds } from "@/lib/datetime/uk";
 import {
-  depositDispositionReasonLabel,
-  requiresDepositDispositionReason,
-} from "@/lib/fleet/hire-rent-settlement";
-import {
-  availableSettlementResolutions,
-  defaultDepositDisposition,
-  getDepositDispositionOptions,
-  hireSettlementLedgerHelpText,
-  settlementResolutionLabel,
-  settlementStepRequired,
-  type HireSettlementResolution,
-} from "@/lib/fleet/hire-settlement-resolution";
-import {
   hireTerminationRentBillingDetail,
   hireTerminationRentBillingLabel,
   supportsEndOfPeriodBilling,
   type HireTerminationRentBillingMode,
 } from "@/lib/fleet/hire-termination-billing";
 import {
-  HIRE_DEPOSIT_REFUND_METHODS,
   hireDepositDispositionLabel,
   rentCadenceLabel,
   rentCadencePluralLabel,
@@ -42,6 +27,8 @@ import {
   type HireDepositDisposition,
   type HireTerminationAccountsSummary,
 } from "@/lib/fleet/hire-termination-summary";
+import { PROVISIONAL_TERMINATION_SETTLEMENT_RESOLUTION } from "@/lib/fleet/hire-settlement-finalization";
+import { settlementResolutionLabel, settlementStepRequired } from "@/lib/fleet/hire-settlement-resolution";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -53,21 +40,19 @@ type Props = {
   onCompleted?: () => void;
 };
 
-type TerminationStepId = "verify" | "deposit" | "accounts" | "settle" | "confirm";
+type TerminationStepId = "verify" | "deposit" | "accounts" | "confirm";
 
 const STEP_LABELS: Record<TerminationStepId, string> = {
   verify: "Verify",
   deposit: "Deposit",
   accounts: "Accounts",
-  settle: "Settle",
   confirm: "Confirm",
 };
 
-function buildStepFlow(showDepositStep: boolean, needsSettlement: boolean): TerminationStepId[] {
+function buildStepFlow(showDepositStep: boolean): TerminationStepId[] {
   const flow: TerminationStepId[] = ["verify"];
   if (showDepositStep) flow.push("deposit");
   flow.push("accounts");
-  if (needsSettlement) flow.push("settle");
   flow.push("confirm");
   return flow;
 }
@@ -111,13 +96,11 @@ function AccountsSummaryPanel({
   accounts,
   showDepositLines,
   billingDetail,
-  depositDisposition,
   compact = false,
 }: {
   accounts: HireTerminationAccountsSummary;
   showDepositLines: boolean;
   billingDetail: string | null;
-  depositDisposition: HireDepositDisposition;
   compact?: boolean;
 }) {
   return (
@@ -179,13 +162,15 @@ function AccountsSummaryPanel({
             </div>
             <div>
               <dt className="rph-muted text-xs">Deposit decision</dt>
-              <dd className="font-medium text-rph-fg">{hireDepositDispositionLabel(depositDisposition)}</dd>
+              <dd className="font-medium text-rph-fg">
+                {hireDepositDispositionLabel("hold_pending")}
+              </dd>
             </div>
           </>
         ) : null}
       </dl>
       <p className="border-t border-rph-border pt-2 font-semibold text-rph-fg">
-        Money owed at end:{" "}
+        Rent position at end:{" "}
         {settlementBalanceLabel(
           accounts.netSettlementGbp > 0
             ? "driver_owes_company"
@@ -194,6 +179,9 @@ function AccountsSummaryPanel({
               : "settled",
           accounts.netSettlementGbp,
         )}
+      </p>
+      <p className="rph-muted text-xs">
+        Final settlement — including the deposit — is completed after vehicle check-in on Payments.
       </p>
     </div>
   );
@@ -212,14 +200,7 @@ export function HireTerminateContractModal({
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<HireTerminationPreview | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
-  const [depositDisposition, setDepositDisposition] = useState<HireDepositDisposition>("hold_pending");
-  const [depositDispositionReason, setDepositDispositionReason] = useState("");
-  const [depositRefundAmountGbp, setDepositRefundAmountGbp] = useState("");
   const [depositUnpaidNote, setDepositUnpaidNote] = useState("");
-  const [settlementResolution, setSettlementResolution] =
-    useState<HireSettlementResolution>("paid_now");
-  const [settlementPaymentMethod, setSettlementPaymentMethod] = useState("bank_transfer");
-  const [settlementPaymentReference, setSettlementPaymentReference] = useState("");
   const [terminationNotes, setTerminationNotes] = useState("");
   const [confirmedIdentity, setConfirmedIdentity] = useState(false);
   const [finalConfirmed, setFinalConfirmed] = useState(false);
@@ -230,23 +211,9 @@ export function HireTerminateContractModal({
   const depositPaid = (preview?.depositPaidGbp ?? 0) > 0.005;
   const showDepositStep = Boolean(preview?.includeDeposit);
   const needsSettlement = settlementStepRequired(accounts?.netSettlementGbp ?? 0);
-  const driverOwesCompany = (accounts?.netSettlementGbp ?? 0) > 0.005;
   const settlementAmount = accounts ? Math.abs(accounts.netSettlementGbp) : 0;
 
-  const signedRentBalanceGbp = accounts?.signedRentBalanceGbp ?? 0;
-  const depositOptions = useMemo(
-    () => getDepositDispositionOptions(signedRentBalanceGbp),
-    [signedRentBalanceGbp],
-  );
-  const settlementResolutions = useMemo(
-    () => (accounts ? availableSettlementResolutions(accounts.netSettlementGbp) : []),
-    [accounts],
-  );
-
-  const stepFlow = useMemo(
-    () => buildStepFlow(showDepositStep, needsSettlement),
-    [showDepositStep, needsSettlement],
-  );
+  const stepFlow = useMemo(() => buildStepFlow(showDepositStep), [showDepositStep]);
   const currentStepId = stepFlow[stepIndex] ?? "verify";
   const stepLabels = useMemo(() => stepFlow.map((id) => STEP_LABELS[id]), [stepFlow]);
   const isLastStep = stepIndex === stepFlow.length - 1;
@@ -257,8 +224,6 @@ export function HireTerminateContractModal({
     accounts && preview
       ? hireTerminationRentBillingDetail(rentBillingMode, preview.rentCadence, billingBreakdown)
       : null;
-  const needsDepositReason =
-    showDepositStep && depositPaid && requiresDepositDispositionReason(depositDisposition);
 
   const loadPreview = useCallback(
     async (input: {
@@ -291,13 +256,8 @@ export function HireTerminateContractModal({
       setStepIndex(0);
       setConfirmedIdentity(false);
       setFinalConfirmed(false);
-      setDepositDisposition("hold_pending");
-      setDepositDispositionReason("");
       setDepositUnpaidNote("");
       setRentBillingMode("end_of_period");
-      setSettlementResolution("paid_now");
-      setSettlementPaymentMethod("bank_transfer");
-      setSettlementPaymentReference("");
       setPreview(null);
       setLoadingPreview(false);
       setError(null);
@@ -316,25 +276,9 @@ export function HireTerminateContractModal({
     }
   }, [stepFlow.length, stepIndex]);
 
-  useEffect(() => {
-    if (!settlementResolutions.includes(settlementResolution)) {
-      setSettlementResolution(settlementResolutions[0] ?? "paid_now");
-    }
-  }, [settlementResolution, settlementResolutions]);
-
   const canAdvanceFromStep = (): boolean => {
     if (!preview || loadingPreview) return false;
     if (currentStepId === "verify") return confirmedIdentity;
-    if (currentStepId === "deposit") {
-      if (!depositPaid) return true;
-      if (needsDepositReason && !depositDispositionReason.trim()) return false;
-      if (depositDisposition === "refund_partial" && !depositRefundAmountGbp.trim()) return false;
-      return depositOptions.find((option) => option.value === depositDisposition)?.allowed ?? false;
-    }
-    if (currentStepId === "settle") {
-      if (settlementResolution === "paid_now" && !settlementPaymentMethod) return false;
-      return Boolean(settlementResolution);
-    }
     if (currentStepId === "confirm") return finalConfirmed;
     return true;
   };
@@ -349,18 +293,12 @@ export function HireTerminateContractModal({
         depositDisposition: "hold_pending",
       });
       if (!data) return;
-      if (data.includeDeposit) {
-        setDepositDisposition(defaultDepositDisposition(data.accounts.signedRentBalanceGbp));
-      }
     }
 
     if (currentStepId === "deposit") {
-      const disposition = depositPaid ? depositDisposition : "hold_pending";
       const data = await loadPreview({
         rentBillingMode,
-        depositDisposition: disposition,
-        depositRefundAmountGbp:
-          disposition === "refund_partial" ? Number(depositRefundAmountGbp) : null,
+        depositDisposition: "hold_pending",
       });
       if (!data) return;
     }
@@ -388,21 +326,10 @@ export function HireTerminateContractModal({
       terminationNotes: [terminationNotes, !depositPaid && depositUnpaidNote ? depositUnpaidNote : ""]
         .filter(Boolean)
         .join("\n\n"),
-      depositDisposition: depositPaid ? depositDisposition : "hold_pending",
-      depositDispositionReason: depositPaid
-        ? depositDispositionReason
-        : depositUnpaidNote || undefined,
-      depositRefundAmountGbp:
-        depositPaid && depositDisposition === "refund_partial"
-          ? Number(depositRefundAmountGbp)
-          : null,
-      settlementResolution: needsSettlement ? settlementResolution : undefined,
-      settlementPaymentMethod:
-        needsSettlement && settlementResolution === "paid_now" ? settlementPaymentMethod : undefined,
-      settlementPaymentReference:
-        needsSettlement && settlementResolution === "paid_now"
-          ? settlementPaymentReference
-          : undefined,
+      depositDisposition: "hold_pending",
+      depositDispositionReason: depositPaid ? undefined : depositUnpaidNote || undefined,
+      depositRefundAmountGbp: null,
+      settlementResolution: needsSettlement ? PROVISIONAL_TERMINATION_SETTLEMENT_RESOLUTION : undefined,
     });
     setSubmitting(false);
     if (!res.ok) {
@@ -422,7 +349,7 @@ export function HireTerminateContractModal({
       open={open}
       titleId="terminate-hire-title"
       title="End hire contract"
-      description="Settle accounts, record any payments, and confirm before ending the contract."
+      description="Stop rent accrual and hold the deposit until vehicle check-in. Final settlement is completed on Payments after check-in."
       pending={submitting}
       pendingMessage="Ending contract…"
       allowMaximize
@@ -559,75 +486,16 @@ export function HireTerminateContractModal({
           {currentStepId === "deposit" ? (
             <div className="space-y-4">
               {depositPaid ? (
-                <>
-                  <p className="text-sm text-rph-fg">
-                    £{preview.depositPaidGbp.toFixed(2)} deposit has been received. Choose what happens
-                    to it — payment is recorded on a later step if money is owed either way.
+                <div className="rph-card space-y-2 border border-rph-border-strong p-4 text-sm">
+                  <p className="font-medium text-rph-fg">
+                    £{preview.depositPaidGbp.toFixed(2)} deposit will be held
                   </p>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-rph-fg" htmlFor="deposit-disposition">
-                      Deposit decision
-                    </label>
-                    <FormModalSelect
-                      value={depositDisposition}
-                      aria-label="Deposit decision"
-                      options={depositOptions.map((option) => ({
-                        value: option.value,
-                        label:
-                          option.label +
-                          (!option.allowed && option.disabledReason
-                            ? ` — ${option.disabledReason}`
-                            : ""),
-                        disabled: !option.allowed,
-                      }))}
-                      onValueChange={(value) =>
-                        setDepositDisposition(value as HireDepositDisposition)
-                      }
-                    />
-                  </div>
-
-                  {depositDisposition === "hold_pending" ? (
-                    <p className="rph-muted text-sm">
-                      You can decide about the deposit on the next step. If you hold it, choose what to
-                      do with it later on the Payments tab for this hire.
-                    </p>
-                  ) : null}
-
-                  {depositDisposition === "refund_partial" ? (
-                    <div>
-                      <label className="rph-meta mb-1 block" htmlFor="refund-amount">
-                        Refund amount (£)
-                      </label>
-                      <input
-                        id="refund-amount"
-                        className="rph-input w-full"
-                        inputMode="decimal"
-                        value={depositRefundAmountGbp}
-                        onChange={(event) => setDepositRefundAmountGbp(event.target.value)}
-                      />
-                    </div>
-                  ) : null}
-
-                  {needsDepositReason ? (
-                    <div>
-                      <label className="rph-meta mb-1 block" htmlFor="deposit-reason">
-                        {depositDispositionReasonLabel(depositDisposition)}
-                      </label>
-                      <textarea
-                        id="deposit-reason"
-                        className="rph-input min-h-20 w-full"
-                        value={depositDispositionReason}
-                        onChange={(event) => setDepositDispositionReason(event.target.value)}
-                        placeholder={
-                          depositDisposition === "refund_partial"
-                            ? "e.g. damage deduction, agreed retention, outstanding charges…"
-                            : "e.g. damage claim pending, outstanding charges, agreed retention…"
-                        }
-                        required
-                      />
-                    </div>
-                  ) : null}
-                </>
+                  <p className="rph-muted text-xs">
+                    {hireDepositDispositionLabel("hold_pending")}. After vehicle check-in, choose
+                    whether to return it, apply it to rent or charges, or keep it on the Payments
+                    tab for this hire.
+                  </p>
+                </div>
               ) : (
                 <>
                   <div className="rph-card p-4 text-sm">
@@ -659,81 +527,7 @@ export function HireTerminateContractModal({
               accounts={accounts}
               showDepositLines={showDepositStep && depositPaid}
               billingDetail={billingDetail}
-              depositDisposition={depositDisposition}
             />
-          ) : null}
-
-          {currentStepId === "settle" && accounts ? (
-            <div className="space-y-4">
-              <div className="rph-card border border-rph-border-strong p-4 text-sm">
-                <p className="font-semibold text-rph-fg">
-                  {driverOwesCompany
-                    ? `Driver owes £${settlementAmount.toFixed(2)}`
-                    : `You owe driver £${settlementAmount.toFixed(2)}`}
-                </p>
-                <p className="rph-muted mt-1 text-xs">{hireSettlementLedgerHelpText()}</p>
-              </div>
-
-              <div className="space-y-2">
-                {settlementResolutions.map((resolution) => (
-                  <label
-                    key={resolution}
-                    className="flex cursor-pointer items-start gap-2 rounded-lg border border-rph-border p-3 has-[:checked]:border-rph-rail has-[:checked]:bg-rph-raised"
-                  >
-                    <input
-                      type="radio"
-                      name="settlement-resolution"
-                      className="mt-0.5"
-                      checked={settlementResolution === resolution}
-                      onChange={() => setSettlementResolution(resolution)}
-                    />
-                    <span>
-                      <span className="block font-medium text-rph-fg">
-                        {settlementResolutionLabel(resolution)}
-                      </span>
-                      <span className="rph-muted mt-0.5 block text-xs">
-                        {resolution === "paid_now"
-                          ? `Record £${settlementAmount.toFixed(2)} ${driverOwesCompany ? "received from" : "paid to"} the driver and clear the balance`
-                          : resolution === "open_balance"
-                            ? `Keep £${settlementAmount.toFixed(2)} on the Balances page for phased payment`
-                            : "Close the hire with no further payment expected"}
-                      </span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-
-              {settlementResolution === "paid_now" ? (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="rph-meta mb-1 block" htmlFor="settlement-payment-method">
-                      Payment method
-                    </label>
-                    <FormModalSelect
-                      value={settlementPaymentMethod}
-                      aria-label="Payment method"
-                      options={HIRE_DEPOSIT_REFUND_METHODS.map((method) => ({
-                        value: method,
-                        label: method.replace(/_/g, " "),
-                      }))}
-                      onValueChange={setSettlementPaymentMethod}
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="rph-meta mb-1 block" htmlFor="settlement-payment-reference">
-                      Payment reference
-                    </label>
-                    <input
-                      id="settlement-payment-reference"
-                      className="rph-input w-full"
-                      value={settlementPaymentReference}
-                      onChange={(event) => setSettlementPaymentReference(event.target.value)}
-                      placeholder="Bank reference, receipt number, etc."
-                    />
-                  </div>
-                </div>
-              ) : null}
-            </div>
           ) : null}
 
           {currentStepId === "confirm" && accounts ? (
@@ -743,21 +537,13 @@ export function HireTerminateContractModal({
                 accounts={accounts}
                 showDepositLines={showDepositStep && depositPaid}
                 billingDetail={billingDetail}
-                depositDisposition={depositDisposition}
                 compact
               />
               {needsSettlement ? (
                 <div className="rph-card p-3 text-sm">
                   <p className="font-medium text-rph-fg">
-                    Payment: {settlementResolutionLabel(settlementResolution)}
-                    {settlementResolution === "paid_now"
-                      ? ` · £${settlementAmount.toFixed(2)} via ${settlementPaymentMethod.replace(/_/g, " ")}`
-                      : settlementResolution === "open_balance"
-                        ? ` · £${settlementAmount.toFixed(2)} on balance sheet`
-                        : ` · £${settlementAmount.toFixed(2)} written off`}
-                    {settlementResolution === "paid_now" && settlementPaymentReference
-                      ? ` · ref ${settlementPaymentReference}`
-                      : ""}
+                    Rent balance: {settlementResolutionLabel(PROVISIONAL_TERMINATION_SETTLEMENT_RESOLUTION)}
+                    {" · "}£{settlementAmount.toFixed(2)} tracked until check-in is complete
                   </p>
                 </div>
               ) : null}
@@ -770,8 +556,9 @@ export function HireTerminateContractModal({
                     {preview.vehicleLabel ? ` (${preview.vehicleLabel})` : ""}
                   </span>{" "}
                   with driver{" "}
-                  <span className="font-semibold">{preview.driverLabel ?? "—"}</span>. You will be
-                  taken to vehicle check-in next.
+                  <span className="font-semibold">{preview.driverLabel ?? "—"}</span>. Rent stops
+                  today. You will complete vehicle check-in next, then finalise the deposit and any
+                  balance on Payments.
                 </p>
                 <label className="flex cursor-pointer items-start gap-2">
                   <input
@@ -781,8 +568,8 @@ export function HireTerminateContractModal({
                     onChange={(event) => setFinalConfirmed(event.target.checked)}
                   />
                   <span className="text-sm text-rph-fg">
-                    I confirm the settlement details above are correct and I want to end this hire
-                    contract for {preview.vehicleVrm ?? "this vehicle"} / {preview.driverLabel ?? "this driver"}.
+                    I confirm the rent position above is correct and I want to end this hire contract
+                    for {preview.vehicleVrm ?? "this vehicle"} / {preview.driverLabel ?? "this driver"}.
                   </span>
                 </label>
               </div>

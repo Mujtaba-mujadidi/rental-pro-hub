@@ -4,7 +4,10 @@ export type HireLifecycleAttentionKind =
   | "awaiting_checkout"
   | "awaiting_termination"
   | "awaiting_checkin"
-  | "awaiting_deposit_resolution";
+  | "awaiting_deposit_resolution"
+  | "awaiting_insurance_upload"
+  | "insurance_expiring"
+  | "insurance_expired";
 
 export type HireLifecycleAttentionItem = {
   kind: HireLifecycleAttentionKind;
@@ -56,6 +59,9 @@ export function lifecycleAttentionLabel(kind: HireLifecycleAttentionKind): strin
   if (kind === "awaiting_checkout") return "Awaiting checkout";
   if (kind === "awaiting_termination") return "End contract";
   if (kind === "awaiting_deposit_resolution") return "Resolve deposit";
+  if (kind === "awaiting_insurance_upload") return "Hire insurance";
+  if (kind === "insurance_expiring") return "Insurance expiring";
+  if (kind === "insurance_expired") return "Insurance expired";
   return "Awaiting check-in";
 }
 

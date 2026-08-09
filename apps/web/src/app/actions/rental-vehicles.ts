@@ -18,11 +18,14 @@ import {
   type VehicleTransferRow,
 } from "@/lib/fleet/vehicles";
 import { prepareVehicleDocumentPdf } from "@/lib/fleet/vehicle-document-pdf";
-import { getVehicleWorkspaceShell } from "@/lib/fleet/load-vehicle-workspace-shell";
+import { getVehicleWorkspaceShell, type VehicleWorkspaceShellResult } from "@/lib/fleet/load-vehicle-workspace-shell";
 import {
   getCachedVehicleSwitcherList,
   revalidateVehicleWorkspaceCache,
 } from "@/lib/fleet/vehicle-workspace-cache";
+import { getActiveHireForVehicle } from "@/app/actions/rental-hires";
+import { bareVehicleTransferBlockedByHire } from "@/lib/fleet/vehicle-transfer-readiness";
+import { vehicleTransferFleetDocKindForVehicleDocType } from "@/lib/fleet/vehicle-transfer-document-requirements";
 import type { VehicleSwitcherOption } from "@/lib/fleet/vehicle-workspace-cache";
 
 export type { VehicleSwitcherOption } from "@/lib/fleet/vehicle-workspace-cache";
@@ -40,7 +43,7 @@ async function loadCompanyNotifySettings(
   const { data } = await supabase
     .from("companies")
     .select(
-      "notify_mot_days_before, notify_tax_days_before, notify_phv_licence_days_before, notify_contract_expiry_days_before",
+      "notify_mot_days_before, notify_tax_days_before, notify_phv_licence_days_before, notify_contract_expiry_days_before, notify_insurance_days_before",
     )
     .eq("id", parentCompanyId)
     .maybeSingle();
@@ -293,6 +296,15 @@ export async function transferVehicleAction(
   const dest = await assertSubcompanyInTenant(supabase, parentCompanyId, toId);
   if (!dest.ok) return dest;
 
+  const blockingHire = await getActiveHireForVehicle(id);
+  if (bareVehicleTransferBlockedByHire(blockingHire)) {
+    return {
+      ok: false,
+      error:
+        "This vehicle has an open hire. Use the transfer wizard to end the contract, complete check-in and settlement, then transfer.",
+    };
+  }
+
   const { error: tErr } = await supabase.from("vehicle_transfers").insert({
     vehicle_id: id,
     parent_company_id: parentCompanyId,
@@ -396,8 +408,7 @@ export async function uploadVehicleDocumentAction(formData: FormData): Promise<V
   );
   if (!prepared.ok) return prepared;
 
-  // One stored PDF per required doc type — replace previous uploads of this type
-  // (including legacy pco_paper / phv_licence rows for the PHV/Taxi paper slot).
+  // One current PDF per doc type — supersede previous uploads (keep historical files).
   const replaceTypes = isPhvTaxiLicencePaperDocType(docTypeRaw)
     ? (["phv_taxi_licence_paper", "pco_paper", "phv_licence"] as const)
     : ([docTypeRaw] as const);
@@ -405,17 +416,20 @@ export async function uploadVehicleDocumentAction(formData: FormData): Promise<V
     .from("vehicle_documents")
     .select("id, file_path")
     .eq("vehicle_id", vehicleId)
-    .in("doc_type", [...replaceTypes]);
+    .in("doc_type", [...replaceTypes])
+    .eq("version_status", "current");
+  const supersededId = existing?.[0]?.id ?? null;
   if (existing?.length) {
     await supabase
       .from("vehicle_documents")
-      .delete()
+      .update({ version_status: "superseded" })
       .in(
         "id",
         existing.map((r) => r.id),
       );
-    await supabase.storage.from("vehicle-documents").remove(existing.map((r) => r.file_path));
   }
+
+  const vehicleTransferId = nullIfEmpty(formData.get("vehicle_transfer_id"));
 
   const path = `${parentCompanyId}/${vehicleId}/${prepared.pdf.fileName}`;
   const { error: upErr } = await supabase.storage.from("vehicle-documents").upload(path, prepared.pdf.bytes, {
@@ -437,6 +451,9 @@ export async function uploadVehicleDocumentAction(formData: FormData): Promise<V
       nullIfEmpty(formData.get("notes")) ??
       (prepared.pdf.pageCount > 1 ? `${prepared.pdf.pageCount} pages` : null),
     uploaded_by: user.id,
+    version_status: "current",
+    supersedes_document_id: supersededId,
+    vehicle_transfer_id: vehicleTransferId,
   });
   if (insErr) {
     await supabase.storage.from("vehicle-documents").remove([path]);
@@ -469,6 +486,38 @@ export async function uploadVehicleDocumentAction(formData: FormData): Promise<V
       .eq("id", vehicleId)
       .eq("parent_company_id", parentCompanyId);
     if (vehiclePatchErr) return { ok: false, error: vehiclePatchErr.message };
+  }
+
+  const requirementId = nullIfEmpty(formData.get("transfer_requirement_id"));
+  if (requirementId) {
+    const fleetKind = vehicleTransferFleetDocKindForVehicleDocType(docTypeRaw);
+    if (!fleetKind) {
+      return { ok: false, error: "This upload does not match the flagged transfer document." };
+    }
+    const { data: requirement, error: reqLoadErr } = await supabase
+      .from("vehicle_transfer_document_requirements")
+      .select("id, vehicle_id, document_kind, status")
+      .eq("id", requirementId)
+      .maybeSingle();
+    if (reqLoadErr) return { ok: false, error: reqLoadErr.message };
+    if (
+      !requirement ||
+      requirement.vehicle_id !== vehicleId ||
+      requirement.status !== "required" ||
+      requirement.document_kind !== fleetKind
+    ) {
+      return { ok: false, error: "Transfer document flag not found." };
+    }
+    const { error: reqErr } = await supabase
+      .from("vehicle_transfer_document_requirements")
+      .update({
+        status: "completed",
+        completed_at: new Date().toISOString(),
+        completed_by: user.id,
+      })
+      .eq("id", requirementId)
+      .eq("status", "required");
+    if (reqErr) return { ok: false, error: reqErr.message };
   }
 
   revalidateVehiclePaths(vehicleId, parentCompanyId);
@@ -665,18 +714,6 @@ export async function loadVehiclesPageData(options?: {
   };
 }
 
-export async function loadVehicleDetailAction(vehicleId: string): Promise<
-  | {
-      ok: true;
-      vehicle: VehicleRow;
-      documents: VehicleDocumentRow[];
-      transfers: VehicleTransferRow[];
-      subcompanies: { id: string; name: string | null; is_primary: boolean }[];
-      notifySettings: CompanyNotificationSettings;
-      canManage: boolean;
-      canDelete: boolean;
-    }
-  | { ok: false; error: string }
-> {
+export async function loadVehicleDetailAction(vehicleId: string): Promise<VehicleWorkspaceShellResult> {
   return getVehicleWorkspaceShell(vehicleId);
 }

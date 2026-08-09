@@ -34,6 +34,8 @@ import {
   hasPostEndPrepaidRows,
 } from "@/lib/fleet/hire-ended-payment-schedule";
 import { buildHireSettlementBreakdown, type HireSettlementBreakdown } from "@/lib/fleet/hire-settlement-breakdown";
+import { loadHireCheckinCompleted } from "@/lib/fleet/hire-inspection-status";
+import { canFinalizeHireSettlement } from "@/lib/fleet/hire-settlement-finalization";
 import {
   hireDriverChargeResolutionLabel,
   hireDriverChargeTypeLabel,
@@ -112,6 +114,9 @@ export type HirePaymentsPageData = {
   depositPendingReview: boolean;
   depositGbp: number | null;
   currentSignedSettlementGbp: number;
+  checkinCompleted: boolean;
+  canFinalizeSettlement: boolean;
+  canResolveDeposit: boolean;
   settlementResolutionLabel: string | null;
   settlementBreakdown: HireSettlementBreakdown | null;
   driverChargeLineItems: HireDriverChargeWorkspaceRow[];
@@ -330,6 +335,12 @@ async function buildPaymentsPageData(
       ? getDriverDocumentsRetentionWarning(retainUntilYmd, ukTodayYmd())?.message ?? null
       : null;
 
+  const checkinCompleted = await loadHireCheckinCompleted(supabase, hireGroupId);
+  const canFinalizeSettlement = canFinalizeHireSettlement({
+    contractEnded: Boolean(contractEndedYmd),
+    checkinCompleted,
+  });
+
   const { data: schedule, error: schedErr } = await supabase
     .from("vehicle_hire_payment_schedule")
     .select(
@@ -420,6 +431,7 @@ async function buildPaymentsPageData(
   let canSubmitPayment = Boolean(options.driverUserId) && !contractEndedYmd;
   let canApplyDiscount = false;
   let canRecordSettlementPayment = false;
+  let canResolveDeposit = false;
   let settlementPaymentAccounts: HireBalancePaymentAccountOption[] = [];
   let defaultSettlementPaymentAccountId: string | null = null;
 
@@ -514,12 +526,18 @@ async function buildPaymentsPageData(
     const { profile } = await requireRentalCompanyArea();
     canApprovePayments = can(profile, "billing.pay") && !contractEndedYmd;
     canSubmitPayment = can(profile, "rentals.write") && !contractEndedYmd;
-    canApplyDiscount = can(profile, "rentals.write") && !contractEndedYmd;
+      canApplyDiscount = can(profile, "rentals.write") && !contractEndedYmd;
+
+    canResolveDeposit =
+      canFinalizeSettlement &&
+      isDepositDispositionPending((group.deposit_disposition as string | null) ?? null) &&
+      can(profile, "rentals.write");
 
     if (
       settlementBalance &&
       !settlementBalance.settled &&
-      settlementBalance.openBalanceGbp > 0.005
+      settlementBalance.openBalanceGbp > 0.005 &&
+      canFinalizeSettlement
     ) {
       canRecordSettlementPayment = can(profile, "rentals.write");
       if (canRecordSettlementPayment) {
@@ -627,6 +645,10 @@ async function buildPaymentsPageData(
       depositPendingReview,
       depositGbp: terminationSummary?.depositGbp ?? null,
       currentSignedSettlementGbp,
+      checkinCompleted,
+      canFinalizeSettlement,
+      canResolveDeposit:
+        canResolveDeposit && (terminationSummary?.depositGbp ?? 0) > 0.005,
       settlementResolutionLabel:
         settlementResolution &&
         (["paid_now", "open_balance", "written_off"] as const).includes(

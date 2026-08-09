@@ -14,6 +14,7 @@ import {
   hireDetailsDocumentFileName,
 } from "@/components/fleet/hire-details/hire-details-doc-actions";
 import { getDriverHireVehicleDocumentUrlAction } from "@/app/actions/hire-details";
+import { HireInsuranceCard } from "@/components/fleet/hire-insurance/hire-insurance-card";
 import { useState } from "react";
 
 const cardClass = "rph-card flex h-full flex-col p-3";
@@ -332,6 +333,12 @@ function StaffDetailsLayout({ data }: { data: HireDetailsPayload }) {
           documents={data.vehicleDocuments}
           onError={setError}
         />
+        <HireInsuranceCard
+          hireGroupId={data.hireGroupId}
+          insurance={data.hireInsurance}
+          audience="staff"
+          onError={setError}
+        />
         {data.hirer ? (
           <HirerDetailsCard
             hirer={data.hirer}
@@ -376,6 +383,12 @@ function DriverDetailsLayout({ data }: { data: HireDetailsPayload }) {
           resolveDocumentUrl={
             data.vehicleDocumentsAccessible ? resolveVehicleDocumentUrl : undefined
           }
+          onError={setError}
+        />
+        <HireInsuranceCard
+          hireGroupId={data.hireGroupId}
+          insurance={data.hireInsurance}
+          audience="driver"
           onError={setError}
         />
       </div>

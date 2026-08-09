@@ -40,6 +40,7 @@ import {
   type HireWizardStep,
 } from "@/lib/fleet/hire-wizard";
 import type { ContractLengthKind, RentCadence } from "@/lib/fleet/hire-types";
+import { HIRE_INSURANCE_PROVIDED_BY_LABELS } from "@/lib/fleet/hire-insurance";
 import DOMPurify from "isomorphic-dompurify";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
@@ -66,6 +67,7 @@ const emptyForm = (vehicleId = ""): HireWizardFormState => ({
   hireTermsVersionId: "",
   driverLicenceNumber: "",
   driverEmail: "",
+  insuranceProvidedBy: "",
 });
 
 type Props = {
@@ -691,6 +693,28 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
                   ...bankAccounts.map((a) => ({ value: a.id, label: a.label })),
                 ]}
               />
+            </FormModalField>
+            <FormModalField label="Who provides insurance?" className="sm:col-span-2">
+              <FormModalSelect
+                value={form.insuranceProvidedBy || "__none__"}
+                disabled={busy || contractTermsLocked}
+                placeholder="— Select —"
+                onValueChange={(value) =>
+                  patchForm({
+                    insuranceProvidedBy:
+                      value === "driver" || value === "company" ? value : "",
+                  })
+                }
+                options={[
+                  { value: "__none__", label: "— Select —" },
+                  { value: "driver", label: HIRE_INSURANCE_PROVIDED_BY_LABELS.driver },
+                  { value: "company", label: HIRE_INSURANCE_PROVIDED_BY_LABELS.company },
+                ]}
+              />
+              <p className="rph-meta mt-1 text-xs">
+                The responsible party uploads the certificate during the hire. Both you and the driver can view it once
+                uploaded.
+              </p>
             </FormModalField>
             <fieldset className="space-y-2 sm:col-span-2">
               <legend className="text-xs font-medium text-rph-fg-muted">Contract lengths</legend>

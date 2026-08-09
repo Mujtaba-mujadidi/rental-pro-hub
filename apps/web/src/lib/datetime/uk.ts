@@ -152,3 +152,16 @@ export function daysFromTodayToExpiry(isoDate: string | null | undefined): numbe
   const diff = utcStartOfDayMs(exp) - utcStartOfDayMs(today);
   return Math.round(diff / 86400000);
 }
+
+/** Whole calendar days from a reference date (YYYY-MM-DD) to expiry; negative if expired. */
+export function daysFromCalendarDateToExpiry(
+  expiryYmd: string | null | undefined,
+  todayYmd: string,
+): number | null {
+  if (!expiryYmd) return null;
+  const exp = parseCalendarDay(expiryYmd.slice(0, 10));
+  const today = parseCalendarDay(todayYmd.slice(0, 10));
+  if (!exp || !today) return null;
+  const diff = utcStartOfDayMs(exp) - utcStartOfDayMs(today);
+  return Math.round(diff / 86400000);
+}

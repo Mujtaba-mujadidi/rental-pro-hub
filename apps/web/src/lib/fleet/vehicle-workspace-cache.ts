@@ -10,12 +10,17 @@ import {
   parseCompanyNotificationSettings,
   type CompanyNotificationSettings,
 } from "@/lib/settings/notification-settings";
+import {
+  mapVehicleTransferOpenRequirements,
+  type VehicleTransferOpenRequirement,
+} from "@/lib/fleet/vehicle-transfer-document-requirements";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export type VehicleWorkspaceShellData = {
   vehicle: VehicleRow;
   documents: VehicleDocumentRow[];
   transfers: VehicleTransferRow[];
+  transferDocumentRequirements: VehicleTransferOpenRequirement[];
   subcompanies: { id: string; name: string | null; is_primary: boolean }[];
   notifySettings: CompanyNotificationSettings;
 };
@@ -36,6 +41,43 @@ function vehicleSwitcherTag(companyId: string) {
   return `vehicle-switcher:${companyId}`;
 }
 
+function isMissingVehicleDocVersionStatusColumn(error: { message?: string } | null): boolean {
+  const message = error?.message?.toLowerCase() ?? "";
+  return message.includes("version_status") && message.includes("column");
+}
+
+async function loadVehicleWorkspaceDocuments(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  vehicleId: string,
+): Promise<{ docs: VehicleDocumentRow[]; error: string | null }> {
+  const baseSelect =
+    "id, vehicle_id, doc_type, file_path, file_name, content_type, expiry_date, issued_date, notes, created_at";
+
+  const versioned = await admin
+    .from("vehicle_documents")
+    .select(`${baseSelect}, version_status`)
+    .eq("vehicle_id", vehicleId)
+    .eq("version_status", "current")
+    .order("created_at", { ascending: false });
+
+  if (!versioned.error) {
+    return { docs: (versioned.data ?? []) as VehicleDocumentRow[], error: null };
+  }
+
+  if (!isMissingVehicleDocVersionStatusColumn(versioned.error)) {
+    return { docs: [], error: versioned.error.message };
+  }
+
+  const legacy = await admin
+    .from("vehicle_documents")
+    .select(baseSelect)
+    .eq("vehicle_id", vehicleId)
+    .order("created_at", { ascending: false });
+
+  if (legacy.error) return { docs: [], error: legacy.error.message };
+  return { docs: (legacy.data ?? []) as VehicleDocumentRow[], error: null };
+}
+
 async function fetchVehicleWorkspaceShellData(
   vehicleId: string,
   companyId: string,
@@ -47,8 +89,9 @@ async function fetchVehicleWorkspaceShellData(
 
   const [
     { data: vehicle, error: vErr },
-    { data: docs, error: dErr },
+    docResult,
     { data: transfers, error: tErr },
+    { data: transferRequirements, error: trErr },
     { data: subs, error: sErr },
     { data: company },
   ] = await Promise.all([
@@ -58,17 +101,19 @@ async function fetchVehicleWorkspaceShellData(
       .eq("id", id)
       .eq("parent_company_id", parentCompanyId)
       .maybeSingle(),
-    admin
-      .from("vehicle_documents")
-      .select("id, vehicle_id, doc_type, file_path, file_name, content_type, expiry_date, issued_date, notes, created_at")
-      .eq("vehicle_id", id)
-      .order("created_at", { ascending: false }),
+    loadVehicleWorkspaceDocuments(admin, id),
     admin
       .from("vehicle_transfers")
       .select("id, vehicle_id, from_subcompany_id, to_subcompany_id, transferred_at, notes")
       .eq("vehicle_id", id)
       .order("transferred_at", { ascending: false })
       .limit(20),
+    admin
+      .from("vehicle_transfer_document_requirements")
+      .select("id, document_kind, vehicle_transfer_id, hire_group_id, agreement_id, inspection_id")
+      .eq("vehicle_id", id)
+      .eq("status", "required")
+      .order("created_at", { ascending: false }),
     admin
       .from("subcompanies")
       .select("id, name, is_primary")
@@ -77,13 +122,28 @@ async function fetchVehicleWorkspaceShellData(
     admin
       .from("companies")
       .select(
-        "notify_mot_days_before, notify_tax_days_before, notify_phv_licence_days_before, notify_contract_expiry_days_before",
+        "notify_mot_days_before, notify_tax_days_before, notify_phv_licence_days_before, notify_contract_expiry_days_before, notify_insurance_days_before",
       )
       .eq("id", parentCompanyId)
       .maybeSingle(),
   ]);
 
-  if (vErr || !vehicle || dErr || tErr || sErr) return null;
+  const docs = docResult.docs;
+  const dErr = docResult.error;
+
+  if (vErr || !vehicle) return null;
+  if (dErr) {
+    console.error("vehicle workspace documents query failed", id, dErr);
+  }
+  if (tErr) {
+    console.error("vehicle workspace transfers query failed", id, tErr.message);
+  }
+  if (trErr) {
+    console.error("vehicle workspace transfer document requirements query failed", id, trErr.message);
+  }
+  if (sErr) {
+    console.error("vehicle workspace subcompanies query failed", parentCompanyId, sErr.message);
+  }
 
   const nested = vehicle.subcompanies as { name: string | null } | { name: string | null }[] | null;
   const subName = Array.isArray(nested) ? nested[0]?.name : nested?.name;
@@ -109,6 +169,7 @@ async function fetchVehicleWorkspaceShellData(
       from_name: nameById.get(t.from_subcompany_id) ?? null,
       to_name: nameById.get(t.to_subcompany_id) ?? null,
     })) as VehicleTransferRow[],
+    transferDocumentRequirements: mapVehicleTransferOpenRequirements(transferRequirements ?? []),
     subcompanies: (subs ?? []).map((s) => ({
       id: s.id,
       name: s.name,
@@ -128,7 +189,7 @@ export function getCachedVehicleWorkspaceShellData(
 
   const cached = unstable_cache(
     () => fetchVehicleWorkspaceShellData(id, parentCompanyId),
-    ["vehicle-workspace-shell", id, parentCompanyId],
+    ["vehicle-workspace-shell-v3", id, parentCompanyId],
     { revalidate: 30, tags: [vehicleWorkspaceTag(id), vehicleSwitcherTag(parentCompanyId)] },
   );
   return cached();

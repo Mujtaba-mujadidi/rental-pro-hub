@@ -7,12 +7,14 @@ import {
   type VehicleTransferRow,
 } from "@/lib/fleet/vehicles";
 import type { CompanyNotificationSettings } from "@/lib/settings/notification-settings";
+import type { VehicleTransferOpenRequirement } from "@/lib/fleet/vehicle-transfer-document-requirements";
 import { getCachedVehicleWorkspaceShellData } from "@/lib/fleet/vehicle-workspace-cache";
 
 export type VehicleWorkspaceShell = {
   vehicle: VehicleRow;
   documents: VehicleDocumentRow[];
   transfers: VehicleTransferRow[];
+  transferDocumentRequirements: VehicleTransferOpenRequirement[];
   subcompanies: { id: string; name: string | null; is_primary: boolean }[];
   notifySettings: CompanyNotificationSettings;
   canManage: boolean;

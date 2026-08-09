@@ -25,6 +25,7 @@ const baseForm = (): HireWizardFormState => ({
   hireTermsVersionId: "",
   driverLicenceNumber: "",
   driverEmail: "",
+  insuranceProvidedBy: "driver",
 });
 
 describe("normalizeDrivingLicence", () => {
@@ -40,7 +41,7 @@ describe("canAdvanceFromStep", () => {
   });
 
   it("requires end time only for custom contracts", () => {
-    const annualOnly = {
+    const annualOnly: HireWizardFormState = {
       ...baseForm(),
       vehicleId: "v1",
       startDate: "2026-08-01",
@@ -48,6 +49,7 @@ describe("canAdvanceFromStep", () => {
       endTime: "",
       rentAmountGbp: "150",
       contractLengths: { annual: true, six_months: false, custom: false },
+      insuranceProvidedBy: "driver",
     };
     expect(canAdvanceFromStep(2, annualOnly)).toBeNull();
 
@@ -62,7 +64,7 @@ describe("canAdvanceFromStep", () => {
   });
 
   it("validates step 2 payment and lengths", () => {
-    const f = {
+    const f: HireWizardFormState = {
       ...baseForm(),
       vehicleId: "v1",
       startDate: "2026-08-01",
@@ -70,6 +72,12 @@ describe("canAdvanceFromStep", () => {
       contractLengths: { annual: true, six_months: false, custom: false },
     };
     expect(canAdvanceFromStep(2, f)).toBeNull();
+    expect(
+      canAdvanceFromStep(2, {
+        ...f,
+        insuranceProvidedBy: "",
+      }),
+    ).toMatch(/insurance/i);
     expect(
       canAdvanceFromStep(2, {
         ...f,

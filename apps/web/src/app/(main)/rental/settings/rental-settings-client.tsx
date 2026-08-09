@@ -11,6 +11,7 @@ import { HireTermsSettingsSection } from "@/app/(main)/rental/settings/hire-term
 import { PaymentSettingsSection } from "@/app/(main)/rental/settings/payment-settings-section";
 import {
   DEFAULT_NOTIFY_CONTRACT_EXPIRY_DAYS,
+  DEFAULT_NOTIFY_INSURANCE_DAYS,
   DEFAULT_NOTIFY_MOT_DAYS,
   DEFAULT_NOTIFY_PHV_LICENCE_DAYS,
   DEFAULT_NOTIFY_TAX_DAYS,
@@ -30,6 +31,7 @@ export function RentalSettingsClient() {
     notify_tax_days_before: DEFAULT_NOTIFY_TAX_DAYS,
     notify_phv_licence_days_before: DEFAULT_NOTIFY_PHV_LICENCE_DAYS,
     notify_contract_expiry_days_before: DEFAULT_NOTIFY_CONTRACT_EXPIRY_DAYS,
+    notify_insurance_days_before: DEFAULT_NOTIFY_INSURANCE_DAYS,
   });
   const [loaded, setLoaded] = useState(false);
 
@@ -130,7 +132,7 @@ export function RentalSettingsClient() {
           {!loaded ? (
             <p className="rph-muted text-sm">Loading…</p>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
               <Field
                 label="MOT"
                 hint="Days before MOT expiry"
@@ -158,6 +160,13 @@ export function RentalSettingsClient() {
                 value={form.notify_contract_expiry_days_before}
                 disabled={!canManage || busy}
                 onChange={(n) => setForm((p) => ({ ...p, notify_contract_expiry_days_before: n }))}
+              />
+              <Field
+                label="Hire insurance"
+                hint="Days before insurance expiry"
+                value={form.notify_insurance_days_before}
+                disabled={!canManage || busy}
+                onChange={(n) => setForm((p) => ({ ...p, notify_insurance_days_before: n }))}
               />
             </div>
           )}

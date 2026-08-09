@@ -21,6 +21,8 @@ import {
   type RequiredVehicleDocType,
 } from "@/lib/fleet/vehicles";
 import { loadHireGroupSignedDocuments, type HireSignedDocumentRow } from "@/lib/fleet/hire-signed-documents";
+import { mapHireInsuranceSummary } from "@/lib/fleet/hire-insurance";
+import { parseCompanyNotificationSettings } from "@/lib/settings/notification-settings";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -93,6 +95,8 @@ export type HireDetailsImportantDates = {
   hirer: HireDetailsImportantDateRow[];
 };
 
+export type HireInsuranceDetailsSummary = ReturnType<typeof mapHireInsuranceSummary>;
+
 export type HireDetailsPayload = {
   hireGroupId: string;
   company: HireDetailsCompanyCard;
@@ -108,6 +112,7 @@ export type HireDetailsPayload = {
   hirerDocumentsAccessible: boolean;
   driverDocumentsRetentionWarning: string | null;
   driverDocumentsRetainUntilLabel: string | null;
+  hireInsurance: HireInsuranceDetailsSummary;
 };
 
 function formatAddress(parts: (string | null | undefined)[]): string | null {
@@ -481,7 +486,7 @@ async function buildHireDetails(
   const { data: group, error } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      `id, status, parent_company_id, subcompany_id, driver_user_id, vehicle_id, start_date, start_time, end_time, activated_at, ended_at, terminated_at, driver_documents_retain_until, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, companies(name), vehicles(vrm, make, model, colour, fuel_type, seats, cc, mot_expiry, tax_expiry, phv_licence_no, phv_licence_expiry, service_due_at), vehicle_hire_agreements(id, contract_length_kind, end_date, status, signed_at, esign_envelope_id)`,
+      `id, status, parent_company_id, subcompany_id, driver_user_id, vehicle_id, start_date, start_time, end_time, activated_at, ended_at, terminated_at, driver_documents_retain_until, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, insurance_provided_by, companies(name), vehicles(vrm, make, model, colour, fuel_type, seats, cc, mot_expiry, tax_expiry, phv_licence_no, phv_licence_expiry, service_due_at), vehicle_hire_agreements(id, contract_length_kind, end_date, status, signed_at, esign_envelope_id)`,
     )
     .eq("id", hireGroupId.trim())
     .maybeSingle();
@@ -591,6 +596,27 @@ async function buildHireDetails(
     forDriver: Boolean(options.driverUserId),
   });
 
+  const [{ data: insuranceRow }, { data: notifyCompany }] = await Promise.all([
+    supabase
+      .from("vehicle_hire_insurance")
+      .select("insurance_type, expiry_date, file_name, uploaded_at, uploaded_by_role")
+      .eq("hire_group_id", hireGroupId.trim())
+      .maybeSingle(),
+    supabase
+      .from("companies")
+      .select("notify_insurance_days_before")
+      .eq("id", group.parent_company_id as string)
+      .maybeSingle(),
+  ]);
+  const notifySettings = parseCompanyNotificationSettings(notifyCompany ?? undefined);
+  const hireInsurance = mapHireInsuranceSummary({
+    providedBy: (group.insurance_provided_by as string | null) ?? null,
+    insuranceRow: insuranceRow,
+    notifyDaysBefore: notifySettings.notify_insurance_days_before,
+    audience: options.driverUserId ? "driver" : "staff",
+    todayYmd,
+  });
+
   const rental = buildRentalCard({
     companyName: options.driverUserId ? companyCard.companyName : null,
     startDate: group.start_date as string | undefined,
@@ -635,6 +661,7 @@ async function buildHireDetails(
       hirerDocumentsAccessible,
       driverDocumentsRetentionWarning: driverDocumentsRetentionWarningMessage,
       driverDocumentsRetainUntilLabel: retainUntilYmd ? formatUkDate(retainUntilYmd) : null,
+      hireInsurance,
     },
   };
 }
