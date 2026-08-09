@@ -10,7 +10,7 @@ import {
   sendDriverRegistrationInviteEmail,
   sendHireDriverAccessEmail,
 } from "@/lib/fleet/hire-access-mail";
-import { loadHireLessorDisplayName } from "@/lib/fleet/hire-lessor-display";
+import { loadHireLessorMailIdentity } from "@/lib/fleet/hire-lessor-display";
 import {
   driverAccessTableStatus,
   hireEsignTableStatus,
@@ -963,13 +963,13 @@ export async function requestDriverAccessForHireAction(
 
   const vehicle = hireSnapshot.vehicles as { vrm?: string; make?: string; model?: string } | undefined;
   const driverName = [driver.first_name, driver.last_name].filter(Boolean).join(" ").trim() || "Driver";
-  const lessorName = await loadHireLessorDisplayName(admin, hireGroupId);
+  const lessor = await loadHireLessorMailIdentity(admin, hireGroupId);
   const email = driver.account_email?.trim();
   if (email) {
     const mail = await sendHireDriverAccessEmail({
       to: email,
       driverName,
-      companyName: lessorName,
+      lessor,
       vehicleLabel: [vehicle?.make, vehicle?.model].filter(Boolean).join(" ") || "Vehicle",
       vrm: vehicle?.vrm ?? "—",
       startDate: (group.start_date as string) ?? "",
@@ -1019,10 +1019,10 @@ export async function sendDriverRegistrationInviteForHireAction(
   }
 
   const admin = createSupabaseAdminClient();
-  const lessorName = await loadHireLessorDisplayName(admin, hireGroupId);
+  const lessor = await loadHireLessorMailIdentity(admin, hireGroupId);
   const mail = await sendDriverRegistrationInviteEmail({
     to,
-    companyName: lessorName,
+    lessor,
     signupUrl: `${getPublicSiteUrl()}/signup?role=driver`,
   });
   if (!mail.ok) return mail;

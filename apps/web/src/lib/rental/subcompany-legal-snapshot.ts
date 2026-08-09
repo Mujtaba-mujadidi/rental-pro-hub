@@ -165,3 +165,50 @@ export function lessorAddressFromSnapshot(snap: Record<string, unknown> | null |
     }) || null
   );
 }
+
+export type HireLessorMailIdentity = {
+  /** Primary lessor label for email copy (legal name when available). */
+  displayName: string;
+  legalName: string | null;
+  companyNumber: string | null;
+  address: string | null;
+};
+
+export type HireLessorIdentitySource = HireLessorNameSource & {
+  company_number?: string | null;
+  registered_address_line1?: string | null;
+  registered_address_line2?: string | null;
+  registered_town?: string | null;
+  registered_county?: string | null;
+  registered_postcode?: string | null;
+};
+
+/** Lessor identity for driver-facing emails — subcompany legal details, not parent tenant name. */
+export function resolveHireLessorMailIdentity(input: {
+  snapshot?: Record<string, unknown> | null;
+  subcompany?: HireLessorIdentitySource | null;
+  parentCompanyName?: string | null;
+  hasSubcompany?: boolean;
+}): HireLessorMailIdentity {
+  const displayName = resolveHireLessorDisplayName({
+    snapshot: input.snapshot,
+    subcompany: input.subcompany,
+    parentCompanyName: input.parentCompanyName,
+    hasSubcompany: input.hasSubcompany,
+  });
+  const legalName =
+    snapshotString(input.snapshot, "legal_name") || input.subcompany?.legal_name?.trim() || null;
+  const companyNumber =
+    snapshotString(input.snapshot, "company_number") || input.subcompany?.company_number?.trim() || null;
+  const address =
+    lessorAddressFromSnapshot(input.snapshot) ||
+    (input.subcompany ? formatSubcompanyAddressLines(input.subcompany) : null) ||
+    null;
+
+  return {
+    displayName: legalName || displayName,
+    legalName,
+    companyNumber,
+    address,
+  };
+}
