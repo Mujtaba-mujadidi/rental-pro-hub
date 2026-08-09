@@ -3,38 +3,18 @@ import { loadUserAccessibleSubcompanyIds } from "@/lib/auth/rental-subcompany-ac
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
 import { canDeleteFleet, canManageFleet } from "@/lib/auth/rental-permissions";
 import {
-  type VehicleDocumentRow,
-  type VehicleRow,
-  type VehicleTransferRow,
-} from "@/lib/fleet/vehicles";
-import {
   canManageVehicleWorkspace,
-  isHistoricVehicleWorkspaceAccess,
   resolveVehicleWorkspaceAccess,
   shouldShowCurrentVehicleDocuments,
   shouldShowTransferDocumentRequirements,
-  type VehicleWorkspaceAccess,
 } from "@/lib/fleet/vehicle-historic-access";
-import type { CompanyNotificationSettings } from "@/lib/settings/notification-settings";
-import type { VehicleTransferOpenRequirement } from "@/lib/fleet/vehicle-transfer-document-requirements";
 import { getCachedVehicleWorkspaceShellData } from "@/lib/fleet/vehicle-workspace-cache";
+import type { VehicleWorkspaceShellResult } from "@/lib/fleet/vehicle-workspace-shell-types";
 
-export type VehicleWorkspaceShell = {
-  vehicle: VehicleRow;
-  documents: VehicleDocumentRow[];
-  documentHistory: VehicleDocumentRow[];
-  transfers: VehicleTransferRow[];
-  transferDocumentRequirements: VehicleTransferOpenRequirement[];
-  subcompanies: { id: string; name: string | null; is_primary: boolean }[];
-  notifySettings: CompanyNotificationSettings;
-  access: VehicleWorkspaceAccess;
-  canManage: boolean;
-  canDelete: boolean;
-};
-
-export type VehicleWorkspaceShellResult =
-  | ({ ok: true } & VehicleWorkspaceShell)
-  | { ok: false; error: string };
+export type {
+  VehicleWorkspaceShell,
+  VehicleWorkspaceShellResult,
+} from "@/lib/fleet/vehicle-workspace-shell-types";
 
 async function fetchVehicleWorkspaceShell(vehicleId: string): Promise<VehicleWorkspaceShellResult> {
   const { profile } = await requireRentalCompanyArea();
@@ -81,8 +61,6 @@ async function fetchVehicleWorkspaceShell(vehicleId: string): Promise<VehicleWor
     canDelete: canDeleteBase,
   };
 }
-
-export { isHistoricVehicleWorkspaceAccess };
 
 /** Deduped per server request (layout + any server child calling the same vehicle). */
 export const getVehicleWorkspaceShell = cache(fetchVehicleWorkspaceShell);

@@ -18,7 +18,7 @@ import {
   loadVehicleMaintenancePageAction,
   type VehicleMaintenancePageData,
 } from "@/app/actions/rental-maintenance";
-import type { VehicleWorkspaceShell } from "@/lib/fleet/load-vehicle-workspace-shell";
+import type { VehicleWorkspaceShell } from "@/lib/fleet/vehicle-workspace-shell-types";
 
 type TabCache<T> = {
   data: T | null;

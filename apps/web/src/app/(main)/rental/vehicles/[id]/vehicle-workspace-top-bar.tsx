@@ -9,7 +9,7 @@ import {
   type VehicleStatus,
 } from "@/lib/fleet/vehicles";
 import { formatUkDateTime } from "@/lib/datetime/uk";
-import { isHistoricVehicleWorkspaceAccess } from "@/lib/fleet/load-vehicle-workspace-shell";
+import { isHistoricVehicleWorkspaceAccess } from "@/lib/fleet/vehicle-historic-access";
 import {
   isVehicleWorkspaceNavItemActive,
   parseVehicleWorkspaceSection,
