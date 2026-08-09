@@ -1,6 +1,6 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { HIRE_ACCESS_VEHICLE_SELECT } from "@/lib/fleet/hire-access-vehicle-fields";
-import { resolveHireLessorDisplayName } from "@/lib/fleet/hire-lessor-display";
+import { resolveHireLessorMailIdentity } from "@/lib/rental/subcompany-legal-snapshot";
 
 export type HireAccessTermsPreview = {
   title: string;
@@ -8,8 +8,11 @@ export type HireAccessTermsPreview = {
   versionLabel: string | null;
 };
 
+const SUBCOMPANY_IDENTITY_SELECT =
+  "legal_name, display_name, name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode";
+
 const HIRE_GROUP_DETAIL_SELECT =
-  `hire_terms_version_id, start_date, start_time, end_time, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, draft_snapshot, subcompany_legal_snapshot, companies(name), vehicles(${HIRE_ACCESS_VEHICLE_SELECT}), subcompanies(legal_name, display_name, name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode), company_hire_terms_versions(title, body, version_label)`;
+  `subcompany_id, hire_terms_version_id, start_date, start_time, end_time, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, draft_snapshot, subcompany_legal_snapshot, companies(name), vehicles(${HIRE_ACCESS_VEHICLE_SELECT}), subcompanies(${SUBCOMPANY_IDENTITY_SELECT}), company_hire_terms_versions(title, body, version_label)`;
 
 export function hireAccessSnapshotIsSparse(snapshot: Record<string, unknown>): boolean {
   return (
@@ -36,6 +39,18 @@ export async function loadHireGroupAccessSnapshot(
 
 function snapshotIsSparse(snapshot: Record<string, unknown>): boolean {
   return hireAccessSnapshotIsSparse(snapshot);
+}
+
+async function loadSubcompanyIdentity(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  subcompanyId: string,
+) {
+  const { data } = await admin
+    .from("subcompanies")
+    .select(SUBCOMPANY_IDENTITY_SELECT)
+    .eq("id", subcompanyId)
+    .maybeSingle();
+  return data;
 }
 
 export async function enrichHireAccessSnapshot(
@@ -93,6 +108,7 @@ export async function enrichHireAccessSnapshot(
     summary = { ...(hg as Record<string, unknown>) };
   } else {
     for (const key of [
+      "subcompany_id",
       "start_date",
       "rent_cadence",
       "rent_amount_gbp",
@@ -109,20 +125,26 @@ export async function enrichHireAccessSnapshot(
     }
   }
 
-  const subcompany = (summary.subcompanies ?? hg.subcompanies ?? null) as {
-    legal_name?: string;
-    display_name?: string | null;
-    name?: string;
-  } | null;
+  const subcompanyId =
+    (typeof summary.subcompany_id === "string" ? summary.subcompany_id : null) ||
+    (typeof hg.subcompany_id === "string" ? hg.subcompany_id : null);
+
+  let subcompany = (summary.subcompanies ?? hg.subcompanies ?? null) as Record<string, unknown> | null;
+  if (!subcompany && subcompanyId) {
+    subcompany = (await loadSubcompanyIdentity(admin, subcompanyId)) as Record<string, unknown> | null;
+    if (subcompany) summary = { ...summary, subcompanies: subcompany };
+  }
+
   const snapshot = (summary.subcompany_legal_snapshot ?? hg.subcompany_legal_snapshot ?? null) as
     | Record<string, unknown>
     | null;
-  companyName = resolveHireLessorDisplayName({
+
+  companyName = resolveHireLessorMailIdentity({
     snapshot,
     subcompany,
     parentCompanyName,
-    hasSubcompany: Boolean(subcompany),
-  });
+    hasSubcompany: Boolean(subcompanyId),
+  }).displayName;
 
   if (!termsPreview && includeTerms) {
     const fromJoin = hg.company_hire_terms_versions as

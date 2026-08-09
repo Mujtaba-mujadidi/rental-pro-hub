@@ -24,7 +24,6 @@ export function HireAccessDetail({ display }: { display: HireAccessDisplay }) {
     <div className="space-y-4">
       <DetailSection title="Rental company">
         <DetailRow label="Company" value={display.companyName} />
-        {display.subcompanyLegalName ? <DetailRow label="Legal entity" value={display.subcompanyLegalName} /> : null}
         {display.subcompanyCompanyNumber ? (
           <DetailRow label="Company number" value={display.subcompanyCompanyNumber} />
         ) : null}
@@ -64,11 +63,7 @@ export function HireAccessDetail({ display }: { display: HireAccessDisplay }) {
         <section className="rounded-xl border border-rph-border bg-rph-page">
           <div className="border-b border-rph-border px-4 py-3">
             <h2 className="text-sm font-semibold text-rph-fg">{display.termsTitle}</h2>
-            {display.termsVersionLabel ? (
-              <p className="rph-meta mt-1 text-xs">Version {display.termsVersionLabel}</p>
-            ) : (
-              <p className="rph-meta mt-1 text-xs">Terms and conditions that apply if you approve this request.</p>
-            )}
+            <p className="rph-meta mt-1 text-xs">Terms and conditions that apply if you approve this request.</p>
           </div>
           <div
             className="prose prose-sm max-w-none px-4 py-4 dark:prose-invert"

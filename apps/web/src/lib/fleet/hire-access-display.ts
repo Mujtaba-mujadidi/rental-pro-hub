@@ -2,7 +2,7 @@ import { formatUkDate } from "@/lib/datetime/uk";
 import { computeContractEndDate } from "@/lib/fleet/hire-lifecycle";
 import type { HireAccessVehicleSnapshot } from "@/lib/fleet/hire-access-vehicle-fields";
 import { formatHireContractStartLabel } from "@/lib/fleet/hire-pdf-details";
-import { resolveHireLessorDisplayName } from "@/lib/fleet/hire-lessor-display";
+import { resolveHireLessorMailIdentity } from "@/lib/rental/subcompany-legal-snapshot";
 import type { ContractLengthKind, RentCadence } from "@/lib/fleet/hire-types";
 
 export const CONTRACT_LENGTH_LABELS: Record<ContractLengthKind, string> = {
@@ -51,11 +51,6 @@ export type HireAccessDisplay = {
   termsBody: string | null;
   termsVersionLabel: string | null;
 };
-
-function formatAddress(parts: (string | null | undefined)[]): string | null {
-  const line = parts.filter(Boolean).join(", ").trim();
-  return line || null;
-}
 
 function formatGbp(amount: unknown): string | null {
   const n = typeof amount === "number" ? amount : Number.parseFloat(String(amount ?? ""));
@@ -111,7 +106,6 @@ export function buildVehicleDetailRows(vehicle: SnapshotVehicle): HireAccessDeta
   push("Fuel type", vehicle.fuel_type?.toUpperCase());
   if (vehicle.seats != null) push("Seats", String(vehicle.seats));
   if (vehicle.cc != null) push("Engine (cc)", String(vehicle.cc));
-  push("Notes", vehicle.notes);
 
   return rows;
 }
@@ -126,6 +120,7 @@ export function parseHireAccessSnapshot(
   const subcompany = (hireSummary.subcompanies ?? null) as SnapshotSubcompany;
   const embeddedTerms = (hireSummary.company_hire_terms_versions ?? null) as SnapshotTerms;
   const snapshot = (hireSummary.subcompany_legal_snapshot ?? null) as Record<string, unknown> | null;
+  const subcompanyId = typeof hireSummary.subcompany_id === "string" ? hireSummary.subcompany_id : null;
 
   const startDate = typeof hireSummary.start_date === "string" ? hireSummary.start_date : null;
   const startTime = typeof hireSummary.start_time === "string" ? hireSummary.start_time : null;
@@ -134,24 +129,19 @@ export function parseHireAccessSnapshot(
 
   const termsTitle = termsPreview?.title ?? embeddedTerms?.title ?? null;
   const termsBody = termsPreview?.body ?? embeddedTerms?.body ?? null;
-  const termsVersionLabel = termsPreview?.versionLabel ?? embeddedTerms?.version_label ?? null;
+
+  const lessor = resolveHireLessorMailIdentity({
+    snapshot,
+    subcompany,
+    parentCompanyName: company?.name ?? companyNameFallback,
+    hasSubcompany: Boolean(subcompanyId || subcompany),
+  });
 
   return {
-    companyName: resolveHireLessorDisplayName({
-      snapshot,
-      subcompany,
-      parentCompanyName: company?.name ?? companyNameFallback,
-      hasSubcompany: Boolean(subcompany),
-    }),
-    subcompanyLegalName: subcompany?.legal_name?.trim() || null,
-    subcompanyCompanyNumber: subcompany?.company_number?.trim() || null,
-    subcompanyAddress: formatAddress([
-      subcompany?.registered_address_line1,
-      subcompany?.registered_address_line2,
-      subcompany?.registered_town,
-      subcompany?.registered_county,
-      subcompany?.registered_postcode,
-    ]),
+    companyName: lessor.displayName,
+    subcompanyLegalName: lessor.legalName,
+    subcompanyCompanyNumber: lessor.companyNumber,
+    subcompanyAddress: lessor.address,
     startDate,
     startDateLabel: startDate ? formatHireContractStartLabel(startDate, startTime) : "—",
     rentLabel: formatRentLabel(hireSummary.rent_amount_gbp, hireSummary.rent_cadence),
@@ -162,6 +152,6 @@ export function parseHireAccessSnapshot(
     vehicleDetailRows: buildVehicleDetailRows(vehicle),
     termsTitle,
     termsBody,
-    termsVersionLabel,
+    termsVersionLabel: null,
   };
 }

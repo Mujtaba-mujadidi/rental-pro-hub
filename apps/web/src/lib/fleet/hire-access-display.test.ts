@@ -22,14 +22,15 @@ describe("parseHireAccessSnapshot", () => {
   it("maps nested snapshot fields", () => {
     const display = parseHireAccessSnapshot(
       {
+        subcompany_id: "sub-1",
         start_date: "2026-03-01",
         rent_amount_gbp: 100,
         rent_cadence: "weekly",
         include_deposit: true,
         deposit_gbp: 500,
-        companies: { name: "Acme Rentals" },
+        companies: { name: "Yama Farooq" },
         subcompanies: {
-          legal_name: "Acme Ltd",
+          legal_name: "Select Me Ltd",
           company_number: "12345678",
           registered_address_line1: "1 High Street",
           registered_town: "London",
@@ -38,12 +39,14 @@ describe("parseHireAccessSnapshot", () => {
         vehicles: { vrm: "AB12 CDE", make: "Ford", model: "Focus", colour: "blue", seats: 5 },
         draft_snapshot: { contractLengths: [{ kind: "annual" }] },
       },
-      "Fallback Co",
+      "Yama Farooq",
       { title: "Hire terms", body: "<p>Terms</p>", versionLabel: "v1" },
     );
 
-    expect(display.companyName).toBe("Acme Ltd");
-    expect(display.subcompanyLegalName).toBe("Acme Ltd");
+    expect(display.companyName).toBe("Select Me Ltd");
+    expect(display.subcompanyCompanyNumber).toBe("12345678");
+    expect(display.termsVersionLabel).toBeNull();
+    expect(display.vehicleDetailRows.some((r) => r.label === "Notes")).toBe(false);
     expect(display.vehicleVrm).toBe("AB12 CDE");
     expect(display.vehicleDetailRows.some((r) => r.label === "Colour" && r.value === "BLUE")).toBe(true);
     expect(display.rentLabel).toBe("£100.00 per week");
