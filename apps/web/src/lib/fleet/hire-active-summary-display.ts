@@ -31,11 +31,16 @@ export function depositRowFromPayments(
 export function buildActiveHirePaymentPosition(input: {
   dashboard: HireDashboardData;
   paymentRows: readonly Pick<HirePaymentPageRow, "rowKind" | "balanceGbp" | "netDueGbp">[];
+  audience?: "staff" | "driver";
 }): ActiveHirePaymentPosition {
-  const { dashboard, paymentRows } = input;
+  const { dashboard, paymentRows, audience = "staff" } = input;
+  const includeDeposit =
+    audience === "driver"
+      ? dashboard.includeDeposit || paymentRows.some((row) => row.rowKind === "deposit")
+      : dashboard.includeDeposit;
   const depositRow = depositRowFromPayments(paymentRows);
   const depositOutstandingGbp =
-    dashboard.includeDeposit && depositRow && depositRow.balanceGbp > 0.005
+    includeDeposit && depositRow && depositRow.balanceGbp > 0.005
       ? roundGbp(depositRow.balanceGbp)
       : 0;
   const rentDueToDateGbp = roundGbp(dashboard.summary.totalDueGbp);
@@ -45,11 +50,20 @@ export function buildActiveHirePaymentPosition(input: {
 
   let dueBreakdownLabel: string | null = null;
   if (depositOutstandingGbp > 0.005 && rentOutstandingGbp > 0.005) {
-    dueBreakdownLabel = `${formatGbp(depositOutstandingGbp)} deposit plus ${formatGbp(rentOutstandingGbp)} rent outstanding.`;
+    dueBreakdownLabel =
+      audience === "driver"
+        ? `Includes ${formatGbp(depositOutstandingGbp)} deposit and ${formatGbp(rentOutstandingGbp)} rent.`
+        : `${formatGbp(depositOutstandingGbp)} deposit plus ${formatGbp(rentOutstandingGbp)} rent outstanding.`;
   } else if (depositOutstandingGbp > 0.005) {
-    dueBreakdownLabel = `${formatGbp(depositOutstandingGbp)} deposit outstanding before or at vehicle handover.`;
+    dueBreakdownLabel =
+      audience === "driver"
+        ? `${formatGbp(depositOutstandingGbp)} deposit is still due before or at vehicle handover.`
+        : `${formatGbp(depositOutstandingGbp)} deposit outstanding before or at vehicle handover.`;
   } else if (rentOutstandingGbp > 0.005) {
-    dueBreakdownLabel = `${formatGbp(rentOutstandingGbp)} rent outstanding on accrued periods.`;
+    dueBreakdownLabel =
+      audience === "driver"
+        ? `${formatGbp(rentOutstandingGbp)} rent is outstanding on accrued periods.`
+        : `${formatGbp(rentOutstandingGbp)} rent outstanding on accrued periods.`;
   }
 
   return {
@@ -67,7 +81,13 @@ export function formatAmountDueChip(currentlyDueGbp: number): string | null {
   return `${formatGbp(currentlyDueGbp)} due today`;
 }
 
-const PAYMENT_RATING_LABEL: Record<HirePaymentHealthLevel, string> = {
+const STAFF_PAYMENT_RATING_LABEL: Record<HirePaymentHealthLevel, string> = {
+  on_track: "On track",
+  attention: "Needs attention",
+  at_risk: "Overdue",
+};
+
+const DRIVER_PAYMENT_RATING_LABEL: Record<HirePaymentHealthLevel, string> = {
   on_track: "On track",
   attention: "Needs attention",
   at_risk: "Overdue",
@@ -103,47 +123,72 @@ export function buildActiveHirePaymentRatingDisplay(input: {
   position: ActiveHirePaymentPosition;
   attentionItems: readonly Pick<HirePaymentAttentionItem, "kind" | "title" | "amountGbp">[];
   includeDeposit: boolean;
+  audience?: "staff" | "driver";
 }): ActiveHirePaymentRatingDisplay {
-  const { health, position, attentionItems, includeDeposit } = input;
+  const { health, position, attentionItems, includeDeposit, audience = "staff" } = input;
   const level = resolveActiveHirePaymentRatingLevel(health, position);
-  const label = PAYMENT_RATING_LABEL[level];
+  const label =
+    audience === "driver" ? DRIVER_PAYMENT_RATING_LABEL[level] : STAFF_PAYMENT_RATING_LABEL[level];
 
   const unpaidParts: string[] = [];
   if (position.depositOutstandingGbp > 0.005) {
-    unpaidParts.push(`the ${formatGbp(position.depositOutstandingGbp)} deposit`);
+    unpaidParts.push(
+      audience === "driver"
+        ? `the ${formatGbp(position.depositOutstandingGbp)} deposit`
+        : `the ${formatGbp(position.depositOutstandingGbp)} deposit`,
+    );
   }
   if (position.rentOutstandingGbp > 0.005) {
     const dueToday = attentionItems.some((item) => item.kind === "due");
     unpaidParts.push(
       dueToday
-        ? `today's ${formatGbp(position.rentOutstandingGbp)} rent`
-        : `${formatGbp(position.rentOutstandingGbp)} outstanding rent`,
+        ? audience === "driver"
+          ? `today's ${formatGbp(position.rentOutstandingGbp)} rent`
+          : `today's ${formatGbp(position.rentOutstandingGbp)} rent`
+        : audience === "driver"
+          ? `${formatGbp(position.rentOutstandingGbp)} outstanding rent`
+          : `${formatGbp(position.rentOutstandingGbp)} outstanding rent`,
     );
   }
 
   let detail: string;
   if (unpaidParts.length > 0) {
-    detail = `No payment has been recorded for ${joinEnglishList(unpaidParts)}. The rating should update automatically when payments are recorded.`;
+    detail =
+      audience === "driver"
+        ? `You still owe ${joinEnglishList(unpaidParts)}. Your score updates when payments are recorded on this hire.`
+        : `No payment has been recorded for ${joinEnglishList(unpaidParts)}. The rating should update automatically when payments are recorded.`;
   } else if (level !== "on_track" && attentionItems[0]?.title) {
-    detail = `${attentionItems[0].title}. The rating should update automatically when payments are recorded.`;
+    detail =
+      audience === "driver"
+        ? `${attentionItems[0].title}. Your score updates when payments are recorded on this hire.`
+        : `${attentionItems[0].title}. The rating should update automatically when payments are recorded.`;
   } else if (level === "on_track") {
-    detail = "Recorded payments are up to date for this hire.";
+    detail =
+      audience === "driver"
+        ? "Your recorded payments are up to date for this hire."
+        : "Recorded payments are up to date for this hire.";
   } else {
-    detail = `${health.detail}. The rating should update automatically when payments are recorded.`;
+    detail =
+      audience === "driver"
+        ? `${health.detail} Your score updates when payments are recorded on this hire.`
+        : `${health.detail}. The rating should update automatically when payments are recorded.`;
   }
 
   const scorePercent =
     health.onTimePercent ??
     (position.rentDueToDateGbp > 0.005 && position.rentPaidGbp <= 0.005 ? 0 : null);
 
-  const totalDueItems =
-    (includeDeposit ? 1 : 0) + (position.rentDueToDateGbp > 0.005 ? 1 : 0);
+  const depositDue = position.depositOutstandingGbp > 0.005;
+  const tracksDeposit = includeDeposit || depositDue;
+  const totalDueItems = (tracksDeposit ? 1 : 0) + (position.rentDueToDateGbp > 0.005 ? 1 : 0);
   const outstandingItems =
-    (position.depositOutstandingGbp > 0.005 ? 1 : 0) + (position.rentOutstandingGbp > 0.005 ? 1 : 0);
+    (depositDue ? 1 : 0) + (position.rentOutstandingGbp > 0.005 ? 1 : 0);
   const paidItems = Math.max(0, totalDueItems - outstandingItems);
   const scoreHint =
     totalDueItems > 0 && position.currentlyDueGbp > 0.005
-      ? `${formatGbp(position.currentlyDueGbp)} currently due · ${paidItems} of ${totalDueItems} due items paid`
+      ? audience === "driver"
+        ? `${formatGbp(position.currentlyDueGbp)} currently due · ${paidItems} of ${totalDueItems} due items paid`
+        : `${formatGbp(position.currentlyDueGbp)} currently due · ${paidItems} of ${totalDueItems} due items paid`
       : null;
 
   return { level, label, detail, scorePercent, scoreHint };

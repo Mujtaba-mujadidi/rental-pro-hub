@@ -1,25 +1,59 @@
 "use client";
 
 import { loadDriverHireDashboardAction, type HireDashboardData } from "@/app/actions/hire-dashboard";
+import {
+  loadDriverHireCheckoutGlanceAction,
+  type HireCheckoutGlanceData,
+} from "@/app/actions/hire-inspections";
+import {
+  loadDriverHirePaymentsPageAction,
+  type HirePaymentPageRow,
+} from "@/app/actions/hire-payments";
+import { HireActiveDriverSummary } from "@/components/fleet/hire-summary/hire-active-driver-summary";
 import { HireOverviewView } from "@/components/fleet/hire-overview/hire-overview-view";
 import { driverHireWorkspaceHref } from "@/lib/fleet/driver-hire-workspace-nav";
 import { useHirePaymentsRealtime } from "@/hooks/use-hire-realtime";
 import { useCallback, useEffect, useState, useTransition } from "react";
 
-export function DriverHireDashboardSection({ hireGroupId }: { hireGroupId: string }) {
+export function DriverHireDashboardSection({
+  hireGroupId,
+  hireStatus,
+}: {
+  hireGroupId: string;
+  hireStatus: string;
+}) {
   const [pending, startTransition] = useTransition();
   const [data, setData] = useState<HireDashboardData | null>(null);
+  const [paymentRows, setPaymentRows] = useState<readonly HirePaymentPageRow[]>([]);
+  const [checkout, setCheckout] = useState<HireCheckoutGlanceData | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const workspaceBase = `/driver/hires/${hireGroupId}`;
 
   const reload = useCallback(() => {
     startTransition(async () => {
-      const res = await loadDriverHireDashboardAction(hireGroupId);
-      if (!res.ok) {
-        setError(res.error);
+      const [dashboardRes, paymentsRes, checkoutRes] = await Promise.all([
+        loadDriverHireDashboardAction(hireGroupId),
+        loadDriverHirePaymentsPageAction(hireGroupId),
+        loadDriverHireCheckoutGlanceAction(hireGroupId),
+      ]);
+      if (!dashboardRes.ok) {
+        setError(dashboardRes.error);
         setData(null);
+        setPaymentRows([]);
+        setCheckout(null);
         return;
       }
-      setData(res.data);
+      if (!paymentsRes.ok) {
+        setError(paymentsRes.error);
+        setData(null);
+        setPaymentRows([]);
+        setCheckout(null);
+        return;
+      }
+      setData(dashboardRes.data);
+      setPaymentRows(paymentsRes.data.rows);
+      setCheckout(checkoutRes.ok ? checkoutRes.data : null);
       setError(null);
     });
   }, [hireGroupId]);
@@ -35,6 +69,23 @@ export function DriverHireDashboardSection({ hireGroupId }: { hireGroupId: strin
   }
   if (error) return <p className="rph-alert-error text-sm">{error}</p>;
   if (!data) return null;
+
+  const contractEnded = data.overview.contractEnded;
+
+  if (!contractEnded) {
+    return (
+      <HireActiveDriverSummary
+        data={data}
+        context={data.overview}
+        paymentRows={paymentRows}
+        checkout={checkout}
+        hireStatus={hireStatus}
+        paymentsHref={driverHireWorkspaceHref(hireGroupId, "payments")}
+        detailsHref={driverHireWorkspaceHref(hireGroupId, "details")}
+        workspaceBase={workspaceBase}
+      />
+    );
+  }
 
   return (
     <HireOverviewView

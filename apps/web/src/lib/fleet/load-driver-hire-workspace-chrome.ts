@@ -1,8 +1,6 @@
 import { cache } from "react";
-import { loadHireDashboardAction } from "@/app/actions/hire-dashboard";
-import { loadHirePaymentsPageAction } from "@/app/actions/hire-payments";
-import { requireRentalCompanyArea } from "@/lib/auth/profile";
-import { canReadRentals } from "@/lib/auth/rental-permissions";
+import { loadDriverHireDashboardAction } from "@/app/actions/hire-dashboard";
+import { loadDriverHirePaymentsPageAction } from "@/app/actions/hire-payments";
 import {
   buildActiveHirePaymentPosition,
   formatAmountDueChip,
@@ -13,12 +11,10 @@ import {
   buildHireEndedHeroMetrics,
   hireEndedSettlementChipLabel,
 } from "@/lib/fleet/hire-ended-summary-display";
-import { loadHireLessorDisplayName } from "@/lib/fleet/hire-lessor-display";
 import type { HireWorkspaceChromeData } from "@/lib/fleet/hire-workspace-chrome-types";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
-export type HireWorkspaceChromeResult =
+export type DriverHireWorkspaceChromeResult =
   | { ok: true; chrome: HireWorkspaceChromeData }
   | { ok: false; error: string };
 
@@ -45,26 +41,22 @@ async function loadCompletedCheckout(hireGroupId: string) {
   };
 }
 
-async function fetchStaffHireWorkspaceChrome(groupId: string): Promise<HireWorkspaceChromeResult> {
-  const { profile } = await requireRentalCompanyArea();
-  if (!canReadRentals(profile)) return { ok: false, error: "You do not have permission." };
-
+async function fetchDriverHireWorkspaceChrome(groupId: string): Promise<DriverHireWorkspaceChromeResult> {
   const id = groupId.trim();
   const [dashboardRes, paymentsRes, checkout] = await Promise.all([
-    loadHireDashboardAction(id),
-    loadHirePaymentsPageAction(id),
+    loadDriverHireDashboardAction(id),
+    loadDriverHirePaymentsPageAction(id),
     loadCompletedCheckout(id),
   ]);
   if (!dashboardRes.ok) return dashboardRes;
   if (!paymentsRes.ok) return paymentsRes;
 
-  const admin = createSupabaseAdminClient();
-  const lessorName = await loadHireLessorDisplayName(admin, id);
   const context = dashboardRes.data.overview;
   const hero = dashboardRes.data.workspaceHero;
   const paymentPosition = buildActiveHirePaymentPosition({
     dashboard: dashboardRes.data,
     paymentRows: paymentsRes.data.rows,
+    audience: "driver",
   });
   const amountDueChip = context.contractEnded
     ? null
@@ -83,12 +75,12 @@ async function fetchStaffHireWorkspaceChrome(groupId: string): Promise<HireWorks
       hireGroupIdShort: shortHireId(context.hireGroupId),
       vehicleVrm: context.vehicleVrm,
       vehicleMakeModel: context.vehicleMakeModel,
-      lessorName,
-      companyName: null,
+      lessorName: context.companyName ?? "—",
+      companyName: context.companyName,
       statusLabel: context.statusLabel,
       contractEnded: context.contractEnded,
       amountDueChip,
-      driverName: context.driverName,
+      driverName: null,
       activeSinceLabel: hero.activeSinceLabel,
       contractEndLabel: hero.contractEndLabel,
       dailyRentLabel: hero.dailyRentLabel,
@@ -97,11 +89,11 @@ async function fetchStaffHireWorkspaceChrome(groupId: string): Promise<HireWorks
       endedHirePeriodLabel: endedHero?.hirePeriodLabel ?? null,
       endedTimeOnHireLabel: endedHero?.timeOnHireLabel ?? null,
       settlementStatusChip,
-      canTerminate: dashboardRes.data.canTerminate,
-      includeDeposit: dashboardRes.data.includeDeposit,
+      canTerminate: false,
+      includeDeposit: paymentsRes.data.rows.some((row) => row.rowKind === "deposit"),
       checkout,
     },
   };
 }
 
-export const getStaffHireWorkspaceChrome = cache(fetchStaffHireWorkspaceChrome);
+export const getDriverHireWorkspaceChrome = cache(fetchDriverHireWorkspaceChrome);

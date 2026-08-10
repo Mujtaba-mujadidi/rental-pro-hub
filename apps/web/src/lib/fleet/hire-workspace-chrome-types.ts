@@ -10,6 +10,7 @@ export type HireWorkspaceChromeData = {
   vehicleVrm: string;
   vehicleMakeModel: string;
   lessorName: string;
+  companyName: string | null;
   statusLabel: string;
   contractEnded: boolean;
   amountDueChip: string | null;

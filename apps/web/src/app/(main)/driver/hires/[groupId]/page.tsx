@@ -5,5 +5,7 @@ import { useDriverHireWorkspace } from "./driver-hire-workspace-provider";
 
 export default function DriverHireOverviewPage() {
   const { shell } = useDriverHireWorkspace();
-  return <DriverHireDashboardSection hireGroupId={shell.hireGroupId} />;
+  return (
+    <DriverHireDashboardSection hireGroupId={shell.hireGroupId} hireStatus={shell.status} />
+  );
 }

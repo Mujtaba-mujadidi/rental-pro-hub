@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
+import { formatUkDateTime } from "@/lib/datetime/uk";
 import { canReadRentals, canWriteRentals } from "@/lib/auth/rental-permissions";
 import { logHireGroupEvent } from "@/lib/fleet/hire-audit";
 import {
@@ -474,6 +475,50 @@ export async function loadHireEndedInspectionAttentionAction(
     data: {
       items,
       checkinCompleted: Boolean(checkin?.checkinCompleted),
+    },
+  };
+}
+
+export type HireCheckoutGlanceData = {
+  odometerMiles: number | null;
+  fuelLevelPercent: number | null;
+  completedAtLabel: string | null;
+};
+
+export async function loadDriverHireCheckoutGlanceAction(
+  hireGroupId: string,
+): Promise<ActionResult<HireCheckoutGlanceData | null>> {
+  const user = await getSessionUser();
+  if (!user) return { ok: false, error: "Sign in required." };
+
+  const id = hireGroupId.trim();
+  const supabase = await createClient();
+  const { data: group, error: groupError } = await supabase
+    .from("vehicle_hire_groups")
+    .select("id")
+    .eq("id", id)
+    .eq("driver_user_id", user.id)
+    .maybeSingle();
+  if (groupError) return { ok: false, error: groupError.message };
+  if (!group?.id) return { ok: false, error: "Hire not found." };
+
+  const { data } = await supabase
+    .from("vehicle_hire_inspections")
+    .select("odometer_reading, fuel_level, completed_at")
+    .eq("hire_group_id", id)
+    .eq("kind", "checkout")
+    .eq("status", "completed")
+    .order("completed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data) return { ok: true, data: null };
+
+  return {
+    ok: true,
+    data: {
+      odometerMiles: data.odometer_reading as number | null,
+      fuelLevelPercent: data.fuel_level as number | null,
+      completedAtLabel: data.completed_at ? formatUkDateTime(data.completed_at) : null,
     },
   };
 }

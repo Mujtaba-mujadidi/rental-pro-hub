@@ -13,26 +13,15 @@ export type DriverHireWorkspaceSection =
   | "checkout"
   | "checkin";
 
-/** Driver hire workspace pills — mirrors rental staff tab order (without Activity). */
-export function driverHireWorkspaceNav(groupId: string, status?: string): DriverHireWorkspaceNavItem[] {
+/** Driver hire workspace tabs — aligned with staff Summary / Inspections / Payments / Details. */
+export function driverHireWorkspaceNav(groupId: string): DriverHireWorkspaceNavItem[] {
   const base = `/driver/hires/${groupId}`;
-  const paymentsLabel =
-    status === "terminated" || status === "completed" ? "Payments & settlement" : "Payments";
-  const items: DriverHireWorkspaceNavItem[] = [
-    { href: base, label: "Overview", match: "exact" },
-    { href: `${base}/payments`, label: paymentsLabel, match: "prefix" },
-    { href: `${base}/details`, label: "Details", match: "prefix" },
+  return [
+    { href: base, label: "Summary", match: "exact" },
+    { href: `${base}/checkout`, label: "Inspections", match: "prefix" },
+    { href: `${base}/payments`, label: "Payments", match: "prefix" },
+    { href: `${base}/details`, label: "Details & documents", match: "prefix" },
   ];
-
-  if (status === "reserved" || status === "active" || status === "terminated" || status === "completed") {
-    items.splice(1, 0, { href: `${base}/checkout`, label: "Checkout", match: "prefix" });
-  }
-  if (status === "terminated" || status === "completed") {
-    items.splice(2, 0, { href: `${base}/checkin`, label: "Check-in", match: "prefix" });
-    items.splice(3, 0, { href: `${base}/settlement`, label: "Settlement", match: "prefix" });
-  }
-
-  return items;
 }
 
 export function driverHireWorkspaceHref(groupId: string, section: DriverHireWorkspaceSection = "") {
@@ -65,5 +54,11 @@ export function isDriverHireWorkspaceNavItemActive(
   item: DriverHireWorkspaceNavItem,
 ): boolean {
   if (item.match === "exact") return pathname === item.href;
+  if (item.label === "Inspections") {
+    return pathname.startsWith(`${item.href}`) || pathname.includes("/checkin");
+  }
+  if (item.label === "Payments") {
+    return pathname === item.href || pathname.startsWith(`${item.href}/`) || pathname.includes("/settlement");
+  }
   return pathname === item.href || pathname.startsWith(`${item.href}/`);
 }

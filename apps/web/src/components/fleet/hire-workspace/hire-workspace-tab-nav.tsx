@@ -50,7 +50,13 @@ function tabIcon(label: string) {
   }
 }
 
-export function HireWorkspaceTabNav({ items }: { items: HireWorkspaceTabItem[] }) {
+export function HireWorkspaceTabNav({
+  items,
+  isItemActive = isHireWorkspaceNavItemActive,
+}: {
+  items: HireWorkspaceTabItem[];
+  isItemActive?: (pathname: string, item: HireWorkspaceTabItem) => boolean;
+}) {
   const pathname = usePathname();
   return (
     <nav
@@ -59,7 +65,7 @@ export function HireWorkspaceTabNav({ items }: { items: HireWorkspaceTabItem[] }
     >
       <div className="flex w-max gap-6">
         {items.map((item) => {
-          const active = isHireWorkspaceNavItemActive(pathname, item);
+          const active = isItemActive(pathname, item);
           return (
             <Link
               key={item.href}

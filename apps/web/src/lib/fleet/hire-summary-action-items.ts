@@ -25,7 +25,9 @@ export function buildHireSummaryActionItems(input: {
   position: ActiveHirePaymentPosition;
   paymentsHref: string;
   includeDeposit: boolean;
+  audience?: "staff" | "driver";
 }): HireSummaryActionItem[] {
+  const audience = input.audience ?? "staff";
   const items: HireSummaryActionItem[] = [];
   const seen = new Set<string>();
 
@@ -44,8 +46,11 @@ export function buildHireSummaryActionItems(input: {
   ) {
     items.push({
       key: "payment:deposit",
-      title: "Deposit has not been paid",
-      detail: `${formatGbp(input.position.depositOutstandingGbp)} remains outstanding`,
+      title: audience === "driver" ? "Deposit not paid" : "Deposit has not been paid",
+      detail:
+        audience === "driver"
+          ? `You still owe ${formatGbp(input.position.depositOutstandingGbp)}`
+          : `${formatGbp(input.position.depositOutstandingGbp)} remains outstanding`,
       href: input.paymentsHref,
       warn: true,
       icon: "pound",
@@ -59,7 +64,7 @@ export function buildHireSummaryActionItems(input: {
       continue;
     }
     seen.add(key);
-    items.push(formatPaymentAttentionActionItem(item, input.paymentsHref));
+    items.push(formatPaymentAttentionActionItem(item, input.paymentsHref, audience));
   }
 
   return items;
@@ -99,6 +104,7 @@ function mapLifecycleActionItem(item: HireLifecycleAttentionItem): HireSummaryAc
 function formatPaymentAttentionActionItem(
   item: HirePaymentAttentionItem,
   paymentsHref: string,
+  audience: "staff" | "driver" = "staff",
 ): HireSummaryActionItem {
   const amount = formatGbp(item.amountGbp);
   const isDeposit = item.title.toLowerCase().includes("deposit");
@@ -106,8 +112,9 @@ function formatPaymentAttentionActionItem(
   if (isDeposit) {
     return {
       key: `payment:${item.kind}:${item.rowId}`,
-      title: "Deposit has not been paid",
-      detail: `${amount} remains outstanding`,
+      title: audience === "driver" ? "Deposit not paid" : "Deposit has not been paid",
+      detail:
+        audience === "driver" ? `You still owe ${amount}` : `${amount} remains outstanding`,
       href: paymentsHref,
       warn: true,
       icon: "pound",
@@ -118,7 +125,7 @@ function formatPaymentAttentionActionItem(
     return {
       key: `payment:${item.kind}:${item.rowId}`,
       title: item.title,
-      detail: `${amount} overdue`,
+      detail: audience === "driver" ? `${amount} overdue — pay now` : `${amount} overdue`,
       href: paymentsHref,
       warn: true,
       icon: "pound",
@@ -129,7 +136,7 @@ function formatPaymentAttentionActionItem(
     return {
       key: `payment:${item.kind}:${item.rowId}`,
       title: item.title,
-      detail: `${amount} due today`,
+      detail: audience === "driver" ? `${amount} due today` : `${amount} due today`,
       href: paymentsHref,
       warn: true,
       icon: "pound",
@@ -140,7 +147,10 @@ function formatPaymentAttentionActionItem(
     return {
       key: `payment:${item.kind}:${item.rowId}`,
       title: item.title,
-      detail: `${amount} pending approval`,
+      detail:
+        audience === "driver"
+          ? `${amount} awaiting company approval`
+          : `${amount} pending approval`,
       href: paymentsHref,
       warn: true,
       icon: "pound",
@@ -150,7 +160,10 @@ function formatPaymentAttentionActionItem(
   return {
     key: `payment:${item.kind}:${item.rowId}`,
     title: item.title,
-    detail: `${amount} rejected — record again`,
+    detail:
+      audience === "driver"
+        ? `${amount} rejected — submit again`
+        : `${amount} rejected — record again`,
     href: paymentsHref,
     warn: true,
     icon: "pound",

@@ -4,7 +4,10 @@ import {
   resolveDriverMyHireRedirectPath,
   shouldHideHireRequestFromInbox,
 } from "@/lib/fleet/driver-hire-nav";
-import { driverHireWorkspaceNav } from "@/lib/fleet/driver-hire-workspace-nav";
+import {
+  driverHireWorkspaceNav,
+  isDriverHireWorkspaceNavItemActive,
+} from "@/lib/fleet/driver-hire-workspace-nav";
 
 describe("shouldHideHireRequestFromInbox", () => {
   it("hides fully signed requests regardless of hire status", () => {
@@ -77,25 +80,22 @@ describe("resolveDriverMyHireRedirectPath", () => {
 });
 
 describe("driverHireWorkspaceNav", () => {
-  it("mirrors staff tab order for active hires", () => {
-    const labels = driverHireWorkspaceNav("g1", "active").map((item) => item.label);
-    expect(labels).toEqual(["Overview", "Checkout", "Payments", "Details"]);
+  it("matches staff hire workspace tab labels", () => {
+    const labels = driverHireWorkspaceNav("g1").map((item) => item.label);
+    expect(labels).toEqual(["Summary", "Inspections", "Payments", "Details & documents"]);
   });
 
-  it("mirrors staff tab order for ended hires", () => {
-    const labels = driverHireWorkspaceNav("g1", "terminated").map((item) => item.label);
-    expect(labels).toEqual([
-      "Overview",
-      "Checkout",
-      "Check-in",
-      "Settlement",
-      "Payments & settlement",
-      "Details",
-    ]);
+  it("highlights inspections for checkout and check-in routes", () => {
+    const items = driverHireWorkspaceNav("g1");
+    const inspections = items.find((item) => item.label === "Inspections")!;
+    expect(isDriverHireWorkspaceNavItemActive("/driver/hires/g1/checkout", inspections)).toBe(true);
+    expect(isDriverHireWorkspaceNavItemActive("/driver/hires/g1/checkin", inspections)).toBe(true);
+    expect(isDriverHireWorkspaceNavItemActive("/driver/hires/g1/payments", inspections)).toBe(false);
   });
 
-  it("does not include check-in while hire is active", () => {
-    expect(driverHireWorkspaceNav("g1", "active").map((item) => item.label)).not.toContain("Check-in");
-    expect(driverHireWorkspaceNav("g1", "reserved").map((item) => item.label)).not.toContain("Check-in");
+  it("highlights payments for settlement route", () => {
+    const items = driverHireWorkspaceNav("g1");
+    const payments = items.find((item) => item.label === "Payments")!;
+    expect(isDriverHireWorkspaceNavItemActive("/driver/hires/g1/settlement", payments)).toBe(true);
   });
 });

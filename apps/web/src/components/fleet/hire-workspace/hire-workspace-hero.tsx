@@ -9,14 +9,17 @@ import { HireWorkspaceChip, HireWorkspacePlate } from "@/components/fleet/hire-w
 export function HireWorkspaceHero({
   chrome,
   status,
+  mode = "staff",
 }: {
   chrome: HireWorkspaceChromeData;
   status: string;
+  mode?: "staff" | "driver";
 }) {
   const [terminateOpen, setTerminateOpen] = useState(false);
   const statusTone = driverHireStatusTone(status);
   const chipTone =
     statusTone === "success" ? "success" : statusTone === "warning" || statusTone === "pending" ? "warn" : "neutral";
+  const subtitleName = mode === "driver" ? chrome.companyName ?? "—" : chrome.lessorName;
 
   return (
     <>
@@ -29,7 +32,7 @@ export function HireWorkspaceHero({
               <p className="mt-0.5 text-xs text-rph-fg-secondary">
                 Hire #{chrome.hireGroupIdShort}
                 <span className="text-rph-fg-muted"> · </span>
-                {chrome.lessorName}
+                {subtitleName}
               </p>
             </div>
           </div>
@@ -47,7 +50,7 @@ export function HireWorkspaceHero({
                 {chrome.settlementStatusChip}
               </HireWorkspaceChip>
             ) : null}
-            {chrome.canTerminate ? (
+            {mode === "staff" && chrome.canTerminate ? (
               <button
                 type="button"
                 className="inline-flex h-8 items-center rounded-lg border border-red-300 bg-rph-raised px-3 text-xs font-semibold text-red-700 shadow-sm transition-colors hover:bg-red-50 dark:border-red-800/60 dark:text-red-300 dark:hover:bg-red-950/30"
@@ -62,14 +65,20 @@ export function HireWorkspaceHero({
         <div className="hire-ws-hero-metrics">
           {chrome.contractEnded ? (
             <>
-              <Metric label="Driver" value={chrome.driverName ?? "—"} />
+              <Metric
+                label={mode === "driver" ? "Rental company" : "Driver"}
+                value={mode === "driver" ? chrome.companyName ?? "—" : chrome.driverName ?? "—"}
+              />
               <Metric label="Hire period" value={chrome.endedHirePeriodLabel ?? "—"} />
               <Metric label="Time on hire" value={chrome.endedTimeOnHireLabel ?? "—"} />
               <Metric label={chrome.rentMetricLabel} value={chrome.dailyRentLabel ?? "—"} />
             </>
           ) : (
             <>
-              <Metric label="Driver" value={chrome.driverName ?? "—"} />
+              <Metric
+                label={mode === "driver" ? "Rental company" : "Driver"}
+                value={mode === "driver" ? chrome.companyName ?? "—" : chrome.driverName ?? "—"}
+              />
               <Metric label="Active since" value={chrome.activeSinceLabel} />
               <Metric label="Contract ends" value={chrome.contractEndLabel ?? "—"} />
               <Metric label={chrome.rentMetricLabel} value={chrome.dailyRentLabel ?? "—"} />
@@ -78,7 +87,7 @@ export function HireWorkspaceHero({
         </div>
       </section>
 
-      {chrome.canTerminate ? (
+      {mode === "staff" && chrome.canTerminate ? (
         <HireTerminateContractModal
           hireGroupId={chrome.hireGroupId}
           open={terminateOpen}
