@@ -42,6 +42,11 @@ export function HireWorkspaceHero({
                 {chrome.amountDueChip}
               </HireWorkspaceChip>
             ) : null}
+            {chrome.settlementStatusChip ? (
+              <HireWorkspaceChip tone="success" dot>
+                {chrome.settlementStatusChip}
+              </HireWorkspaceChip>
+            ) : null}
             {chrome.canTerminate ? (
               <button
                 type="button"
@@ -55,10 +60,21 @@ export function HireWorkspaceHero({
         </div>
 
         <div className="hire-ws-hero-metrics">
-          <Metric label="Driver" value={chrome.driverName ?? "—"} />
-          <Metric label="Active since" value={chrome.activeSinceLabel} />
-          <Metric label="Contract ends" value={chrome.contractEndLabel ?? "—"} />
-          <Metric label={chrome.rentMetricLabel} value={chrome.dailyRentLabel ?? "—"} />
+          {chrome.contractEnded ? (
+            <>
+              <Metric label="Driver" value={chrome.driverName ?? "—"} />
+              <Metric label="Hire period" value={chrome.endedHirePeriodLabel ?? "—"} />
+              <Metric label="Time on hire" value={chrome.endedTimeOnHireLabel ?? "—"} />
+              <Metric label={chrome.rentMetricLabel} value={chrome.dailyRentLabel ?? "—"} />
+            </>
+          ) : (
+            <>
+              <Metric label="Driver" value={chrome.driverName ?? "—"} />
+              <Metric label="Active since" value={chrome.activeSinceLabel} />
+              <Metric label="Contract ends" value={chrome.contractEndLabel ?? "—"} />
+              <Metric label={chrome.rentMetricLabel} value={chrome.dailyRentLabel ?? "—"} />
+            </>
+          )}
         </div>
       </section>
 

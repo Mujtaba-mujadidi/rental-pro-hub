@@ -52,15 +52,18 @@ export function HireWorkspaceProgressBar({
   tone = "warn",
 }: {
   percent: number;
-  tone?: "warn" | "ok";
+  tone?: "ok" | "warn" | "danger";
 }) {
   const clamped = Math.max(0, Math.min(100, percent));
+  const fillClass =
+    tone === "ok"
+      ? "hire-ws-progress-fill-ok"
+      : tone === "danger"
+        ? "hire-ws-progress-fill-danger"
+        : "hire-ws-progress-fill";
   return (
     <div className="hire-ws-progress" role="progressbar" aria-valuenow={clamped} aria-valuemin={0} aria-valuemax={100}>
-      <div
-        className={tone === "ok" ? "hire-ws-progress-fill-ok" : "hire-ws-progress-fill"}
-        style={{ width: `${clamped}%` }}
-      />
+      <div className={fillClass} style={{ width: `${clamped}%` }} />
     </div>
   );
 }

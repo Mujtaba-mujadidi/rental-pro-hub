@@ -19,6 +19,9 @@ export type HireWorkspaceChromeData = {
   dailyRentLabel: string | null;
   rentMetricLabel: string;
   frequencyHint: string | null;
+  endedHirePeriodLabel: string | null;
+  endedTimeOnHireLabel: string | null;
+  settlementStatusChip: string | null;
   canTerminate: boolean;
   includeDeposit: boolean;
   checkout: HireWorkspaceCheckoutGlance | null;

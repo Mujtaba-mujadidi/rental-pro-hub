@@ -52,6 +52,11 @@ function dashboard(overrides: Partial<HireDashboardData> = {}): HireDashboardDat
     depositDispositionLabel: null,
     financialClosure: {} as HireDashboardData["financialClosure"],
     overview: {} as HireDashboardData["overview"],
+    workspaceHero: {
+      activeSinceLabel: "—",
+      contractEndLabel: null,
+      dailyRentLabel: null,
+    },
     terminationSummary: null,
     ...overrides,
   };

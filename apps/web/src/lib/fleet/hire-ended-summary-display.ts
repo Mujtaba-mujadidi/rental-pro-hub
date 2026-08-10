@@ -1,0 +1,276 @@
+import type { HirePaymentsPageData } from "@/app/actions/hire-payments";
+import type { HireDriverChargeWorkspaceRow } from "@/app/actions/rental-hire-termination";
+import type { HireDashboardData } from "@/app/actions/hire-dashboard";
+import type { HireOverviewContext } from "@/lib/fleet/hire-overview-types";
+import { formatUkDateRangeText } from "@/lib/datetime/uk";
+import type { HirePaymentHealthSummary } from "@/lib/fleet/hire-payment-analytics";
+import { formatGbp } from "@/lib/fleet/maintenance";
+import {
+  formatHireDurationWeeksAndDays,
+  type HireTerminationAccountsSummary,
+} from "@/lib/fleet/hire-termination-summary";
+import { summarizeHireSettlementLedger } from "@/lib/fleet/hire-payments-ledger";
+
+function roundGbp(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+export function hireDepositAppliedToRentGbp(summary: HireTerminationAccountsSummary): number {
+  return roundGbp(Math.max(0, summary.accruedRentDueGbp - summary.accruedRentPaidGbp));
+}
+
+export function sumDriverChargesGbp(items: readonly HireDriverChargeWorkspaceRow[]): number {
+  return roundGbp(
+    items
+      .filter((item) => item.resolution === "add_to_balance" || item.resolution === "paid_now")
+      .reduce((sum, item) => sum + item.amountGbp, 0),
+  );
+}
+
+export function countBillableDriverCharges(items: readonly HireDriverChargeWorkspaceRow[]): number {
+  return items.filter(
+    (item) =>
+      (item.resolution === "add_to_balance" || item.resolution === "paid_now") && item.amountGbp > 0.005,
+  ).length;
+}
+
+export function formatDriverChargesHint(count: number): string {
+  if (count <= 0) return "No driver charges recorded";
+  const noun = count === 1 ? "charge" : "charges";
+  return `${count} damage ${noun} after check-in`;
+}
+
+export function formatRentSettledHint(
+  rentPaidGbp: number,
+  depositAppliedGbp: number,
+): string {
+  const parts: string[] = [];
+  if (rentPaidGbp > 0.005) parts.push(`${formatGbp(rentPaidGbp)} paid`);
+  if (depositAppliedGbp > 0.005) parts.push(`${formatGbp(depositAppliedGbp)} from deposit`);
+  if (!parts.length) return "No rent settlement recorded";
+  return parts.join(" + ");
+}
+
+export function formatRefundPaidHint(paymentCount: number): string {
+  if (paymentCount <= 0) return "No refund payments recorded";
+  const noun = paymentCount === 1 ? "bank transfer" : "bank transfers";
+  return `Paid in ${paymentCount} ${noun}`;
+}
+
+export type HireEndedRefundCalculation = {
+  originalDepositGbp: number;
+  rentFromDepositGbp: number;
+  driverChargesGbp: number;
+  finalRefundPaidGbp: number;
+  visible: boolean;
+};
+
+export function buildHireEndedRefundCalculation(input: {
+  terminationSummary: HireTerminationAccountsSummary | null;
+  driverChargesGbp: number;
+  settlementPaymentsToDriverGbp: number;
+}): HireEndedRefundCalculation | null {
+  const summary = input.terminationSummary;
+  if (!summary || summary.depositGbp <= 0.005) return null;
+
+  const rentFromDepositGbp = hireDepositAppliedToRentGbp(summary);
+  const driverChargesGbp = roundGbp(input.driverChargesGbp);
+  const finalRefundPaidGbp = roundGbp(input.settlementPaymentsToDriverGbp);
+  const visible =
+    rentFromDepositGbp > 0.005 || driverChargesGbp > 0.005 || finalRefundPaidGbp > 0.005;
+
+  return {
+    originalDepositGbp: summary.depositGbp,
+    rentFromDepositGbp,
+    driverChargesGbp,
+    finalRefundPaidGbp,
+    visible,
+  };
+}
+
+export type HireEndedOutstandingBalance = {
+  amountGbp: number;
+  settled: boolean;
+  kicker: string | null;
+  headline: string;
+  detail: string | null;
+  statusLabel: string;
+};
+
+export function buildHireEndedOutstandingBalance(
+  payments: Pick<HirePaymentsPageData, "settlementBalance" | "currentSignedSettlementGbp">,
+  options?: { refundPaidGbp?: number },
+): HireEndedOutstandingBalance {
+  const openBalanceGbp = roundGbp(
+    payments.settlementBalance?.openBalanceGbp ?? Math.abs(payments.currentSignedSettlementGbp),
+  );
+  const settled =
+    payments.settlementBalance?.settled === true ||
+    openBalanceGbp <= 0.005 ||
+    payments.settlementBalance?.settlementDirection === "settled";
+
+  if (settled) {
+    const refundPaidGbp = roundGbp(options?.refundPaidGbp ?? 0);
+    return {
+      amountGbp: 0,
+      settled: true,
+      kicker: "Hire and settlement completed",
+      headline: "Nothing is currently owed",
+      detail:
+        refundPaidGbp > 0.005
+          ? "The hire is complete and the driver’s final refund has been paid."
+          : "The hire is complete and all amounts are settled.",
+      statusLabel: "All clear",
+    };
+  }
+
+  const direction = payments.settlementBalance?.settlementDirection;
+  const headline =
+    direction === "company_owes_driver"
+      ? `${formatGbp(openBalanceGbp)} refund still due`
+      : `${formatGbp(openBalanceGbp)} still outstanding`;
+  const detail =
+    direction === "company_owes_driver"
+      ? "Settlement payments to the driver are still open on this hire."
+      : "The driver still owes this amount after contract end.";
+
+  return {
+    amountGbp: openBalanceGbp,
+    settled: false,
+    kicker: null,
+    headline,
+    detail,
+    statusLabel: direction === "company_owes_driver" ? "Refund due" : "Outstanding",
+  };
+}
+
+const ENDED_PAYMENT_RATING_LABEL = {
+  on_track: "Good",
+  attention: "Fair",
+  at_risk: "Poor",
+} as const;
+
+export type HireEndedPaymentRatingDisplay = {
+  level: keyof typeof ENDED_PAYMENT_RATING_LABEL;
+  label: string;
+  detail: string;
+  scorePercent: number | null;
+};
+
+export function buildEndedHirePaymentRatingDisplay(input: {
+  health: HirePaymentHealthSummary;
+  outstanding: HireEndedOutstandingBalance;
+}): HireEndedPaymentRatingDisplay {
+  const { health, outstanding } = input;
+  let level: keyof typeof ENDED_PAYMENT_RATING_LABEL = health.level;
+  if (!outstanding.settled && level === "on_track") level = "attention";
+
+  let detail: string;
+  if (!outstanding.settled) {
+    detail =
+      "Settlement is not fully closed yet. The rating reflects payment behaviour during the hire and may change when the final balance is cleared.";
+  } else if (level === "on_track") {
+    detail = "Rent and settlement payments were recorded on time for this hire.";
+  } else if (health.detail) {
+    detail = health.detail;
+  } else {
+    detail = "Some rent periods were paid late or remain outstanding on the schedule.";
+  }
+
+  return {
+    level,
+    label: ENDED_PAYMENT_RATING_LABEL[level],
+    detail,
+    scorePercent: health.onTimePercent,
+  };
+}
+
+export type HireEndedGlanceDisplay = {
+  hirePeriodLabel: string;
+  rentLabel: string;
+  depositReceivedLabel: string;
+  contractEndedLabel: string;
+};
+
+export function buildHireEndedGlanceDisplay(input: {
+  context: HireOverviewContext;
+  payments: Pick<
+    HirePaymentsPageData,
+    "terminationSummary" | "contractEndedYmd" | "depositGbp" | "contractEndedAtLabel"
+  >;
+}): HireEndedGlanceDisplay {
+  const summary = input.payments.terminationSummary;
+  const endYmd =
+    input.payments.contractEndedYmd ??
+    (summary?.terminatedAt ? summary.terminatedAt.slice(0, 10) : null);
+  const startYmd = summary?.activatedAt ? summary.activatedAt.slice(0, 10) : null;
+
+  return {
+    hirePeriodLabel: startYmd && endYmd ? formatUkDateRangeText(startYmd, endYmd) : "—",
+    rentLabel: input.context.rentLabel ?? "—",
+    depositReceivedLabel:
+      input.payments.depositGbp != null && input.payments.depositGbp > 0.005
+        ? formatGbp(input.payments.depositGbp)
+        : "—",
+    contractEndedLabel: input.payments.contractEndedAtLabel ?? input.context.endedAtLabel ?? "—",
+  };
+}
+
+export function buildHireEndedHeroMetrics(input: {
+  payments: Pick<HirePaymentsPageData, "terminationSummary" | "contractEndedYmd">;
+}): { hirePeriodLabel: string; timeOnHireLabel: string } {
+  const summary = input.payments.terminationSummary;
+  const endYmd =
+    input.payments.contractEndedYmd ??
+    (summary?.terminatedAt ? summary.terminatedAt.slice(0, 10) : null);
+  const startYmd = summary?.activatedAt ? summary.activatedAt.slice(0, 10) : null;
+
+  return {
+    hirePeriodLabel: startYmd && endYmd ? formatUkDateRangeText(startYmd, endYmd) : "—",
+    timeOnHireLabel: summary
+      ? formatHireDurationWeeksAndDays(summary.durationDays)
+      : "—",
+  };
+}
+
+export function buildHireEndedSummaryStats(input: {
+  dashboard: HireDashboardData;
+  payments: HirePaymentsPageData;
+}) {
+  const summary = input.payments.terminationSummary;
+  const depositAppliedGbp = summary ? hireDepositAppliedToRentGbp(summary) : 0;
+  const rentSettledGbp = summary?.accruedRentDueGbp ?? input.dashboard.summary.totalDueGbp;
+  const rentPaidGbp = summary?.accruedRentPaidGbp ?? input.dashboard.summary.totalPaidGbp;
+  const driverChargesGbp = sumDriverChargesGbp(input.payments.driverChargeLineItems);
+  const driverChargeCount = countBillableDriverCharges(input.payments.driverChargeLineItems);
+  const ledger = summarizeHireSettlementLedger(input.payments.settlementBalancePayments);
+  const refundPaidGbp = ledger.settlementPaidGbp;
+  const refundPaymentCount = input.payments.settlementBalancePayments.filter(
+    (payment) => payment.direction === "paid_to_driver",
+  ).length;
+
+  return {
+    rentSettledGbp: roundGbp(rentSettledGbp),
+    rentSettledHint: formatRentSettledHint(rentPaidGbp, depositAppliedGbp),
+    driverChargesGbp,
+    driverChargesHint: formatDriverChargesHint(driverChargeCount),
+    refundPaidGbp,
+    refundPaidHint: formatRefundPaidHint(refundPaymentCount),
+    depositAppliedGbp,
+    driverChargeCount,
+  };
+}
+
+export function hireEndedSettlementChipLabel(
+  payments: Pick<HirePaymentsPageData, "settlementBalance" | "depositPendingReview">,
+): string | null {
+  if (payments.depositPendingReview) return null;
+  if (payments.settlementBalance?.settled) return "Settlement completed";
+  if (payments.settlementBalance?.settlementDirection === "company_owes_driver") {
+    return "Refund due";
+  }
+  if (payments.settlementBalance?.settlementDirection === "driver_owes_company") {
+    return "Balance outstanding";
+  }
+  return null;
+}

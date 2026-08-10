@@ -425,6 +425,59 @@ export async function loadHireInspectionAction(
   return { ok: true, data };
 }
 
+export type HireEndedInspectionAttentionData = {
+  items: import("@/lib/fleet/hire-ended-inspection-attention").HireEndedInspectionAttentionItem[];
+  checkinCompleted: boolean;
+};
+
+export async function loadHireEndedInspectionAttentionAction(
+  hireGroupId: string,
+): Promise<ActionResult<HireEndedInspectionAttentionData>> {
+  const { profile } = await requireRentalCompanyArea();
+  if (!canReadRentals(profile)) return { ok: false, error: "You do not have permission." };
+
+  const id = hireGroupId.trim();
+  const supabase = await createClient();
+  const { data: group, error: groupError } = await supabase
+    .from("vehicle_hire_groups")
+    .select("id, vehicle_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (groupError) return { ok: false, error: groupError.message };
+  if (!group?.id) return { ok: false, error: "Hire not found." };
+
+  const vehicleId = group.vehicle_id as string | null;
+  const [checkout, checkin] = await Promise.all([
+    loadInspectionPayload(supabase, id, "checkout", vehicleId),
+    loadInspectionPayload(supabase, id, "checkin", vehicleId),
+  ]);
+
+  const { buildHireEndedInspectionAttentionItems } = await import(
+    "@/lib/fleet/hire-ended-inspection-attention"
+  );
+  const checkinHref = `/rental/hires/${id}/checkin`;
+  const items = buildHireEndedInspectionAttentionItems({
+    hireGroupId: id,
+    checkinHref,
+    checkoutOdometerMiles: checkout?.odometerReading ?? null,
+    checkoutAccessories: checkout?.accessories ?? { ...EMPTY_HIRE_INSPECTION_ACCESSORIES },
+    checkinOdometerMiles: checkin?.odometerReading ?? null,
+    checkinAccessories: checkin?.accessories ?? { ...EMPTY_HIRE_INSPECTION_ACCESSORIES },
+    checkinDamages: (checkin?.damages ?? []).map((damage) => ({
+      checkoutDamageId: damage.checkoutDamageId,
+    })),
+    checkinCompleted: Boolean(checkin?.checkinCompleted),
+  });
+
+  return {
+    ok: true,
+    data: {
+      items,
+      checkinCompleted: Boolean(checkin?.checkinCompleted),
+    },
+  };
+}
+
 export type HireInspectionDamageDraftInput = {
   id?: string | null;
   panelId: string;

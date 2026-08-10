@@ -163,6 +163,33 @@ export function formatUkDateTimeText(value: string | Date | null | undefined, em
   return d.toLocaleString(LOCALE, { ...UK_DATETIME_TEXT, timeZone: "Europe/London" });
 }
 
+/** Calendar date with short month: `10 Aug 2026`. */
+export function formatUkDateText(value: string | Date | null | undefined, empty = "—"): string {
+  if (value == null || value === "") return empty;
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value.trim()) && !value.includes("T")) {
+    const d = parseCalendarDay(value);
+    if (!d) return empty;
+    return d.toLocaleDateString(LOCALE, { ...UK_DATE_TEXT, timeZone: "UTC" });
+  }
+  const d = parseInstant(value);
+  if (!d) return empty;
+  return d.toLocaleDateString(LOCALE, { ...UK_DATE_TEXT, timeZone: "Europe/London" });
+}
+
+/** Inclusive calendar range with short month: `29 Jul – 8 Aug 2026`. */
+export function formatUkDateRangeText(
+  startYmd: string | null | undefined,
+  endYmd: string | null | undefined,
+  empty = "—",
+): string {
+  const start = formatUkDateText(startYmd, "");
+  if (!start) return empty;
+  if (!endYmd || endYmd === startYmd) return start;
+  const end = formatUkDateText(endYmd, "");
+  if (!end) return start;
+  return `${start} – ${end}`;
+}
+
 /** Calendar date + fixed time with short month: `9 Aug 2027, 09:00`. */
 export function formatUkCalendarDateTimeText(
   dateYmd: string | null | undefined,

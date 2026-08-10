@@ -5,13 +5,17 @@ import {
   type HireDashboardData,
 } from "@/app/actions/hire-dashboard";
 import {
+  loadHireEndedInspectionAttentionAction,
+  type HireEndedInspectionAttentionData,
+} from "@/app/actions/hire-inspections";
+import {
   loadHirePaymentsPageAction,
   type HirePaymentPageRow,
+  type HirePaymentsPageData,
 } from "@/app/actions/hire-payments";
 import { HireActiveCompanySummary } from "@/components/fleet/hire-summary/hire-active-company-summary";
-import { HireOverviewView } from "@/components/fleet/hire-overview/hire-overview-view";
+import { HireEndedCompanySummary } from "@/components/fleet/hire-summary/hire-ended-company-summary";
 import { useHirePaymentsRealtime } from "@/hooks/use-hire-realtime";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { useHireWorkspace } from "./hire-workspace-provider";
@@ -21,7 +25,11 @@ export function HireDashboardClient() {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [data, setData] = useState<HireDashboardData | null>(null);
+  const [payments, setPayments] = useState<HirePaymentsPageData | null>(null);
   const [paymentRows, setPaymentRows] = useState<readonly HirePaymentPageRow[]>([]);
+  const [inspectionAttention, setInspectionAttention] = useState<HireEndedInspectionAttentionData | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   const base = `/rental/hires/${shell.hireGroupId}`;
@@ -35,17 +43,29 @@ export function HireDashboardClient() {
       if (!dashboardRes.ok) {
         setError(dashboardRes.error);
         setData(null);
+        setPayments(null);
         setPaymentRows([]);
+        setInspectionAttention(null);
         return;
       }
       if (!paymentsRes.ok) {
         setError(paymentsRes.error);
         setData(null);
+        setPayments(null);
         setPaymentRows([]);
+        setInspectionAttention(null);
         return;
       }
+
+      let inspectionRes: Awaited<ReturnType<typeof loadHireEndedInspectionAttentionAction>> | null = null;
+      if (dashboardRes.data.overview.contractEnded) {
+        inspectionRes = await loadHireEndedInspectionAttentionAction(shell.hireGroupId);
+      }
+
       setData(dashboardRes.data);
+      setPayments(paymentsRes.data);
       setPaymentRows(paymentsRes.data.rows);
+      setInspectionAttention(inspectionRes?.ok ? inspectionRes.data : { items: [], checkinCompleted: false });
       setError(null);
     });
   }, [shell.hireGroupId]);
@@ -66,7 +86,7 @@ export function HireDashboardClient() {
   }
 
   if (error) return <p className="rph-alert-error text-sm">{error}</p>;
-  if (!data) return null;
+  if (!data || !payments) return null;
 
   const contractEnded = data.overview.contractEnded;
 
@@ -89,18 +109,14 @@ export function HireDashboardClient() {
   }
 
   return (
-    <HireOverviewView
+    <HireEndedCompanySummary
       data={data}
       context={data.overview}
-      audience="staff"
+      payments={payments}
+      inspectionItems={inspectionAttention?.items ?? []}
       paymentsHref={`${base}/payments`}
-      headerActions={
-        shell.status === "terminated" ? (
-          <Link href={`${base}/checkin`} className="rph-btn-primary">
-            Vehicle check-in
-          </Link>
-        ) : null
-      }
+      detailsHref={`${base}/details`}
+      inspectionsHref={`${base}/checkout`}
     />
   );
 }

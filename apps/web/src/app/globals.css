@@ -350,6 +350,66 @@ html {
 .hire-ws-banner {
   @apply rounded-2xl bg-rph-rail px-5 py-5 text-white shadow-sm dark:bg-rph-rail-soft;
 }
+.hire-ws-settled-banner {
+  @apply flex flex-col gap-4 rounded-2xl border border-emerald-200/90 bg-emerald-50 px-5 py-5 shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/25 lg:flex-row lg:items-center lg:justify-between;
+}
+.hire-ws-settled-banner-main {
+  @apply flex min-w-0 items-center gap-3;
+}
+.hire-ws-settled-banner-icon {
+  @apply flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm;
+}
+.hire-ws-settled-banner-kicker {
+  @apply text-[10px] font-semibold uppercase tracking-wider text-rph-fg-muted;
+}
+.hire-ws-settled-banner-title {
+  @apply text-xl font-semibold tracking-tight text-rph-fg sm:text-2xl;
+}
+.hire-ws-settled-banner-balance {
+  @apply shrink-0 border-t border-emerald-200/80 pt-4 text-left dark:border-emerald-900/50 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0 lg:text-right;
+}
+.hire-ws-settled-banner-badge {
+  @apply mt-1.5 inline-flex rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-100;
+}
+.hire-ws-rating-icon {
+  @apply flex h-11 w-11 shrink-0 items-center justify-center self-center rounded-xl shadow-sm;
+}
+.hire-ws-rating-icon-on_track {
+  @apply bg-emerald-600 text-white;
+}
+.hire-ws-rating-icon-attention {
+  @apply bg-amber-500 text-white;
+}
+.hire-ws-rating-icon-at_risk {
+  @apply bg-red-600 text-white;
+}
+.hire-ws-rating-label-on_track {
+  @apply text-emerald-700 dark:text-emerald-300;
+}
+.hire-ws-rating-label-attention {
+  @apply text-amber-700 dark:text-amber-300;
+}
+.hire-ws-rating-label-at_risk {
+  @apply text-red-700 dark:text-red-300;
+}
+.hire-ws-refund-flow {
+  @apply flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between;
+}
+.hire-ws-refund-step {
+  @apply min-w-0 flex-1 rounded-xl border border-rph-border bg-rph-page/50 px-3 py-3 text-center;
+}
+.hire-ws-refund-step-highlight {
+  @apply border-rph-rail bg-rph-rail text-white dark:border-rph-rail-soft dark:bg-rph-rail-soft;
+}
+.hire-ws-refund-step-highlight .hire-ws-section-kicker {
+  @apply text-white/70;
+}
+.hire-ws-refund-step-highlight p:last-child {
+  @apply text-white;
+}
+.hire-ws-refund-operator {
+  @apply flex h-8 w-8 shrink-0 items-center justify-center self-center rounded-full bg-rph-chrome text-sm font-semibold text-rph-fg-muted;
+}
 .hire-ws-stat-card {
   @apply rounded-xl border border-rph-border bg-rph-raised p-3.5 shadow-sm;
 }
@@ -387,13 +447,16 @@ html {
   @apply border-rph-rail text-rph-fg dark:border-rph-rail-soft;
 }
 .hire-ws-progress {
-  @apply h-2 overflow-hidden rounded-full bg-rph-chrome;
+  @apply h-2.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700;
 }
 .hire-ws-progress-fill {
-  @apply h-full rounded-full bg-amber-500;
+  @apply h-full min-w-[4px] rounded-full bg-amber-500 transition-[width];
 }
 .hire-ws-progress-fill-ok {
-  @apply bg-emerald-500;
+  @apply bg-emerald-600;
+}
+.hire-ws-progress-fill-danger {
+  @apply bg-red-600;
 }
 .hire-ws-compact-card {
   @apply rounded-xl border border-rph-border bg-rph-raised p-4 shadow-sm;

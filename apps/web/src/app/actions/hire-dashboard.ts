@@ -661,7 +661,7 @@ async function buildDriverDashboardData(
   const scheduleDepositStatusLabel = depositStatusLabel(analyticsRows, today);
   const driverEmail = (group.driver_email as string | null) ?? user.email ?? null;
   const driverLicence = (group.driver_licence_number as string | null) ?? null;
-  const driverUserId = (group.driver_user_id as string | null) ?? user.id;
+  const driverUserId = user.id;
   const driverName = await loadHireDriverDisplayName(driverUserId, driverEmail, driverLicence);
   const agreementEndDates = (
     (group.vehicle_hire_agreements as { end_date?: string | null }[] | null | undefined) ?? []

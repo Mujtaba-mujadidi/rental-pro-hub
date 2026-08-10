@@ -20,6 +20,14 @@ import {
 } from "@/components/fleet/hire-workspace/hire-workspace-ui";
 import { HireDepositPendingBanner } from "@/components/fleet/hire-dashboard/hire-deposit-pending-banner";
 
+function paymentRatingProgressTone(
+  level: "on_track" | "attention" | "at_risk",
+): "ok" | "warn" | "danger" {
+  if (level === "on_track") return "ok";
+  if (level === "at_risk") return "danger";
+  return "warn";
+}
+
 export function HireActiveCompanySummary({
   data,
   context,
@@ -182,7 +190,7 @@ export function HireActiveCompanySummary({
                 <div className="mt-1.5">
                   <HireWorkspaceProgressBar
                     percent={rating.scorePercent}
-                    tone={rating.level === "on_track" ? "ok" : "warn"}
+                    tone={paymentRatingProgressTone(rating.level)}
                   />
                 </div>
                 {rating.scoreHint ? (

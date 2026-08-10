@@ -9,6 +9,10 @@ import {
 } from "@/lib/fleet/hire-active-summary-display";
 import { formatHireRentMetricLabel } from "@/lib/fleet/hire-access-display";
 import { formatUkDateTime } from "@/lib/datetime/uk";
+import {
+  buildHireEndedHeroMetrics,
+  hireEndedSettlementChipLabel,
+} from "@/lib/fleet/hire-ended-summary-display";
 import { loadHireLessorDisplayName } from "@/lib/fleet/hire-lessor-display";
 import type { HireWorkspaceChromeData } from "@/lib/fleet/hire-workspace-chrome-types";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -65,6 +69,12 @@ async function fetchStaffHireWorkspaceChrome(groupId: string): Promise<HireWorks
   const amountDueChip = context.contractEnded
     ? null
     : formatAmountDueChip(paymentPosition.currentlyDueGbp);
+  const endedHero = context.contractEnded
+    ? buildHireEndedHeroMetrics({ payments: paymentsRes.data })
+    : null;
+  const settlementStatusChip = context.contractEnded
+    ? hireEndedSettlementChipLabel(paymentsRes.data)
+    : null;
 
   return {
     ok: true,
@@ -83,6 +93,9 @@ async function fetchStaffHireWorkspaceChrome(groupId: string): Promise<HireWorks
       dailyRentLabel: hero.dailyRentLabel,
       rentMetricLabel: formatHireRentMetricLabel(context.rentCadence),
       frequencyHint: null,
+      endedHirePeriodLabel: endedHero?.hirePeriodLabel ?? null,
+      endedTimeOnHireLabel: endedHero?.timeOnHireLabel ?? null,
+      settlementStatusChip,
       canTerminate: dashboardRes.data.canTerminate,
       includeDeposit: dashboardRes.data.includeDeposit,
       checkout,
