@@ -44,6 +44,7 @@ import {
   driverAccessResendReasonCopy,
   type DriverAccessResendReason,
 } from "@/lib/fleet/hire-access-token";
+import { HIRE_INSURANCE_PROVIDED_BY_LABELS } from "@/lib/fleet/hire-insurance";
 import DOMPurify from "isomorphic-dompurify";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
