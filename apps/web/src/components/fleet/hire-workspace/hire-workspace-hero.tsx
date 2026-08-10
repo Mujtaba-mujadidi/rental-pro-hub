@@ -54,12 +54,12 @@ export function HireWorkspaceHero({
           </div>
         </div>
 
-        <dl className="mt-3 grid gap-3 border-t border-rph-border pt-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="hire-ws-hero-metrics">
           <Metric label="Driver" value={chrome.driverName ?? "—"} />
           <Metric label="Active since" value={chrome.activeSinceLabel} />
           <Metric label="Contract ends" value={chrome.contractEndLabel ?? "—"} />
-          <Metric label="Daily rent" value={chrome.dailyRentLabel ?? "—"} hint={chrome.frequencyHint} />
-        </dl>
+          <Metric label={chrome.rentMetricLabel} value={chrome.dailyRentLabel ?? "—"} />
+        </div>
       </section>
 
       {chrome.canTerminate ? (
@@ -78,17 +78,14 @@ export function HireWorkspaceHero({
 function Metric({
   label,
   value,
-  hint,
 }: {
   label: string;
   value: string;
-  hint?: string | null;
 }) {
   return (
-    <div className="min-w-0">
-      <dt className="hire-ws-section-kicker">{label}</dt>
-      <dd className="mt-0.5 text-sm font-medium text-rph-fg">{value}</dd>
-      {hint ? <dd className="mt-0.5 text-[11px] text-rph-fg-muted">{hint}</dd> : null}
+    <div className="hire-ws-hero-metric">
+      <p className="hire-ws-section-kicker">{label}</p>
+      <p className="mt-0.5 whitespace-nowrap text-sm font-semibold text-rph-fg">{value}</p>
     </div>
   );
 }

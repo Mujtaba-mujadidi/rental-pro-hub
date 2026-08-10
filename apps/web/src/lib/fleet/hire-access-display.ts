@@ -66,6 +66,19 @@ export function formatRentLabel(amountGbp: unknown, cadence: unknown): string | 
   return unit ? `${amount} per ${unit}` : amount;
 }
 
+/** Rent amount only — used where the cadence is shown in the field label (e.g. Daily rent). */
+export function formatHireRentAmountGbp(amountGbp: unknown): string | null {
+  return formatGbp(amountGbp);
+}
+
+export function formatHireRentMetricLabel(cadence: unknown): string {
+  const c = String(cadence ?? "").trim() as RentCadence;
+  if (c === "daily") return "Daily rent";
+  if (c === "weekly") return "Weekly rent";
+  if (c === "monthly") return "Monthly rent";
+  return "Rent";
+}
+
 export function buildContractLengthLines(
   startDate: string | null,
   draftSnapshot: unknown,

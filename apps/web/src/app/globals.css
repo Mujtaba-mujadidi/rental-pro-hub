@@ -359,6 +359,27 @@ html {
 .hire-ws-section-kicker {
   @apply text-[10px] font-semibold uppercase tracking-wider text-rph-fg-muted;
 }
+.hire-ws-hero-metrics {
+  display: inline-flex;
+  max-width: 100%;
+  flex-direction: row;
+  align-items: center;
+  margin-top: 0.5rem;
+  width: fit-content;
+}
+.hire-ws-hero-metric {
+  flex: none;
+  width: max-content;
+}
+.hire-ws-hero-metric:not(:first-child) {
+  margin-left: 0.5rem;
+  padding-left: 1rem;
+  @apply border-l border-rph-border;
+}
+.hire-ws-hero-metric p:last-child {
+  margin-top: 0.125rem;
+}
+
 .hire-ws-tab {
   @apply inline-flex h-10 shrink-0 items-center gap-2 border-b-2 border-transparent px-1 pb-3 pt-1 text-sm font-medium text-rph-fg-muted transition-colors hover:text-rph-fg;
 }

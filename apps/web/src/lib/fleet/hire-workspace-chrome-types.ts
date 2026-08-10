@@ -17,6 +17,7 @@ export type HireWorkspaceChromeData = {
   activeSinceLabel: string;
   contractEndLabel: string | null;
   dailyRentLabel: string | null;
+  rentMetricLabel: string;
   frequencyHint: string | null;
   canTerminate: boolean;
   includeDeposit: boolean;

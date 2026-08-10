@@ -40,7 +40,12 @@ import type { HireLifecycleAttentionItem } from "@/lib/fleet/hire-lifecycle-atte
 import type { HirePaymentSummary } from "@/lib/fleet/hire-payment-summary";
 import type { HirePaymentDisplayOptions } from "@/lib/fleet/hire-payment-display";
 import type { HireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
+import {
+  buildHireWorkspaceHeroMetrics,
+  type HireWorkspaceHeroMetrics,
+} from "@/lib/fleet/hire-workspace-hero-display";
 import { driverHireStatusLabel } from "@/lib/fleet/driver-hire-nav";
+import { loadDriverLabelsMap } from "@/lib/fleet/driver-labels";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -80,6 +85,7 @@ export type HireDashboardData = {
   depositDispositionLabel: string | null;
   financialClosure: HireFinancialClosureState;
   overview: HireOverviewContext;
+  workspaceHero: HireWorkspaceHeroMetrics;
   terminationSummary: HireTerminationAccountsSummary | null;
 };
 
@@ -87,22 +93,38 @@ function shortHireId(hireGroupId: string): string {
   return hireGroupId.trim().slice(0, 8);
 }
 
-function driverNameFromEmail(email: string | null): string | null {
-  const trimmed = email?.trim();
-  if (!trimmed) return null;
-  const local = trimmed.split("@")[0] ?? "";
-  if (!local) return trimmed;
-  return local
-    .split(/[._-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+function resolveHireDriverDisplayName(
+  profileLabel: string | undefined,
+  driverEmail: string | null,
+  driverLicence: string | null,
+): string | null {
+  if (profileLabel && profileLabel !== "Driver" && !profileLabel.includes("@")) {
+    return profileLabel;
+  }
+  return driverEmail ?? driverLicence;
+}
+
+async function loadHireDriverDisplayName(
+  driverUserId: string | null,
+  driverEmail: string | null,
+  driverLicence: string | null,
+): Promise<string | null> {
+  if (!driverUserId) {
+    return resolveHireDriverDisplayName(undefined, driverEmail, driverLicence);
+  }
+  try {
+    const labels = await loadDriverLabelsMap(createSupabaseAdminClient(), [driverUserId]);
+    return resolveHireDriverDisplayName(labels.get(driverUserId), driverEmail, driverLicence);
+  } catch {
+    return resolveHireDriverDisplayName(undefined, driverEmail, driverLicence);
+  }
 }
 
 function buildOverviewContext(input: {
   hireGroupId: string;
   vehicleVrm: string;
   vehicleMakeModel: string;
+  driverName: string | null;
   driverEmail: string | null;
   driverLicence: string | null;
   companyName: string | null;
@@ -146,7 +168,7 @@ function buildOverviewContext(input: {
     hireGroupIdShort: shortHireId(input.hireGroupId),
     vehicleVrm: input.vehicleVrm,
     vehicleMakeModel: input.vehicleMakeModel,
-    driverName: driverNameFromEmail(input.driverEmail) ?? input.driverLicence,
+    driverName: input.driverName,
     driverEmail: input.driverEmail,
     companyName: input.companyName,
     rentLabel: formatRentLabel(input.group.rent_amount_gbp, cadence),
@@ -412,13 +434,31 @@ export async function loadHireDashboardAction(
     depositGbp: page.data.depositGbp,
   });
   const scheduleDepositStatusLabel = depositStatusLabel(analyticsRows, today);
+  const driverEmail = (group?.driver_email as string | null) ?? null;
+  const driverLicence = (group?.driver_licence_number as string | null) ?? null;
+  const driverName = await loadHireDriverDisplayName(driverUserId, driverEmail, driverLicence);
+  const agreementEndDates = (
+    (group?.vehicle_hire_agreements as { end_date?: string | null }[] | null | undefined) ?? []
+  ).map((a) => a.end_date);
+  const workspaceHero = buildHireWorkspaceHeroMetrics({
+    startDate,
+    startTime: (group?.start_time as string | null) ?? null,
+    endTime: (group?.end_time as string | null) ?? null,
+    activatedAt: (group?.activated_at as string | null) ?? null,
+    terminatedAt: (group?.terminated_at as string | null) ?? null,
+    endedAt: (group?.ended_at as string | null) ?? null,
+    status: hireStatus,
+    rentAmountGbp: group?.rent_amount_gbp != null ? Number(group.rent_amount_gbp) : null,
+    agreementEndDates,
+  });
   const overview = buildOverviewContext({
     hireGroupId: hireGroupId.trim(),
     vehicleVrm: vehicle?.vrm?.trim() || page.data.vehicleVrm,
     vehicleMakeModel:
       [vehicle?.make, vehicle?.model].filter(Boolean).join(" ").trim() || page.data.vehicleVrm,
-    driverEmail: (group?.driver_email as string | null) ?? null,
-    driverLicence: (group?.driver_licence_number as string | null) ?? null,
+    driverName,
+    driverEmail,
+    driverLicence: driverLicence,
     companyName: null,
     statusLabel: driverHireStatusLabel(hireStatus),
     group: group ?? {
@@ -434,9 +474,7 @@ export async function loadHireDashboardAction(
       deposit_gbp: null,
       include_deposit: false,
     },
-    agreementEndDates: (
-      (group?.vehicle_hire_agreements as { end_date?: string | null }[] | null | undefined) ?? []
-    ).map((a) => a.end_date),
+    agreementEndDates,
     scheduleRows: analyticsRows,
     contractEndedAtLabel: page.data.contractEndedAtLabel,
     todayYmd: today,
@@ -478,6 +516,7 @@ export async function loadHireDashboardAction(
       depositDispositionLabel: page.data.depositDispositionLabel,
       financialClosure,
       overview,
+      workspaceHero,
       terminationSummary: page.data.terminationSummary,
     },
   };
@@ -620,18 +659,35 @@ async function buildDriverDashboardData(
     depositGbp: page.data.depositGbp,
   });
   const scheduleDepositStatusLabel = depositStatusLabel(analyticsRows, today);
+  const driverEmail = (group.driver_email as string | null) ?? user.email ?? null;
+  const driverLicence = (group.driver_licence_number as string | null) ?? null;
+  const driverUserId = (group.driver_user_id as string | null) ?? user.id;
+  const driverName = await loadHireDriverDisplayName(driverUserId, driverEmail, driverLicence);
+  const agreementEndDates = (
+    (group.vehicle_hire_agreements as { end_date?: string | null }[] | null | undefined) ?? []
+  ).map((a) => a.end_date);
+  const workspaceHero = buildHireWorkspaceHeroMetrics({
+    startDate,
+    startTime: (group.start_time as string | null) ?? null,
+    endTime: (group.end_time as string | null) ?? null,
+    activatedAt: (group.activated_at as string | null) ?? null,
+    terminatedAt: (group.terminated_at as string | null) ?? null,
+    endedAt: (group.ended_at as string | null) ?? null,
+    status: hireStatus,
+    rentAmountGbp: group.rent_amount_gbp != null ? Number(group.rent_amount_gbp) : null,
+    agreementEndDates,
+  });
   const overview = buildOverviewContext({
     hireGroupId: hireGroupId.trim(),
     vehicleVrm: shell.vehicleVrm,
     vehicleMakeModel: shell.vehicleMakeModel,
-    driverEmail: (group.driver_email as string | null) ?? user.email ?? null,
-    driverLicence: (group.driver_licence_number as string | null) ?? null,
+    driverName,
+    driverEmail,
+    driverLicence,
     companyName: shell.companyName,
     statusLabel: shell.statusLabel,
     group,
-    agreementEndDates: (
-      (group.vehicle_hire_agreements as { end_date?: string | null }[] | null | undefined) ?? []
-    ).map((a) => a.end_date),
+    agreementEndDates,
     scheduleRows: analyticsRows,
     contractEndedAtLabel: page.data.contractEndedAtLabel,
     todayYmd: today,
@@ -673,6 +729,7 @@ async function buildDriverDashboardData(
       depositDispositionLabel: page.data.depositDispositionLabel,
       financialClosure,
       overview,
+      workspaceHero,
       terminationSummary: page.data.terminationSummary,
     },
   };

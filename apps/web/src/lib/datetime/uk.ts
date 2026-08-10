@@ -28,6 +28,19 @@ const UK_DATETIME_SECONDS_NUMERIC: Intl.DateTimeFormatOptions = {
   second: "2-digit",
 };
 
+const UK_DATE_TEXT: Intl.DateTimeFormatOptions = {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+};
+
+const UK_DATETIME_TEXT: Intl.DateTimeFormatOptions = {
+  ...UK_DATE_TEXT,
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+};
+
 /** Today's calendar date in UK (YYYY-MM-DD) for hire start / fleet status logic. */
 export function ukTodayYmd(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
@@ -137,6 +150,30 @@ export function formatUkDateTimeSeconds(value: string | Date | null | undefined,
   const d = parseInstant(value);
   if (!d) return empty;
   return d.toLocaleString(LOCALE, { ...UK_DATETIME_SECONDS_NUMERIC, timeZone: "Europe/London" });
+}
+
+/**
+ * UK date + time with short month: `10 Aug 2026, 01:23` (24-hour, Europe/London).
+ * Use for hire workspace hero and other compact summary headers.
+ */
+export function formatUkDateTimeText(value: string | Date | null | undefined, empty = "—"): string {
+  if (value == null || value === "") return empty;
+  const d = parseInstant(value);
+  if (!d) return empty;
+  return d.toLocaleString(LOCALE, { ...UK_DATETIME_TEXT, timeZone: "Europe/London" });
+}
+
+/** Calendar date + fixed time with short month: `9 Aug 2027, 09:00`. */
+export function formatUkCalendarDateTimeText(
+  dateYmd: string | null | undefined,
+  time24: string,
+  empty = "—",
+): string {
+  const d = dateYmd?.trim() ? parseCalendarDay(dateYmd) : null;
+  if (!d) return empty;
+  const datePart = d.toLocaleDateString(LOCALE, { ...UK_DATE_TEXT, timeZone: "UTC" });
+  const t = time24.trim();
+  return t ? `${datePart}, ${t}` : datePart;
 }
 
 function utcStartOfDayMs(d: Date): number {

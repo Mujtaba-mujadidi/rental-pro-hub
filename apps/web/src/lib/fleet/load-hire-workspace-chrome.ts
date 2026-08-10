@@ -7,6 +7,7 @@ import {
   buildActiveHirePaymentPosition,
   formatAmountDueChip,
 } from "@/lib/fleet/hire-active-summary-display";
+import { formatHireRentMetricLabel } from "@/lib/fleet/hire-access-display";
 import { formatUkDateTime } from "@/lib/datetime/uk";
 import { loadHireLessorDisplayName } from "@/lib/fleet/hire-lessor-display";
 import type { HireWorkspaceChromeData } from "@/lib/fleet/hire-workspace-chrome-types";
@@ -56,6 +57,7 @@ async function fetchStaffHireWorkspaceChrome(groupId: string): Promise<HireWorks
   const admin = createSupabaseAdminClient();
   const lessorName = await loadHireLessorDisplayName(admin, id);
   const context = dashboardRes.data.overview;
+  const hero = dashboardRes.data.workspaceHero;
   const paymentPosition = buildActiveHirePaymentPosition({
     dashboard: dashboardRes.data,
     paymentRows: paymentsRes.data.rows,
@@ -76,12 +78,11 @@ async function fetchStaffHireWorkspaceChrome(groupId: string): Promise<HireWorks
       contractEnded: context.contractEnded,
       amountDueChip,
       driverName: context.driverName,
-      activeSinceLabel: context.startAtLabel,
-      contractEndLabel: context.contractEnded
-        ? context.endedAtLabel
-        : context.scheduledEndAtLabel,
-      dailyRentLabel: context.rentLabel,
-      frequencyHint: context.frequencyPositionLabel,
+      activeSinceLabel: hero.activeSinceLabel,
+      contractEndLabel: hero.contractEndLabel,
+      dailyRentLabel: hero.dailyRentLabel,
+      rentMetricLabel: formatHireRentMetricLabel(context.rentCadence),
+      frequencyHint: null,
       canTerminate: dashboardRes.data.canTerminate,
       includeDeposit: dashboardRes.data.includeDeposit,
       checkout,
