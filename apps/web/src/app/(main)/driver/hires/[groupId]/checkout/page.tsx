@@ -1,16 +1,16 @@
 "use client";
 
-import { HireInspectionWizard } from "@/components/fleet/hire-inspection/hire-inspection-wizard";
+import { HireInspectionsWorkspaceClient } from "@/components/fleet/hire-inspection/hire-inspections-workspace-client";
 import { useDriverHireWorkspace } from "../driver-hire-workspace-provider";
 
 export default function DriverHireCheckoutPage() {
   const { shell } = useDriverHireWorkspace();
   return (
-    <HireInspectionWizard
+    <HireInspectionsWorkspaceClient
       hireGroupId={shell.hireGroupId}
-      kind="checkout"
-      vehicleLabel={`${shell.vehicleVrm} · ${shell.vehicleMakeModel}`}
       hireStatus={shell.status}
+      vehicleLabel={`${shell.vehicleVrm} · ${shell.vehicleMakeModel}`}
+      focusKind="checkout"
       audience="driver"
     />
   );

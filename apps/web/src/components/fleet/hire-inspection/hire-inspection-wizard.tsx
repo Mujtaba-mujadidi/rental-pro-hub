@@ -185,6 +185,7 @@ type Props = {
   hireStatus: string;
   vehicleId?: string | null;
   audience?: "staff" | "driver";
+  embedded?: boolean;
 };
 
 export function HireInspectionWizard({
@@ -194,6 +195,7 @@ export function HireInspectionWizard({
   hireStatus,
   vehicleId,
   audience = "staff",
+  embedded = false,
 }: Props) {
   const router = useRouter();
   const [step, setStep] = useState(1);
@@ -658,13 +660,15 @@ export function HireInspectionWizard({
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="rph-h1">{title}</h1>
-        <p className="rph-muted mt-1 text-sm">
-          {vehicleLabel}
-          {readOnly ? " · Completed" : ""}
-        </p>
-      </div>
+      {!embedded ? (
+        <div>
+          <h1 className="rph-h1">{title}</h1>
+          <p className="rph-muted mt-1 text-sm">
+            {vehicleLabel}
+            {readOnly ? " · Completed" : ""}
+          </p>
+        </div>
+      ) : null}
 
       {wrongStatus ? (
         <p className="rph-alert-error text-sm">
@@ -689,6 +693,9 @@ export function HireInspectionWizard({
           fuelLevel={fuelLevel}
           accessories={accessories}
           generalNotes={generalNotes}
+          trackerLinked={trackerLinked}
+          completedByLabel={audience === "driver" ? "Rental company" : "Company staff"}
+          checkinCompleted={data.checkinCompleted}
         />
       ) : (
         <div className="relative">

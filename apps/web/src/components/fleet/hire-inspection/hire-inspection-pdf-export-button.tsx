@@ -38,24 +38,26 @@ export function HireInspectionPdfExportButton({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-col items-end gap-1">
       <button
         type="button"
-        className="rph-btn-ghost text-sm"
+        className="hire-ws-inspection-download-btn"
         disabled={pending}
         aria-busy={pending}
         onClick={download}
       >
-        Download PDF
+        <DownloadIcon />
+        {pending ? "Preparing…" : "Download PDF"}
       </button>
-      {pending ? (
-        <span
-          className="h-4 w-4 animate-spin rounded-full border-2 border-rph-border border-t-rph-rail"
-          role="status"
-          aria-label="Preparing PDF"
-        />
-      ) : null}
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {error ? <p className="text-xs text-red-600">{error}</p> : null}
     </div>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M12 3v12M7 10l5 5 5-5M5 21h14" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }

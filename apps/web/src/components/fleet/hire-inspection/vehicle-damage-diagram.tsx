@@ -34,6 +34,7 @@ type VehicleDamageDiagramProps = {
   selectedPanelId?: string | null;
   mode?: "edit" | "readonly" | "diff" | "checkin";
   allowExpand?: boolean;
+  showDamageList?: boolean;
   fullscreenAside?: ReactNode;
   onExpandedChange?: (expanded: boolean) => void;
   canRemoveDamage?: (damage: VehicleDamageDiagramEntry) => boolean;
@@ -140,6 +141,7 @@ export function VehicleDamageDiagram({
   selectedPanelId,
   mode = "edit",
   allowExpand = true,
+  showDamageList = true,
   fullscreenAside,
   onExpandedChange,
   onPanelSelect,
@@ -394,14 +396,14 @@ export function VehicleDamageDiagram({
             </aside>
             <div className="flex min-h-0 shrink-0 flex-col gap-3 overflow-hidden lg:col-start-1 lg:row-start-2 lg:min-h-0 lg:shrink">
               {legend}
-              {damageList}
+              {showDamageList ? damageList : null}
             </div>
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
             {diagramSection}
             {legend}
-            {damageList}
+            {showDamageList ? damageList : null}
           </div>
         )}
       </div>
@@ -410,17 +412,22 @@ export function VehicleDamageDiagram({
 
   return (
     <div className="space-y-3">
-      <div className="overflow-hidden rounded-xl border border-rph-border bg-rph-raised p-3">
+      <div
+        className="overflow-hidden rounded-xl border border-rph-border bg-rph-raised p-3"
+        data-hire-inspection-diagram-measure=""
+      >
         {allowExpand ? <div className="mb-2 flex justify-end">{expandButton}</div> : null}
         {diagramCanvas}
-        <p className="rph-muted mt-2 text-center text-xs">
-          {mode === "checkin"
-            ? "Pre-existing checkout damage is read-only · click a panel to add new damage"
-            : "Click a panel on any view to mark damage"}
-        </p>
+        {mode !== "readonly" && mode !== "diff" ? (
+          <p className="rph-muted mt-2 text-center text-xs">
+            {mode === "checkin"
+              ? "Pre-existing checkout damage is read-only · click a panel to add new damage"
+              : "Click a panel on any view to mark damage"}
+          </p>
+        ) : null}
       </div>
       {legend}
-      {damageList}
+      {showDamageList ? damageList : null}
     </div>
   );
 }

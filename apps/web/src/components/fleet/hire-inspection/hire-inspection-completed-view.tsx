@@ -1,29 +1,38 @@
 "use client";
 
-import { RphSectionHeader } from "@/components/ui/rph-toolbar";
 import { useState } from "react";
-import { HireInspectionLazyImage } from "@/components/fleet/hire-inspection/hire-inspection-lazy-image";
 import { HireInspectionPdfExportButton } from "@/components/fleet/hire-inspection/hire-inspection-pdf-export-button";
+import { HireInspectionLazyImage } from "@/components/fleet/hire-inspection/hire-inspection-lazy-image";
+import { HireInspectionVehicleMetrics } from "@/components/fleet/hire-inspection/hire-inspection-vehicle-metrics";
+import { HireInspectionDamageLayout } from "@/components/fleet/hire-inspection/hire-inspection-damage-layout";
+import { HireInspectionRecordedDamageList } from "@/components/fleet/hire-inspection/hire-inspection-recorded-damage-list";
 import { VehicleDamageDiagram } from "@/components/fleet/hire-inspection/vehicle-damage-diagram";
-import { HireInspectionReadingsSection } from "@/components/fleet/hire-inspection/hire-inspection-readings-section";
+import type { HireInspectionPayload } from "@/app/actions/hire-inspections";
 import {
   HIRE_INSPECTION_ACCESSORY_KEYS,
-  formatAccessoryPresence,
   hireInspectionAccessoryLabel,
   type HireInspectionAccessories,
 } from "@/lib/fleet/hire-inspection-accessories";
-import type { HireInspectionPayload } from "@/app/actions/hire-inspections";
 import {
-  getVehicleDamagePanel,
-  hireDamageSeverityLabel,
-  hireDamageTypeLabel,
+  formatHireInspectionOdometer,
+  formatHireInspectionStamp,
+  summarizeInspectionKit,
+} from "@/lib/fleet/hire-inspection-display";
+import { formatHireFuelLevelPercent } from "@/lib/fleet/hire-fuel-level";
+import {
   type HireInspectionKind,
 } from "@/lib/fleet/vehicle-damage-panels";
-import { formatHireFuelLevelPercent } from "@/lib/fleet/hire-fuel-level";
 import type { VehicleDamageDiagramEntry } from "@/components/fleet/hire-inspection/vehicle-damage-diagram";
-import { formatUkDateTime } from "@/lib/datetime/uk";
+import { HireWorkspaceChip } from "@/components/fleet/hire-workspace/hire-workspace-ui";
 
-const TAB_LABELS = ["Vehicle", "Damage", "Photos", "Review"] as const;
+const TABS = [
+  { id: "vehicle", label: "Vehicle" },
+  { id: "damage", label: "Damage" },
+  { id: "photos", label: "Photos" },
+  { id: "summary", label: "Summary" },
+] as const;
+
+type TabId = (typeof TABS)[number]["id"];
 
 type HireInspectionCompletedViewProps = {
   hireGroupId: string;
@@ -35,6 +44,9 @@ type HireInspectionCompletedViewProps = {
   fuelLevel: number | null;
   accessories: HireInspectionAccessories;
   generalNotes: string;
+  trackerLinked?: boolean;
+  completedByLabel?: string;
+  checkinCompleted?: boolean;
 };
 
 export function HireInspectionCompletedView({
@@ -47,137 +59,212 @@ export function HireInspectionCompletedView({
   fuelLevel,
   accessories,
   generalNotes,
+  trackerLinked = false,
+  completedByLabel = "Company staff",
+  checkinCompleted = false,
 }: HireInspectionCompletedViewProps) {
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState<TabId>("summary");
+  const [selectedDamageId, setSelectedDamageId] = useState<string | null>(null);
+  const title = kind === "checkout" ? "Vehicle checkout" : "Vehicle check-in";
+  const recordedAtLabel = kind === "checkout" ? "Recorded at checkout" : "Recorded at check-in";
+  const odometerMiles = odometer.trim()
+    ? Number.parseInt(odometer.replace(/,/g, ""), 10)
+    : data.odometerReading;
+  const kitSummary = summarizeInspectionKit(accessories, HIRE_INSPECTION_ACCESSORY_KEYS);
+  const hireResult =
+    kind === "checkout" ? "Vehicle handed over" : checkinCompleted ? "Vehicle returned" : "Return recorded";
+  const hireResultDetail = generalNotes.trim() ? "Notes recorded on inspection" : null;
 
   return (
-    <div className="space-y-4">
-      <RphSectionHeader
-        actions={
-          <HireInspectionPdfExportButton hireGroupId={hireGroupId} kind={kind} vehicleLabel={vehicleLabel} />
-        }
-      >
-        <div className="flex flex-wrap gap-2">
-          {TAB_LABELS.map((label, index) => (
-            <button
-              key={label}
-              type="button"
-              className={`rph-pill ${tab === index ? "rph-pill-active" : ""}`}
-              onClick={() => setTab(index)}
-            >
-              {label}
-            </button>
-          ))}
+    <section className="hire-ws-inspection-panel">
+      <div className="hire-ws-inspection-panel-header">
+        <div className="min-w-0">
+          <p className="hire-ws-section-kicker">Completed inspection</p>
+          <h2 className="mt-1 text-lg font-semibold tracking-tight text-rph-fg">{title}</h2>
+          <p className="mt-0.5 text-xs text-rph-fg-secondary">
+            {formatHireInspectionStamp(data.completedAt)}
+            <span className="text-rph-fg-muted"> · </span>
+            {completedByLabel}
+          </p>
         </div>
-      </RphSectionHeader>
+        <HireInspectionPdfExportButton hireGroupId={hireGroupId} kind={kind} vehicleLabel={vehicleLabel} />
+      </div>
 
-      {tab === 0 ? (
-        <section className="rph-card space-y-3 p-4">
-          <h2 className="text-sm font-semibold text-rph-fg">Vehicle readings</h2>
-          <HireInspectionReadingsSection
-            odometer={odometer}
-            onOdometerChange={() => {}}
-            fuelLevel={fuelLevel}
-            onFuelLevelChange={() => {}}
-            accessories={accessories}
-            onAccessoryChange={() => {}}
-            trackerOdometerMiles={null}
-            trackerLinked={false}
-            trackerLoading={false}
-            readOnly
-          />
-        </section>
-      ) : null}
+      <nav className="hire-ws-inspection-subtabs" aria-label="Inspection sections">
+        {TABS.map((item) => {
+          const active = tab === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={active ? "hire-ws-tab hire-ws-tab-active" : "hire-ws-tab"}
+              onClick={() => setTab(item.id)}
+              aria-current={active ? "page" : undefined}
+            >
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
 
-      {tab === 1 ? (
-        <section className="rph-card p-4">
-          <h2 className="mb-3 text-sm font-semibold text-rph-fg">Damage diagram</h2>
-          <VehicleDamageDiagram
-            damages={diagramDamages}
-            mode={kind === "checkin" ? "diff" : "readonly"}
-            allowExpand
-          />
-        </section>
-      ) : null}
+      <div className="hire-ws-inspection-panel-body">
+        {tab === "vehicle" ? (
+          <>
+            <HireInspectionVehicleMetrics
+              odometerMiles={Number.isFinite(odometerMiles) ? odometerMiles : data.odometerReading}
+              fuelLevelPercent={fuelLevel}
+              completedAt={data.completedAt}
+              trackerLinked={trackerLinked}
+              recordedAtLabel={recordedAtLabel}
+            />
 
-      {tab === 2 ? (
-        <section className="rph-card space-y-3 p-4">
-          <h2 className="text-sm font-semibold text-rph-fg">Photos</h2>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {data.media.map((item) => (
-              <div key={item.id} className="overflow-hidden rounded-lg border border-rph-border">
-                <HireInspectionLazyImage
-                  hireGroupId={hireGroupId}
-                  mediaId={item.id}
-                  alt={item.caption ?? "Vehicle photo"}
-                  eagerSrc={item.signedUrl}
-                />
-              </div>
-            ))}
-          </div>
-          {!data.media.length ? <p className="rph-muted text-sm">No photos recorded.</p> : null}
-        </section>
-      ) : null}
-
-      {tab === 3 ? (
-        <section className="rph-card space-y-3 p-4">
-          <h2 className="text-sm font-semibold text-rph-fg">Review</h2>
-          {data.completedAt ? (
-            <p className="text-sm text-rph-fg-secondary">
-              Completed {formatUkDateTime(data.completedAt)}
-            </p>
-          ) : null}
-          <dl className="grid gap-2 text-sm sm:grid-cols-2">
             <div>
-              <dt className="rph-muted text-xs">Odometer</dt>
-              <dd className="text-rph-fg">{odometer.trim() ? `${odometer} mi` : "—"}</dd>
-            </div>
-            <div>
-              <dt className="rph-muted text-xs">Fuel</dt>
-              <dd className="text-rph-fg">{formatHireFuelLevelPercent(fuelLevel)}</dd>
-            </div>
-            <div>
-              <dt className="rph-muted text-xs">Photos</dt>
-              <dd className="text-rph-fg">{data.media.length}</dd>
-            </div>
-            <div>
-              <dt className="rph-muted text-xs">Damage items</dt>
-              <dd className="text-rph-fg">{data.damages.length}</dd>
-            </div>
-          </dl>
-          <div>
-            <h3 className="rph-muted mb-1 text-xs">Vehicle kit</h3>
-            <ul className="space-y-1 text-sm text-rph-fg-secondary">
-              {HIRE_INSPECTION_ACCESSORY_KEYS.map((key) => (
-                <li key={key}>
-                  {hireInspectionAccessoryLabel(key)}: {formatAccessoryPresence(accessories[key])}
-                </li>
-              ))}
-            </ul>
-          </div>
-          {data.damages.length > 0 ? (
-            <div>
-              <h3 className="rph-muted mb-1 text-xs">Damage list</h3>
-              <ul className="space-y-1 text-sm text-rph-fg-secondary">
-                {data.damages.map((damage, index) => (
-                  <li key={damage.id}>
-                    #{index + 1}{" "}
-                    {getVehicleDamagePanel(damage.panelId)?.label ?? damage.panelId} ·{" "}
-                    {hireDamageTypeLabel(damage.damageType)} ·{" "}
-                    {hireDamageSeverityLabel(damage.severity)}
+              <h3 className="text-sm font-semibold text-rph-fg">Vehicle kit</h3>
+              <p className="mt-0.5 text-xs text-rph-fg-secondary">
+                Items recorded when the vehicle was handed over.
+              </p>
+              <ul className="hire-ws-inspection-kit-grid mt-3">
+                {HIRE_INSPECTION_ACCESSORY_KEYS.map((key) => (
+                  <li key={key} className="hire-ws-inspection-kit-row">
+                    <span className="text-sm text-rph-fg">{hireInspectionAccessoryLabel(key)}</span>
+                    <AccessoryChip value={accessories[key]} />
                   </li>
                 ))}
               </ul>
             </div>
-          ) : null}
-          {generalNotes.trim() ? (
-            <div>
-              <h3 className="rph-muted mb-1 text-xs">Notes</h3>
-              <p className="text-sm text-rph-fg-secondary whitespace-pre-wrap">{generalNotes.trim()}</p>
+          </>
+        ) : null}
+
+        {tab === "damage" ? (
+          <HireInspectionDamageLayout
+            diagram={
+              <VehicleDamageDiagram
+                damages={diagramDamages}
+                mode={kind === "checkin" ? "diff" : "readonly"}
+                allowExpand
+                showDamageList={false}
+                selectedDamageId={selectedDamageId}
+                onDamageSelect={setSelectedDamageId}
+              />
+            }
+            list={
+              <HireInspectionRecordedDamageList
+                damages={data.damages}
+                selectedDamageId={selectedDamageId}
+                onSelect={setSelectedDamageId}
+              />
+            }
+          />
+        ) : null}
+
+        {tab === "photos" ? (
+          <div>
+            {data.media.length ? (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {data.media.map((item) => (
+                  <div key={item.id} className="overflow-hidden rounded-lg border border-rph-border">
+                    <HireInspectionLazyImage
+                      hireGroupId={hireGroupId}
+                      mediaId={item.id}
+                      alt={item.caption ?? "Vehicle photo"}
+                      eagerSrc={item.signedUrl}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-rph-fg-muted">No photos recorded.</p>
+            )}
+          </div>
+        ) : null}
+
+        {tab === "summary" ? (
+          <>
+            <div className="hire-ws-inspection-status-grid">
+              <div className="hire-ws-inspection-status-card">
+                <p className="hire-ws-section-kicker">Inspection status</p>
+                <div className="mt-2">
+                  <HireWorkspaceChip tone="success" dot>
+                    Completed
+                  </HireWorkspaceChip>
+                </div>
+              </div>
+              <div className="hire-ws-inspection-status-card">
+                <p className="hire-ws-section-kicker">Recorded by</p>
+                <p className="mt-2 text-sm font-semibold text-rph-fg">{completedByLabel}</p>
+                <p className="mt-0.5 text-xs text-rph-fg-muted">{formatHireInspectionStamp(data.completedAt)}</p>
+              </div>
+              <div className="hire-ws-inspection-status-card">
+                <p className="hire-ws-section-kicker">Hire result</p>
+                <p className="mt-2 text-sm font-semibold text-rph-fg">{hireResult}</p>
+                {hireResultDetail ? (
+                  <p className="mt-0.5 text-xs text-rph-fg-muted">{hireResultDetail}</p>
+                ) : null}
+              </div>
             </div>
-          ) : null}
-        </section>
-      ) : null}
+
+            <div className="hire-ws-inspection-summary-section">
+              <h3 className="text-sm font-semibold text-rph-fg">
+                {kind === "checkout" ? "Checkout summary" : "Check-in summary"}
+              </h3>
+              <dl className="mt-2">
+                <SummaryRow
+                  label="Odometer"
+                  value={
+                    odometer.trim()
+                      ? `${odometer} mi`
+                      : formatHireInspectionOdometer(data.odometerReading)
+                  }
+                />
+                <SummaryRow
+                  label="Fuel"
+                  value={formatHireFuelLevelPercent(fuelLevel).replace("Not recorded", "—")}
+                />
+                <SummaryRow label="Kit recorded" value={kitSummary} />
+                <SummaryRow
+                  label="Check-in"
+                  value={checkinCompleted ? "Completed" : "Not started"}
+                />
+              </dl>
+            </div>
+
+            {generalNotes.trim() ? (
+              <div className="rounded-lg border border-rph-border/70 bg-rph-page/40 px-3 py-2.5">
+                <p className="hire-ws-section-kicker">Notes</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-rph-fg-secondary">{generalNotes.trim()}</p>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="hire-ws-inspection-summary-row">
+      <dt className="hire-ws-inspection-summary-label">{label}</dt>
+      <dd className="hire-ws-inspection-summary-value">{value}</dd>
     </div>
   );
+}
+
+function AccessoryChip({ value }: { value: boolean | null }) {
+  if (value === true) {
+    return (
+      <HireWorkspaceChip tone="success" dot>
+        Present
+      </HireWorkspaceChip>
+    );
+  }
+  if (value === false) {
+    return (
+      <span className="hire-ws-chip border-rph-border bg-rph-raised text-rph-fg-muted">
+        <span className="h-1.5 w-1.5 rounded-full bg-current opacity-50" aria-hidden />
+        Not present
+      </span>
+    );
+  }
+  return <span className="text-xs text-rph-fg-muted">Not recorded</span>;
 }
