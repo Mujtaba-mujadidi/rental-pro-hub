@@ -7,6 +7,8 @@ import {
   type HireInspectionPayload,
 } from "@/app/actions/hire-inspections";
 import { HireInspectionCompletedView } from "@/components/fleet/hire-inspection/hire-inspection-completed-view";
+import { HireInspectionEndedWorkspace } from "@/components/fleet/hire-inspection/hire-inspection-ended-workspace";
+import { useEndedInspectionTabState } from "@/components/fleet/hire-inspection/hire-inspection-ended-tabs";
 import { HireInspectionTimeline } from "@/components/fleet/hire-inspection/hire-inspection-timeline";
 import { HireInspectionWizard } from "@/components/fleet/hire-inspection/hire-inspection-wizard";
 import { buildHireInspectionDiff } from "@/lib/fleet/hire-inspection-lifecycle";
@@ -14,6 +16,7 @@ import {
   EMPTY_HIRE_INSPECTION_ACCESSORIES,
   type HireInspectionAccessories,
 } from "@/lib/fleet/hire-inspection-accessories";
+import { hireInspectionEndedEmptyMessage } from "@/lib/fleet/hire-inspection-ended-display";
 import type { VehicleDamageDiagramEntry } from "@/components/fleet/hire-inspection/vehicle-damage-diagram";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -28,6 +31,21 @@ function inspectionLoader() {
       <p className="text-sm text-rph-fg-secondary">Loading inspections…</p>
     </div>
   );
+}
+
+function toDiagramDamages(
+  damages: HireInspectionPayload["damages"],
+): VehicleDamageDiagramEntry[] {
+  return damages.map((damage) => ({
+    id: damage.id,
+    panelId: damage.panelId,
+    damageType: damage.damageType,
+    severity: damage.severity,
+    diagramView: damage.diagramView,
+    pinX: damage.pinX,
+    pinY: damage.pinY,
+    checkoutDamageId: damage.checkoutDamageId,
+  }));
 }
 
 export function HireInspectionsWorkspaceClient({
@@ -84,8 +102,90 @@ export function HireInspectionsWorkspaceClient({
 
   const checkoutCompleted = checkoutData?.status === "completed";
   const checkinCompleted = checkinData?.status === "completed";
+  const recordedByLabel = audience === "driver" ? "Rental company" : "Company staff";
+
+  const { activeTab, setActiveTab } = useEndedInspectionTabState(
+    {
+      focusKind,
+      checkoutCompleted: Boolean(checkoutCompleted),
+      checkinCompleted: Boolean(checkinCompleted),
+    },
+    !loading && checkoutData != null,
+  );
+
+  const damageDiff = useMemo(() => {
+    if (!checkoutData || !checkinData) return null;
+    return buildHireInspectionDiff(checkoutData.damages, checkinData.damages);
+  }, [checkoutData, checkinData]);
+
+  const completedCheckoutView = useMemo(() => {
+    if (!checkoutData || checkoutData.status !== "completed") return null;
+    const accessories: HireInspectionAccessories = checkoutData.accessories ?? {
+      ...EMPTY_HIRE_INSPECTION_ACCESSORIES,
+    };
+
+    return (
+      <HireInspectionCompletedView
+        hireGroupId={hireGroupId}
+        vehicleLabel={vehicleLabel}
+        kind="checkout"
+        data={checkoutData}
+        diagramDamages={toDiagramDamages(checkoutData.damages)}
+        odometer={checkoutData.odometerReading != null ? String(checkoutData.odometerReading) : ""}
+        fuelLevel={checkoutData.fuelLevel}
+        accessories={accessories}
+        generalNotes={checkoutData.generalNotes ?? ""}
+        trackerLinked={trackerLinked}
+        checkinCompleted={checkinCompleted}
+        completedByLabel={recordedByLabel}
+      />
+    );
+  }, [
+    checkinCompleted,
+    checkoutData,
+    hireGroupId,
+    recordedByLabel,
+    trackerLinked,
+    vehicleLabel,
+  ]);
+
+  const completedCheckinView = useMemo(() => {
+    if (!checkinData || checkinData.status !== "completed" || !checkoutData || !damageDiff) return null;
+
+    return (
+      <HireInspectionCompletedView
+        hireGroupId={hireGroupId}
+        vehicleLabel={vehicleLabel}
+        kind="checkin"
+        data={checkinData}
+        diagramDamages={damageDiff.checkinDamages.map((damage) => ({
+          id: damage.id,
+          panelId: damage.panelId,
+          damageType: damage.damageType,
+          severity: damage.severity,
+          diagramView: damage.diagramView,
+          pinX: damage.pinX,
+          pinY: damage.pinY,
+          checkoutDamageId: damage.checkoutDamageId,
+          diffStatus: damage.diffStatus,
+        }))}
+        odometer={checkinData.odometerReading != null ? String(checkinData.odometerReading) : ""}
+        fuelLevel={checkinData.fuelLevel}
+        accessories={checkinData.accessories}
+        generalNotes={checkinData.generalNotes ?? ""}
+        trackerLinked={trackerLinked}
+        checkinCompleted
+        completedByLabel={recordedByLabel}
+      />
+    );
+  }, [checkinData, checkoutData, damageDiff, hireGroupId, recordedByLabel, trackerLinked, vehicleLabel]);
 
   const introHint = useMemo(() => {
+    if (contractEnded && checkinCompleted) {
+      return audience === "driver"
+        ? "Checkout and check-in are complete. Review your vehicle return details below."
+        : "Checkout and check-in are complete. Review the comparison below.";
+    }
     if (checkinCompleted) {
       return audience === "driver"
         ? "Checkout and check-in are complete. Review your vehicle return details below."
@@ -98,97 +198,67 @@ export function HireInspectionsWorkspaceClient({
     }
     if (checkoutCompleted && contractEnded) {
       return audience === "driver"
-        ? "Checkout is complete. Complete check-in when you return the vehicle."
+        ? "Checkout is complete. Your return inspection will appear here once recorded."
         : "Checkout is complete. Complete check-in to record the vehicle return.";
     }
     return audience === "driver"
-      ? "Complete checkout to record the vehicle condition at handover."
+      ? "Your handover inspection will appear here once your rental company completes checkout."
       : "Complete checkout to record the vehicle condition at handover.";
   }, [audience, checkinCompleted, checkoutCompleted, contractEnded]);
-
-  const recordedByLabel = audience === "driver" ? "Rental company" : "Company staff";
-
-  const completedCheckoutView = useMemo(() => {
-    if (!checkoutData || checkoutData.status !== "completed") return null;
-    const odometer =
-      checkoutData.odometerReading != null ? String(checkoutData.odometerReading) : "";
-    const accessories: HireInspectionAccessories = checkoutData.accessories ?? {
-      ...EMPTY_HIRE_INSPECTION_ACCESSORIES,
-    };
-    const diagramDamages: VehicleDamageDiagramEntry[] = checkoutData.damages.map((damage) => ({
-      id: damage.id,
-      panelId: damage.panelId,
-      damageType: damage.damageType,
-      severity: damage.severity,
-      diagramView: damage.diagramView,
-      pinX: damage.pinX,
-      pinY: damage.pinY,
-      checkoutDamageId: damage.checkoutDamageId,
-    }));
-
-    return (
-      <HireInspectionCompletedView
-        hireGroupId={hireGroupId}
-        vehicleLabel={vehicleLabel}
-        kind="checkout"
-        data={checkoutData}
-        diagramDamages={diagramDamages}
-        odometer={odometer}
-        fuelLevel={checkoutData.fuelLevel}
-        accessories={accessories}
-        generalNotes={checkoutData.generalNotes ?? ""}
-        trackerLinked={trackerLinked}
-        checkinCompleted={checkinCompleted}
-        completedByLabel={recordedByLabel}
-      />
-    );
-  }, [checkinCompleted, checkoutData, hireGroupId, recordedByLabel, trackerLinked, vehicleLabel]);
-
-  const completedCheckinView = useMemo(() => {
-    if (!checkinData || checkinData.status !== "completed" || !checkoutData) return null;
-    const odometer = checkinData.odometerReading != null ? String(checkinData.odometerReading) : "";
-    const diff = buildHireInspectionDiff(checkoutData.damages, checkinData.damages);
-    const diagramDamages: VehicleDamageDiagramEntry[] = diff.checkinDamages.map((damage) => ({
-      id: damage.id,
-      panelId: damage.panelId,
-      damageType: damage.damageType,
-      severity: damage.severity,
-      diagramView: damage.diagramView,
-      pinX: damage.pinX,
-      pinY: damage.pinY,
-      checkoutDamageId: damage.checkoutDamageId,
-    }));
-
-    return (
-      <HireInspectionCompletedView
-        hireGroupId={hireGroupId}
-        vehicleLabel={vehicleLabel}
-        kind="checkin"
-        data={checkinData}
-        diagramDamages={diagramDamages}
-        odometer={odometer}
-        fuelLevel={checkinData.fuelLevel}
-        accessories={checkinData.accessories}
-        generalNotes={checkinData.generalNotes ?? ""}
-        trackerLinked={trackerLinked}
-        checkinCompleted
-        completedByLabel={recordedByLabel}
-      />
-    );
-  }, [checkinData, checkoutData, hireGroupId, recordedByLabel, trackerLinked, vehicleLabel]);
 
   if (loading && !checkoutData) return inspectionLoader();
   if (error) return <p className="rph-alert-error text-sm">{error}</p>;
 
   const showCheckoutWizard =
     audience === "staff" && focusKind === "checkout" && !checkoutCompleted;
-  const showCheckinWizard =
-    audience === "staff" && focusKind === "checkin" && contractEnded && !checkinCompleted;
+
+  if (contractEnded) {
+    return (
+      <HireInspectionEndedWorkspace
+        audience={audience}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        checkoutCompleted={Boolean(checkoutCompleted)}
+        checkinCompleted={Boolean(checkinCompleted)}
+        checkoutData={checkoutData}
+        checkinData={checkinData}
+        damageDiff={damageDiff}
+        completedCheckoutView={completedCheckoutView}
+        completedCheckinView={completedCheckinView}
+        staffCheckoutWizard={
+          audience === "staff" && !checkoutCompleted ? (
+            <HireInspectionWizard
+              hireGroupId={hireGroupId}
+              kind="checkout"
+              vehicleLabel={vehicleLabel}
+              hireStatus={hireStatus}
+              vehicleId={vehicleId}
+              audience={audience}
+              embedded
+            />
+          ) : null
+        }
+        staffCheckinWizard={
+          audience === "staff" && checkoutCompleted && !checkinCompleted ? (
+            <HireInspectionWizard
+              hireGroupId={hireGroupId}
+              kind="checkin"
+              vehicleLabel={vehicleLabel}
+              hireStatus={hireStatus}
+              vehicleId={vehicleId}
+              audience={audience}
+              embedded
+            />
+          ) : null
+        }
+      />
+    );
+  }
 
   return (
     <div className="space-y-5">
       <header className="hire-ws-inspection-intro">
-        <p className="hire-ws-section-kicker">{contractEnded ? "Ended hire" : "Active hire"}</p>
+        <p className="hire-ws-section-kicker">Active hire</p>
         <h1 className="text-2xl font-semibold tracking-tight text-rph-fg">Inspections</h1>
         <p className="max-w-3xl text-sm leading-relaxed text-rph-fg-secondary">{introHint}</p>
       </header>
@@ -209,14 +279,8 @@ export function HireInspectionsWorkspaceClient({
       />
 
       {audience === "driver" && !checkoutCompleted ? (
-        <p className="rounded-xl border border-rph-border bg-rph-raised px-4 py-3 text-sm text-rph-fg-secondary">
-          Vehicle checkout will appear here once your rental company completes handover inspection.
-        </p>
-      ) : null}
-
-      {audience === "driver" && contractEnded && !checkinCompleted && focusKind === "checkin" ? (
-        <p className="rounded-xl border border-rph-border bg-rph-raised px-4 py-3 text-sm text-rph-fg-secondary">
-          Check-in will appear here once your vehicle return inspection is completed.
+        <p className="hire-ws-inspection-ended-empty">
+          {hireInspectionEndedEmptyMessage(audience, "checkout-pending")}
         </p>
       ) : null}
 
@@ -232,21 +296,8 @@ export function HireInspectionsWorkspaceClient({
         />
       ) : null}
 
-      {showCheckinWizard ? (
-        <HireInspectionWizard
-          hireGroupId={hireGroupId}
-          kind="checkin"
-          vehicleLabel={vehicleLabel}
-          hireStatus={hireStatus}
-          vehicleId={vehicleId}
-          audience={audience}
-          embedded
-        />
-      ) : null}
-
       {focusKind === "checkout" && checkoutCompleted ? completedCheckoutView : null}
       {focusKind === "checkin" && checkinCompleted ? completedCheckinView : null}
-      {contractEnded && checkinCompleted && focusKind === "checkout" ? completedCheckinView : null}
     </div>
   );
 }

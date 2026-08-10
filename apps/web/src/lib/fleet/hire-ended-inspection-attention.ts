@@ -35,7 +35,7 @@ function countMissingKitItems(
   return count;
 }
 
-function shouldReviewMileage(
+export function shouldReviewEndedHireMileage(
   checkoutOdometerMiles: number | null,
   checkinOdometerMiles: number | null,
 ): boolean {
@@ -51,7 +51,7 @@ export function buildHireEndedInspectionAttentionItems(
 
   const items: HireEndedInspectionAttentionItem[] = [];
 
-  if (shouldReviewMileage(input.checkoutOdometerMiles, input.checkinOdometerMiles)) {
+  if (shouldReviewEndedHireMileage(input.checkoutOdometerMiles, input.checkinOdometerMiles)) {
     items.push({
       key: "mileage",
       title: "Mileage needs review",
