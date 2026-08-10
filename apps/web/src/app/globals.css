@@ -328,3 +328,219 @@ html {
   }
 }
 
+/* Hire workspace (prototype-aligned) */
+.hire-ws-plate {
+  @apply inline-flex shrink-0 items-center rounded-md border border-yellow-600/50 bg-yellow-300 px-2.5 py-1 font-mono text-sm font-bold tracking-wide text-slate-900 shadow-sm;
+}
+.hire-ws-plate-sm {
+  @apply rounded px-2 py-0.5 text-xs tracking-wide;
+}
+.dark .hire-ws-plate {
+  @apply border-yellow-500/40 bg-yellow-400/90 text-slate-950;
+}
+.hire-ws-chip {
+  @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold;
+}
+.hire-ws-chip-success {
+  @apply border-emerald-300/60 bg-emerald-50 text-emerald-900 dark:border-emerald-800/50 dark:bg-emerald-950/40 dark:text-emerald-100;
+}
+.hire-ws-chip-warn {
+  @apply border-amber-300/60 bg-amber-50 text-amber-950 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-100;
+}
+.hire-ws-banner {
+  @apply rounded-2xl bg-rph-rail px-5 py-5 text-white shadow-sm dark:bg-rph-rail-soft;
+}
+.hire-ws-stat-card {
+  @apply rounded-xl border border-rph-border bg-rph-raised p-3.5 shadow-sm;
+}
+.hire-ws-stat-card-warn {
+  @apply border-amber-300/50 bg-amber-50/80 dark:border-amber-800/40 dark:bg-amber-950/20;
+}
+.hire-ws-section-kicker {
+  @apply text-[10px] font-semibold uppercase tracking-wider text-rph-fg-muted;
+}
+.hire-ws-tab {
+  @apply inline-flex h-10 shrink-0 items-center gap-2 border-b-2 border-transparent px-1 pb-3 pt-1 text-sm font-medium text-rph-fg-muted transition-colors hover:text-rph-fg;
+}
+.hire-ws-tab-active {
+  @apply border-rph-rail text-rph-fg dark:border-rph-rail-soft;
+}
+.hire-ws-progress {
+  @apply h-2 overflow-hidden rounded-full bg-rph-chrome;
+}
+.hire-ws-progress-fill {
+  @apply h-full rounded-full bg-amber-500;
+}
+.hire-ws-progress-fill-ok {
+  @apply bg-emerald-500;
+}
+.hire-ws-compact-card {
+  @apply rounded-xl border border-rph-border bg-rph-raised p-4 shadow-sm;
+}
+.hire-ws-attention-card {
+  @apply rounded-xl border border-amber-300/55 bg-amber-50/80 p-4 shadow-sm dark:border-amber-800/45 dark:bg-amber-950/25;
+}
+.hire-ws-icon-tile {
+  @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200;
+}
+.hire-ws-glance-grid {
+  @apply mt-3 grid gap-3 sm:grid-cols-2;
+}
+.hire-ws-action-row {
+  @apply flex items-start gap-2.5 rounded-lg px-1 py-2.5 text-sm transition-colors hover:bg-rph-chrome/40;
+}
+.hire-ws-action-icon {
+  @apply mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm font-bold;
+}
+.hire-ws-action-icon-pound {
+  @apply bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-100;
+}
+.hire-ws-action-icon-count {
+  @apply bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-100;
+}
+.hire-ws-action-icon-warning {
+  @apply bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-300;
+}
+.hire-ws-rating-divider {
+  @apply hidden w-px self-stretch bg-rph-border lg:block;
+}
+.hire-ws-track-mobile {
+  @apply mt-5 flex flex-col sm:hidden;
+}
+.hire-ws-track-step {
+  @apply grid min-w-0 grid-cols-[auto_1fr] gap-x-3 text-left items-start;
+}
+.hire-ws-track-marker {
+  @apply flex min-h-full flex-col items-center self-stretch;
+}
+.hire-ws-track-v-line {
+  @apply my-1 w-px flex-1 min-h-5 bg-rph-border;
+}
+.hire-ws-track-step:last-child .hire-ws-track-v-line {
+  display: none;
+}
+.hire-ws-track-text-mobile {
+  @apply pb-4 pt-0.5;
+}
+.hire-ws-track-text-mobile .hire-ws-track-label {
+  @apply mb-0.5 max-w-none text-left text-sm font-semibold text-rph-fg;
+}
+.hire-ws-track-text-mobile .hire-ws-track-detail {
+  @apply mt-0 max-w-none text-left text-xs text-rph-fg-muted;
+}
+.hire-ws-track-node {
+  @apply relative flex h-8 w-8 shrink-0 items-center justify-center;
+}
+.hire-ws-track-label {
+  @apply text-xs font-semibold leading-snug text-rph-fg;
+}
+.hire-ws-track-detail {
+  @apply text-[11px] leading-snug text-rph-fg-muted;
+}
+.hire-ws-track-ring {
+  @apply relative z-[1] flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-rph-raised p-0.5;
+}
+.hire-ws-track-ring-done {
+  @apply ring-2 ring-emerald-200 dark:ring-emerald-800/60;
+}
+.hire-ws-track-ring-current {
+  @apply ring-2 ring-amber-200 dark:ring-amber-800/60;
+}
+.hire-ws-track-ring-upcoming {
+  @apply ring-2 ring-rph-border;
+}
+.hire-ws-track-dot {
+  @apply flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold;
+}
+.hire-ws-track-dot-done {
+  @apply bg-emerald-500 text-white;
+}
+.hire-ws-track-dot-current {
+  @apply bg-amber-500 text-white;
+}
+.hire-ws-track-dot-upcoming {
+  @apply border border-rph-border bg-rph-raised text-rph-fg-muted;
+}
+
+.hire-ws-track-horizontal {
+  @apply mt-5 hidden list-none items-start p-0 sm:flex;
+}
+.hire-ws-track-h-step {
+  @apply relative flex min-w-0 flex-1 items-center overflow-visible;
+}
+.hire-ws-track-h-step::before,
+.hire-ws-track-h-step::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  height: 1px;
+  transform: translateY(-50%);
+  z-index: 0;
+  @apply bg-rph-border;
+}
+/* Incoming: stop at circle centre (same inset as outgoing start). */
+.hire-ws-track-h-step:not(:first-child)::before {
+  left: 0;
+  width: 1rem;
+}
+/* Outgoing: start at circle centre, end before next circle. */
+.hire-ws-track-h-step:not(:last-child)::after {
+  left: 1rem;
+  width: calc(100% - 2rem);
+}
+.hire-ws-track-h-step:last-child {
+  @apply flex-none;
+}
+.hire-ws-track-h-node {
+  @apply relative z-[1] shrink-0 bg-rph-raised;
+  padding-right: 0.5rem;
+}
+.hire-ws-track-h-segment {
+  @apply relative z-[1] flex min-w-0 flex-1 flex-col items-start justify-center;
+}
+.hire-ws-track-h-step:not(:last-child) .hire-ws-track-h-segment {
+  padding-right: 0.5rem;
+}
+.hire-ws-track-h-label {
+  margin: 0;
+  padding: 0 0 0.125rem;
+  line-height: 1;
+  text-align: left;
+  white-space: nowrap;
+}
+.hire-ws-track-h-detail {
+  margin: 0;
+  padding: 0.125rem 0 0;
+  line-height: 1;
+  text-align: left;
+}
+.hire-ws-track-horizontal .hire-ws-track-h-label,
+.hire-ws-track-horizontal .hire-ws-track-h-detail {
+  @apply leading-none;
+}
+
+.hire-ws-stepper {
+  @apply mt-4 grid gap-4 sm:grid-cols-4;
+}
+.hire-ws-step {
+  @apply relative flex min-w-0 flex-col items-start;
+}
+.hire-ws-step:not(:last-child)::before {
+  content: "";
+  @apply absolute left-[1.125rem] top-[1.125rem] hidden h-px bg-rph-border sm:block;
+  width: calc(100% - 1.125rem);
+  transform: translateX(1.125rem);
+}
+.hire-ws-step-dot {
+  @apply relative z-[1] flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold;
+}
+.hire-ws-step-dot-done {
+  @apply bg-emerald-500 text-white;
+}
+.hire-ws-step-dot-current {
+  @apply bg-amber-500 text-white;
+}
+.hire-ws-step-dot-upcoming {
+  @apply border border-rph-border bg-rph-raised text-rph-fg-muted;
+}
+

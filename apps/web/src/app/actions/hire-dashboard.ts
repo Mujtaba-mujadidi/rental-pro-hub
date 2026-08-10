@@ -27,6 +27,7 @@ import {
 } from "@/lib/fleet/hire-payment-analytics";
 import { buildHireLifecycleAttentionItems } from "@/lib/fleet/hire-lifecycle-attention";
 import { buildHireInsuranceAttentionItems } from "@/lib/fleet/hire-insurance-attention";
+import { buildHireDocumentExpiryAttentionItem } from "@/lib/fleet/hire-document-expiry-attention";
 import { isHireInsuranceProvidedBy, type HireInsuranceProvidedBy } from "@/lib/fleet/hire-insurance";
 import { parseCompanyNotificationSettings } from "@/lib/settings/notification-settings";
 import {
@@ -40,6 +41,7 @@ import type { HirePaymentSummary } from "@/lib/fleet/hire-payment-summary";
 import type { HirePaymentDisplayOptions } from "@/lib/fleet/hire-payment-display";
 import type { HireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
 import { driverHireStatusLabel } from "@/lib/fleet/driver-hire-nav";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export type HireDashboardRecentEvent = {
@@ -225,13 +227,20 @@ export async function loadHireDashboardAction(
   const { data: group } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "start_date, start_time, end_time, status, include_deposit, activated_at, terminated_at, ended_at, rent_cadence, rent_amount_gbp, deposit_gbp, driver_email, driver_licence_number, parent_company_id, insurance_provided_by, vehicles(vrm, make, model), vehicle_hire_agreements(end_date)",
+      "start_date, start_time, end_time, status, include_deposit, activated_at, terminated_at, ended_at, rent_cadence, rent_amount_gbp, deposit_gbp, driver_email, driver_licence_number, driver_user_id, parent_company_id, insurance_provided_by, vehicles(vrm, make, model, mot_expiry, tax_expiry, phv_licence_expiry), vehicle_hire_agreements(end_date)",
     )
     .eq("id", hireGroupId.trim())
     .maybeSingle();
   const startDate = (group?.start_date as string | null) ?? today;
   const hireStatus = (group?.status as string | null) ?? "";
-  const vehicle = group?.vehicles as { vrm?: string; make?: string; model?: string } | null;
+  const vehicle = group?.vehicles as {
+    vrm?: string;
+    make?: string;
+    model?: string;
+    mot_expiry?: string | null;
+    tax_expiry?: string | null;
+    phv_licence_expiry?: string | null;
+  } | null;
 
   const [{ data: inspectionRows }, { data: insuranceRow }, { data: notifyCompany }] = await Promise.all([
     supabase
@@ -246,7 +255,9 @@ export async function loadHireDashboardAction(
     group?.parent_company_id
       ? supabase
           .from("companies")
-          .select("notify_insurance_days_before")
+          .select(
+            "notify_mot_days_before, notify_tax_days_before, notify_phv_licence_days_before, notify_insurance_days_before, notify_contract_expiry_days_before",
+          )
           .eq("id", group.parent_company_id as string)
           .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
@@ -261,7 +272,7 @@ export async function loadHireDashboardAction(
   const providedByRaw = (group?.insurance_provided_by as string | null) ?? null;
   const insuranceProvidedBy: HireInsuranceProvidedBy | null =
     providedByRaw && isHireInsuranceProvidedBy(providedByRaw) ? providedByRaw : null;
-  const lifecycleAttentionItems = [
+  const lifecycleAttentionItems: HireLifecycleAttentionItem[] = [
     ...buildHireLifecycleAttentionItems({
       hireGroupId: hireGroupId.trim(),
       status: hireStatus,
@@ -281,6 +292,44 @@ export async function loadHireDashboardAction(
       hireStatus,
     }),
   ];
+
+  const driverUserId = (group?.driver_user_id as string | null) ?? null;
+  if (driverUserId) {
+    try {
+      const admin = createSupabaseAdminClient();
+      const { data: driverProfile } = await admin
+        .from("driver_profiles")
+        .select("driving_licence_expiry, phv_licence_expiry")
+        .eq("user_id", driverUserId)
+        .maybeSingle();
+      const documentExpiry = buildHireDocumentExpiryAttentionItem({
+        hireGroupId: hireGroupId.trim(),
+        vehicle: {
+          mot_expiry: vehicle?.mot_expiry,
+          tax_expiry: vehicle?.tax_expiry,
+          phv_licence_expiry: vehicle?.phv_licence_expiry,
+        },
+        driver: driverProfile,
+        settings: notifySettings,
+        detailsHref: `/rental/hires/${hireGroupId.trim()}/details`,
+      });
+      if (documentExpiry) lifecycleAttentionItems.push(documentExpiry);
+    } catch {
+      // Driver profile is optional for the summary action list.
+    }
+  } else {
+    const documentExpiry = buildHireDocumentExpiryAttentionItem({
+      hireGroupId: hireGroupId.trim(),
+      vehicle: {
+        mot_expiry: vehicle?.mot_expiry,
+        tax_expiry: vehicle?.tax_expiry,
+        phv_licence_expiry: vehicle?.phv_licence_expiry,
+      },
+      settings: notifySettings,
+      detailsHref: `/rental/hires/${hireGroupId.trim()}/details`,
+    });
+    if (documentExpiry) lifecycleAttentionItems.push(documentExpiry);
+  }
 
   const { data: agreements } = await supabase
     .from("vehicle_hire_agreements")
