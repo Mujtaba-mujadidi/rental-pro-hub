@@ -8,9 +8,10 @@ import {
 import {
   loadDriverHirePaymentsPageAction,
   type HirePaymentPageRow,
+  type HirePaymentsPageData,
 } from "@/app/actions/hire-payments";
 import { HireActiveDriverSummary } from "@/components/fleet/hire-summary/hire-active-driver-summary";
-import { HireOverviewView } from "@/components/fleet/hire-overview/hire-overview-view";
+import { HireEndedDriverSummary } from "@/components/fleet/hire-summary/hire-ended-driver-summary";
 import { driverHireWorkspaceHref } from "@/lib/fleet/driver-hire-workspace-nav";
 import { useHirePaymentsRealtime } from "@/hooks/use-hire-realtime";
 import { useCallback, useEffect, useState, useTransition } from "react";
@@ -25,6 +26,7 @@ export function DriverHireDashboardSection({
   const [pending, startTransition] = useTransition();
   const [data, setData] = useState<HireDashboardData | null>(null);
   const [paymentRows, setPaymentRows] = useState<readonly HirePaymentPageRow[]>([]);
+  const [payments, setPayments] = useState<HirePaymentsPageData | null>(null);
   const [checkout, setCheckout] = useState<HireCheckoutGlanceData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,6 +43,7 @@ export function DriverHireDashboardSection({
         setError(dashboardRes.error);
         setData(null);
         setPaymentRows([]);
+        setPayments(null);
         setCheckout(null);
         return;
       }
@@ -48,11 +51,13 @@ export function DriverHireDashboardSection({
         setError(paymentsRes.error);
         setData(null);
         setPaymentRows([]);
+        setPayments(null);
         setCheckout(null);
         return;
       }
       setData(dashboardRes.data);
       setPaymentRows(paymentsRes.data.rows);
+      setPayments(paymentsRes.data);
       setCheckout(checkoutRes.ok ? checkoutRes.data : null);
       setError(null);
     });
@@ -87,12 +92,17 @@ export function DriverHireDashboardSection({
     );
   }
 
+  if (!payments) return null;
+
   return (
-    <HireOverviewView
+    <HireEndedDriverSummary
       data={data}
       context={data.overview}
-      audience="driver"
+      payments={payments}
+      checkout={checkout}
+      workspaceBase={workspaceBase}
       paymentsHref={driverHireWorkspaceHref(hireGroupId, "payments")}
+      detailsHref={driverHireWorkspaceHref(hireGroupId, "details")}
     />
   );
 }

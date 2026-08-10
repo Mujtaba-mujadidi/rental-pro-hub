@@ -4,6 +4,7 @@ import {
   buildHireEndedRefundCalculation,
   buildHireEndedSummaryStats,
   formatDriverChargesHint,
+  formatRefundPaidHintForAudience,
   formatRentSettledHint,
   hireDepositAppliedToRentGbp,
   hireEndedSettlementChipLabel,
@@ -187,6 +188,18 @@ describe("hire-ended-summary-display", () => {
   it("formats rent settled and driver charge hints", () => {
     expect(formatRentSettledHint(100, 57.14)).toBe("£100.00 paid + £57.14 from deposit");
     expect(formatDriverChargesHint(1)).toBe("1 damage charge after check-in");
+    expect(formatDriverChargesHint(1, "driver")).toBe("1 charge applied after vehicle return");
+    expect(formatRefundPaidHintForAudience(1, "driver")).toBe("Received in 1 bank transfer");
+  });
+
+  it("builds driver-facing settled outstanding balance copy", () => {
+    const outstanding = buildHireEndedOutstandingBalance(payments(), {
+      refundPaidGbp: 342.86,
+      audience: "driver",
+    });
+    expect(outstanding.kicker).toBe("Hire completed");
+    expect(outstanding.headline).toBe("You have nothing outstanding");
+    expect(outstanding.detail).toContain("your final refund has been paid");
   });
 
   it("builds settled outstanding balance banner copy", () => {
@@ -219,6 +232,14 @@ describe("hire-ended-summary-display", () => {
     expect(stats.driverChargesGbp).toBe(100);
     expect(stats.refundPaidGbp).toBe(342.86);
     expect(stats.rentSettledHint).toContain("£100.00 paid");
+
+    const driverStats = buildHireEndedSummaryStats({
+      dashboard: dashboard(),
+      payments: payments(),
+      audience: "driver",
+    });
+    expect(driverStats.driverChargesHint).toBe("1 charge applied after vehicle return");
+    expect(driverStats.refundPaidHint).toBe("Received in 1 bank transfer");
   });
 
   it("labels settlement chip when balance is settled", () => {

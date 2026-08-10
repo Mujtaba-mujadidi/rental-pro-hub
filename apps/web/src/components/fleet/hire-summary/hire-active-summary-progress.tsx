@@ -2,6 +2,14 @@
 
 import Link from "next/link";
 import type { HireDashboardData } from "@/app/actions/hire-dashboard";
+import type { HirePaymentsPageData } from "@/app/actions/hire-payments";
+
+type ProgressStep = {
+  id: string;
+  label: string;
+  detail: string;
+  state: "done" | "current" | "upcoming";
+};
 
 function formatHireProgressStamp(value: string | null | undefined): string {
   if (!value) return "—";
@@ -67,6 +75,72 @@ function HireProgressStepMarker({
       </div>
       {showVerticalLine ? <span className="hire-ws-track-v-line" aria-hidden /> : null}
     </div>
+  );
+}
+
+function HireSummaryProgressTrack({ steps }: { steps: readonly ProgressStep[] }) {
+  return (
+    <>
+      <ol className="hire-ws-track-mobile">
+        {steps.map((step, index) => (
+          <li key={step.id} className="hire-ws-track-step">
+            <HireProgressStepMarker
+              state={step.state}
+              index={index}
+              showVerticalLine={index < steps.length - 1}
+            />
+            <div className="hire-ws-track-text-mobile">
+              <p className="hire-ws-track-label">{step.label}</p>
+              <p className="hire-ws-track-detail">{step.detail}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+
+      <ol className="hire-ws-track-horizontal" aria-label="Hire progress">
+        {steps.map((step, index) => (
+          <li key={step.id} className="hire-ws-track-h-step">
+            <div className="hire-ws-track-h-node">
+              <HireProgressCircle state={step.state} index={index} />
+            </div>
+            <div className="hire-ws-track-h-segment">
+              <p className="hire-ws-track-label hire-ws-track-h-label">{step.label}</p>
+              <p className="hire-ws-track-detail hire-ws-track-h-detail">{step.detail}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </>
+  );
+}
+
+function HireSummaryProgressCard({
+  progressHint,
+  actionHref,
+  actionLabel,
+  steps,
+}: {
+  progressHint: string;
+  actionHref: string;
+  actionLabel: string;
+  steps: readonly ProgressStep[];
+}) {
+  return (
+    <section className="hire-ws-compact-card">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-rph-fg">Hire progress</h2>
+          <p className="mt-0.5 text-xs text-rph-fg-secondary">{progressHint}</p>
+        </div>
+        <Link
+          href={actionHref}
+          className="inline-flex h-8 items-center rounded-lg border border-rph-border bg-rph-raised px-3 text-xs font-semibold text-rph-fg shadow-sm transition-colors hover:bg-rph-chrome"
+        >
+          {actionLabel}
+        </Link>
+      </div>
+      <HireSummaryProgressTrack steps={steps} />
+    </section>
   );
 }
 
@@ -146,48 +220,114 @@ export function HireActiveSummaryProgress({
         : "Sign the agreement and complete checkout to activate the hire.";
 
   return (
-    <section className="hire-ws-compact-card">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-semibold text-rph-fg">Hire progress</h2>
-          <p className="mt-0.5 text-xs text-rph-fg-secondary">{progressHint}</p>
-        </div>
-        <Link
-          href={checkoutHref}
-          className="inline-flex h-8 items-center rounded-lg border border-rph-border bg-rph-raised px-3 text-xs font-semibold text-rph-fg shadow-sm transition-colors hover:bg-rph-chrome"
-        >
-          {audience === "driver" ? "Open checkout" : "View checkout"}
-        </Link>
-      </div>
-      <ol className="hire-ws-track-mobile">
-        {steps.map((step, index) => (
-          <li key={step.id} className="hire-ws-track-step">
-            <HireProgressStepMarker
-              state={step.state}
-              index={index}
-              showVerticalLine={index < steps.length - 1}
-            />
-            <div className="hire-ws-track-text-mobile">
-              <p className="hire-ws-track-label">{step.label}</p>
-              <p className="hire-ws-track-detail">{step.detail}</p>
-            </div>
-          </li>
-        ))}
-      </ol>
+    <HireSummaryProgressCard
+      progressHint={progressHint}
+      actionHref={checkoutHref}
+      actionLabel={audience === "driver" ? "Open checkout" : "View checkout"}
+      steps={steps}
+    />
+  );
+}
 
-      <ol className="hire-ws-track-horizontal" aria-label="Hire progress">
-        {steps.map((step, index) => (
-          <li key={step.id} className="hire-ws-track-h-step">
-            <div className="hire-ws-track-h-node">
-              <HireProgressCircle state={step.state} index={index} />
-            </div>
-            <div className="hire-ws-track-h-segment">
-              <p className="hire-ws-track-label hire-ws-track-h-label">{step.label}</p>
-              <p className="hire-ws-track-detail hire-ws-track-h-detail">{step.detail}</p>
-            </div>
-          </li>
-        ))}
-      </ol>
-    </section>
+export function HireEndedSummaryProgress({
+  activeSinceLabel,
+  endedAtLabel,
+  checkoutCompleted,
+  checkoutCompletedAtLabel,
+  checkinCompleted,
+  settlementSettled,
+  workspaceBase,
+  audience = "staff",
+}: {
+  activeSinceLabel: string;
+  endedAtLabel: string | null;
+  checkoutCompleted: boolean;
+  checkoutCompletedAtLabel: string | null;
+  checkinCompleted: boolean;
+  settlementSettled: boolean;
+  workspaceBase: string;
+  audience?: "staff" | "driver";
+}) {
+  const settlementStepState: ProgressStep["state"] = settlementSettled
+    ? "done"
+    : checkinCompleted || checkoutCompleted
+      ? "current"
+      : "upcoming";
+
+  const steps: ProgressStep[] = [
+    {
+      id: "signed",
+      label: "Agreement signed",
+      detail: formatHireProgressStamp(activeSinceLabel),
+      state: "done",
+    },
+    {
+      id: "checkout",
+      label: "Checkout completed",
+      detail: checkoutCompleted
+        ? formatHireProgressStamp(checkoutCompletedAtLabel)
+        : audience === "driver"
+          ? "Vehicle handover inspection"
+          : "Handover inspection",
+      state: checkoutCompleted ? "done" : "upcoming",
+    },
+    {
+      id: "active",
+      label: "Hire active",
+      detail: endedAtLabel
+        ? formatHireProgressStamp(endedAtLabel)
+        : audience === "driver"
+          ? "Hire completed"
+          : "Contract ended",
+      state: "done",
+    },
+    {
+      id: "checkin",
+      label: "Check-in & settlement",
+      detail: settlementSettled
+        ? audience === "driver"
+          ? "Settlement completed"
+          : "Settlement completed"
+        : checkinCompleted
+          ? audience === "driver"
+            ? "Settlement in progress"
+            : "Settlement in progress"
+          : audience === "driver"
+            ? "Vehicle return and final balance"
+            : "Vehicle return and final balance",
+      state: settlementStepState,
+    },
+  ];
+
+  const progressHint = settlementSettled
+    ? audience === "driver"
+      ? "Your hire is complete and settlement is finished."
+      : "This hire is complete and settlement is finished."
+    : audience === "driver"
+      ? "Your contract has ended. Complete check-in and settlement if anything is still open."
+      : "Contract ended. Complete check-in and settlement if anything is still open.";
+
+  const actionHref = settlementSettled
+    ? `${workspaceBase}/payments`
+    : checkinCompleted
+      ? `${workspaceBase}/settlement`
+      : `${workspaceBase}/checkin`;
+  const actionLabel = settlementSettled
+    ? "View payments"
+    : checkinCompleted
+      ? audience === "driver"
+        ? "Open settlement"
+        : "View settlement"
+      : audience === "driver"
+        ? "Open check-in"
+        : "View check-in";
+
+  return (
+    <HireSummaryProgressCard
+      progressHint={progressHint}
+      actionHref={actionHref}
+      actionLabel={actionLabel}
+      steps={steps}
+    />
   );
 }

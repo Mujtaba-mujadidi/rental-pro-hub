@@ -57,9 +57,9 @@ export function HireWorkspaceProgressBar({
   const clamped = Math.max(0, Math.min(100, percent));
   const fillClass =
     tone === "ok"
-      ? "hire-ws-progress-fill-ok"
+      ? "hire-ws-progress-fill hire-ws-progress-fill-ok"
       : tone === "danger"
-        ? "hire-ws-progress-fill-danger"
+        ? "hire-ws-progress-fill hire-ws-progress-fill-danger"
         : "hire-ws-progress-fill";
   return (
     <div className="hire-ws-progress" role="progressbar" aria-valuenow={clamped} aria-valuemin={0} aria-valuemax={100}>

@@ -34,10 +34,30 @@ export function countBillableDriverCharges(items: readonly HireDriverChargeWorks
   ).length;
 }
 
-export function formatDriverChargesHint(count: number): string {
-  if (count <= 0) return "No driver charges recorded";
+export function formatDriverChargesHint(
+  count: number,
+  audience: "staff" | "driver" = "staff",
+): string {
+  if (count <= 0) {
+    return audience === "driver" ? "No charges on your account" : "No driver charges recorded";
+  }
   const noun = count === 1 ? "charge" : "charges";
-  return `${count} damage ${noun} after check-in`;
+  return audience === "driver"
+    ? `${count} ${noun} applied after vehicle return`
+    : `${count} damage ${noun} after check-in`;
+}
+
+export function formatRefundPaidHintForAudience(
+  paymentCount: number,
+  audience: "staff" | "driver" = "staff",
+): string {
+  if (paymentCount <= 0) {
+    return audience === "driver" ? "No refund payments yet" : "No refund payments recorded";
+  }
+  const noun = paymentCount === 1 ? "bank transfer" : "bank transfers";
+  return audience === "driver"
+    ? `Received in ${paymentCount} ${noun}`
+    : `Paid in ${paymentCount} ${noun}`;
 }
 
 export function formatRentSettledHint(
@@ -99,8 +119,9 @@ export type HireEndedOutstandingBalance = {
 
 export function buildHireEndedOutstandingBalance(
   payments: Pick<HirePaymentsPageData, "settlementBalance" | "currentSignedSettlementGbp">,
-  options?: { refundPaidGbp?: number },
+  options?: { refundPaidGbp?: number; audience?: "staff" | "driver" },
 ): HireEndedOutstandingBalance {
+  const audience = options?.audience ?? "staff";
   const openBalanceGbp = roundGbp(
     payments.settlementBalance?.openBalanceGbp ?? Math.abs(payments.currentSignedSettlementGbp),
   );
@@ -114,12 +135,16 @@ export function buildHireEndedOutstandingBalance(
     return {
       amountGbp: 0,
       settled: true,
-      kicker: "Hire and settlement completed",
-      headline: "Nothing is currently owed",
+      kicker: audience === "driver" ? "Hire completed" : "Hire and settlement completed",
+      headline: audience === "driver" ? "You have nothing outstanding" : "Nothing is currently owed",
       detail:
         refundPaidGbp > 0.005
-          ? "The hire is complete and the driver’s final refund has been paid."
-          : "The hire is complete and all amounts are settled.",
+          ? audience === "driver"
+            ? "Your hire is complete and your final refund has been paid."
+            : "The hire is complete and the driver’s final refund has been paid."
+          : audience === "driver"
+            ? "Your hire is complete and all amounts are settled."
+            : "The hire is complete and all amounts are settled.",
       statusLabel: "All clear",
     };
   }
@@ -127,12 +152,20 @@ export function buildHireEndedOutstandingBalance(
   const direction = payments.settlementBalance?.settlementDirection;
   const headline =
     direction === "company_owes_driver"
-      ? `${formatGbp(openBalanceGbp)} refund still due`
-      : `${formatGbp(openBalanceGbp)} still outstanding`;
+      ? audience === "driver"
+        ? `${formatGbp(openBalanceGbp)} refund still due to you`
+        : `${formatGbp(openBalanceGbp)} refund still due`
+      : audience === "driver"
+        ? `${formatGbp(openBalanceGbp)} still outstanding`
+        : `${formatGbp(openBalanceGbp)} still outstanding`;
   const detail =
     direction === "company_owes_driver"
-      ? "Settlement payments to the driver are still open on this hire."
-      : "The driver still owes this amount after contract end.";
+      ? audience === "driver"
+        ? "Your final refund payment is still being processed on this hire."
+        : "Settlement payments to the driver are still open on this hire."
+      : audience === "driver"
+        ? "You still owe this amount after your hire ended."
+        : "The driver still owes this amount after contract end.";
 
   return {
     amountGbp: openBalanceGbp,
@@ -160,17 +193,24 @@ export type HireEndedPaymentRatingDisplay = {
 export function buildEndedHirePaymentRatingDisplay(input: {
   health: HirePaymentHealthSummary;
   outstanding: HireEndedOutstandingBalance;
+  audience?: "staff" | "driver";
 }): HireEndedPaymentRatingDisplay {
   const { health, outstanding } = input;
+  const audience = input.audience ?? "staff";
   let level: keyof typeof ENDED_PAYMENT_RATING_LABEL = health.level;
   if (!outstanding.settled && level === "on_track") level = "attention";
 
   let detail: string;
   if (!outstanding.settled) {
     detail =
-      "Settlement is not fully closed yet. The rating reflects payment behaviour during the hire and may change when the final balance is cleared.";
+      audience === "driver"
+        ? "Settlement is not fully closed yet. Your rating reflects how rent was paid during the hire and may change when the final balance is cleared."
+        : "Settlement is not fully closed yet. The rating reflects payment behaviour during the hire and may change when the final balance is cleared.";
   } else if (level === "on_track") {
-    detail = "Rent and settlement payments were recorded on time for this hire.";
+    detail =
+      audience === "driver"
+        ? "You paid rent on time throughout this hire."
+        : "Rent and settlement payments were recorded on time for this hire.";
   } else if (health.detail) {
     detail = health.detail;
   } else {
@@ -236,7 +276,9 @@ export function buildHireEndedHeroMetrics(input: {
 export function buildHireEndedSummaryStats(input: {
   dashboard: HireDashboardData;
   payments: HirePaymentsPageData;
+  audience?: "staff" | "driver";
 }) {
+  const audience = input.audience ?? "staff";
   const summary = input.payments.terminationSummary;
   const depositAppliedGbp = summary ? hireDepositAppliedToRentGbp(summary) : 0;
   const rentSettledGbp = summary?.accruedRentDueGbp ?? input.dashboard.summary.totalDueGbp;
@@ -253,9 +295,9 @@ export function buildHireEndedSummaryStats(input: {
     rentSettledGbp: roundGbp(rentSettledGbp),
     rentSettledHint: formatRentSettledHint(rentPaidGbp, depositAppliedGbp),
     driverChargesGbp,
-    driverChargesHint: formatDriverChargesHint(driverChargeCount),
+    driverChargesHint: formatDriverChargesHint(driverChargeCount, audience),
     refundPaidGbp,
-    refundPaidHint: formatRefundPaidHint(refundPaymentCount),
+    refundPaidHint: formatRefundPaidHintForAudience(refundPaymentCount, audience),
     depositAppliedGbp,
     driverChargeCount,
   };
