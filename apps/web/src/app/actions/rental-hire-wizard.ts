@@ -10,7 +10,7 @@ import {
   sendDriverRegistrationInviteEmail,
   sendHireDriverAccessEmail,
 } from "@/lib/fleet/hire-access-mail";
-import { loadHireLessorMailIdentity } from "@/lib/fleet/hire-lessor-display";
+import { loadHireLessorMailIdentity, loadHireLessorMailIdentityForSubcompany } from "@/lib/fleet/hire-lessor-display";
 import {
   driverAccessTableStatus,
   hireEsignTableStatus,
@@ -30,6 +30,19 @@ import { prepareHireAgreementEsignAction } from "@/app/actions/rental-hires";
 import { assertDriverLinkedToCompany } from "@/app/actions/rental-driver-links";
 import { loadDriverPreviewBundle } from "@/lib/admin/load-driver-preview";
 import { enrichHireAccessSnapshot, hireAccessSnapshotIsSparse, loadHireGroupAccessSnapshot } from "@/lib/fleet/hire-access-enrich";
+import {
+  approveHireAccessViaToken,
+  expireHireAccessRequestIfNeeded,
+  findHireAccessRequestByToken,
+  hireAccessRequestExpired,
+  hireAccessRequestUnlocked,
+  hireAccessOtpAttemptsRemaining,
+  issueHireAccessResponseCredentials,
+  loadDriverAccessResendReason,
+  rejectHireAccessViaToken,
+  verifyHireAccessOtp,
+  type DriverAccessResendReason,
+} from "@/lib/fleet/hire-access-token";
 import { logHireGroupEvent } from "@/lib/fleet/hire-audit";
 import { shouldHideHireRequestFromInbox } from "@/lib/fleet/driver-hire-nav";
 import { deriveDriverHireSigningSummary, driverHireAccessLabel } from "@/lib/fleet/driver-hire-request-display";
@@ -112,6 +125,7 @@ export type HireDraftPayload = {
   id: string;
   wizard_step: number;
   driver_access_status: string;
+  driver_access_resend_reason: DriverAccessResendReason | null;
   driver_profile_confirmed: boolean;
   form: HireWizardFormState;
 };
@@ -140,10 +154,24 @@ function hireDraftPayloadFromRow(
       id: data.id as string,
       wizard_step: Number(data.wizard_step ?? 1),
       driver_access_status: (data.driver_access_status as string) ?? "not_requested",
+      driver_access_resend_reason: null,
       driver_profile_confirmed: Boolean(data.driver_profile_confirmed),
       form: formFromRow(data),
     },
   };
+}
+
+async function enrichHireDraftAccessContext(draft: HireDraftPayload): Promise<HireDraftPayload> {
+  if (draft.driver_access_status !== "not_requested") {
+    return { ...draft, driver_access_resend_reason: null };
+  }
+  try {
+    const admin = createSupabaseAdminClient();
+    const reason = await loadDriverAccessResendReason(admin, draft.id, draft.driver_access_status);
+    return { ...draft, driver_access_resend_reason: reason };
+  } catch {
+    return { ...draft, driver_access_resend_reason: null };
+  }
 }
 
 function revalidateHires(opts?: { groupId?: string; companyId?: string }) {
@@ -472,7 +500,10 @@ export async function loadHireDraftAction(
     .eq("id", hireGroupId)
     .maybeSingle();
   if (error) return { ok: false, error: error.message };
-  return hireDraftPayloadFromRow(data as Record<string, unknown> | null, companyId);
+  const parsed = hireDraftPayloadFromRow(data as Record<string, unknown> | null, companyId);
+  if (!parsed.ok) return parsed;
+  const draft = await enrichHireDraftAccessContext(parsed.draft);
+  return { ok: true, draft };
 }
 
 /** One round-trip for wizard open: draft (optional), payment accounts, and term list (no bodies). */
@@ -521,7 +552,7 @@ export async function loadHireWizardShellAction(
   if (draftId) {
     const parsed = hireDraftPayloadFromRow(draftRes.data as Record<string, unknown> | null, companyId);
     if (!parsed.ok) return parsed;
-    draft = parsed.draft;
+    draft = await enrichHireDraftAccessContext(parsed.draft);
   }
 
   return {
@@ -611,6 +642,7 @@ export async function saveHireDraftStepAction(input: {
   }));
 
   let subcompanyId = existing.subcompany_id as string | null;
+  const previousSubcompanyId = subcompanyId;
   if (input.form.vehicleId) {
     const { data: vehicle } = await supabase
       .from("vehicles")
@@ -632,6 +664,7 @@ export async function saveHireDraftStepAction(input: {
       wizard_step: input.step,
       vehicle_id: input.form.vehicleId || null,
       subcompany_id: subcompanyId,
+      ...(subcompanyId !== previousSubcompanyId ? { subcompany_legal_snapshot: {} } : {}),
       start_date: input.form.startDate || null,
       start_time: input.form.startTime?.trim() ? normalizeHireTime(input.form.startTime, "09:00") : null,
       end_time: (() => {
@@ -857,6 +890,21 @@ export async function requestDriverAccessForHireAction(
   }
   const driver = matchedDrivers?.[0] ?? null;
 
+  const { data: vehicleRow } = await admin
+    .from("vehicles")
+    .select("subcompany_id")
+    .eq("id", group.vehicle_id as string)
+    .maybeSingle();
+  const vehicleSubcompanyId = (vehicleRow?.subcompany_id as string | null) ?? null;
+  if (vehicleSubcompanyId && vehicleSubcompanyId !== group.subcompany_id) {
+    const { error: syncErr } = await admin
+      .from("vehicle_hire_groups")
+      .update({ subcompany_id: vehicleSubcompanyId, subcompany_legal_snapshot: {} })
+      .eq("id", hireGroupId);
+    if (syncErr) return { ok: false, error: syncErr.message };
+    group.subcompany_id = vehicleSubcompanyId;
+  }
+
   let hireSnapshot: Record<string, unknown>;
   try {
     hireSnapshot = await loadHireGroupAccessSnapshot(admin, hireGroupId);
@@ -905,8 +953,7 @@ export async function requestDriverAccessForHireAction(
     .limit(1)
     .maybeSingle();
 
-  const token = generateAccessToken();
-  const tokenHash = hashSecret(token);
+  const credentials = issueHireAccessResponseCredentials();
   const requestPayload = {
     parent_company_id: group.parent_company_id,
     subcompany_id: group.subcompany_id,
@@ -915,7 +962,11 @@ export async function requestDriverAccessForHireAction(
     driving_licence_number: licence,
     driver_email: driver.account_email,
     hire_snapshot: hireSnapshot,
-    response_token_hash: tokenHash,
+    response_token_hash: credentials.tokenHash,
+    response_otp_hash: credentials.otpHash,
+    response_otp_attempts: 0,
+    response_verified_at: null,
+    response_expires_at: credentials.expiresAt.toISOString(),
     requested_by_user_id: user.id,
     status: "pending" as const,
     resolved_at: null,
@@ -963,7 +1014,14 @@ export async function requestDriverAccessForHireAction(
 
   const vehicle = hireSnapshot.vehicles as { vrm?: string; make?: string; model?: string } | undefined;
   const driverName = [driver.first_name, driver.last_name].filter(Boolean).join(" ").trim() || "Driver";
-  const lessor = await loadHireLessorMailIdentity(admin, hireGroupId);
+  const lessorSubcompanyId = vehicleSubcompanyId ?? (group.subcompany_id as string | null);
+  const lessor = lessorSubcompanyId
+    ? await loadHireLessorMailIdentityForSubcompany(
+        admin,
+        lessorSubcompanyId,
+        group.parent_company_id as string,
+      )
+    : await loadHireLessorMailIdentity(admin, hireGroupId);
   const email = driver.account_email?.trim();
   if (email) {
     const mail = await sendHireDriverAccessEmail({
@@ -974,7 +1032,8 @@ export async function requestDriverAccessForHireAction(
       vrm: vehicle?.vrm ?? "—",
       startDate: (group.start_date as string) ?? "",
       rentLabel: `£${Number(group.rent_amount_gbp).toFixed(2)} / ${group.rent_cadence}`,
-      accessUrl: `${site}/hire-access/${token}`,
+      accessUrl: `${site}/hire-access/${credentials.token}`,
+      accessCode: credentials.otp,
     });
     if (!mail.ok) return { ok: false, error: mail.error };
   }
@@ -983,7 +1042,7 @@ export async function requestDriverAccessForHireAction(
     hireGroupId,
     eventType: "driver_access_requested",
     summary: reopened
-      ? "Driver access request re-sent after rejection."
+      ? "Driver access request re-sent with a new link and access code."
       : "Driver access request sent by email.",
     actorRole: "company_staff",
     actorUserId: user.id,
@@ -1411,11 +1470,14 @@ export async function respondToHireAccessRequestAction(
   const supabase = await createClient();
   const { data: req } = await supabase
     .from("company_driver_access_requests")
-    .select("id, driver_user_id, hire_group_id, parent_company_id, status")
+    .select("id, driver_user_id, hire_group_id, parent_company_id, status, response_expires_at")
     .eq("id", requestId)
     .maybeSingle();
   if (!req || req.status !== "pending") {
     return { ok: false, error: "Request not found." };
+  }
+  if (hireAccessRequestExpired(req)) {
+    return { ok: false, error: "This request has expired. Ask the rental company to send a new access request." };
   }
   if (req.driver_user_id !== user.id) {
     return {
@@ -1487,6 +1549,102 @@ export async function respondToHireAccessRequestAction(
   return { ok: true };
 }
 
+export type HireAccessPageState =
+  | {
+      ok: true;
+      gate: "otp_required";
+      requestId: string;
+      companyName: string;
+      status: string;
+      expiresAt: string | null;
+      otpAttemptsRemaining: number;
+    }
+  | {
+      ok: true;
+      gate: "unlocked" | "completed";
+      requestId: string;
+      companyName: string;
+      status: string;
+      expiresAt: string | null;
+      hireSummary: Record<string, unknown>;
+      termsPreview: { title: string; body: string; versionLabel: string | null } | null;
+      signedInDriverMatch: boolean;
+      signedInEmail: string | null;
+    }
+  | { ok: false; error: string; gate?: "expired" | "invalid"; companyName?: string };
+
+export async function loadHireAccessPageStateAction(
+  token: string,
+): Promise<HireAccessPageState> {
+  let admin: ReturnType<typeof createSupabaseAdminClient>;
+  try {
+    admin = createSupabaseAdminClient();
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Server error." };
+  }
+
+  const found = await findHireAccessRequestByToken(admin, token);
+  if (!found.ok) return { ok: false, error: found.error, gate: "invalid" };
+
+  let request = await expireHireAccessRequestIfNeeded(admin, found.request);
+  const user = await getSessionUser();
+  const signedInDriverMatch = Boolean(user?.id && user.id === request.driver_user_id);
+
+  const { hireSummary, termsPreview, companyName } = await enrichHireAccessSnapshot(
+    admin,
+    (request.hire_snapshot ?? {}) as Record<string, unknown>,
+    request.hire_group_id,
+    request.parent_company_id,
+  );
+  const label = companyName ?? "Rental company";
+
+  if (hireAccessRequestExpired(request)) {
+    return { ok: false, error: "This link has expired.", gate: "expired", companyName: label };
+  }
+
+  if (request.status !== "pending") {
+    return {
+      ok: true,
+      gate: "completed",
+      requestId: request.id,
+      companyName: label,
+      status: request.status,
+      expiresAt: request.response_expires_at,
+      hireSummary,
+      termsPreview,
+      signedInDriverMatch,
+      signedInEmail: user?.email ?? null,
+    };
+  }
+
+  const unlocked = hireAccessRequestUnlocked(request, signedInDriverMatch ? user!.id : null);
+  if (!unlocked) {
+    return {
+      ok: true,
+      gate: "otp_required",
+      requestId: request.id,
+      companyName: label,
+      status: request.status,
+      expiresAt: request.response_expires_at,
+      otpAttemptsRemaining: hireAccessOtpAttemptsRemaining(request),
+    };
+  }
+
+  return {
+    ok: true,
+    gate: "unlocked",
+    requestId: request.id,
+    companyName: label,
+    status: request.status,
+    expiresAt: request.response_expires_at,
+    hireSummary,
+    termsPreview,
+    signedInDriverMatch,
+    signedInEmail: user?.email ?? null,
+  };
+}
+
+/** @deprecated Use loadHireAccessPageStateAction */
 export async function loadHireAccessByTokenAction(
   token: string,
 ): Promise<
@@ -1500,36 +1658,39 @@ export async function loadHireAccessByTokenAction(
     }
   | { ok: false; error: string }
 > {
-  const tokenHash = hashSecret(token.trim());
+  const state = await loadHireAccessPageStateAction(token);
+  if (!state.ok) return { ok: false, error: state.error };
+  if (state.gate === "otp_required") {
+    return {
+      ok: true,
+      requestId: state.requestId,
+      companyName: state.companyName,
+      hireSummary: {},
+      termsPreview: null,
+      status: state.status,
+    };
+  }
+  return {
+    ok: true,
+    requestId: state.requestId,
+    companyName: state.companyName,
+    hireSummary: state.hireSummary,
+    termsPreview: state.termsPreview,
+    status: state.status,
+  };
+}
+
+export async function verifyHireAccessOtpAction(
+  token: string,
+  otp: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
   let admin: ReturnType<typeof createSupabaseAdminClient>;
   try {
     admin = createSupabaseAdminClient();
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Server error." };
   }
-
-  const { data: reqRow } = await admin
-    .from("company_driver_access_requests")
-    .select("id, status, hire_snapshot, parent_company_id, hire_group_id")
-    .eq("response_token_hash", tokenHash)
-    .maybeSingle();
-  if (!reqRow) return { ok: false, error: "Link invalid or expired." };
-
-  const { hireSummary, termsPreview, companyName } = await enrichHireAccessSnapshot(
-    admin,
-    (reqRow.hire_snapshot ?? {}) as Record<string, unknown>,
-    reqRow.hire_group_id as string | null,
-    reqRow.parent_company_id as string,
-  );
-
-  return {
-    ok: true,
-    requestId: reqRow.id as string,
-    companyName: companyName ?? "Rental company",
-    hireSummary,
-    termsPreview,
-    status: reqRow.status as string,
-  };
+  return verifyHireAccessOtp(admin, token, otp);
 }
 
 export type DriverHireRequestSummary = {
@@ -1697,50 +1858,45 @@ export async function loadDriverHireRequestDetailAction(
 export async function respondToHireAccessByTokenAction(
   token: string,
   approve: boolean,
-): Promise<{ ok: true; loginRequired: boolean; requestId?: string } | { ok: false; error: string }> {
-  const loaded = await loadHireAccessByTokenAction(token);
-  if (!loaded.ok) return loaded;
-  if (loaded.status !== "pending") return { ok: false, error: "This request has already been answered." };
-
-  const user = await getSessionUser();
-  if (!user) {
-    if (!approve) {
-      let admin: ReturnType<typeof createSupabaseAdminClient>;
-      try {
-        admin = createSupabaseAdminClient();
-      } catch (e) {
-        return { ok: false, error: e instanceof Error ? e.message : "Server error." };
-      }
-      const now = new Date().toISOString();
-      await admin
-        .from("company_driver_access_requests")
-        .update({ status: "rejected", resolved_at: now })
-        .eq("id", loaded.requestId);
-      const { data: req } = await admin
-        .from("company_driver_access_requests")
-        .select("hire_group_id")
-        .eq("id", loaded.requestId)
-        .maybeSingle();
-      if (req?.hire_group_id) {
-        await admin
-          .from("vehicle_hire_groups")
-          .update({ driver_access_status: "rejected" })
-          .eq("id", req.hire_group_id);
-        await logHireGroupEvent(admin, {
-          hireGroupId: req.hire_group_id as string,
-          eventType: "driver_access_rejected",
-          summary: "Driver rejected profile access via email link (without signing in).",
-          actorRole: "driver",
-          metadata: { access_request_id: loaded.requestId, via: "email_token" },
-        });
-        await syncVehicleStatusForHireGroup(admin, req.hire_group_id as string);
-      }
-      return { ok: true, loginRequired: false, requestId: loaded.requestId };
-    }
-    return { ok: true, loginRequired: true, requestId: loaded.requestId };
+): Promise<{ ok: true; requestId?: string } | { ok: false; error: string }> {
+  let admin: ReturnType<typeof createSupabaseAdminClient>;
+  try {
+    admin = createSupabaseAdminClient();
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Server error." };
   }
 
-  const res = await respondToHireAccessRequestAction(loaded.requestId, approve);
-  if (!res.ok) return res;
-  return { ok: true, loginRequired: false, requestId: loaded.requestId };
+  const found = await findHireAccessRequestByToken(admin, token);
+  if (!found.ok) return found;
+
+  const request = await expireHireAccessRequestIfNeeded(admin, found.request);
+  if (request.status !== "pending") {
+    return { ok: false, error: "This request has already been answered." };
+  }
+  if (hireAccessRequestExpired(request)) {
+    return { ok: false, error: "This link has expired. Ask the rental company to send a new access request." };
+  }
+
+  const user = await getSessionUser();
+  if (user?.id === request.driver_user_id) {
+    const res = await respondToHireAccessRequestAction(request.id, approve);
+    if (!res.ok) return res;
+    revalidatePath("/driver/hire-requests");
+    return { ok: true, requestId: request.id };
+  }
+
+  if (approve) {
+    const approved = await approveHireAccessViaToken(admin, request.id, { via: "email_token" });
+    if (!approved.ok) return approved;
+  } else {
+    const rejected = await rejectHireAccessViaToken(admin, request.id, { via: "email_token" });
+    if (!rejected.ok) return rejected;
+  }
+
+  revalidateHires({
+    groupId: request.hire_group_id ?? undefined,
+    companyId: request.parent_company_id,
+  });
+  revalidatePath("/driver/hire-requests");
+  return { ok: true, requestId: request.id };
 }

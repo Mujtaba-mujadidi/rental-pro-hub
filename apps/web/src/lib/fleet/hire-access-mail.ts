@@ -12,6 +12,7 @@ export type HireAccessEmailInput = {
   startDate: string;
   rentLabel: string;
   accessUrl: string;
+  accessCode: string;
 };
 
 function lessorEmailTableRows(lessor: HireLessorMailIdentity) {
@@ -49,7 +50,10 @@ export async function sendHireDriverAccessEmail(input: HireAccessEmailInput): Pr
     "Review the request and approve or reject here:",
     input.accessUrl,
     "",
-    "If you approve, you will be asked to sign in and confirm before your profile is shared.",
+    `Access code: ${input.accessCode}`,
+    "Enter this code when you open the link. The link and code expire in 30 minutes.",
+    "",
+    "Alternatively, sign in to your driver account from the review page to approve or reject from your hire requests inbox.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -67,7 +71,12 @@ export async function sendHireDriverAccessEmail(input: HireAccessEmailInput): Pr
       { label: "Rent", value: escapeHtml(input.rentLabel) },
     ],
     cta: { label: "Review request", href: input.accessUrl },
-    footer: "You can approve or reject this request from the link above. No profile data is shared until you approve.",
+    otp: {
+      code: input.accessCode,
+      expiresLabel: "The link and access code expire in 30 minutes. Do not share this email.",
+    },
+    footer:
+      "Open the link above and enter your access code to review the request. You can approve or reject without signing in once the code is verified, or sign in from the review page instead.",
   });
 
   try {

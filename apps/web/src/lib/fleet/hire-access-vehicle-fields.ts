@@ -1,8 +1,9 @@
 /** Vehicle columns included in hire access previews (specs only — no compliance/maintenance or internal notes). */
 export const HIRE_ACCESS_VEHICLE_SELECT =
-  "vrm, make, model, colour, first_reg_date, first_reg_uk_date, fuel_type, seats, cc";
+  "subcompany_id, vrm, make, model, colour, first_reg_date, first_reg_uk_date, fuel_type, seats, cc";
 
 export type HireAccessVehicleSnapshot = {
+  subcompany_id?: string | null;
   vrm?: string | null;
   make?: string | null;
   model?: string | null;

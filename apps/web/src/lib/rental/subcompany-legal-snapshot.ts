@@ -174,6 +174,19 @@ export type HireLessorMailIdentity = {
   address: string | null;
 };
 
+/**
+ * The vehicle's operating subcompany is the lessor. Hire drafts may still point at an
+ * older subcompany until the wizard is saved again (e.g. after a vehicle transfer).
+ */
+export function resolveEffectiveHireLessorSubcompanyId(input: {
+  hireGroupSubcompanyId?: string | null;
+  vehicleSubcompanyId?: string | null;
+}): string | null {
+  const fromVehicle = input.vehicleSubcompanyId?.trim();
+  if (fromVehicle) return fromVehicle;
+  return input.hireGroupSubcompanyId?.trim() || null;
+}
+
 export type HireLessorIdentitySource = HireLessorNameSource & {
   company_number?: string | null;
   registered_address_line1?: string | null;
@@ -183,25 +196,54 @@ export type HireLessorIdentitySource = HireLessorNameSource & {
   registered_postcode?: string | null;
 };
 
+export function snapshotHasLessorIdentity(snap: Record<string, unknown> | null | undefined): boolean {
+  if (!snap) return false;
+  return Boolean(
+    snapshotString(snap, "legal_name") ||
+      snapshotString(snap, "display_name") ||
+      snapshotString(snap, "name") ||
+      snapshotString(snap, "company_number"),
+  );
+}
+
+/** Draft hires and mismatched snapshots must use live subcompany data for driver-facing copy. */
+export function shouldUseFrozenLessorSnapshot(input: {
+  hireStatus?: string | null;
+  snapshot?: Record<string, unknown> | null;
+  subcompany?: HireLessorIdentitySource | null;
+}): boolean {
+  if ((input.hireStatus ?? "").trim() === "draft") return false;
+  if (!snapshotHasLessorIdentity(input.snapshot)) return false;
+  const snapNumber = snapshotString(input.snapshot, "company_number");
+  const liveNumber = input.subcompany?.company_number?.trim();
+  if (snapNumber && liveNumber && snapNumber !== liveNumber) return false;
+  const snapLegal = snapshotString(input.snapshot, "legal_name");
+  const liveLegal = input.subcompany?.legal_name?.trim();
+  if (snapLegal && liveLegal && snapLegal !== liveLegal) return false;
+  return true;
+}
+
 /** Lessor identity for driver-facing emails — subcompany legal details, not parent tenant name. */
 export function resolveHireLessorMailIdentity(input: {
   snapshot?: Record<string, unknown> | null;
   subcompany?: HireLessorIdentitySource | null;
   parentCompanyName?: string | null;
   hasSubcompany?: boolean;
+  useSnapshot?: boolean;
 }): HireLessorMailIdentity {
+  const snapshot = input.useSnapshot === false ? null : input.snapshot;
   const displayName = resolveHireLessorDisplayName({
-    snapshot: input.snapshot,
+    snapshot,
     subcompany: input.subcompany,
     parentCompanyName: input.parentCompanyName,
     hasSubcompany: input.hasSubcompany,
   });
   const legalName =
-    snapshotString(input.snapshot, "legal_name") || input.subcompany?.legal_name?.trim() || null;
+    snapshotString(snapshot, "legal_name") || input.subcompany?.legal_name?.trim() || null;
   const companyNumber =
-    snapshotString(input.snapshot, "company_number") || input.subcompany?.company_number?.trim() || null;
+    snapshotString(snapshot, "company_number") || input.subcompany?.company_number?.trim() || null;
   const address =
-    lessorAddressFromSnapshot(input.snapshot) ||
+    lessorAddressFromSnapshot(snapshot) ||
     (input.subcompany ? formatSubcompanyAddressLines(input.subcompany) : null) ||
     null;
 

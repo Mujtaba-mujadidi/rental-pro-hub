@@ -1,6 +1,10 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { HIRE_ACCESS_VEHICLE_SELECT } from "@/lib/fleet/hire-access-vehicle-fields";
-import { resolveHireLessorMailIdentity } from "@/lib/rental/subcompany-legal-snapshot";
+import {
+  resolveEffectiveHireLessorSubcompanyId,
+  resolveHireLessorMailIdentity,
+  shouldUseFrozenLessorSnapshot,
+} from "@/lib/rental/subcompany-legal-snapshot";
 
 export type HireAccessTermsPreview = {
   title: string;
@@ -12,7 +16,7 @@ const SUBCOMPANY_IDENTITY_SELECT =
   "legal_name, display_name, name, company_number, registered_address_line1, registered_address_line2, registered_town, registered_county, registered_postcode";
 
 const HIRE_GROUP_DETAIL_SELECT =
-  `subcompany_id, hire_terms_version_id, start_date, start_time, end_time, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, draft_snapshot, subcompany_legal_snapshot, companies(name), vehicles(${HIRE_ACCESS_VEHICLE_SELECT}), subcompanies(${SUBCOMPANY_IDENTITY_SELECT}), company_hire_terms_versions(title, body, version_label)`;
+  `subcompany_id, status, hire_terms_version_id, start_date, start_time, end_time, rent_cadence, rent_amount_gbp, deposit_gbp, include_deposit, draft_snapshot, subcompany_legal_snapshot, companies(name), vehicles(${HIRE_ACCESS_VEHICLE_SELECT}), subcompanies(${SUBCOMPANY_IDENTITY_SELECT}), company_hire_terms_versions(title, body, version_label)`;
 
 export function hireAccessSnapshotIsSparse(snapshot: Record<string, unknown>): boolean {
   return (
@@ -125,25 +129,47 @@ export async function enrichHireAccessSnapshot(
     }
   }
 
-  const subcompanyId =
+  const hireGroupSubcompanyId =
     (typeof summary.subcompany_id === "string" ? summary.subcompany_id : null) ||
     (typeof hg.subcompany_id === "string" ? hg.subcompany_id : null);
+  const vehicleSubcompanyId = (
+    (summary.vehicles ?? hg.vehicles ?? null) as { subcompany_id?: string } | null
+  )?.subcompany_id;
+  const effectiveSubcompanyId = resolveEffectiveHireLessorSubcompanyId({
+    hireGroupSubcompanyId,
+    vehicleSubcompanyId,
+  });
 
   let subcompany = (summary.subcompanies ?? hg.subcompanies ?? null) as Record<string, unknown> | null;
-  if (!subcompany && subcompanyId) {
-    subcompany = (await loadSubcompanyIdentity(admin, subcompanyId)) as Record<string, unknown> | null;
-    if (subcompany) summary = { ...summary, subcompanies: subcompany };
+  if (effectiveSubcompanyId && (!subcompany || effectiveSubcompanyId !== hireGroupSubcompanyId)) {
+    subcompany = (await loadSubcompanyIdentity(admin, effectiveSubcompanyId)) as Record<string, unknown> | null;
+    if (subcompany) {
+      summary = {
+        ...summary,
+        subcompany_id: effectiveSubcompanyId,
+        subcompanies: subcompany,
+        subcompany_legal_snapshot: null,
+      };
+    }
+  } else if (effectiveSubcompanyId && effectiveSubcompanyId !== hireGroupSubcompanyId) {
+    summary = { ...summary, subcompany_id: effectiveSubcompanyId, subcompany_legal_snapshot: null };
   }
 
-  const snapshot = (summary.subcompany_legal_snapshot ?? hg.subcompany_legal_snapshot ?? null) as
+  const frozenSnapshot = (summary.subcompany_legal_snapshot ?? hg.subcompany_legal_snapshot ?? null) as
     | Record<string, unknown>
     | null;
+  const useSnapshot = shouldUseFrozenLessorSnapshot({
+    hireStatus: (summary.status ?? hg.status) as string | null,
+    snapshot: frozenSnapshot,
+    subcompany: subcompany as Record<string, unknown> | null,
+  });
 
   companyName = resolveHireLessorMailIdentity({
-    snapshot,
+    snapshot: useSnapshot ? frozenSnapshot : null,
     subcompany,
     parentCompanyName,
-    hasSubcompany: Boolean(subcompanyId),
+    hasSubcompany: Boolean(effectiveSubcompanyId),
+    useSnapshot,
   }).displayName;
 
   if (!termsPreview && includeTerms) {

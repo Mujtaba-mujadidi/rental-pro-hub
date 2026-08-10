@@ -40,7 +40,10 @@ import {
   type HireWizardStep,
 } from "@/lib/fleet/hire-wizard";
 import type { ContractLengthKind, RentCadence } from "@/lib/fleet/hire-types";
-import { HIRE_INSURANCE_PROVIDED_BY_LABELS } from "@/lib/fleet/hire-insurance";
+import {
+  driverAccessResendReasonCopy,
+  type DriverAccessResendReason,
+} from "@/lib/fleet/hire-access-token";
 import DOMPurify from "isomorphic-dompurify";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
@@ -90,6 +93,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
   const [draftId, setDraftId] = useState<string | null>(null);
   const [form, setForm] = useState<HireWizardFormState>(emptyForm(initialVehicleId));
   const [driverAccessStatus, setDriverAccessStatus] = useState("not_requested");
+  const [driverAccessResendReason, setDriverAccessResendReason] = useState<DriverAccessResendReason | null>(null);
   const [driverProfileConfirmed, setDriverProfileConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -136,6 +140,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
         setStep(res.data.draft.wizard_step as HireWizardStep);
         setForm(res.data.draft.form);
         setDriverAccessStatus(res.data.draft.driver_access_status);
+        setDriverAccessResendReason(res.data.draft.driver_access_resend_reason);
         setDriverProfileConfirmed(res.data.draft.driver_profile_confirmed);
       }
       setError(null);
@@ -157,6 +162,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
       setStep(res.draft.wizard_step as HireWizardStep);
       setForm(res.draft.form);
       setDriverAccessStatus(res.draft.driver_access_status);
+      setDriverAccessResendReason(res.draft.driver_access_resend_reason);
       setDriverProfileConfirmed(res.draft.driver_profile_confirmed);
       setError(null);
     } finally {
@@ -227,6 +233,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
       setStep(1);
       setForm(emptyForm(initialVehicleId));
       setDriverAccessStatus("not_requested");
+      setDriverAccessResendReason(null);
       setDriverProfileConfirmed(false);
       clearDriverProfileCache();
       void loadShell(null);
@@ -370,6 +377,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
           setAccessMessage("No driver profile found for this licence. Register the driver or send a registration link.");
         } else {
           setDriverAccessStatus("pending");
+          setDriverAccessResendReason(null);
           setAccessMessage("Access request sent. The driver will receive an email to approve or reject.");
         }
         onSaved();
@@ -379,6 +387,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
           setStep(draftRes.draft.wizard_step as HireWizardStep);
           setForm(draftRes.draft.form);
           setDriverAccessStatus(draftRes.draft.driver_access_status);
+          setDriverAccessResendReason(draftRes.draft.driver_access_resend_reason);
           setDriverProfileConfirmed(draftRes.draft.driver_profile_confirmed);
         }
       } finally {
@@ -463,6 +472,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
       }
       setAmendConfirmOpen(false);
       setDriverAccessStatus("not_requested");
+      setDriverAccessResendReason(null);
       setDriverProfileConfirmed(false);
       clearDriverProfileCache();
       setAccessMessage(null);
@@ -825,6 +835,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
             </FormModalField>
             <DriverAccessStatusPanel
               status={driverAccessStatus}
+              resendReason={driverAccessResendReason}
               sending={requestingDriverAccess}
               refreshing={accessStatusRefreshing}
               message={accessMessage}
@@ -842,8 +853,8 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
                       <InlineSpinner onDark />
                       Sending request…
                     </>
-                  ) : driverAccessStatus === "rejected" ? (
-                    "Send new request"
+                  ) : driverAccessStatus === "rejected" || driverAccessResendReason ? (
+                    "Send new access link"
                   ) : (
                     "Request driver access"
                   )}
@@ -987,11 +998,13 @@ const DRIVER_ACCESS_STATUS_COPY: Record<
 
 function DriverAccessStatusPanel({
   status,
+  resendReason,
   sending,
   refreshing,
   message,
 }: {
   status: string;
+  resendReason?: DriverAccessResendReason | null;
   sending: boolean;
   refreshing: boolean;
   message: string | null;
@@ -1020,9 +1033,13 @@ function DriverAccessStatusPanel({
     detail: "Status updates live when the driver responds.",
     tone: "neutral" as const,
   };
-
-  const toneClass =
-    copy.tone === "pending"
+  const resendNote = driverAccessResendReasonCopy(resendReason);
+  const title =
+    status === "not_requested" && resendReason ? "New driver access link required" : copy.title;
+  const detail = message?.trim() || resendNote || copy.detail;
+  const toneClass = resendReason
+    ? "border-amber-300/80 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30"
+    : copy.tone === "pending"
       ? "border-amber-300/80 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30"
       : copy.tone === "success"
         ? "border-emerald-300/80 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/30"
@@ -1041,8 +1058,8 @@ function DriverAccessStatusPanel({
     >
       {status === "pending" || refreshing ? <StatusSpinner /> : null}
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold capitalize text-rph-fg">{copy.title}</p>
-        <p className="mt-0.5 text-sm text-rph-fg-secondary">{message?.trim() || copy.detail}</p>
+        <p className="text-sm font-semibold capitalize text-rph-fg">{title}</p>
+        <p className="mt-0.5 text-sm text-rph-fg-secondary">{detail}</p>
         {status === "pending" ? (
           <p className="mt-2 text-xs font-medium text-rph-fg-muted">
             {refreshing ? "Checking for driver response…" : "Waiting for driver response · updates live"}

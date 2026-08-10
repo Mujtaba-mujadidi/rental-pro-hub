@@ -80,7 +80,13 @@ export function hireAccessApproveConfirmCopy(companyName: string): string {
 }
 
 export function hireAccessRejectConfirmCopy(companyName: string): string {
-  return `Reject the hire access request from ${companyName}? They will not be able to use your driver profile for this contract.`;
+  return [
+    `You are about to reject the hire access request from ${companyName}.`,
+    "",
+    "If you reject, they will not be able to use your driver profile for this contract and the hire draft will not proceed.",
+    "",
+    "Only reject if you do not want this rental company to access your profile for this hire.",
+  ].join("\n");
 }
 
 export function hireCancelConfirmCopy(vehicleVrm?: string | null): string {
