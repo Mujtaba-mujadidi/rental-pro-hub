@@ -1,36 +1,54 @@
 "use client";
 
-import type { HirePaymentAccountDisplay } from "@/app/actions/hire-payments";
-import { previewHirePaymentAllocationAction } from "@/app/actions/hire-payments";
-import { formatUkDate } from "@/lib/datetime/uk";
-import type { HirePaymentAllocationResult } from "@/lib/fleet/hire-payment-allocation";
+import type { HirePaymentAccountDisplay, HirePaymentPageRow } from "@/app/actions/hire-payments";
+import { formatUkDate, ukTodayYmd } from "@/lib/datetime/uk";
+import {
+  allocatePaymentAcrossRows,
+  type HirePaymentAllocationResult,
+} from "@/lib/fleet/hire-payment-allocation";
+import { payBalanceToDateGbp } from "@/lib/fleet/hire-active-payments-display";
+import type { HirePaymentScheduleRowInput } from "@/lib/fleet/hire-payment-summary";
 import { formatGbp } from "@/lib/fleet/maintenance";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 
 function parseAmountInput(raw: string): number | null {
   const n = Number.parseFloat(raw.replace(/£/g, "").replace(/,/g, "").trim());
   return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
 }
 
+function toAllocationInputs(rows: readonly HirePaymentPageRow[]): HirePaymentScheduleRowInput[] {
+  return rows.map((row) => ({
+    id: row.id,
+    periodStart: row.periodStart,
+    periodEnd: row.periodEnd,
+    rowKind: row.rowKind,
+    baseAmountGbp: row.baseAmountGbp,
+    discountTotalGbp: row.discountTotalGbp,
+    paymentStatus: row.paymentStatus,
+    approvedAmountGbp: row.approvedAmountGbp,
+    pendingSubmittedGbp: row.pendingSubmittedGbp,
+    sortOrder: row.sortOrder,
+  }));
+}
+
 export function HirePaymentComposer({
-  hireGroupId,
+  scheduleRows,
   scheduleBalanceGbp,
-  balanceToDateGbp,
   paymentAccount,
   canSubmit,
   submitLabel,
   triggerLabel = "Record payment",
-  asDriver,
   onAllocationChange,
   onSubmit,
   onSuccess,
   busy,
 }: {
+  /** Kept for call-site consistency; submit auth still uses hireGroupId in onSubmit. */
   hireGroupId: string;
+  /** Authorised schedule rows already loaded for this hire — used for instant local preview. */
+  scheduleRows: readonly HirePaymentPageRow[];
   /** Full sheet outstanding — used to enable recording when prepayment is possible. */
   scheduleBalanceGbp: number;
-  /** Accrued balance to date — used for the pay-in-full shortcut. */
-  balanceToDateGbp: number;
   paymentAccount: HirePaymentAccountDisplay | null;
   canSubmit: boolean;
   submitLabel: string;
@@ -45,69 +63,59 @@ export function HirePaymentComposer({
   const [amount, setAmount] = useState("");
   const [reference, setReference] = useState("");
   const [allocation, setAllocation] = useState<HirePaymentAllocationResult | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [previewPending, startPreview] = useTransition();
   const [submitPending, startSubmit] = useTransition();
+
+  const allocationInputs = useMemo(() => toAllocationInputs(scheduleRows), [scheduleRows]);
+  const balanceShortcutGbp = useMemo(() => payBalanceToDateGbp(scheduleRows), [scheduleRows]);
 
   const closeModal = useCallback(() => {
     setOpen(false);
     setAmount("");
     setReference("");
     setAllocation(null);
-    setPreviewError(null);
     setSubmitError(null);
     onAllocationChange?.([]);
   }, [onAllocationChange]);
 
-  const runPreview = useCallback(
-    (value: string) => {
-      const parsed = parseAmountInput(value);
-      if (!parsed) {
-        setAllocation(null);
-        onAllocationChange?.([]);
-        setPreviewError(null);
-        return;
-      }
-      startPreview(async () => {
-        const res = await previewHirePaymentAllocationAction({
-          hireGroupId,
-          amountGbp: parsed,
-          asDriver,
-        });
-        if (!res.ok) {
-          setPreviewError(res.error);
-          setAllocation(null);
-          onAllocationChange?.([]);
-          return;
-        }
-        setPreviewError(null);
-        setAllocation(res.allocation);
-        onAllocationChange?.(res.allocation.allocations.map((line) => line.rowId));
-      });
-    },
-    [asDriver, hireGroupId, onAllocationChange],
-  );
-
   useEffect(() => {
     if (!open) return;
-    const timer = setTimeout(() => runPreview(amount), 200);
-    return () => clearTimeout(timer);
-  }, [amount, open, runPreview]);
+
+    const parsed = parseAmountInput(amount);
+    if (!parsed) {
+      setAllocation(null);
+      onAllocationChange?.([]);
+      return;
+    }
+
+    // Local FIFO allocation — same helper the server uses on submit. Debounce only the
+    // parent table highlight so keystrokes stay responsive.
+    const next = allocatePaymentAcrossRows(parsed, allocationInputs, ukTodayYmd());
+    setAllocation(next);
+
+    const highlightTimer = setTimeout(() => {
+      onAllocationChange?.(next.allocations.map((line) => line.rowId));
+    }, 250);
+    return () => clearTimeout(highlightTimer);
+  }, [allocationInputs, amount, onAllocationChange, open]);
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !submitPending && !previewPending) closeModal();
+      if (e.key === "Escape" && !submitPending) closeModal();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [closeModal, open, previewPending, submitPending]);
+  }, [closeModal, open, submitPending]);
 
   function handleSubmit() {
     const parsed = parseAmountInput(amount);
     if (!parsed) {
       setSubmitError("Enter a valid payment amount.");
+      return;
+    }
+    if (!allocation?.allocations.length) {
+      setSubmitError("No outstanding balance to allocate this payment to.");
       return;
     }
     setSubmitError(null);
@@ -122,7 +130,8 @@ export function HirePaymentComposer({
     });
   }
 
-  const disabled = busy || previewPending || submitPending || !canSubmit;
+  const fieldsDisabled = busy || submitPending || !canSubmit;
+  const submitDisabled = fieldsDisabled || !allocation?.allocations.length;
 
   if (!canSubmit) return null;
 
@@ -131,7 +140,7 @@ export function HirePaymentComposer({
       <button
         type="button"
         className="rph-btn-primary"
-        disabled={disabled || scheduleBalanceGbp <= 0}
+        disabled={fieldsDisabled || scheduleBalanceGbp <= 0}
         onClick={() => setOpen(true)}
       >
         {triggerLabel}
@@ -179,17 +188,18 @@ export function HirePaymentComposer({
                     inputMode="decimal"
                     placeholder="0.00"
                     value={amount}
-                    disabled={disabled}
+                    disabled={fieldsDisabled}
+                    autoFocus
                     onChange={(e) => setAmount(e.target.value)}
                   />
                 </label>
                 <button
                   type="button"
                   className="rph-btn-ghost h-10 shrink-0 px-3 text-xs"
-                  disabled={disabled || balanceToDateGbp <= 0}
-                  onClick={() => setAmount(balanceToDateGbp.toFixed(2))}
+                  disabled={fieldsDisabled || balanceShortcutGbp <= 0}
+                  onClick={() => setAmount(balanceShortcutGbp.toFixed(2))}
                 >
-                  Pay balance to date ({formatGbp(balanceToDateGbp)})
+                  Pay balance to date ({formatGbp(balanceShortcutGbp)})
                 </button>
               </div>
 
@@ -198,18 +208,11 @@ export function HirePaymentComposer({
                 <input
                   className="rph-input w-full"
                   value={reference}
-                  disabled={disabled}
+                  disabled={fieldsDisabled}
                   onChange={(e) => setReference(e.target.value)}
                   placeholder="Bank reference or note"
                 />
               </label>
-
-              {previewPending ? (
-                <p className="rph-meta text-sm" role="status">
-                  Calculating allocation…
-                </p>
-              ) : null}
-              {previewError ? <p className="rph-alert-error text-sm">{previewError}</p> : null}
 
               {allocation?.allocations.length ? (
                 <div className="space-y-2 rounded-lg border border-rph-border bg-rph-page p-3">
@@ -263,13 +266,18 @@ export function HirePaymentComposer({
             </div>
 
             <div className="flex shrink-0 justify-end gap-2 border-t border-rph-border px-5 py-4 sm:px-6">
-              <button type="button" className="rph-btn-ghost h-10 px-4" disabled={disabled} onClick={closeModal}>
+              <button
+                type="button"
+                className="rph-btn-ghost h-10 px-4"
+                disabled={fieldsDisabled}
+                onClick={closeModal}
+              >
                 Cancel
               </button>
               <button
                 type="button"
                 className="rph-btn-primary h-10 px-4"
-                disabled={disabled || !allocation?.allocations.length}
+                disabled={submitDisabled}
                 onClick={handleSubmit}
               >
                 {submitPending ? "Submitting…" : submitLabel}

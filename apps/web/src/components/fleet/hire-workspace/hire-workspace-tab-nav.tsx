@@ -60,12 +60,13 @@ export function HireWorkspaceTabNav({
   const pathname = usePathname();
   return (
     <nav
-      className="-mx-1 mt-4 overflow-x-auto overscroll-x-contain border-b border-rph-border px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="hire-ws-tab-nav -mx-1 mt-3 overflow-x-auto overscroll-x-contain border-b border-rph-border px-1 sm:mt-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       aria-label="Hire sections"
     >
-      <div className="flex w-max gap-6">
+      <div className="flex w-max min-w-full gap-4 sm:gap-6">
         {items.map((item) => {
           const active = isItemActive(pathname, item);
+          const mobileLabel = item.mobileLabel ?? item.label;
           return (
             <Link
               key={item.href}
@@ -73,8 +74,9 @@ export function HireWorkspaceTabNav({
               className={active ? "hire-ws-tab hire-ws-tab-active" : "hire-ws-tab"}
               aria-current={active ? "page" : undefined}
             >
-              {tabIcon(item.label)}
-              <span>{item.label}</span>
+              <span className="hidden sm:inline-flex">{tabIcon(item.label)}</span>
+              <span className="sm:hidden">{mobileLabel}</span>
+              <span className="hidden sm:inline">{item.label}</span>
             </Link>
           );
         })}

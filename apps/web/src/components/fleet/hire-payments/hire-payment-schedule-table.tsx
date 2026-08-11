@@ -14,9 +14,14 @@ import {
   type HirePaymentDisplayStatus,
 } from "@/lib/fleet/hire-payment-display";
 import { formatGbp } from "@/lib/fleet/maintenance";
+import {
+  upcomingPaymentPeriodLabel,
+  upcomingPaymentStatusLabel,
+} from "@/lib/fleet/hire-active-payments-display";
 import { useMemo, useState } from "react";
 
-function periodCell(row: HirePaymentPageRow): string {
+function periodCell(row: HirePaymentPageRow, compact = false): string {
+  if (compact) return upcomingPaymentPeriodLabel(row);
   if (row.rowKind === "deposit") return "Deposit";
   return `${formatUkDate(row.periodStart)} – ${formatUkDate(row.periodEnd)}`;
 }
@@ -52,6 +57,8 @@ export function HirePaymentScheduleTable({
   settlementSettled = false,
   audience = "staff",
   readOnly = false,
+  showActions = true,
+  variant = "default",
   onRefresh,
 }: {
   rows: HirePaymentPageRow[];
@@ -63,6 +70,8 @@ export function HirePaymentScheduleTable({
   settlementSettled?: boolean;
   audience?: HirePaymentDisplayAudience;
   readOnly?: boolean;
+  showActions?: boolean;
+  variant?: "default" | "workspace";
   onRefresh: () => void;
 }) {
   const [search, setSearch] = useState("");
@@ -117,6 +126,199 @@ export function HirePaymentScheduleTable({
       });
   }, [audience, displayOptions, rows, search, statusFilter, todayYmd]);
 
+  const workspaceTable = variant === "workspace";
+  const includeActions = showActions;
+  const emptyColSpan = workspaceTable ? (includeActions ? 5 : 4) : includeActions ? 6 : 5;
+
+  const tableBody = (
+    <table
+      className={
+        workspaceTable
+          ? includeActions
+            ? "hire-ws-payments-table"
+            : "hire-ws-payments-table hire-ws-payments-table-no-actions"
+          : "w-full text-sm"
+      }
+    >
+      {workspaceTable ? (
+        <colgroup>
+          <col className="hire-ws-payments-col-period" />
+          <col className="hire-ws-payments-col-amount" />
+          <col className="hire-ws-payments-col-amount" />
+          <col className="hire-ws-payments-col-status" />
+          {includeActions ? <col className="hire-ws-payments-col-action" /> : null}
+        </colgroup>
+      ) : null}
+      <thead className={workspaceTable ? undefined : "sticky top-0 z-10"}>
+        <tr
+          className={
+            workspaceTable
+              ? undefined
+              : "border-b border-rph-border bg-rph-chrome text-left text-xs font-semibold uppercase tracking-wide text-rph-fg-muted shadow-[0_1px_0_0_var(--rph-border)]"
+          }
+        >
+          <th scope="col" className={workspaceTable ? undefined : "px-4 py-2.5"}>
+            Period
+          </th>
+          <th scope="col" className={workspaceTable ? undefined : "px-4 py-2.5"}>
+            Due
+          </th>
+          <th scope="col" className={workspaceTable ? undefined : "px-4 py-2.5"}>
+            Paid
+          </th>
+          {!workspaceTable ? (
+            <th scope="col" className="px-4 py-2.5">
+              Balance
+            </th>
+          ) : null}
+          <th scope="col" className={workspaceTable ? undefined : "px-4 py-2.5"}>
+            Status
+          </th>
+          {includeActions ? (
+            <th scope="col" className={workspaceTable ? "text-right" : "px-4 py-2.5 text-right"}>
+              Action
+            </th>
+          ) : null}
+        </tr>
+      </thead>
+      <tbody className={workspaceTable ? undefined : "divide-y divide-rph-border"}>
+        {!filtered.length ? (
+          <tr>
+            <td
+              colSpan={emptyColSpan}
+              className={
+                workspaceTable
+                  ? "hire-ws-payments-table-empty"
+                  : "px-4 py-8 text-center text-rph-fg-muted"
+              }
+            >
+              No payment rows match your filters.
+            </td>
+          </tr>
+        ) : (
+          filtered.map((row) => {
+            const highlighted = highlightSet.has(row.id);
+            const displayStatus = rowDisplayStatus(row, todayYmd, displayOptions);
+            const statusMeta = hirePaymentDisplayStatusMeta(displayStatus, { audience });
+            const workspaceStatus = upcomingPaymentStatusLabel(row, todayYmd, displayOptions);
+            const rowClass = workspaceTable
+              ? highlighted
+                ? "hire-ws-payments-table-row-highlight"
+                : undefined
+              : highlighted
+                ? "bg-rph-rail/10"
+                : displayStatus === "overdue"
+                  ? "bg-red-50/40 dark:bg-red-950/15"
+                  : displayStatus === "pending_approval"
+                    ? "bg-amber-50/50 dark:bg-amber-950/20"
+                    : "bg-rph-raised/30";
+
+            return (
+              <tr key={row.id} className={rowClass}>
+                <td
+                  data-label="Period"
+                  className={workspaceTable ? undefined : "rph-table-primary px-4 py-3"}
+                >
+                  {workspaceTable ? (
+                    <>
+                      <span className="hire-ws-payments-period-label">{periodCell(row, true)}</span>
+                      {highlighted ? (
+                        <p className="mt-0.5 hidden text-[10px] font-medium text-rph-link sm:mt-1 sm:block sm:text-xs">
+                          Allocated in payment
+                        </p>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-medium text-rph-fg">{periodCell(row)}</p>
+                      <p className="rph-meta text-xs capitalize">{row.rowKind}</p>
+                      {row.discountTotalGbp > 0 ? (
+                        <p className="rph-meta text-xs">Discount {formatGbp(row.discountTotalGbp)}</p>
+                      ) : null}
+                      {row.discounts.length > 0 ? (
+                        <ul className="rph-meta mt-1 space-y-0.5 text-[10px]">
+                          {row.discounts.map((d) => (
+                            <li key={d.id}>
+                              −{formatGbp(d.amountGbp)} · {d.reason}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      {highlighted ? (
+                        <p className="mt-1 text-xs font-medium text-rph-link">Allocated in payment</p>
+                      ) : null}
+                    </>
+                  )}
+                </td>
+                <td data-label="Due" className={workspaceTable ? "tabular-nums" : "px-4 py-3 tabular-nums"}>
+                  {workspaceTable ? (
+                    formatGbp(row.netDueGbp)
+                  ) : (
+                    <span className="rph-table-cell-value">{formatGbp(row.netDueGbp)}</span>
+                  )}
+                </td>
+                <td data-label="Paid" className={workspaceTable ? "tabular-nums" : "px-4 py-3 tabular-nums"}>
+                  {workspaceTable ? (
+                    formatGbp(row.paidGbp)
+                  ) : (
+                    <span className="rph-table-cell-value">{formatGbp(row.paidGbp)}</span>
+                  )}
+                </td>
+                {!workspaceTable ? (
+                  <td data-label="Balance" className="px-4 py-3 tabular-nums font-medium">
+                    <span className="rph-table-cell-value">{formatGbp(row.balanceGbp)}</span>
+                  </td>
+                ) : null}
+                <td data-label="Status" className={workspaceTable ? undefined : "px-4 py-3"}>
+                  {workspaceTable ? (
+                    <span
+                      className={`hire-ws-payments-status-pill ${hireTableStatusToneClass(workspaceStatus.tone)}`}
+                    >
+                      {workspaceStatus.label}
+                    </span>
+                  ) : (
+                    <div className="rph-table-cell-value">
+                      <span
+                        className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${hireTableStatusToneClass(statusMeta.tone)}`}
+                      >
+                        {statusMeta.label}
+                      </span>
+                      {row.pendingSubmittedGbp != null ? (
+                        <p className="mt-1 text-xs font-medium text-rph-fg-secondary">
+                          {formatGbp(row.pendingSubmittedGbp)} submitted — awaiting approval
+                        </p>
+                      ) : row.paymentStatus === "pending_approval" ? (
+                        <p className="rph-meta mt-1 text-xs">Awaiting company approval</p>
+                      ) : null}
+                    </div>
+                  )}
+                </td>
+                {includeActions ? (
+                  <td
+                    data-label="Actions"
+                    className={
+                      workspaceTable ? "hire-ws-payments-table-actions" : "rph-table-actions px-4 py-3 text-right"
+                    }
+                  >
+                    <HirePaymentRowActions
+                      row={row}
+                      canRecordOnRow={canRecordOnRow}
+                      canApprove={canApprove}
+                      canApplyDiscount={canApplyDiscount}
+                      readOnly={readOnly}
+                      onRefresh={onRefresh}
+                      onError={setRowError}
+                    />
+                  </td>
+                ) : null}
+              </tr>
+            );
+          })
+        )}
+      </tbody>
+    </table>
+  );
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-3">
@@ -148,109 +350,15 @@ export function HirePaymentScheduleTable({
 
       {rowError ? <p className="rph-alert-error text-sm">{rowError}</p> : null}
 
-      <div className="rph-table-responsive">
-        <div className="lg:max-h-[min(60vh,28rem)] lg:overflow-y-auto lg:overscroll-y-contain">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 z-10">
-                <tr className="border-b border-rph-border bg-rph-chrome text-left text-xs font-semibold uppercase tracking-wide text-rph-fg-muted shadow-[0_1px_0_0_var(--rph-border)]">
-                <th className="px-4 py-2.5">Period</th>
-                <th className="px-4 py-2.5">Due</th>
-                <th className="px-4 py-2.5">Paid</th>
-                <th className="px-4 py-2.5">Balance</th>
-                <th className="px-4 py-2.5">Status</th>
-                <th className="px-4 py-2.5 text-right">{readOnly ? "History" : "Actions"}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-rph-border">
-              {!filtered.length ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-rph-fg-muted">
-                    No payment rows match your filters.
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((row) => {
-                  const highlighted = highlightSet.has(row.id);
-                  const displayStatus = rowDisplayStatus(row, todayYmd, displayOptions);
-                  const statusMeta = hirePaymentDisplayStatusMeta(displayStatus, { audience });
-                  return (
-                    <tr
-                      key={row.id}
-                      className={
-                        highlighted
-                          ? "bg-rph-rail/10"
-                          : displayStatus === "overdue"
-                            ? "bg-red-50/40 dark:bg-red-950/15"
-                            : displayStatus === "pending_approval"
-                              ? "bg-amber-50/50 dark:bg-amber-950/20"
-                              : "bg-rph-raised/30"
-                      }
-                    >
-                      <td data-label="Period" className="rph-table-primary px-4 py-3">
-                        <p className="font-medium text-rph-fg">{periodCell(row)}</p>
-                        <p className="rph-meta text-xs capitalize">{row.rowKind}</p>
-                        {row.discountTotalGbp > 0 ? (
-                          <p className="rph-meta text-xs">Discount {formatGbp(row.discountTotalGbp)}</p>
-                        ) : null}
-                        {row.discounts.length > 0 ? (
-                          <ul className="rph-meta mt-1 space-y-0.5 text-[10px]">
-                            {row.discounts.map((d) => (
-                              <li key={d.id}>
-                                −{formatGbp(d.amountGbp)} · {d.reason}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null}
-                        {highlighted ? (
-                          <p className="mt-1 text-xs font-medium text-rph-link">Allocated in payment</p>
-                        ) : null}
-                      </td>
-                      <td data-label="Due" className="px-4 py-3 tabular-nums">
-                        <span className="rph-table-cell-value">{formatGbp(row.netDueGbp)}</span>
-                      </td>
-                      <td data-label="Paid" className="px-4 py-3 tabular-nums">
-                        <span className="rph-table-cell-value">{formatGbp(row.paidGbp)}</span>
-                      </td>
-                      <td data-label="Balance" className="px-4 py-3 tabular-nums font-medium">
-                        <span className="rph-table-cell-value">{formatGbp(row.balanceGbp)}</span>
-                      </td>
-                      <td data-label="Status" className="px-4 py-3">
-                        <div className="rph-table-cell-value">
-                        <span
-                          className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${hireTableStatusToneClass(statusMeta.tone)}`}
-                        >
-                          {statusMeta.label}
-                        </span>
-                        {row.pendingSubmittedGbp != null ? (
-                          <p className="mt-1 text-xs font-medium text-rph-fg-secondary">
-                            {formatGbp(row.pendingSubmittedGbp)} submitted — awaiting approval
-                          </p>
-                        ) : row.paymentStatus === "pending_approval" ? (
-                          <p className="rph-meta mt-1 text-xs">Awaiting company approval</p>
-                        ) : null}
-                        </div>
-                      </td>
-                      <td data-label="" className="rph-table-actions px-4 py-3 text-right">
-                        <div className="flex justify-end">
-                          <HirePaymentRowActions
-                            row={row}
-                            canRecordOnRow={canRecordOnRow}
-                            canApprove={canApprove}
-                            canApplyDiscount={canApplyDiscount}
-                            readOnly={readOnly}
-                            onRefresh={onRefresh}
-                            onError={setRowError}
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+      {workspaceTable ? (
+        <div className="hire-ws-payments-table-wrap !px-0 !pb-0">
+          <div className="max-h-[min(60vh,28rem)] overflow-y-auto overscroll-y-contain">{tableBody}</div>
         </div>
-      </div>
+      ) : (
+        <div className="rph-table-responsive">
+          <div className="lg:max-h-[min(60vh,28rem)] lg:overflow-y-auto lg:overscroll-y-contain">{tableBody}</div>
+        </div>
+      )}
     </div>
   );
 }

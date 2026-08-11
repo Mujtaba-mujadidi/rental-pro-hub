@@ -13,7 +13,17 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useState, useTransition } from "react";
 
 const triggerClass =
-  "inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-rph-border bg-rph-raised px-2.5 text-xs font-medium text-rph-fg-secondary transition-colors hover:bg-rph-chrome data-[state=open]:bg-rph-chrome disabled:opacity-50";
+  "hire-ws-payments-row-action-trigger inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-raised text-rph-fg-secondary transition-colors hover:bg-rph-chrome data-[state=open]:bg-rph-chrome disabled:opacity-50";
+
+function IconKebabVertical() {
+  return (
+    <svg width={18} height={18} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <circle cx="12" cy="6" r="1.75" />
+      <circle cx="12" cy="12" r="1.75" />
+      <circle cx="12" cy="18" r="1.75" />
+    </svg>
+  );
+}
 
 const contentClass =
   "z-[200] min-w-[11.5rem] overflow-hidden rounded-lg border border-rph-border bg-rph-elevated py-1 shadow-lg";
@@ -64,14 +74,32 @@ export function HirePaymentRowActions({
   if (readOnly) {
     return (
       <>
-        <button
-          type="button"
-          className={triggerClass}
-          onClick={() => setHistoryOpen(true)}
-          aria-label="Payment history"
-        >
-          History
-        </button>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button type="button" className={triggerClass} aria-label="Payment row actions" title="Actions">
+              <IconKebabVertical />
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              side="bottom"
+              align="end"
+              sideOffset={6}
+              avoidCollisions={false}
+              className={contentClass}
+            >
+              <DropdownMenu.Item
+                className={itemClass}
+                onSelect={(e) => {
+                  e.preventDefault();
+                  setHistoryOpen(true);
+                }}
+              >
+                History
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
         <HirePaymentRowHistoryModal
           scheduleRowId={row.id}
           periodLabel={row.periodLabel}
@@ -108,11 +136,14 @@ export function HirePaymentRowActions({
     <>
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
-          <button type="button" className={triggerClass} disabled={pending} aria-label="Payment row actions">
-            {pending ? "Working…" : "Actions"}
-            <span className="text-[10px] text-rph-fg-muted" aria-hidden>
-              ▾
-            </span>
+          <button
+            type="button"
+            className={triggerClass}
+            disabled={pending}
+            aria-label="Payment row actions"
+            title="Actions"
+          >
+            <IconKebabVertical />
           </button>
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>

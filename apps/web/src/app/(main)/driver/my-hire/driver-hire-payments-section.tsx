@@ -2,26 +2,21 @@
 
 import {
   loadDriverHirePaymentsPageAction,
-  submitDriverHirePaymentAction,
   type HirePaymentsPageData,
 } from "@/app/actions/hire-payments";
-import { HireEndedContractScheduleBanner } from "@/components/fleet/hire-payments/hire-ended-contract-schedule-banner";
-import { HirePaymentComposer } from "@/components/fleet/hire-payments/hire-payment-composer";
-import { HirePaymentSummaryCards } from "@/components/fleet/hire-payments/hire-payment-summary-cards";
-import { HireSettlementBalancePaymentsTable } from "@/components/fleet/hire-payments/hire-settlement-balance-payments-table";
-import { HireTerminationSummaryCard } from "@/components/fleet/hire-payments/hire-termination-summary-card";
-import { HirePaymentsAccountOverview } from "@/components/fleet/hire-payments/hire-payments-account-overview";
-import { HireDepositPendingBanner } from "@/components/fleet/hire-dashboard/hire-deposit-pending-banner";
-import { HireWorkspaceBalanceBanner } from "@/components/fleet/hire-dashboard/hire-workspace-balance-banner";
-import { HirePaymentScheduleTable } from "@/components/fleet/hire-payments/hire-payment-schedule-table";
-import { HireSettlementFinalizationBanner } from "@/components/fleet/hire-payments/hire-settlement-finalization-banner";
-import { HireSettlementBreakdownPanel } from "@/components/fleet/hire-settlement/hire-settlement-breakdown-panel";
-import { HireDriverChargesTable } from "@/components/fleet/hire-payments/hire-driver-charges-table";
-import { summarizeHireSettlementLedger } from "@/lib/fleet/hire-payments-ledger";
+import { HireActiveDriverPaymentsView } from "@/components/fleet/hire-payments/hire-active-driver-payments-view";
+import { HireEndedDriverPaymentsView } from "@/components/fleet/hire-payments/hire-ended-driver-payments-view";
 import { useHirePaymentsRealtime } from "@/hooks/use-hire-realtime";
+import type { HireWorkspaceChromeData } from "@/lib/fleet/hire-workspace-chrome-types";
 import { useCallback, useEffect, useState, useTransition } from "react";
 
-export function DriverHirePaymentsSection({ hireGroupId }: { hireGroupId: string }) {
+export function DriverHirePaymentsSection({
+  hireGroupId,
+  chrome,
+}: {
+  hireGroupId: string;
+  chrome?: HireWorkspaceChromeData;
+}) {
   const [pending, startTransition] = useTransition();
   const [data, setData] = useState<HirePaymentsPageData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,165 +42,43 @@ export function DriverHirePaymentsSection({ hireGroupId }: { hireGroupId: string
   useHirePaymentsRealtime(hireGroupId, reload);
 
   if (!data && pending) {
-    return <p className="rph-muted text-sm" role="status">Loading payments…</p>;
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-16" role="status">
+        <span className="h-8 w-8 animate-spin rounded-full border-2 border-rph-rail/30 border-t-rph-rail" />
+        <p className="text-sm text-rph-fg-secondary">Loading payments…</p>
+      </div>
+    );
   }
   if (error) return <p className="rph-alert-error text-sm">{error}</p>;
   if (!data) return null;
 
   const contractEnded = Boolean(data.contractEndedYmd);
-  const ledgerSummary =
-    data.settlementBalancePayments.length > 0
-      ? summarizeHireSettlementLedger(data.settlementBalancePayments)
-      : null;
 
+  if (!contractEnded && chrome) {
+    return (
+      <HireActiveDriverPaymentsView
+        hireGroupId={hireGroupId}
+        data={data}
+        chrome={chrome}
+        highlightedRowIds={highlightedRowIds}
+        onHighlightedRowIdsChange={setHighlightedRowIds}
+        onReload={reload}
+        busy={pending}
+      />
+    );
+  }
+
+  if (contractEnded) {
+    return (
+      <HireEndedDriverPaymentsView hireGroupId={hireGroupId} data={data} onReload={reload} />
+    );
+  }
+
+  // Active hire without chrome (rare): keep a minimal loading-safe fallback.
   return (
-    <div className="space-y-6">
-      <HirePaymentsAccountOverview
-        contractEnded={contractEnded}
-        contractEndedAtLabel={data.contractEndedAtLabel}
-        summary={data.summary}
-        terminationSummary={data.terminationSummary}
-        settlementBalance={data.settlementBalance}
-        depositPendingReview={data.depositPendingReview}
-        depositGbp={data.depositGbp ?? 0}
-        depositDispositionLabel={data.depositDispositionLabel}
-        ledgerSummary={ledgerSummary}
-        driverChargeLineItems={data.driverChargeLineItems}
-        audience="driver"
-        canFinalizeSettlement={data.canFinalizeSettlement}
-      />
-
-      <HireSettlementFinalizationBanner
-        hireGroupId={hireGroupId}
-        contractEnded={contractEnded}
-        checkinCompleted={data.checkinCompleted}
-        audience="driver"
-      />
-
-      {data.settlementBreakdown ? (
-        <HireSettlementBreakdownPanel
-          breakdown={data.settlementBreakdown}
-          audience="driver"
-          title={data.canFinalizeSettlement ? "Final settlement" : "Balance so far"}
-          openBalanceLabel={data.canFinalizeSettlement ? "Final balance" : "Balance before final settlement"}
-        />
-      ) : null}
-
-      <HireDriverChargesTable
-        items={data.driverChargeLineItems}
-        description="Charges from check-in and other events on this hire."
-        audience="driver"
-      />
-
-      {!contractEnded ? (
-        <>
-          <HirePaymentSummaryCards
-            summary={data.summary}
-            compact
-            contractEnded={contractEnded}
-          />
-          <HireWorkspaceBalanceBanner
-            hireGroupId={hireGroupId}
-            rentBalanceGbp={data.summary.balanceGbp}
-            rentCreditGbp={data.summary.creditGbp}
-            settlementBalance={data.settlementBalance}
-            audience="driver"
-            contractEnded={contractEnded}
-            depositPendingReview={data.depositPendingReview}
-            depositGbp={data.depositGbp ?? 0}
-            depositDispositionLabel={data.depositDispositionLabel}
-          />
-        </>
-      ) : null}
-
-      <HireDepositPendingBanner
-        hireGroupId={hireGroupId}
-        closure={{
-          depositPendingReview: data.depositPendingReview,
-          depositGbp: data.depositGbp ?? 0,
-          rentSettlementSettled: data.settlementBalance?.settled === true,
-        }}
-        audience="driver"
-        checkinCompleted={data.checkinCompleted}
-      />
-
-      <HireSettlementBalancePaymentsTable
-        payments={data.settlementBalancePayments}
-        contractEnded={contractEnded}
-        audience="driver"
-      />
-
-      {data.terminationSummary ? (
-        <HireTerminationSummaryCard
-          summary={data.terminationSummary}
-          depositDispositionLabel={data.depositDispositionLabel}
-          settlementResolutionLabel={data.settlementResolutionLabel}
-          audience="driver"
-        />
-      ) : null}
-
-      {data.contractEndedAtLabel ? (
-        <HireEndedContractScheduleBanner
-          contractEndedAtLabel={data.contractEndedAtLabel}
-          hasPostEndPrepaidPayments={data.hasPostEndPrepaidPayments}
-          settlementSettled={data.settlementBalance?.settled === true}
-        />
-      ) : null}
-
-      {data.canSubmitPayment ? (
-        <div className="flex justify-end">
-          <HirePaymentComposer
-            hireGroupId={hireGroupId}
-            scheduleBalanceGbp={data.summary.scheduleBalanceGbp}
-            balanceToDateGbp={data.summary.balanceGbp}
-            paymentAccount={data.paymentAccount}
-            canSubmit={data.canSubmitPayment}
-            triggerLabel="Submit payment"
-            submitLabel="Submit payment"
-            asDriver
-            onAllocationChange={setHighlightedRowIds}
-            onSuccess={reload}
-            onSubmit={async (input) => {
-              const res = await submitDriverHirePaymentAction({
-                hireGroupId,
-                amountGbp: input.amountGbp,
-                paymentReference: input.paymentReference,
-              });
-              if (res.ok) reload();
-              return res;
-            }}
-            busy={pending}
-          />
-        </div>
-      ) : null}
-
-      <section className="space-y-3">
-        <div>
-          <h2 className="text-sm font-semibold text-rph-fg">
-            {contractEnded ? "Rent during contract" : "Payment schedule"}
-          </h2>
-          <p className="rph-muted mt-1 text-xs">
-            {contractEnded
-              ? "Deposit is listed first, then rent weeks. Weeks after the end date are hidden unless you paid early."
-              : "Deposit is listed first, then rent weeks. Only weeks that have started count toward the balance above."}
-          </p>
-        </div>
-        {contractEnded ? (
-          <HirePaymentSummaryCards summary={data.summary} compact contractEnded endedContractOnly />
-        ) : null}
-        <HirePaymentScheduleTable
-          rows={data.rows}
-          canRecordOnRow={false}
-          canApprove={false}
-          canApplyDiscount={false}
-          highlightedRowIds={highlightedRowIds}
-          contractEndedYmd={data.contractEndedYmd}
-          settlementSettled={data.settlementBalance?.settled === true}
-          audience="driver"
-          readOnly={data.scheduleReadOnly}
-          onRefresh={reload}
-        />
-      </section>
+    <div className="flex flex-col items-center justify-center gap-3 py-16" role="status">
+      <span className="h-8 w-8 animate-spin rounded-full border-2 border-rph-rail/30 border-t-rph-rail" />
+      <p className="text-sm text-rph-fg-secondary">Loading payments…</p>
     </div>
   );
 }

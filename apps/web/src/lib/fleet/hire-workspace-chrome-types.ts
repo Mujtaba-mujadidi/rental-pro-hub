@@ -20,6 +20,7 @@ export type HireWorkspaceChromeData = {
   dailyRentLabel: string | null;
   rentMetricLabel: string;
   frequencyHint: string | null;
+  frequencyPositionLabel: string | null;
   endedHirePeriodLabel: string | null;
   endedTimeOnHireLabel: string | null;
   settlementStatusChip: string | null;

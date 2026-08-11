@@ -420,24 +420,37 @@ html {
   @apply text-[10px] font-semibold uppercase tracking-wider text-rph-fg-muted;
 }
 .hire-ws-hero-metrics {
-  display: inline-flex;
-  max-width: 100%;
-  flex-direction: row;
-  align-items: center;
-  margin-top: 0.5rem;
-  width: fit-content;
+  @apply mt-3 grid w-full grid-cols-2 overflow-hidden rounded-xl border border-rph-border bg-rph-border lg:mt-4 lg:grid-cols-4;
 }
 .hire-ws-hero-metric {
-  flex: none;
-  width: max-content;
+  @apply bg-rph-raised px-2.5 py-2 sm:px-4 sm:py-3;
 }
-.hire-ws-hero-metric:not(:first-child) {
-  margin-left: 0.5rem;
-  padding-left: 1rem;
-  @apply border-l border-rph-border;
+.hire-ws-hero-metric-value {
+  @apply mt-0.5 text-xs font-semibold leading-snug text-rph-fg sm:text-sm lg:whitespace-nowrap;
 }
-.hire-ws-hero-metric p:last-child {
-  margin-top: 0.125rem;
+.hire-ws-hero-head {
+  @apply flex items-start gap-2;
+}
+.hire-ws-hero-back {
+  @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-raised text-rph-fg-secondary transition-colors hover:bg-rph-chrome;
+}
+.hire-ws-hero-identity {
+  @apply flex min-w-0 flex-1 items-start gap-2 sm:gap-3;
+}
+.hire-ws-hero-actions {
+  @apply mt-3 flex flex-wrap items-center gap-2;
+}
+.hire-ws-hero-actions .hire-ws-chip {
+  @apply px-2 py-0.5 text-[11px] sm:px-2.5 sm:py-1 sm:text-xs;
+}
+.hire-ws-hero-card {
+  @apply overflow-hidden;
+}
+.hire-ws-top-breadcrumb {
+  @apply mb-2 flex flex-wrap items-center gap-1.5 text-xs text-rph-fg-secondary sm:mb-3 sm:gap-2 sm:text-sm;
+}
+.hire-ws-tab-nav .hire-ws-tab {
+  @apply h-9 gap-0 px-0 pb-2 pt-1 text-xs sm:h-10 sm:gap-2 sm:px-1 sm:pb-3 sm:text-sm;
 }
 
 .hire-ws-tab {
@@ -823,5 +836,149 @@ html {
 }
 .hire-ws-inspection-ended-empty {
   @apply rounded-xl border border-rph-border bg-rph-raised px-4 py-3 text-sm text-rph-fg-secondary shadow-sm;
+}
+.hire-ws-payments-layout {
+  @apply space-y-4;
+}
+.hire-ws-payments-intro {
+  @apply space-y-1.5;
+}
+.hire-ws-banner .rph-btn-primary {
+  @apply bg-white text-rph-rail hover:bg-white/90;
+}
+.hire-ws-payments-statement-btn-banner {
+  @apply inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-white/35 bg-white/10 px-3 text-xs font-semibold text-white transition-colors hover:bg-white/20 disabled:opacity-60;
+}
+.hire-ws-payments-panel {
+  @apply overflow-hidden rounded-xl border border-rph-border bg-rph-raised shadow-sm;
+}
+.hire-ws-payments-panel-header {
+  @apply border-b border-rph-border px-3 py-3 sm:px-5 sm:py-4;
+}
+.hire-ws-payments-table-wrap {
+  @apply overflow-x-hidden px-3 pb-3 sm:overflow-x-auto sm:px-5 sm:pb-4;
+}
+.hire-ws-payments-table {
+  @apply w-full table-fixed border-separate border-spacing-0 text-xs sm:text-sm;
+}
+.hire-ws-payments-col-period {
+  width: 24%;
+}
+.hire-ws-payments-col-amount {
+  width: 17%;
+}
+.hire-ws-payments-col-status {
+  width: 30%;
+}
+.hire-ws-payments-col-action {
+  width: 12%;
+}
+.hire-ws-payments-table-no-actions .hire-ws-payments-col-period {
+  width: 28%;
+}
+.hire-ws-payments-table-no-actions .hire-ws-payments-col-amount {
+  width: 18%;
+}
+.hire-ws-payments-table-no-actions .hire-ws-payments-col-status {
+  width: 36%;
+}
+.hire-ws-payments-table thead th {
+  @apply sticky top-0 z-[1] border-b border-rph-border bg-rph-page px-1 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.06em] text-rph-fg-muted first:pl-0 last:pr-0 sm:bg-rph-page/70 sm:px-3 sm:py-2.5 sm:text-[11px] sm:tracking-[0.08em];
+}
+.hire-ws-payments-table tbody td {
+  @apply border-b border-rph-border/60 px-1 py-2 align-middle text-[11px] leading-snug text-rph-fg sm:px-3 sm:py-3 sm:text-sm;
+}
+.hire-ws-payments-table tbody td:first-child {
+  @apply max-w-0 font-medium text-rph-fg;
+}
+.hire-ws-payments-period-label {
+  @apply block truncate;
+}
+.hire-ws-payments-table tbody td:nth-child(2),
+.hire-ws-payments-table tbody td:nth-child(3) {
+  @apply whitespace-nowrap tabular-nums;
+}
+.hire-ws-payments-table thead th:last-child,
+.hire-ws-payments-table tbody td.hire-ws-payments-table-actions {
+  @apply w-10 text-right sm:w-14;
+}
+.hire-ws-payments-table-actions {
+  @apply px-0 sm:px-0;
+}
+.hire-ws-payments-row-action-trigger {
+  @apply h-7 w-7 sm:h-8 sm:w-8;
+}
+.hire-ws-payments-row-action-trigger svg {
+  @apply h-4 w-4 sm:h-[18px] sm:w-[18px];
+}
+.hire-ws-payments-table-row-highlight {
+  @apply bg-rph-rail/10;
+}
+.hire-ws-payments-table-empty {
+  @apply px-3 py-8 text-center text-sm text-rph-fg-muted;
+}
+.hire-ws-payments-status-pill {
+  @apply inline-flex max-w-full whitespace-nowrap rounded-full border px-1.5 py-px text-[10px] font-medium leading-tight sm:px-2 sm:py-0.5 sm:text-xs;
+}
+.hire-ws-payments-account-card,
+.hire-ws-payments-next-card {
+  @apply rounded-xl border border-rph-border bg-rph-raised p-4 shadow-sm;
+}
+.hire-ws-payments-account-footer {
+  @apply mt-4 flex items-center justify-between gap-3 rounded-lg border border-sky-200/80 bg-sky-50/80 px-3 py-2.5 dark:border-sky-900/50 dark:bg-sky-950/25;
+}
+.hire-ws-payments-next-highlight {
+  @apply mt-3 rounded-xl bg-rph-rail px-4 py-4 text-white shadow-sm dark:bg-rph-rail-soft;
+}
+.hire-ws-payments-next-note {
+  @apply mt-3 rounded-lg border border-amber-200/80 bg-amber-50/80 px-3 py-2.5 text-xs leading-relaxed text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-100;
+}
+.hire-ws-payments-schedule-collapse {
+  @apply overflow-hidden rounded-xl border border-rph-border bg-rph-raised shadow-sm;
+}
+.hire-ws-payments-schedule-toggle {
+  @apply flex w-full items-center justify-between gap-3 px-4 py-4 text-left transition-colors hover:bg-rph-page/40 sm:px-5;
+}
+.hire-ws-payments-schedule-body {
+  @apply space-y-4 border-t border-rph-border px-3 py-3 sm:px-5 sm:py-4;
+}
+.hire-ws-settlement-tx-list {
+  @apply space-y-2 px-3 pb-3;
+}
+.hire-ws-settlement-tx-card {
+  @apply rounded-xl border border-rph-border bg-rph-raised px-3.5 py-3;
+}
+.hire-ws-settlement-tx-icon {
+  @apply inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full;
+}
+.hire-ws-settlement-tx-icon-out {
+  @apply bg-emerald-600 text-white;
+}
+.hire-ws-settlement-tx-icon-in {
+  @apply bg-sky-600 text-white;
+}
+.hire-ws-charges-body {
+  @apply px-3 py-3 sm:px-5 sm:py-4;
+}
+.hire-ws-charges-body-scroll {
+  @apply max-h-[19.5rem] overflow-y-auto overscroll-y-contain;
+}
+.hire-ws-charges-list {
+  @apply flex flex-col gap-3;
+}
+.hire-ws-charges-card {
+  @apply flex flex-col gap-3 rounded-xl border border-rph-border bg-rph-raised px-3.5 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-4 sm:py-4;
+}
+.hire-ws-charges-type {
+  @apply inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-100;
+}
+.hire-ws-charges-evidence-btn {
+  @apply inline-flex h-9 items-center gap-1.5 rounded-lg border border-rph-border bg-rph-raised px-3 text-xs font-medium text-rph-fg shadow-sm transition-colors hover:bg-rph-chrome;
+}
+.hire-ws-charges-evidence-btn svg {
+  @apply text-sky-600 dark:text-sky-400;
+}
+.hire-ws-charges-resolution {
+  @apply text-[11px] font-medium text-amber-800 dark:text-amber-200;
 }
 

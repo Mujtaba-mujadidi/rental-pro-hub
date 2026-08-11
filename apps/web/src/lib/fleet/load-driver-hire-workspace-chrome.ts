@@ -86,6 +86,7 @@ async function fetchDriverHireWorkspaceChrome(groupId: string): Promise<DriverHi
       dailyRentLabel: hero.dailyRentLabel,
       rentMetricLabel: formatHireRentMetricLabel(context.rentCadence),
       frequencyHint: null,
+      frequencyPositionLabel: context.frequencyPositionLabel,
       endedHirePeriodLabel: endedHero?.hirePeriodLabel ?? null,
       endedTimeOnHireLabel: endedHero?.timeOnHireLabel ?? null,
       settlementStatusChip,

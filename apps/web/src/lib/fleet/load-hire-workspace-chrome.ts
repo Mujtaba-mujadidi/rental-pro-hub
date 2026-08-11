@@ -94,6 +94,7 @@ async function fetchStaffHireWorkspaceChrome(groupId: string): Promise<HireWorks
       dailyRentLabel: hero.dailyRentLabel,
       rentMetricLabel: formatHireRentMetricLabel(context.rentCadence),
       frequencyHint: null,
+      frequencyPositionLabel: context.frequencyPositionLabel,
       endedHirePeriodLabel: endedHero?.hirePeriodLabel ?? null,
       endedTimeOnHireLabel: endedHero?.timeOnHireLabel ?? null,
       settlementStatusChip,

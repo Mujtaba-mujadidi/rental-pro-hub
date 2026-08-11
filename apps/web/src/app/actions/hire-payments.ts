@@ -1372,3 +1372,46 @@ export async function loadHirePaymentRowEventsAction(
 
   return { ok: true, events: formatHirePaymentRowEvents(mapped) };
 }
+
+/** One-off PDF payment statement for an ended hire (not stored). Staff only. */
+export async function exportHirePaymentStatementAction(
+  hireGroupId: string,
+): Promise<{ ok: true; base64: string; fileName: string } | { ok: false; error: string }> {
+  const id = hireGroupId.trim();
+  if (!id) return { ok: false, error: "Hire not found." };
+
+  const { profile } = await requireRentalCompanyArea();
+  if (!canReadRentals(profile)) return { ok: false, error: "You do not have permission." };
+
+  const page = await buildPaymentsPageData(id, {});
+  if (!page.ok) return page;
+  if (!page.data.contractEndedYmd) {
+    return { ok: false, error: "Payment statements are available after the contract has ended." };
+  }
+
+  const { createClient } = await import("@/lib/supabase/server");
+  const { loadHireInspectionReportPdfContext } = await import(
+    "@/lib/fleet/hire-inspection-report-context"
+  );
+  const { buildHirePaymentStatementPdf } = await import("@/lib/fleet/hire-payment-statement-pdf");
+  const { formatUkDateTime } = await import("@/lib/datetime/uk");
+
+  const supabase = await createClient();
+  const context = await loadHireInspectionReportPdfContext(supabase, id, "checkin");
+  if (!context.ok) return { ok: false, error: context.error };
+
+  const pdf = await buildHirePaymentStatementPdf(page.data, {
+    ...context.summary,
+    title: "Hire payment statement",
+    documentLabel: "Payment statement",
+    metaLine: page.data.contractEndedAtLabel
+      ? `Contract ended: ${page.data.contractEndedAtLabel}`
+      : `Generated: ${formatUkDateTime(new Date().toISOString())}`,
+  });
+
+  return {
+    ok: true,
+    base64: Buffer.from(pdf.bytes).toString("base64"),
+    fileName: pdf.fileName,
+  };
+}

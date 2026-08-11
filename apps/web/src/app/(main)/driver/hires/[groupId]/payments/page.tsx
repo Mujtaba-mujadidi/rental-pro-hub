@@ -4,20 +4,22 @@ import { DriverHirePaymentsSection } from "@/app/(main)/driver/my-hire/driver-hi
 import { useDriverHireWorkspace } from "../driver-hire-workspace-provider";
 
 export default function DriverHirePaymentsPage() {
-  const { shell } = useDriverHireWorkspace();
+  const { shell, chrome } = useDriverHireWorkspace();
   const contractEnded = shell.status === "terminated" || shell.status === "completed";
+
+  if (!contractEnded) {
+    return <DriverHirePaymentsSection hireGroupId={shell.hireGroupId} chrome={chrome} />;
+  }
 
   return (
     <div className="space-y-6">
       <div className="min-w-0">
-        <h1 className="rph-h1">{contractEnded ? "Payments & settlement" : "Payments"}</h1>
+        <h1 className="rph-h1">Payments & settlement</h1>
         <p className="rph-muted mt-1 text-sm">
-          {contractEnded
-            ? "Summary of rent during your contract, money in and out after it ended, and your payment schedule."
-            : "Your rent payment schedule and amounts due for weeks that have started."}
+          Summary of rent during your contract, money in and out after it ended, and your payment schedule.
         </p>
       </div>
-      <DriverHirePaymentsSection hireGroupId={shell.hireGroupId} />
+      <DriverHirePaymentsSection hireGroupId={shell.hireGroupId} chrome={chrome} />
     </div>
   );
 }

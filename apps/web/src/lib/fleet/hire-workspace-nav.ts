@@ -2,6 +2,7 @@
 export type HireWorkspaceNavItem = {
   href: string;
   label: string;
+  mobileLabel?: string;
   match: "exact" | "prefix";
 };
 
@@ -21,7 +22,7 @@ export function hireWorkspaceNav(groupId: string): HireWorkspaceNavItem[] {
     { href: base, label: "Summary", match: "exact" },
     { href: `${base}/checkout`, label: "Inspections", match: "prefix" },
     { href: `${base}/payments`, label: "Payments", match: "prefix" },
-    { href: `${base}/details`, label: "Details & documents", match: "prefix" },
+    { href: `${base}/details`, label: "Details & documents", mobileLabel: "Details", match: "prefix" },
     { href: `${base}/activity`, label: "Activity", match: "prefix" },
   ];
 }

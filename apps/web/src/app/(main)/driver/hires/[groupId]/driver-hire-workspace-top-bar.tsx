@@ -20,18 +20,18 @@ export function DriverHireWorkspaceTopBar() {
 
   return (
     <div className="-mx-3 -mt-3 mb-5 px-3 pt-3">
-      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+      <nav className="hire-ws-top-breadcrumb" aria-label="Breadcrumb">
         <Link href={backLink.href} className="font-medium text-rph-link hover:text-rph-link-hover">
           {backLink.label}
         </Link>
         <span className="text-rph-fg-muted" aria-hidden>
-          /
+          ›
         </span>
-        <span className="font-mono font-semibold text-rph-fg">{shell.vehicleVrm}</span>
-      </div>
+        <span className="truncate font-mono text-xs font-semibold text-rph-fg sm:text-sm">{shell.vehicleVrm}</span>
+      </nav>
 
-      <section className="rph-card p-4">
-        <HireWorkspaceHero chrome={chrome} status={shell.status} mode="driver" />
+      <section className="rph-card hire-ws-hero-card p-3 sm:p-4">
+        <HireWorkspaceHero chrome={chrome} status={shell.status} mode="driver" backHref={backLink.href} />
       </section>
 
       <HireWorkspaceTabNav items={items} isItemActive={isDriverHireWorkspaceNavItemActive} />
