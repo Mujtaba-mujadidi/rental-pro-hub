@@ -10,15 +10,22 @@ import {
   hireDetailsDocumentFileName,
 } from "@/components/fleet/hire-details/hire-details-document-row";
 import {
+  CarIcon,
+  DocTileIcon,
+  FactRow,
+  HireDetailsAgreementsSection,
+  HireDetailsVehiclePanel,
+  PersonIcon,
+  WarnIcon,
+} from "@/components/fleet/hire-details/hire-details-shared";
+import {
   buildHireDetailsComplianceTiles,
   buildHireDetailsDriverDocumentRows,
   buildHireDetailsExpiringSoonItems,
   buildHireDetailsInsuranceDocumentRow,
   buildHireDetailsVehicleDocumentRows,
-  formatHireDetailsVehicleSubtitle,
   hireDetailsIsEnded,
   HIRE_DETAILS_EXPIRING_PREVIEW_COUNT,
-  vehicleExpiryHint,
   type HireDetailsExpiringSoonItem,
 } from "@/lib/fleet/hire-details-display";
 
@@ -109,70 +116,39 @@ export function HireDetailsCompanyView({ data }: { data: HireDetailsPayload }) {
         </div>
       ) : null}
 
-      <div className={`hire-ws-details-top-grid${ended ? " hire-ws-details-top-grid-ended" : ""}`}>
+      <div className="hire-ws-details-top-grid">
         <section className="hire-ws-payments-panel">
           <div className="hire-ws-details-panel-body">
             <h2 className="text-base font-semibold text-rph-fg">Hire details</h2>
             <dl className="hire-ws-details-facts-list mt-4">
-              {ended ? (
-                <>
-                  <div className="hire-ws-details-facts-row">
-                    <FactRow
-                      label="Rental company"
-                      value={data.company.rentalSubcompanyName ?? data.company.companyName}
-                    />
-                    <FactRow label="Driver" value={data.hirer?.fullName ?? "—"} />
-                  </div>
-                  <div className="hire-ws-details-facts-row">
-                    <FactRow label="Scheduled start" value={data.rental.startDateLabel} />
-                    <FactRow
-                      label="Actual start/end"
-                      value={formatActualStartEnd(
-                        data.rental.activatedAtLabel,
-                        data.rental.endedAtLabel,
-                      )}
-                    />
-                  </div>
-                  <div className="hire-ws-details-facts-row">
-                    <FactRow
-                      label="Contract ended"
-                      value={data.rental.endedAtLabel ?? data.rental.contractEndLabel ?? "—"}
-                    />
-                    <FactRow
-                      label="Rent and frequency"
-                      value={`${data.rental.rentAmountLabel} ${data.rental.rentFrequencyLabel}`}
-                    />
-                  </div>
-                  <div className="hire-ws-details-facts-row">
-                    <FactRow label="Deposit" value={data.rental.depositLabel ?? "—"} />
-                    <FactRow label="Hire reference" value={data.hireReferenceLabel} />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="hire-ws-details-facts-row">
-                    <FactRow
-                      label="Rental company"
-                      value={data.company.rentalSubcompanyName ?? data.company.companyName}
-                    />
-                    <FactRow label="Driver" value={data.hirer?.fullName ?? "—"} />
-                  </div>
-                  <div className="hire-ws-details-facts-row">
-                    <FactRow label="Hire reference" value={data.hireReferenceLabel} />
-                    <FactRow label="Scheduled start" value={data.rental.startDateLabel} />
-                  </div>
-                  <div className="hire-ws-details-facts-row">
-                    <FactRow
-                      label="Actual checkout"
-                      value={data.rental.activatedAtLabel ?? "Not recorded"}
-                    />
-                    <FactRow label="Contract end" value={data.rental.contractEndLabel ?? "—"} />
-                  </div>
-                  <div className="hire-ws-details-facts-row">
-                    <FactRow label="Rent and deposit" value={data.rental.rentRateDetailsLabel} />
-                  </div>
-                </>
-              )}
+              <div className="hire-ws-details-facts-row">
+                <FactRow
+                  label="Rental company"
+                  value={data.company.rentalSubcompanyName ?? data.company.companyName}
+                />
+                <FactRow label="Driver" value={data.hirer?.fullName ?? "—"} />
+              </div>
+              <div className="hire-ws-details-facts-row">
+                <FactRow label="Hire reference" value={data.hireReferenceLabel} />
+                <FactRow label="Scheduled start" value={data.rental.startDateLabel} />
+              </div>
+              <div className="hire-ws-details-facts-row">
+                <FactRow
+                  label="Actual checkout"
+                  value={data.rental.activatedAtLabel ?? "Not recorded"}
+                />
+                <FactRow
+                  label={ended ? "Contract ended" : "Contract end"}
+                  value={
+                    ended
+                      ? (data.rental.endedAtLabel ?? data.rental.contractEndLabel ?? "—")
+                      : (data.rental.contractEndLabel ?? "—")
+                  }
+                />
+              </div>
+              <div className="hire-ws-details-facts-row">
+                <FactRow label="Rent and deposit" value={data.rental.rentRateDetailsLabel} />
+              </div>
             </dl>
             {!ended && data.rental.checkoutBeforeScheduledNote ? (
               <p className="hire-ws-details-warn-note mt-4">{data.rental.checkoutBeforeScheduledNote}</p>
@@ -180,39 +156,7 @@ export function HireDetailsCompanyView({ data }: { data: HireDetailsPayload }) {
           </div>
         </section>
 
-        <aside className="hire-ws-payments-panel">
-          <div className="hire-ws-details-panel-body">
-            <div className="hire-ws-details-vehicle-head">
-              <span className="hire-ws-details-vehicle-icon" aria-hidden>
-                <CarIcon />
-              </span>
-              <div className="min-w-0">
-                <p className="hire-ws-section-kicker">Hire vehicle</p>
-                <p className="mt-1 text-2xl font-semibold tracking-tight text-rph-fg">{data.vehicle.vrm}</p>
-                <p className="mt-1 text-sm text-rph-fg-secondary">
-                  {formatHireDetailsVehicleSubtitle(data.vehicle)}
-                </p>
-              </div>
-            </div>
-            <dl className="hire-ws-details-vehicle-expiry-list">
-              <ExpiryRow
-                label="MOT"
-                value={data.vehicle.motExpiryLabel}
-                hint={ended ? null : vehicleExpiryHint(data.vehicle.motExpiryYmd, data.rental.contractEndYmd)}
-              />
-              <ExpiryRow
-                label="Tax"
-                value={data.vehicle.taxExpiryLabel}
-                hint={ended ? null : vehicleExpiryHint(data.vehicle.taxExpiryYmd, data.rental.contractEndYmd)}
-              />
-              <ExpiryRow
-                label="PHV licence"
-                value={data.vehicle.phvExpiryLabel}
-                hint={ended ? null : vehicleExpiryHint(data.vehicle.phvExpiryYmd, data.rental.contractEndYmd)}
-              />
-            </dl>
-          </div>
-        </aside>
+        <HireDetailsVehiclePanel data={data} ended={ended} />
       </div>
 
       {!ended ? (
@@ -407,75 +351,16 @@ export function HireDetailsCompanyView({ data }: { data: HireDetailsPayload }) {
         ) : null}
       </section>
 
-      <section className="hire-ws-payments-panel">
-        <header className="hire-ws-payments-panel-header">
-          <h2 className="text-base font-semibold text-rph-fg">Signed agreements</h2>
-          <p className="mt-1 text-xs leading-relaxed text-rph-fg-secondary">
-            {ended
-              ? "All contracts created for this hire are kept together with their form and signing status."
-              : "All contracts created for this hire are shown together; multiple agreements are expected by design."}
-          </p>
-        </header>
-        <ul className="hire-ws-details-agreements-list">
-          {data.rental.agreements.length ? (
-            data.rental.agreements.map((agreement) => (
-              <li key={agreement.id} className="hire-ws-details-agreement-row">
-                <div className="flex min-w-0 flex-1 items-start gap-3">
-                  <span className="hire-ws-details-doc-icon" aria-hidden>
-                    <DocIcon />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-rph-fg">{agreement.label}</p>
-                    <p className="mt-0.5 text-xs text-rph-fg-secondary">
-                      {agreement.signedAtLabel
-                        ? `Signed: ${agreement.signedAtLabel}`
-                        : `Ends ${agreement.endDateLabel}`}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex shrink-0 flex-wrap items-center gap-2 sm:gap-3">
-                  <span className="hire-ws-details-doc-chip hire-ws-details-doc-chip-success">
-                    <span className="hire-ws-details-doc-chip-dot" aria-hidden />
-                    {agreement.statusLabel}
-                  </span>
-                  {agreement.pdfUrl ? (
-                    <a
-                      href={agreement.pdfUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hire-ws-details-agreement-btn"
-                    >
-                      View PDF
-                    </a>
-                  ) : null}
-                </div>
-              </li>
-            ))
-          ) : (
-            <li className="px-4 py-5 text-sm text-rph-fg-secondary sm:px-5">
-              No agreements on this hire yet.
-            </li>
-          )}
-        </ul>
-      </section>
+      <HireDetailsAgreementsSection
+        agreements={data.rental.agreements}
+        description={
+          ended
+            ? "All contracts created for this hire are kept together with their form and signing status."
+            : "All contracts created for this hire are shown together; multiple agreements are expected by design."
+        }
+      />
     </div>
   );
-}
-
-function FactRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-xs text-rph-fg-muted">{label}</dt>
-      <dd className="mt-1 truncate text-sm font-semibold text-rph-fg">{value}</dd>
-    </div>
-  );
-}
-
-function formatActualStartEnd(activatedAtLabel: string | null, endedAtLabel: string | null): string {
-  if (activatedAtLabel && endedAtLabel) return `${activatedAtLabel} – ${endedAtLabel}`;
-  if (activatedAtLabel) return activatedAtLabel;
-  if (endedAtLabel) return endedAtLabel;
-  return "Not recorded";
 }
 
 function ExpiringSoonRow({ item }: { item: HireDetailsExpiringSoonItem }) {
@@ -527,57 +412,3 @@ function ChevronIcon({ open }: { open: boolean }) {
   );
 }
 
-function ExpiryRow({ label, value, hint }: { label: string; value: string; hint: string | null }) {
-  return (
-    <div className="hire-ws-details-vehicle-expiry-row">
-      <dt className="text-sm text-rph-fg-secondary">{label}</dt>
-      <dd className="text-right">
-        <p className="text-sm font-semibold text-rph-fg">{value}</p>
-        {hint ? <p className="mt-0.5 text-[11px] font-medium text-amber-800 dark:text-amber-200">{hint}</p> : null}
-      </dd>
-    </div>
-  );
-}
-
-function CarIcon() {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <path d="M7 17h10M5 11l1.5-4h11L19 11M6 17a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm12 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function PersonIcon() {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <path d="M20 21a8 8 0 0 0-16 0" strokeLinecap="round" />
-      <circle cx="12" cy="8" r="4" />
-    </svg>
-  );
-}
-
-function DocIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
-    </svg>
-  );
-}
-
-function WarnIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function DocTileIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M14 2v6h6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}

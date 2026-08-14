@@ -82,7 +82,7 @@ describe("resolveDriverMyHireRedirectPath", () => {
 describe("driverHireWorkspaceNav", () => {
   it("matches staff hire workspace tab labels", () => {
     const labels = driverHireWorkspaceNav("g1").map((item) => item.label);
-    expect(labels).toEqual(["Summary", "Inspections", "Payments", "Details & documents"]);
+    expect(labels).toEqual(["Summary", "Inspections", "Payments", "Details & documents", "Activity"]);
   });
 
   it("highlights inspections for checkout and check-in routes", () => {
@@ -97,5 +97,12 @@ describe("driverHireWorkspaceNav", () => {
     const items = driverHireWorkspaceNav("g1");
     const payments = items.find((item) => item.label === "Payments")!;
     expect(isDriverHireWorkspaceNavItemActive("/driver/hires/g1/settlement", payments)).toBe(true);
+  });
+
+  it("includes an activity tab", () => {
+    const items = driverHireWorkspaceNav("g1");
+    const activity = items.find((item) => item.label === "Activity")!;
+    expect(isDriverHireWorkspaceNavItemActive("/driver/hires/g1/activity", activity)).toBe(true);
+    expect(isDriverHireWorkspaceNavItemActive("/driver/hires/g1/details", activity)).toBe(false);
   });
 });

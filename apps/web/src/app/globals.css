@@ -997,18 +997,6 @@ html {
 .hire-ws-details-top-grid > .hire-ws-payments-panel {
   @apply flex h-full min-h-0 flex-col;
 }
-.hire-ws-details-top-grid-ended {
-  @apply items-start;
-}
-.hire-ws-details-top-grid-ended > .hire-ws-payments-panel {
-  @apply h-auto;
-}
-.hire-ws-details-top-grid-ended .hire-ws-details-panel-body {
-  @apply h-auto;
-}
-.hire-ws-details-top-grid-ended .hire-ws-details-vehicle-expiry-list {
-  @apply mt-5;
-}
 .hire-ws-details-panel-body {
   @apply flex h-full flex-col px-4 py-4 sm:px-5 sm:py-5;
 }
@@ -1035,6 +1023,9 @@ html {
 }
 .hire-ws-details-compliance-grid {
   @apply grid gap-3 px-3 py-3 sm:grid-cols-3 sm:px-5 sm:pb-4;
+}
+.hire-ws-details-compliance-grid-single {
+  @apply grid max-w-xl gap-3 px-3 py-3 sm:px-5 sm:pb-4;
 }
 .hire-ws-details-compliance-scroll {
   @apply max-h-[24rem] overflow-y-auto overscroll-y-contain;
@@ -1147,4 +1138,72 @@ html {
 .hire-ws-details-agreement-btn {
   @apply inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-raised px-3 text-xs font-medium text-rph-fg shadow-sm transition-colors hover:bg-rph-chrome;
 }
+
+.hire-ws-activity-layout {
+  @apply space-y-4;
+}
+.hire-ws-activity-intro {
+  @apply flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between;
+}
+.hire-ws-activity-card-head {
+  @apply border-b border-rph-border px-4 py-3 sm:px-5;
+}
+.hire-ws-activity-scroll {
+  @apply min-h-[12rem] overflow-y-auto overscroll-y-contain;
+  max-height: calc(100dvh - 22rem);
+}
+@media (min-width: 1024px) {
+  .hire-ws-activity-scroll {
+    max-height: calc(100dvh - 16rem);
+  }
+}
+.hire-ws-activity-list {
+  @apply divide-y divide-rph-border;
+}
+.hire-ws-activity-row {
+  @apply grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-3 gap-y-1 px-4 py-4 sm:grid-cols-[6.75rem_2.25rem_minmax(0,1fr)] sm:gap-x-4 sm:px-5;
+}
+.hire-ws-activity-when {
+  @apply hidden sm:block;
+}
+.hire-ws-activity-date {
+  @apply text-sm font-semibold text-rph-fg;
+}
+.hire-ws-activity-time {
+  @apply mt-0.5 text-xs text-rph-fg-muted;
+}
+.hire-ws-activity-when-inline {
+  @apply mb-1 text-xs text-rph-fg-muted sm:hidden;
+}
+.hire-ws-activity-rail {
+  @apply relative flex justify-center;
+}
+.hire-ws-activity-rail::before {
+  content: "";
+  @apply absolute top-9 bottom-[-1.05rem] left-1/2 w-px -translate-x-1/2 bg-rph-border;
+}
+.hire-ws-activity-row:last-child .hire-ws-activity-rail::before {
+  content: none;
+}
+.hire-ws-activity-icon {
+  @apply relative z-[1] flex h-9 w-9 shrink-0 items-center justify-center rounded-full border;
+}
+.hire-ws-activity-icon-payment,
+.hire-ws-activity-icon-status {
+  @apply border-emerald-200/80 bg-emerald-50 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200;
+}
+.hire-ws-activity-icon-inspection {
+  @apply border-sky-200/80 bg-sky-50 text-sky-800 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200;
+}
+.hire-ws-activity-icon-warn,
+.hire-ws-activity-icon-charge {
+  @apply border-amber-200/80 bg-amber-50 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200;
+}
+.hire-ws-activity-icon-neutral {
+  @apply border-rph-border bg-rph-chrome text-rph-fg-secondary;
+}
+.hire-ws-activity-body {
+  @apply min-w-0;
+}
+
 

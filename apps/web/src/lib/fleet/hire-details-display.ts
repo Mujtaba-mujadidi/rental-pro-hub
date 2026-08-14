@@ -188,6 +188,7 @@ export function hireDetailsIsEnded(status: string | null | undefined): boolean {
 
 export function buildHireDetailsInsuranceDocumentRow(
   data: Pick<HireDetailsPayload, "hireInsurance" | "rental">,
+  audience: "staff" | "driver" = "staff",
 ): HireDetailsDocumentRowDisplay {
   const insurance = data.hireInsurance;
   const expiryYmd = insurance.expiryDate?.slice(0, 10) ?? null;
@@ -196,9 +197,13 @@ export function buildHireDetailsInsuranceDocumentRow(
   if (!insurance.hasDocument) {
     subtitle =
       insurance.providedBy === "driver"
-        ? "Awaiting upload from the driver"
+        ? audience === "driver"
+          ? "You need to upload this"
+          : "Awaiting upload from the driver"
         : insurance.providedBy === "company"
-          ? "Awaiting upload from your rental company"
+          ? audience === "driver"
+            ? "Your rental company will upload this"
+            : "Awaiting upload from your rental company"
           : "Not uploaded";
   } else if (insurance.insuranceTypeLabel && expiryLabel) {
     subtitle = `${insurance.insuranceTypeLabel} · Expires ${expiryLabel}`;
@@ -257,17 +262,26 @@ function licenceComplianceDetail(
 
 function insuranceComplianceTile(
   insurance: HireDetailsPayload["hireInsurance"],
+  audience: "staff" | "driver" = "staff",
 ): HireDetailsComplianceTile {
   if (insurance.status === "not_configured" || !insurance.hasDocument) {
     const responsibilityUnset = insurance.status === "not_configured" && !insurance.providedBy;
+    const awaitingFromDriver = insurance.providedBy === "driver";
+    const detail = responsibilityUnset
+      ? audience === "driver"
+        ? "Insurance has not been set for this hire."
+        : "Insurance responsibility has not been set for this hire."
+      : awaitingFromDriver
+        ? audience === "driver"
+          ? "You need to upload your hire insurance certificate."
+          : "Awaiting upload from the driver."
+        : audience === "driver"
+          ? "Your rental company will upload the hire insurance certificate."
+          : "Awaiting upload from your rental company.";
     return {
       id: "insurance",
       title: "Hire insurance certificate",
-      detail: responsibilityUnset
-        ? "Insurance responsibility has not been set for this hire."
-        : insurance.providedBy === "driver"
-          ? "Awaiting upload from the driver."
-          : "Awaiting upload from your rental company.",
+      detail,
       tone: "warn",
       badgeLabel: responsibilityUnset ? "Not set" : "Awaiting upload",
       badgeTone: "warn",
@@ -279,7 +293,10 @@ function insuranceComplianceTile(
   return {
     id: "insurance",
     title: "Hire insurance certificate",
-    detail: insurance.attentionMessage ?? insurance.insuranceTypeLabel ?? "Certificate uploaded.",
+    detail:
+      insurance.attentionMessage ??
+      insurance.insuranceTypeLabel ??
+      (audience === "driver" ? "Your certificate is on file." : "Certificate uploaded."),
     tone: warn ? "warn" : "ok",
     badgeLabel:
       insurance.status === "expired"
@@ -295,7 +312,7 @@ function insuranceComplianceTile(
 export function buildHireDetailsComplianceTiles(
   data: Pick<HireDetailsPayload, "hireInsurance" | "hirer" | "rental">,
 ): HireDetailsComplianceTile[] {
-  const insuranceTile = insuranceComplianceTile(data.hireInsurance);
+  const insuranceTile = insuranceComplianceTile(data.hireInsurance, "staff");
 
   const drivingExpiry = data.hirer?.drivingLicenceExpiryLabel;
   const phvExpiry = data.hirer?.phvLicenceExpiryLabel;
@@ -325,6 +342,12 @@ export function buildHireDetailsComplianceTiles(
       badgeTone: "warn",
     },
   ];
+}
+
+export function buildHireDetailsDriverComplianceTiles(
+  data: Pick<HireDetailsPayload, "hireInsurance">,
+): HireDetailsComplianceTile[] {
+  return [insuranceComplianceTile(data.hireInsurance, "driver")];
 }
 
 export const HIRE_DETAILS_EXPIRING_PREVIEW_COUNT = 3;

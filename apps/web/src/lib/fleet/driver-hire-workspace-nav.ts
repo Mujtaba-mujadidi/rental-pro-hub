@@ -12,9 +12,10 @@ export type DriverHireWorkspaceSection =
   | "documents"
   | "details"
   | "checkout"
-  | "checkin";
+  | "checkin"
+  | "activity";
 
-/** Driver hire workspace tabs — aligned with staff Summary / Inspections / Payments / Details. */
+/** Driver hire workspace tabs — aligned with staff Summary / Inspections / Payments / Details / Activity. */
 export function driverHireWorkspaceNav(groupId: string): DriverHireWorkspaceNavItem[] {
   const base = `/driver/hires/${groupId}`;
   return [
@@ -22,6 +23,7 @@ export function driverHireWorkspaceNav(groupId: string): DriverHireWorkspaceNavI
     { href: `${base}/checkout`, label: "Inspections", match: "prefix" },
     { href: `${base}/payments`, label: "Payments", match: "prefix" },
     { href: `${base}/details`, label: "Details & documents", mobileLabel: "Details", match: "prefix" },
+    { href: `${base}/activity`, label: "Activity", match: "prefix" },
   ];
 }
 
@@ -43,7 +45,8 @@ export function parseDriverHireWorkspaceSection(
     segment === "documents" ||
     segment === "details" ||
     segment === "checkout" ||
-    segment === "checkin"
+    segment === "checkin" ||
+    segment === "activity"
   ) {
     return segment;
   }

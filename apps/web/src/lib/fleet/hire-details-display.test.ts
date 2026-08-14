@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHireDetailsComplianceTiles,
+  buildHireDetailsDriverComplianceTiles,
   buildHireDetailsDriverDocumentRows,
   buildHireDetailsExpiringSoonItems,
   buildHireDetailsInsuranceDocumentRow,
   buildHireDetailsVehicleDocumentRows,
   hireDetailsDocumentStatusChip,
+  hireDetailsIsEnded,
 } from "@/lib/fleet/hire-details-display";
 import type { HireDetailsPayload, HireDetailsRentalAgreement } from "@/app/actions/hire-details";
 
@@ -102,6 +104,20 @@ function basePayload(): Pick<
     ],
   };
 }
+
+describe("hireDetailsIsEnded", () => {
+  it("treats completed, terminated and cancelled as ended", () => {
+    expect(hireDetailsIsEnded("completed")).toBe(true);
+    expect(hireDetailsIsEnded("terminated")).toBe(true);
+    expect(hireDetailsIsEnded("cancelled")).toBe(true);
+  });
+
+  it("treats active and reserved hires as ongoing", () => {
+    expect(hireDetailsIsEnded("active")).toBe(false);
+    expect(hireDetailsIsEnded("reserved")).toBe(false);
+    expect(hireDetailsIsEnded(null)).toBe(false);
+  });
+});
 
 describe("hireDetailsDocumentStatusChip", () => {
   it("flags expiry during hire", () => {
@@ -343,6 +359,55 @@ describe("buildHireDetailsComplianceTiles", () => {
   });
 });
 
+describe("buildHireDetailsDriverComplianceTiles", () => {
+  it("uses driver-facing copy when the driver must upload", () => {
+    const [tile] = buildHireDetailsDriverComplianceTiles({
+      hireInsurance: insuranceSummary({
+        providedBy: "driver",
+        status: "awaiting_upload",
+        hasDocument: false,
+        canUpload: true,
+      }),
+    });
+    expect(tile?.detail).toBe("You need to upload your hire insurance certificate.");
+    expect(tile?.badgeLabel).toBe("Awaiting upload");
+    expect(tile?.interactive).toBe(true);
+  });
+
+  it("uses driver-facing copy when the company must upload", () => {
+    const [tile] = buildHireDetailsDriverComplianceTiles({
+      hireInsurance: insuranceSummary({
+        providedBy: "company",
+        providedByLabel: "Rental company",
+        status: "awaiting_upload",
+        hasDocument: false,
+        canUpload: false,
+      }),
+    });
+    expect(tile?.detail).toBe("Your rental company will upload the hire insurance certificate.");
+    expect(tile?.interactive).toBe(false);
+  });
+
+  it("does not include licence monitor tiles", () => {
+    const tiles = buildHireDetailsDriverComplianceTiles({
+      hireInsurance: insuranceSummary({ hasDocument: true, status: "on_file" }),
+    });
+    expect(tiles.map((tile) => tile.id)).toEqual(["insurance"]);
+    expect(tiles.some((tile) => tile.badgeLabel === "Monitor")).toBe(false);
+  });
+
+  it("does not show On file when no certificate exists", () => {
+    const [tile] = buildHireDetailsDriverComplianceTiles({
+      hireInsurance: insuranceSummary({
+        status: "on_file",
+        hasDocument: false,
+      }),
+    });
+    expect(tile?.badgeLabel).toBe("Awaiting upload");
+    expect(tile?.detail).toBe("You need to upload your hire insurance certificate.");
+  });
+});
+
 describe("buildHireDetailsInsuranceDocumentRow", () => {
   it("adds a missing hire insurance row for driver documents", () => {
     const row = buildHireDetailsInsuranceDocumentRow({
@@ -368,5 +433,32 @@ describe("buildHireDetailsInsuranceDocumentRow", () => {
     expect(row.status.tone).toBe("success");
     expect(row.subtitle).toContain("Fully Comprehensive");
     expect(row.subtitle).toContain("15/01/2027");
+  });
+
+  it("uses driver-facing missing copy", () => {
+    const row = buildHireDetailsInsuranceDocumentRow(
+      {
+        rental: basePayload().rental,
+        hireInsurance: insuranceSummary({ hasDocument: false, status: "awaiting_upload" }),
+      },
+      "driver",
+    );
+    expect(row.subtitle).toBe("You need to upload this");
+  });
+
+  it("tells the driver when the rental company will upload", () => {
+    const row = buildHireDetailsInsuranceDocumentRow(
+      {
+        rental: basePayload().rental,
+        hireInsurance: insuranceSummary({
+          providedBy: "company",
+          providedByLabel: "Rental company",
+          hasDocument: false,
+          status: "awaiting_upload",
+        }),
+      },
+      "driver",
+    );
+    expect(row.subtitle).toBe("Your rental company will upload this");
   });
 });
