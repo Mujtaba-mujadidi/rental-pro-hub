@@ -128,4 +128,14 @@ describe("buildHirePaymentStatementContent", () => {
     const rent = content.sections.find((s) => s.heading === "Rent calculation");
     expect(rent?.lines.some((line) => line.includes("£157.14"))).toBe(true);
   });
+
+  it("uses driver wording when requested", () => {
+    const content = buildHirePaymentStatementContent(minimalPage(), { audience: "driver" });
+    const rent = content.sections.find((s) => s.heading === "Rent calculation");
+    expect(rent?.lines.some((line) => line.startsWith("You paid during hire:"))).toBe(true);
+    const deposit = content.sections.find((s) => s.heading === "Deposit and refund");
+    expect(deposit?.lines.some((line) => line.startsWith("Refund paid to you:"))).toBe(true);
+    const position = content.sections.find((s) => s.heading === "Position when your hire ended");
+    expect(position?.lines.some((line) => line.startsWith("Rent paid by you:"))).toBe(true);
+  });
 });

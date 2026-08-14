@@ -9,13 +9,13 @@ import type {
   HireDetailsRentalCard,
   HireDetailsVehicleCard,
 } from "@/app/actions/hire-details";
+import { getDriverHireVehicleDocumentUrlAction } from "@/app/actions/hire-details";
+import { HireDetailsCompanyView } from "@/components/fleet/hire-details/hire-details-company-view";
 import {
   HireDetailsDocActionsMenu,
   hireDetailsDocumentFileName,
 } from "@/components/fleet/hire-details/hire-details-doc-actions";
-import { getDriverHireVehicleDocumentUrlAction } from "@/app/actions/hire-details";
 import { HireInsuranceCard } from "@/components/fleet/hire-insurance/hire-insurance-card";
-import Link from "next/link";
 import { useState } from "react";
 
 const cardClass = "rph-card flex h-full flex-col p-3";
@@ -133,20 +133,6 @@ function DocumentsList({
         </ul>
       )}
     </div>
-  );
-}
-
-function CompanyDetailsCard({ company }: { company: HireDetailsCompanyCard }) {
-  return (
-    <section className={cardClass}>
-      <h2 className={sectionTitleClass}>Rental company</h2>
-      <div className="mt-2 space-y-1.5">
-        <DetailBlock label="Company" value={company.companyName} />
-        {company.legalName ? <DetailBlock label="Legal entity" value={company.legalName} /> : null}
-        {company.companyNumber ? <DetailBlock label="Company number" value={company.companyNumber} /> : null}
-        {company.address ? <DetailBlock label="Address" value={company.address} /> : null}
-      </div>
-    </section>
   );
 }
 
@@ -271,118 +257,6 @@ function VehicleDetailsCard({
   );
 }
 
-function HirerDetailsCard({
-  hirer,
-  dates,
-  documents,
-  onError,
-}: {
-  hirer: HireDetailsHirerCard;
-  dates: HireDetailsImportantDateRow[];
-  documents: HireDetailsDocumentItem[];
-  onError?: (message: string) => void;
-}) {
-  return (
-    <section className={cardClass}>
-      <h2 className={sectionTitleClass}>Hirer</h2>
-      <div className="mt-2 space-y-1.5">
-        <DetailBlock label="Name" value={hirer.fullName} />
-        {hirer.email ? <DetailBlock label="Email" value={hirer.email} /> : null}
-        {hirer.phone ? <DetailBlock label="Phone" value={hirer.phone} /> : null}
-        {hirer.address ? <DetailBlock label="Address" value={hirer.address} /> : null}
-        {hirer.drivingLicenceNumber ? <DetailBlock label="Driving licence" value={hirer.drivingLicenceNumber} /> : null}
-      </div>
-
-      {dates.length ? (
-        <div className={subsectionClass}>
-          <p className="mb-1 text-[10px] font-semibold text-rph-fg-secondary">Expiry dates</p>
-          <DateTextList rows={dates} />
-        </div>
-      ) : null}
-
-      <div className={`${subsectionClass} mt-auto`}>
-        <DocumentsList documents={documents} onError={onError} />
-      </div>
-    </section>
-  );
-}
-
-function StaffDetailsLayout({ data }: { data: HireDetailsPayload }) {
-  const [error, setError] = useState<string | null>(null);
-
-  return (
-    <div className="space-y-3">
-      {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
-      {data.driverDocumentsRetentionWarning ? (
-        <p
-          className={
-            data.hirerDocumentsAccessible ? "rph-alert-warning text-sm" : "rph-alert-error text-sm"
-          }
-        >
-          {data.driverDocumentsRetentionWarning}
-          {data.driverDocumentsRetainUntilLabel
-            ? ` Access until ${data.driverDocumentsRetainUntilLabel}.`
-            : null}
-        </p>
-      ) : null}
-      {data.hireSupersession ? (
-        <div className="rph-alert-ok text-sm">
-          <p>
-            {data.hireSupersession.direction === "supersedes" ? (
-              <>
-                This hire replaced an earlier contract under a different company.{" "}
-                <Link href={`/rental/hires/${data.hireSupersession.hireGroupId}`} className="rph-link">
-                  View previous hire ({data.hireSupersession.lessorLabel})
-                </Link>
-              </>
-            ) : (
-              <>
-                This hire was superseded by a replacement contract under{" "}
-                {data.hireSupersession.lessorLabel}.{" "}
-                <Link href={`/rental/hires/${data.hireSupersession.hireGroupId}`} className="rph-link">
-                  View replacement hire
-                </Link>
-              </>
-            )}
-          </p>
-        </div>
-      ) : null}
-      <div className="grid gap-3 xl:grid-cols-3">
-        <CompanyDetailsCard company={data.company} />
-        <RentalCard rental={data.rental} onError={setError} />
-        <VehicleDetailsCard
-          vehicle={data.vehicle}
-          dates={data.importantDates.vehicle}
-          documents={data.vehicleDocuments}
-          onError={setError}
-        />
-        <HireInsuranceCard
-          hireGroupId={data.hireGroupId}
-          insurance={data.hireInsurance}
-          audience="staff"
-          onError={setError}
-        />
-        {data.hirer ? (
-          <HirerDetailsCard
-            hirer={data.hirer}
-            dates={data.importantDates.hirer}
-            documents={data.hirerDocuments}
-            onError={setError}
-          />
-        ) : (
-          <section className={`${cardClass} items-center justify-center`}>
-            <p className="text-xs text-rph-fg-muted">
-              {data.hirerDocumentsAccessible
-                ? "No hirer linked to this hire."
-                : "Driver document access for this hire has expired."}
-            </p>
-          </section>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function DriverDetailsLayout({ data }: { data: HireDetailsPayload }) {
   const [error, setError] = useState<string | null>(null);
 
@@ -426,6 +300,6 @@ export function HireDetailsView({
   data: HireDetailsPayload;
   audience: "driver" | "staff";
 }) {
-  if (audience === "staff") return <StaffDetailsLayout data={data} />;
+  if (audience === "staff") return <HireDetailsCompanyView data={data} />;
   return <DriverDetailsLayout data={data} />;
 }

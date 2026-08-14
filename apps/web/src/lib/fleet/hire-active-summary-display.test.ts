@@ -120,7 +120,7 @@ describe("buildActiveHirePaymentRatingDisplay", () => {
     expect(rating.level).toBe("attention");
     expect(rating.label).toBe("Needs attention");
     expect(rating.detail).toContain("£100.00 deposit");
-    expect(rating.detail).toContain("today's £10.00 rent");
+    expect(rating.detail).toContain("£10.00 unpaid rent");
     expect(rating.detail).not.toContain("up to date");
     expect(rating.scoreHint).toContain("0 of 2 due items paid");
   });

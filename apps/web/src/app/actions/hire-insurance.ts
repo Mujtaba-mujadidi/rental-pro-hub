@@ -112,7 +112,7 @@ export async function loadHireInsuranceSummaryAction(
       .maybeSingle(),
     access.supabase
       .from("vehicle_hire_insurance")
-      .select("insurance_type, expiry_date, file_name, uploaded_at, uploaded_by_role")
+      .select("insurance_type, expiry_date, file_name, file_path, uploaded_at, uploaded_by_role")
       .eq("hire_group_id", access.group.id)
       .maybeSingle(),
   ]);

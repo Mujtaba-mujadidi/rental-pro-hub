@@ -1377,13 +1377,34 @@ export async function loadHirePaymentRowEventsAction(
 export async function exportHirePaymentStatementAction(
   hireGroupId: string,
 ): Promise<{ ok: true; base64: string; fileName: string } | { ok: false; error: string }> {
+  return exportHirePaymentStatementForAudience(hireGroupId, "staff");
+}
+
+/** One-off PDF payment statement for an ended hire (not stored). Driver only. */
+export async function exportDriverHirePaymentStatementAction(
+  hireGroupId: string,
+): Promise<{ ok: true; base64: string; fileName: string } | { ok: false; error: string }> {
+  return exportHirePaymentStatementForAudience(hireGroupId, "driver");
+}
+
+async function exportHirePaymentStatementForAudience(
+  hireGroupId: string,
+  audience: "staff" | "driver",
+): Promise<{ ok: true; base64: string; fileName: string } | { ok: false; error: string }> {
   const id = hireGroupId.trim();
   if (!id) return { ok: false, error: "Hire not found." };
 
-  const { profile } = await requireRentalCompanyArea();
-  if (!canReadRentals(profile)) return { ok: false, error: "You do not have permission." };
+  let page: Awaited<ReturnType<typeof buildPaymentsPageData>>;
+  if (audience === "driver") {
+    const user = await getSessionUser();
+    if (!user) return { ok: false, error: "Sign in required." };
+    page = await buildPaymentsPageData(id, { driverUserId: user.id });
+  } else {
+    const { profile } = await requireRentalCompanyArea();
+    if (!canReadRentals(profile)) return { ok: false, error: "You do not have permission." };
+    page = await buildPaymentsPageData(id, {});
+  }
 
-  const page = await buildPaymentsPageData(id, {});
   if (!page.ok) return page;
   if (!page.data.contractEndedYmd) {
     return { ok: false, error: "Payment statements are available after the contract has ended." };
@@ -1394,20 +1415,28 @@ export async function exportHirePaymentStatementAction(
     "@/lib/fleet/hire-inspection-report-context"
   );
   const { buildHirePaymentStatementPdf } = await import("@/lib/fleet/hire-payment-statement-pdf");
+  const { buildHirePaymentStatementContent } = await import("@/lib/fleet/hire-payment-statement");
   const { formatUkDateTime } = await import("@/lib/datetime/uk");
 
   const supabase = await createClient();
   const context = await loadHireInspectionReportPdfContext(supabase, id, "checkin");
   if (!context.ok) return { ok: false, error: context.error };
 
-  const pdf = await buildHirePaymentStatementPdf(page.data, {
-    ...context.summary,
-    title: "Hire payment statement",
-    documentLabel: "Payment statement",
-    metaLine: page.data.contractEndedAtLabel
-      ? `Contract ended: ${page.data.contractEndedAtLabel}`
-      : `Generated: ${formatUkDateTime(new Date().toISOString())}`,
-  });
+  const statementContent = buildHirePaymentStatementContent(page.data, { audience });
+  const pdf = await buildHirePaymentStatementPdf(
+    page.data,
+    {
+      ...context.summary,
+      title: audience === "driver" ? "Your hire payment statement" : "Hire payment statement",
+      documentLabel: "Payment statement",
+      metaLine: page.data.contractEndedAtLabel
+        ? audience === "driver"
+          ? `Hire ended: ${page.data.contractEndedAtLabel}`
+          : `Contract ended: ${page.data.contractEndedAtLabel}`
+        : `Generated: ${formatUkDateTime(new Date().toISOString())}`,
+    },
+    statementContent,
+  );
 
   return {
     ok: true,

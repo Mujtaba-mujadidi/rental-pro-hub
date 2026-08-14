@@ -9,12 +9,23 @@ import {
   canCompanyAccessHireDriverDocuments,
   driverDocumentsRetentionWarning,
 } from "@/lib/fleet/hire-document-retention";
-import { ukTodayYmd } from "@/lib/datetime/uk";
+import {
+  formatUkCalendarDateTimeText,
+  formatUkDate,
+  formatUkDateText,
+  formatUkDateTime,
+  formatUkDateTimeText,
+  ukTodayYmd,
+} from "@/lib/datetime/uk";
 import { CONTRACT_LENGTH_LABELS } from "@/lib/fleet/hire-access-display";
-import { formatHireContractEndLabel, formatHireContractStartLabel } from "@/lib/fleet/hire-pdf-details";
+import {
+  formatHireContractEndLabel,
+  HIRE_PDF_DEFAULT_END_TIME,
+  HIRE_PDF_DEFAULT_START_TIME,
+  normalizeHireTime,
+} from "@/lib/fleet/hire-pdf-details";
 import { resolveHireLessorDisplayName } from "@/lib/fleet/hire-lessor-display";
 import type { ContractLengthKind } from "@/lib/fleet/hire-types";
-import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
 import {
   REQUIRED_VEHICLE_DOC_TYPES,
   VEHICLE_DOC_TYPE_LABELS,
@@ -38,7 +49,9 @@ export type HireDetailsRentalAgreement = {
   id: string;
   label: string;
   endDateLabel: string;
+  endDateYmd: string | null;
   statusLabel: string;
+  signedAtLabel: string | null;
   pdfUrl: string | null;
   downloadFileName: string | null;
 };
@@ -48,13 +61,19 @@ export type HireDetailsRentalCard = {
   startDateLabel: string;
   activatedAtLabel: string | null;
   endedAtLabel: string | null;
+  contractEndLabel: string | null;
+  contractEndYmd: string | null;
   rentAmountLabel: string;
   rentFrequencyLabel: string;
+  rentRateDetailsLabel: string;
   depositLabel: string | null;
+  checkoutBeforeScheduledNote: string | null;
   agreements: HireDetailsRentalAgreement[];
 };
 
 export type HireDetailsCompanyCard = {
+  parentCompanyName: string;
+  rentalSubcompanyName: string | null;
   companyName: string;
   legalName: string | null;
   companyNumber: string | null;
@@ -70,9 +89,12 @@ export type HireDetailsVehicleCard = {
   seats: number | null;
   cc: number | null;
   motExpiryLabel: string;
+  motExpiryYmd: string | null;
   taxExpiryLabel: string;
+  taxExpiryYmd: string | null;
   phvLicenceNo: string | null;
   phvExpiryLabel: string;
+  phvExpiryYmd: string | null;
 };
 
 export type HireDetailsHirerCard = {
@@ -105,6 +127,8 @@ export type HireSupersessionLink = {
 
 export type HireDetailsPayload = {
   hireGroupId: string;
+  hireReferenceLabel: string;
+  hireReferenceKicker: string;
   company: HireDetailsCompanyCard;
   rental: HireDetailsRentalCard;
   vehicle: HireDetailsVehicleCard;
@@ -120,6 +144,7 @@ export type HireDetailsPayload = {
   driverDocumentsRetainUntilLabel: string | null;
   hireInsurance: HireInsuranceDetailsSummary;
   hireSupersession: HireSupersessionLink | null;
+  hireStatus: string;
 };
 
 function formatAddress(parts: (string | null | undefined)[]): string | null {
@@ -291,6 +316,51 @@ async function loadHirerDocuments(admin: ReturnType<typeof createSupabaseAdminCl
   return { hirer, documents };
 }
 
+function formatRentFrequencyShort(cadence: unknown): string {
+  const c = String(cadence ?? "").trim();
+  if (c === "daily") return "daily";
+  if (c === "weekly") return "weekly";
+  if (c === "monthly") return "monthly";
+  return "—";
+}
+
+function buildCheckoutBeforeScheduledNote(input: {
+  startDate: string | null | undefined;
+  startTime: string | null | undefined;
+  activatedAt: string | null | undefined;
+}): string | null {
+  if (!input.activatedAt || !input.startDate) return null;
+  const scheduled = new Date(
+    `${input.startDate.trim()}T${normalizeHireTime(input.startTime, HIRE_PDF_DEFAULT_START_TIME)}:00`,
+  );
+  const activated = new Date(input.activatedAt);
+  if (Number.isNaN(scheduled.getTime()) || Number.isNaN(activated.getTime())) return null;
+  if (activated.getTime() < scheduled.getTime()) {
+    return "Checkout occurred before the scheduled start time. Keep both timestamps and label them clearly.";
+  }
+  return null;
+}
+
+function buildRentRateDetailsLabel(input: {
+  rentAmountGbp: unknown;
+  rentCadence: unknown;
+  depositLabel: string | null;
+}): string {
+  const amount = formatRentAmount(input.rentAmountGbp);
+  const frequency = formatRentFrequencyShort(input.rentCadence);
+  const rentPart = amount !== "—" && frequency !== "—" ? `${amount} ${frequency}` : amount;
+  if (input.depositLabel) return `${rentPart} · ${input.depositLabel} deposit`;
+  return rentPart;
+}
+
+function formatHireReference(hireGroupId: string): { label: string; kicker: string } {
+  const short = hireGroupId.replace(/-/g, "").slice(0, 8);
+  return {
+    label: short.toLowerCase(),
+    kicker: `HIRE ${short.toUpperCase()}`,
+  };
+}
+
 function formatRentFrequency(cadence: unknown): string {
   const c = String(cadence ?? "").trim();
   if (c === "daily") return "Daily";
@@ -340,7 +410,9 @@ function mapRentalAgreements(
       id: (agreement.id as string) ?? label,
       label,
       endDateLabel: formatHireContractEndLabel(agreement.end_date, endTime),
+      endDateYmd: agreement.end_date?.slice(0, 10) ?? null,
       statusLabel: agreementStatusLabel(agreement),
+      signedAtLabel: agreement.signed_at ? formatUkDateTime(agreement.signed_at) : null,
       pdfUrl: signed?.pdfUrl ?? null,
       downloadFileName,
     };
@@ -382,16 +454,38 @@ function buildRentalCard(input: {
     input.includeDeposit && input.depositGbp != null && input.depositGbp !== ""
       ? formatRentAmount(input.depositGbp)
       : null;
+  const mappedAgreements = mapRentalAgreements(input.agreements, input.signedByEnvelope, input.endTime);
+  const primaryAgreement = mappedAgreements[0] ?? null;
 
   return {
     companyName: input.companyName,
-    startDateLabel: formatHireContractStartLabel(input.startDate, input.startTime),
-    activatedAtLabel: input.activatedAt ? formatUkDateTime(input.activatedAt) : null,
-    endedAtLabel: input.endedAt ? formatUkDateTime(input.endedAt) : null,
+    startDateLabel: formatUkCalendarDateTimeText(
+      input.startDate,
+      normalizeHireTime(input.startTime, HIRE_PDF_DEFAULT_START_TIME),
+    ),
+    activatedAtLabel: input.activatedAt ? formatUkDateTimeText(input.activatedAt) : null,
+    endedAtLabel: input.endedAt ? formatUkDateTimeText(input.endedAt) : null,
+    contractEndLabel: primaryAgreement
+      ? formatUkCalendarDateTimeText(
+          input.agreements?.[0]?.end_date,
+          normalizeHireTime(input.endTime, HIRE_PDF_DEFAULT_END_TIME),
+        )
+      : null,
+    contractEndYmd: input.agreements?.[0]?.end_date?.slice(0, 10) ?? null,
     rentAmountLabel: formatRentAmount(input.rentAmountGbp),
     rentFrequencyLabel: formatRentFrequency(input.rentCadence),
+    rentRateDetailsLabel: buildRentRateDetailsLabel({
+      rentAmountGbp: input.rentAmountGbp,
+      rentCadence: input.rentCadence,
+      depositLabel,
+    }),
     depositLabel,
-    agreements: mapRentalAgreements(input.agreements, input.signedByEnvelope, input.endTime),
+    checkoutBeforeScheduledNote: buildCheckoutBeforeScheduledNote({
+      startDate: input.startDate,
+      startTime: input.startTime,
+      activatedAt: input.activatedAt,
+    }),
+    agreements: mappedAgreements,
   };
 }
 
@@ -477,12 +571,24 @@ async function loadCompanyCardForHire(input: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   forDriver: boolean;
 }): Promise<HireDetailsCompanyCard> {
-  let companyName = input.embeddedCompanyName?.trim() || "Rental company";
+  let parentCompanyName = input.embeddedCompanyName?.trim() || "Rental company";
+  let rentalSubcompanyName: string | null = null;
+  let companyName = parentCompanyName;
   let legalName: string | null = null;
   let companyNumber: string | null = null;
   let address: string | null = null;
 
   const client = input.forDriver && input.admin ? input.admin : input.supabase;
+
+  const { data: parentCompany } = await client
+    .from("companies")
+    .select("name")
+    .eq("id", input.parentCompanyId)
+    .maybeSingle();
+  if (parentCompany?.name?.trim()) {
+    parentCompanyName = parentCompany.name.trim();
+    companyName = parentCompanyName;
+  }
 
   if (input.subcompanyId) {
     const { data: subcompany } = await client
@@ -502,7 +608,7 @@ async function loadCompanyCardForHire(input: {
         subcompany.registered_county as string | null,
         subcompany.registered_postcode as string | null,
       ]);
-      companyName = resolveHireLessorDisplayName({
+      rentalSubcompanyName = resolveHireLessorDisplayName({
         subcompany: {
           legal_name: subcompany.legal_name as string | null,
           display_name: subcompany.display_name as string | null,
@@ -510,17 +616,11 @@ async function loadCompanyCardForHire(input: {
         },
         hasSubcompany: true,
       });
+      companyName = rentalSubcompanyName;
     }
-  } else {
-    const { data: company } = await client
-      .from("companies")
-      .select("name")
-      .eq("id", input.parentCompanyId)
-      .maybeSingle();
-    if (company?.name?.trim()) companyName = company.name.trim();
   }
 
-  return { companyName, legalName, companyNumber, address };
+  return { parentCompanyName, rentalSubcompanyName, companyName, legalName, companyNumber, address };
 }
 
 async function buildHireDetails(
@@ -644,7 +744,7 @@ async function buildHireDetails(
   const [{ data: insuranceRow }, { data: notifyCompany }] = await Promise.all([
     supabase
       .from("vehicle_hire_insurance")
-      .select("insurance_type, expiry_date, file_name, uploaded_at, uploaded_by_role")
+      .select("insurance_type, expiry_date, file_name, file_path, uploaded_at, uploaded_by_role")
       .eq("hire_group_id", hireGroupId.trim())
       .maybeSingle(),
     supabase
@@ -681,10 +781,14 @@ async function buildHireDetails(
 
   const hireSupersession = await loadHireSupersessionLink(supabase, group);
 
+  const hireReference = formatHireReference(group.id as string);
+
   return {
     ok: true,
     data: {
       hireGroupId: group.id as string,
+      hireReferenceLabel: hireReference.label,
+      hireReferenceKicker: hireReference.kicker,
       company: companyCard,
       rental,
       vehicle: {
@@ -695,10 +799,13 @@ async function buildHireDetails(
         fuelType: vehicle.fuel_type?.trim() || null,
         seats: vehicle.seats ?? null,
         cc: vehicle.cc ?? null,
-        motExpiryLabel: formatUkDate(vehicle.mot_expiry),
-        taxExpiryLabel: formatUkDate(vehicle.tax_expiry),
+        motExpiryLabel: formatUkDateText(vehicle.mot_expiry),
+        motExpiryYmd: vehicle.mot_expiry?.slice(0, 10) ?? null,
+        taxExpiryLabel: formatUkDateText(vehicle.tax_expiry),
+        taxExpiryYmd: vehicle.tax_expiry?.slice(0, 10) ?? null,
         phvLicenceNo: vehicle.phv_licence_no?.trim() || null,
-        phvExpiryLabel: formatUkDate(vehicle.phv_licence_expiry),
+        phvExpiryLabel: formatUkDateText(vehicle.phv_licence_expiry),
+        phvExpiryYmd: vehicle.phv_licence_expiry?.slice(0, 10) ?? null,
       },
       importantDates,
       vehicleDocuments,
@@ -710,6 +817,7 @@ async function buildHireDetails(
       driverDocumentsRetainUntilLabel: retainUntilYmd ? formatUkDate(retainUntilYmd) : null,
       hireInsurance,
       hireSupersession,
+      hireStatus,
     },
   };
 }

@@ -228,8 +228,8 @@ export function HireActiveDriverSummary({
           <h2 className="text-sm font-semibold text-rph-fg">What you need to do</h2>
           <p className="mt-0.5 text-xs text-rph-fg-secondary">Payments, documents and inspections for this hire.</p>
           {actionItems.length ? (
-            <ul className="mt-2 divide-y divide-rph-border">
-              {actionItems.slice(0, 8).map((item) => (
+            <ul className="hire-ws-action-list-scroll divide-y divide-rph-border">
+              {actionItems.map((item) => (
                 <li key={item.key}>
                   <Link href={item.href} className="hire-ws-action-row">
                     <ActionNeededIcon item={item} />

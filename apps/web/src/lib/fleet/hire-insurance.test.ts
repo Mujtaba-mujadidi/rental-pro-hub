@@ -4,6 +4,7 @@ import {
   deriveHireInsuranceDocumentStatus,
   hireInsuranceAttentionMessage,
   isHireInsuranceType,
+  mapHireInsuranceSummary,
 } from "./hire-insurance";
 
 describe("deriveHireInsuranceDocumentStatus", () => {
@@ -75,6 +76,27 @@ describe("hireInsuranceAttentionMessage", () => {
         todayYmd: "2026-08-09",
       }),
     ).toMatch(/driver/i);
+  });
+});
+
+describe("mapHireInsuranceSummary", () => {
+  it("treats a row without a stored file as awaiting upload", () => {
+    const summary = mapHireInsuranceSummary({
+      providedBy: "driver",
+      insuranceRow: {
+        insurance_type: "tpo",
+        expiry_date: "2027-01-01",
+        file_name: null,
+        file_path: "  ",
+        uploaded_at: "2026-08-01T00:00:00.000Z",
+        uploaded_by_role: "driver",
+      },
+      notifyDaysBefore: 28,
+      audience: "staff",
+      todayYmd: "2026-08-14",
+    });
+    expect(summary.hasDocument).toBe(false);
+    expect(summary.status).toBe("awaiting_upload");
   });
 });
 

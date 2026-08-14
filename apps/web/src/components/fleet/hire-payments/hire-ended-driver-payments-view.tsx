@@ -6,6 +6,7 @@ import type { HirePaymentsPageData } from "@/app/actions/hire-payments";
 import { HirePaymentScheduleTable } from "@/components/fleet/hire-payments/hire-payment-schedule-table";
 import { HireSettlementFinalizationBanner } from "@/components/fleet/hire-payments/hire-settlement-finalization-banner";
 import { HireDepositPendingBanner } from "@/components/fleet/hire-dashboard/hire-deposit-pending-banner";
+import { HirePaymentStatementDownloadButton } from "@/components/fleet/hire-payments/hire-payment-statement-download-button";
 import { formatUkDateTime } from "@/lib/datetime/uk";
 import {
   buildHireEndedDepositRefundDisplay,
@@ -88,9 +89,12 @@ export function HireEndedDriverPaymentsView({
                 <p className="mt-1 text-xs text-white/75 sm:text-sm">{outstanding.detail}</p>
               ) : null}
             </div>
-            <p className="shrink-0 text-3xl font-semibold tabular-nums tracking-tight text-white sm:text-4xl">
-              {formatGbp(0)}
-            </p>
+            <div className="flex shrink-0 flex-col items-start gap-3 sm:flex-row sm:items-center lg:flex-col lg:items-end">
+              <p className="text-3xl font-semibold tabular-nums tracking-tight text-white sm:text-4xl">
+                {formatGbp(0)}
+              </p>
+              <HirePaymentStatementDownloadButton hireGroupId={hireGroupId} variant="banner" asDriver />
+            </div>
           </div>
         </section>
       ) : (
@@ -107,9 +111,12 @@ export function HireEndedDriverPaymentsView({
                 <p className="mt-1 text-xs text-white/75 sm:text-sm">{outstanding.detail}</p>
               ) : null}
             </div>
-            <p className="shrink-0 text-3xl font-semibold tabular-nums tracking-tight text-white sm:text-4xl">
-              {formatGbp(outstanding.amountGbp)}
-            </p>
+            <div className="flex shrink-0 flex-col items-start gap-3 sm:flex-row sm:items-center lg:flex-col lg:items-end">
+              <p className="text-3xl font-semibold tabular-nums tracking-tight text-white sm:text-4xl">
+                {formatGbp(outstanding.amountGbp)}
+              </p>
+              <HirePaymentStatementDownloadButton hireGroupId={hireGroupId} variant="banner" asDriver />
+            </div>
           </div>
         </section>
       )}

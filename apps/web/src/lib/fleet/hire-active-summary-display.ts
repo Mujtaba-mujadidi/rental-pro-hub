@@ -139,16 +139,7 @@ export function buildActiveHirePaymentRatingDisplay(input: {
     );
   }
   if (position.rentOutstandingGbp > 0.005) {
-    const dueToday = attentionItems.some((item) => item.kind === "due");
-    unpaidParts.push(
-      dueToday
-        ? audience === "driver"
-          ? `today's ${formatGbp(position.rentOutstandingGbp)} rent`
-          : `today's ${formatGbp(position.rentOutstandingGbp)} rent`
-        : audience === "driver"
-          ? `${formatGbp(position.rentOutstandingGbp)} outstanding rent`
-          : `${formatGbp(position.rentOutstandingGbp)} outstanding rent`,
-    );
+    unpaidParts.push(`${formatGbp(position.rentOutstandingGbp)} unpaid rent`);
   }
 
   let detail: string;

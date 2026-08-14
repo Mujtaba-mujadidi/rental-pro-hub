@@ -100,6 +100,7 @@ export function mapHireInsuranceSummary(input: {
     insurance_type: string;
     expiry_date: string;
     file_name: string | null;
+    file_path?: string | null;
     uploaded_at: string;
     uploaded_by_role: string;
   } | null;
@@ -122,7 +123,9 @@ export function mapHireInsuranceSummary(input: {
 } {
   const providedBy: HireInsuranceProvidedBy | null =
     input.providedBy && isHireInsuranceProvidedBy(input.providedBy) ? input.providedBy : null;
-  const hasDocument = Boolean(input.insuranceRow);
+  const hasDocument = Boolean(
+    input.insuranceRow?.file_path?.trim() || input.insuranceRow?.file_name?.trim(),
+  );
   const expiryDate = input.insuranceRow?.expiry_date ?? null;
   const todayYmd = input.todayYmd ?? "";
   const status = deriveHireInsuranceDocumentStatus({

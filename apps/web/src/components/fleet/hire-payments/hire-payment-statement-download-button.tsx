@@ -1,14 +1,19 @@
 "use client";
 
-import { exportHirePaymentStatementAction } from "@/app/actions/hire-payments";
+import {
+  exportDriverHirePaymentStatementAction,
+  exportHirePaymentStatementAction,
+} from "@/app/actions/hire-payments";
 import { useState, useTransition } from "react";
 
 export function HirePaymentStatementDownloadButton({
   hireGroupId,
   variant = "banner",
+  asDriver = false,
 }: {
   hireGroupId: string;
   variant?: "banner" | "default";
+  asDriver?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -17,7 +22,9 @@ export function HirePaymentStatementDownloadButton({
     setError(null);
     startTransition(() => {
       void (async () => {
-        const res = await exportHirePaymentStatementAction(hireGroupId);
+        const res = asDriver
+          ? await exportDriverHirePaymentStatementAction(hireGroupId)
+          : await exportHirePaymentStatementAction(hireGroupId);
         if (!res.ok) {
           setError(res.error);
           return;

@@ -46,13 +46,16 @@ export function hirePaymentStatementFileName(input: {
 /** Build printable statement sections from authorised payments page data. */
 export function buildHirePaymentStatementContent(
   data: HirePaymentsPageData,
+  options?: { audience?: "staff" | "driver" },
 ): HirePaymentStatementContent {
+  const audience = options?.audience ?? "staff";
   const ledger = summarizeHireSettlementLedger(data.settlementBalancePayments);
   const outstanding = buildHireEndedOutstandingBalance(data, {
     refundPaidGbp: ledger.settlementPaidGbp,
+    audience,
   });
   const rentCalc = buildHireEndedRentCalculation(data);
-  const depositRefund = buildHireEndedDepositRefundDisplay({ payments: data });
+  const depositRefund = buildHireEndedDepositRefundDisplay({ payments: data, audience });
   const position = buildHireEndedPositionSnapshot(data);
 
   const sections: HirePaymentStatementSection[] = [
@@ -69,7 +72,9 @@ export function buildHirePaymentStatementContent(
       heading: "Rent calculation",
       lines: [
         `Rent due to end date: ${formatGbp(rentCalc.rentDueToEndGbp)}`,
-        `Payment received during hire: ${formatGbp(rentCalc.paymentReceivedDuringHireGbp)}`,
+        audience === "driver"
+          ? `You paid during hire: ${formatGbp(rentCalc.paymentReceivedDuringHireGbp)}`
+          : `Payment received during hire: ${formatGbp(rentCalc.paymentReceivedDuringHireGbp)}`,
         `Paid from deposit: ${formatGbp(rentCalc.paidFromDepositGbp)}`,
         `Rent outstanding: ${formatGbp(rentCalc.rentOutstandingGbp)}`,
         ...(rentCalc.cancelledPeriodNote ? [rentCalc.cancelledPeriodNote] : []),
@@ -84,7 +89,7 @@ export function buildHirePaymentStatementContent(
         `Original deposit: ${formatGbp(depositRefund.originalDepositGbp)}`,
         `Less unpaid rent: ${formatGbp(depositRefund.lessUnpaidRentGbp)}`,
         `Less damage charge: ${formatGbp(depositRefund.lessDamageGbp)}`,
-        `Refund paid to driver: ${formatGbp(depositRefund.refundPaidToDriverGbp)}`,
+        `${depositRefund.refundPaidLabel}: ${formatGbp(depositRefund.refundPaidToDriverGbp)}`,
         ...(depositRefund.refundNote ? [depositRefund.refundNote] : []),
       ],
     });
@@ -97,7 +102,7 @@ export function buildHirePaymentStatementContent(
   );
   if (charges.length) {
     sections.push({
-      heading: "Charges",
+      heading: audience === "driver" ? "Charges on your account" : "Charges",
       lines: charges.map((item) => {
         const when = item.createdAt ? ` (${formatUkDateTime(item.createdAt)})` : "";
         return `${item.chargeTypeLabel}: ${item.description?.trim() || "Charge"} — ${formatGbp(item.amountGbp)}${when}`;
@@ -113,7 +118,7 @@ export function buildHirePaymentStatementContent(
           direction: payment.direction,
           paymentCategory: payment.paymentCategory,
           notes: payment.notes,
-          audience: "staff",
+          audience,
         });
         const method = PAYMENT_METHOD_LABELS[payment.paymentMethod] ?? payment.paymentMethod;
         return `${formatUkDateTime(payment.paidAt)} — ${label} — ${method} — ${formatGbp(payment.amountGbp)}`;
@@ -123,10 +128,15 @@ export function buildHirePaymentStatementContent(
 
   if (position) {
     sections.push({
-      heading: "Position when the contract ended",
+      heading:
+        audience === "driver"
+          ? "Position when your hire ended"
+          : "Position when the contract ended",
       lines: [
         `Rent due: ${formatGbp(position.rentDueGbp)}`,
-        `Rent paid by driver: ${formatGbp(position.rentPaidByDriverGbp)}`,
+        audience === "driver"
+          ? `Rent paid by you: ${formatGbp(position.rentPaidByDriverGbp)}`
+          : `Rent paid by driver: ${formatGbp(position.rentPaidByDriverGbp)}`,
         `Deposit applied to rent: ${formatGbp(position.depositAppliedToRentGbp)}`,
         `Refund due before later charges: ${formatGbp(position.refundDueBeforeLaterChargesGbp)}`,
       ],
