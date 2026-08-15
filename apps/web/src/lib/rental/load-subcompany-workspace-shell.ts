@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
-import { canWriteSubcompany } from "@/lib/auth/rental-permissions";
+import { canWriteRentals, canWriteSubcompany } from "@/lib/auth/rental-permissions";
 import {
   mapSubcompanyRow,
   SUBCOMPANY_SELECT,
@@ -127,6 +127,7 @@ async function fetchSubcompanyWorkspaceShell(
     shell: {
       subcompany,
       canWrite,
+      canWriteRentals: canWriteRentals(profile),
       canDeactivate: canWrite && !subcompany.is_primary,
       openRequirementCount,
       logoSignedUrl,

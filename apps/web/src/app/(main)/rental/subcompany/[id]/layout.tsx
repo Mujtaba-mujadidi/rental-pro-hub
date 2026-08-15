@@ -38,7 +38,7 @@ export default async function SubcompanyWorkspaceLayout({
 
   return (
     <SubcompanyWorkspaceProvider shell={result.shell}>
-      <Suspense fallback={<div className="rph-chrome -mx-3 -mt-3 mb-5 h-20 animate-pulse border-b px-3" />}>
+      <Suspense fallback={<div className="mb-5 h-40 animate-pulse rounded-xl border border-rph-border bg-rph-raised" />}>
         <SubcompanyWorkspaceTopBar subcompanies={switcher} />
       </Suspense>
       {children}

@@ -66,6 +66,7 @@ export default async function SubcompanyWorkspacePage({
         <SubcompanyOverviewClient
           stats={res.data.stats}
           openRequirements={res.data.openRequirements}
+          recentActivity={res.data.recentActivity}
         />
       );
     }

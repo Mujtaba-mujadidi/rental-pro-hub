@@ -301,7 +301,31 @@ function ActivityList({ items }: { items: CompanyDashboardActivityItem[] }) {
   );
 }
 
-const filterSelectClass = `${rphSelectTriggerClass} h-12 border-rph-border bg-rph-chrome/60`;
+const filterSelectClass =
+  `${rphSelectTriggerClass} h-auto min-h-0 w-full border-0 bg-transparent p-0 pr-1 text-sm font-semibold leading-tight text-rph-fg shadow-none ring-0 focus-visible:ring-0`;
+
+function FilterControlIcon({ kind }: { kind: "grid" | "clock" }) {
+  return (
+    <span
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-rph-raised text-sky-600 shadow-sm ring-1 ring-rph-border dark:text-sky-300"
+      aria-hidden
+    >
+      {kind === "grid" ? (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
+        </svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" strokeLinecap="round" />
+        </svg>
+      )}
+    </span>
+  );
+}
 
 export function CompanyDashboardView() {
   const router = useRouter();
@@ -390,99 +414,109 @@ export function CompanyDashboardView() {
 
   return (
     <div className="company-dash max-w-full space-y-4 overflow-x-hidden md:space-y-5">
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-700 dark:text-sky-300">
             {ukTodayLongUpper()}
           </p>
           <h1 className="rph-h1 mt-1">Company performance</h1>
-          <p className="rph-lead mt-1 max-w-2xl text-sm">
+          <p className="mt-1 max-w-2xl text-sm text-rph-fg-muted">
             Financial performance, fleet health and priority actions across your rental business.
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap lg:justify-end">
+        <div className="flex flex-wrap gap-2 sm:justify-end">
           {data?.capabilities.canManageFleet ? (
-            <button type="button" className="rph-btn-ghost w-full sm:w-auto" onClick={() => setVehicleOpen(true)}>
+            <button type="button" className="rph-btn-ghost" onClick={() => setVehicleOpen(true)}>
               Add vehicle
             </button>
           ) : null}
           {data?.capabilities.canWriteRentals ? (
-            <button type="button" className="rph-btn-primary w-full sm:w-auto" onClick={() => setHireOpen(true)}>
+            <button type="button" className="rph-btn-primary" onClick={() => setHireOpen(true)}>
               New hire
             </button>
           ) : null}
         </div>
       </header>
 
-      <section className="rph-card company-dash-filters space-y-3 p-4">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block min-w-0">
-            <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-rph-fg-muted">
-              Business view
-            </span>
-            <RphSelect
-              value={subcompanyId}
-              onValueChange={setSubcompanyId}
-              options={subcompanyOptions}
-              aria-label="Business view"
-              triggerClassName={filterSelectClass}
-            />
-          </label>
-          <label className="block min-w-0">
-            <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-rph-fg-muted">
-              Reporting period
-            </span>
-            <RphSelect
-              value={periodKind}
-              onValueChange={(value) => setPeriodKind(value as CompanyDashboardPeriodKind)}
-              options={COMPANY_DASHBOARD_PERIOD_OPTIONS}
-              aria-label="Reporting period"
-              triggerClassName={filterSelectClass}
-            />
-          </label>
-          {periodKind === "custom" ? (
-            <>
-              <label className="block min-w-0">
-                <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-rph-fg-muted">
-                  From
+      <section className="rph-card company-dash-filters space-y-3 p-3 sm:p-3.5">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+          <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+            <div className="company-dash-filter-control flex min-w-[18rem] flex-1 items-center gap-2 rounded-xl bg-rph-chrome/70 px-2.5 py-1.5 sm:max-w-[26rem] sm:flex-none">
+              <FilterControlIcon kind="grid" />
+              <label className="min-w-0 flex-1">
+                <span className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-rph-fg-muted">
+                  Business view
                 </span>
-                <input
-                  type="date"
-                  className="rph-input"
-                  value={customStartYmd}
-                  onChange={(e) => setCustomStartYmd(e.target.value)}
+                <RphSelect
+                  value={subcompanyId}
+                  onValueChange={setSubcompanyId}
+                  options={subcompanyOptions}
+                  aria-label="Business view"
+                  triggerClassName={filterSelectClass}
                 />
               </label>
-              <label className="block min-w-0">
-                <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-rph-fg-muted">
-                  To
+            </div>
+            <div className="company-dash-filter-control flex min-w-[18rem] flex-1 items-center gap-2 rounded-xl bg-rph-chrome/70 px-2.5 py-1.5 sm:max-w-[24rem] sm:flex-none">
+              <FilterControlIcon kind="clock" />
+              <label className="min-w-0 flex-1">
+                <span className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-rph-fg-muted">
+                  Reporting period
                 </span>
-                <input
-                  type="date"
-                  className="rph-input"
-                  value={customEndYmd}
-                  onChange={(e) => setCustomEndYmd(e.target.value)}
+                <RphSelect
+                  value={periodKind}
+                  onValueChange={(value) => setPeriodKind(value as CompanyDashboardPeriodKind)}
+                  options={COMPANY_DASHBOARD_PERIOD_OPTIONS}
+                  aria-label="Reporting period"
+                  triggerClassName={filterSelectClass}
                 />
               </label>
-            </>
-          ) : null}
+            </div>
+            <div className="min-w-0 px-1 sm:px-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-rph-fg-muted">Showing</p>
+              <p className="text-sm font-semibold text-rph-fg">
+                {data?.selectedSubcompanyName ?? "All subcompanies"}
+              </p>
+              <p className="text-xs text-rph-fg-muted">
+                {periodOptionLabel}
+                {updatedAt ? ` · Updated ${ukTimeHm(updatedAt)}` : ""}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="rph-btn-ghost w-full shrink-0 xl:w-auto"
+            onClick={exportDashboard}
+            disabled={exporting || !data}
+          >
+            {exporting ? "Exporting…" : "Export dashboard"}
+          </button>
         </div>
-        <p className="text-xs text-rph-fg-secondary">
-          Showing <span className="font-semibold text-rph-fg">{data?.selectedSubcompanyName ?? "All subcompanies"}</span>
-          <span className="text-rph-fg-muted">
-            {" "}
-            · {periodOptionLabel}
-            {updatedAt ? ` · Updated ${ukTimeHm(updatedAt)}` : ""}
-          </span>
-        </p>
-        <button
-          type="button"
-          className="rph-btn-ghost w-full"
-          onClick={exportDashboard}
-          disabled={exporting || !data}
-        >
-          {exporting ? "Exporting…" : "Export dashboard"}
-        </button>
+        {periodKind === "custom" ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block min-w-0">
+              <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-rph-fg-muted">
+                From
+              </span>
+              <input
+                type="date"
+                className="rph-input"
+                value={customStartYmd}
+                onChange={(e) => setCustomStartYmd(e.target.value)}
+              />
+            </label>
+            <label className="block min-w-0">
+              <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-rph-fg-muted">
+                To
+              </span>
+              <input
+                type="date"
+                className="rph-input"
+                value={customEndYmd}
+                onChange={(e) => setCustomEndYmd(e.target.value)}
+              />
+            </label>
+          </div>
+        ) : null}
       </section>
 
       {error ? <p className="rph-alert-error">{error}</p> : null}
@@ -497,7 +531,7 @@ export function CompanyDashboardView() {
         <>
           {data.insight && insightParts ? (
             <div
-              className={`company-dash-insight flex gap-3 ${
+              className={`company-dash-insight flex flex-col gap-3 sm:flex-row sm:items-center ${
                 data.insight.tone === "ok"
                   ? "company-dash-insight-ok"
                   : data.insight.tone === "warn"
@@ -506,19 +540,36 @@ export function CompanyDashboardView() {
               }`}
             >
               <span
-                className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-white ${
+                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-white ${
                   data.insight.tone === "warn" ? "bg-amber-600" : "bg-emerald-700"
                 }`}
                 aria-hidden
               >
                 ↗
               </span>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">{insightParts.title}</p>
-                <p className="mt-0.5 text-sm text-rph-fg-secondary">{insightParts.body}</p>
-                <Link href={data.insight.href} className="rph-open-link mt-2">
-                  {data.insight.hrefLabel}
-                </Link>
+              <div className="min-w-0 flex-1">
+                <p
+                  className={`text-sm font-semibold ${
+                    data.insight.tone === "ok"
+                      ? "text-emerald-900 dark:text-emerald-100"
+                      : data.insight.tone === "warn"
+                        ? "text-amber-950 dark:text-amber-100"
+                        : "text-rph-fg"
+                  }`}
+                >
+                  {insightParts.title}
+                </p>
+                <p
+                  className={`mt-0.5 text-sm ${
+                    data.insight.tone === "ok"
+                      ? "text-emerald-800/85 dark:text-emerald-100/80"
+                      : data.insight.tone === "warn"
+                        ? "text-amber-900/85 dark:text-amber-100/80"
+                        : "text-rph-fg-secondary"
+                  }`}
+                >
+                  {insightParts.body}
+                </p>
               </div>
             </div>
           ) : null}

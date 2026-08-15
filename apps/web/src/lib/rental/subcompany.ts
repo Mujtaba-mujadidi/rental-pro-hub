@@ -30,6 +30,8 @@ export type SubcompanyRow = {
 export type SubcompanyWorkspaceShell = {
   subcompany: SubcompanyRow;
   canWrite: boolean;
+  /** Create / manage hires for this tenant (capability only; still scoped server-side). */
+  canWriteRentals: boolean;
   canDeactivate: boolean;
   openRequirementCount: number;
   logoSignedUrl: string | null;

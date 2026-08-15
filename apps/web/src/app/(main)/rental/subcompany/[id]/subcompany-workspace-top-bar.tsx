@@ -1,44 +1,65 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { HireContractWizardModal } from "@/app/(main)/rental/hires/hire-contract-wizard-modal";
+import type { SubcompanySwitcherOption } from "@/app/actions/rental-subcompany-workspace";
+import { subcompanyInitials } from "@/lib/rental/subcompanies-portfolio-display";
 import {
   isSubcompanyWorkspaceNavItemActive,
   parseSubcompanyWorkspaceSection,
   subcompanyWorkspaceHref,
   subcompanyWorkspaceNav,
 } from "@/lib/rental/subcompany-workspace-nav";
-import type { SubcompanySwitcherOption } from "@/app/actions/rental-subcompany-workspace";
+import { SUBCOMPANY_STATUS_LABELS } from "./subcompany-status-chip";
 import { useSubcompanyWorkspace } from "./subcompany-workspace-provider";
-import { SubcompanyStatusChip } from "./subcompany-status-chip";
+
+function locationLine(input: {
+  company_number: string | null;
+  registered_town: string | null;
+  country: string | null;
+}): string {
+  const parts: string[] = [];
+  if (input.company_number?.trim()) {
+    parts.push(`Company number ${input.company_number.trim()}`);
+  }
+  const place = [input.registered_town?.trim(), input.country?.trim()].filter(Boolean).join(", ");
+  if (place) parts.push(place);
+  return parts.join(" · ");
+}
 
 export function SubcompanyWorkspaceTopBar({
   subcompanies,
 }: {
   subcompanies: SubcompanySwitcherOption[];
 }) {
-  const { shell } = useSubcompanyWorkspace();
+  const { shell, refreshShell } = useSubcompanyWorkspace();
   const subcompany = shell.subcompany;
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
   const section = parseSubcompanyWorkspaceSection(pathname, subcompany.id, searchParams.get("section"));
   const items = subcompanyWorkspaceNav(subcompany.id);
+  const initials = subcompanyInitials(subcompany.name);
+  const meta = locationLine(subcompany);
+  const typeBadge = subcompany.is_primary ? "Main company" : "Subcompany";
 
-  const [open, setOpen] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [hireOpen, setHireOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!switcherOpen) return;
     inputRef.current?.focus();
     function onDoc(e: MouseEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(e.target as Node)) setSwitcherOpen(false);
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") setSwitcherOpen(false);
     }
     document.addEventListener("mousedown", onDoc);
     window.addEventListener("keydown", onKey);
@@ -46,7 +67,7 @@ export function SubcompanyWorkspaceTopBar({
       document.removeEventListener("mousedown", onDoc);
       window.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [switcherOpen]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -55,104 +76,147 @@ export function SubcompanyWorkspaceTopBar({
   }, [subcompanies, query]);
 
   function switchTo(id: string) {
-    setOpen(false);
+    setSwitcherOpen(false);
     setQuery("");
     if (id === subcompany.id) return;
     router.push(subcompanyWorkspaceHref(id, section));
   }
 
   return (
-    <div className="rph-chrome -mx-3 -mt-3 mb-5 border-b px-3 py-2.5">
-      {/* Row 1: back + subcompany switcher (+ status on sm+) */}
-      <div className="flex items-center gap-2">
-        <Link
-          href="/rental/subcompany"
-          className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-rph-border bg-rph-raised px-2 text-xs font-semibold text-rph-fg-secondary shadow-sm transition-colors hover:bg-rph-chrome hover:text-rph-fg"
-          aria-label="Back to subcompanies"
-        >
-          <IconArrowLeft className="h-3.5 w-3.5 shrink-0" />
-          Subcompanies
-        </Link>
+    <div className="subco-ws-chrome mb-5 space-y-4">
+      <Link href="/rental/subcompany" className="subco-ws-back">
+        <IconArrowLeft className="h-3.5 w-3.5 shrink-0" />
+        Back to subcompanies
+      </Link>
 
-        <div className="relative min-w-0 flex-1 sm:max-w-64 sm:flex-none" ref={rootRef}>
-          <button
-            type="button"
-            className="flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-rph-border bg-rph-raised px-2.5 text-left text-sm shadow-sm"
-            aria-expanded={open}
-            aria-haspopup="listbox"
-            onClick={() => setOpen((v) => !v)}
-          >
-            <span className="min-w-0 truncate">
-              <span className="font-semibold text-rph-fg">{subcompany.name}</span>
-              {subcompany.is_primary ? <span className="text-rph-fg-muted"> · Main</span> : null}
-            </span>
-            <span className="shrink-0 text-xs text-rph-fg-muted" aria-hidden>
-              ▾
-            </span>
-          </button>
-
-          {open ? (
-            <div className="absolute left-0 right-0 z-40 mt-1 max-h-[min(70vh,24rem)] overflow-hidden rounded-lg border border-rph-border bg-rph-elevated shadow-lg sm:right-auto sm:w-[min(100vw-2rem,20rem)]">
-              <div className="border-b border-rph-border p-2">
-                <input
-                  ref={inputRef}
-                  className="rph-input py-1.5"
-                  placeholder="Search subcompanies…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+      <section className="subco-ws-hero rph-card">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+            <div className="subco-ws-avatar" aria-hidden>
+              {shell.logoSignedUrl ? (
+                <Image
+                  src={shell.logoSignedUrl}
+                  alt=""
+                  width={48}
+                  height={48}
+                  className="h-full w-full object-cover"
+                  unoptimized
                 />
-              </div>
-              <ul className="max-h-64 overflow-y-auto overscroll-contain py-1" role="listbox">
-                {!filtered.length ? (
-                  <li className="px-3 py-2 text-sm text-rph-fg-muted">No subcompanies match.</li>
-                ) : (
-                  filtered.map((s) => {
-                    const active = s.id === subcompany.id;
-                    return (
-                      <li key={s.id}>
-                        <button
-                          type="button"
-                          role="option"
-                          aria-selected={active}
-                          className={[
-                            "flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm sm:py-2",
-                            active ? "bg-rph-rail/10 text-rph-link" : "text-rph-fg hover:bg-rph-chrome",
-                          ].join(" ")}
-                          onClick={() => switchTo(s.id)}
-                        >
-                          <span className="min-w-0 truncate">
-                            <span className="font-semibold">{s.name}</span>
-                            {s.isPrimary ? <span className="text-rph-fg-muted"> · Main</span> : null}
-                          </span>
-                          <SubcompanyStatusChip status={s.status} />
-                        </button>
-                      </li>
-                    );
-                  })
-                )}
-              </ul>
+              ) : (
+                initials
+              )}
             </div>
-          ) : null}
-        </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="subco-ws-badge subco-ws-badge-status">
+                  {SUBCOMPANY_STATUS_LABELS[subcompany.status]}
+                </span>
+                <span className="subco-ws-badge subco-ws-badge-type">{typeBadge}</span>
+                {subcompanies.length > 1 ? (
+                  <div className="relative" ref={rootRef}>
+                    <button
+                      type="button"
+                      className="subco-ws-switcher-btn"
+                      aria-expanded={switcherOpen}
+                      aria-haspopup="listbox"
+                      onClick={() => setSwitcherOpen((v) => !v)}
+                    >
+                      Switch
+                      <span aria-hidden>▾</span>
+                    </button>
+                    {switcherOpen ? (
+                      <div className="subco-ws-switcher-menu">
+                        <div className="border-b border-rph-border p-2">
+                          <input
+                            ref={inputRef}
+                            className="rph-input py-1.5"
+                            placeholder="Search subcompanies…"
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                          />
+                        </div>
+                        <ul className="max-h-64 overflow-y-auto overscroll-contain py-1" role="listbox">
+                          {!filtered.length ? (
+                            <li className="px-3 py-2 text-sm text-rph-fg-muted">No subcompanies match.</li>
+                          ) : (
+                            filtered.map((s) => {
+                              const active = s.id === subcompany.id;
+                              return (
+                                <li key={s.id}>
+                                  <button
+                                    type="button"
+                                    role="option"
+                                    aria-selected={active}
+                                    className={[
+                                      "flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm sm:py-2",
+                                      active
+                                        ? "bg-rph-rail/10 font-semibold text-sky-700 dark:text-sky-300"
+                                        : "text-rph-fg hover:bg-rph-chrome",
+                                    ].join(" ")}
+                                    onClick={() => switchTo(s.id)}
+                                  >
+                                    <span className="min-w-0 truncate">
+                                      <span className="font-semibold">{s.name}</span>
+                                      {s.isPrimary ? (
+                                        <span className="text-rph-fg-muted"> · Main</span>
+                                      ) : null}
+                                    </span>
+                                  </button>
+                                </li>
+                              );
+                            })
+                          )}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+              <h1 className="subco-ws-title">{subcompany.name}</h1>
+              {meta ? <p className="subco-ws-meta">{meta}</p> : null}
+            </div>
+          </div>
 
-        <div className="hidden shrink-0 items-center gap-2 sm:flex">
-          <SubcompanyStatusChip status={subcompany.status} />
-          <span className="max-w-[8rem] truncate text-xs font-medium text-rph-fg-muted lg:max-w-[12rem]">
-            {subcompany.company_number ?? "No company number"}
-          </span>
+          <div className="flex w-full shrink-0 flex-col gap-2 sm:flex-row lg:w-auto">
+            {shell.canWrite ? (
+              <Link
+                href={subcompanyWorkspaceHref(subcompany.id, "details")}
+                className="rph-btn-ghost w-full sm:w-auto"
+              >
+                Edit details
+              </Link>
+            ) : (
+              <Link
+                href={subcompanyWorkspaceHref(subcompany.id, "details")}
+                className="rph-btn-ghost w-full sm:w-auto"
+              >
+                View details
+              </Link>
+            )}
+            {shell.canWriteRentals ? (
+              <button
+                type="button"
+                className="rph-btn-primary w-full sm:w-auto"
+                onClick={() => setHireOpen(true)}
+              >
+                Create hire
+              </button>
+            ) : null}
+          </div>
         </div>
-      </div>
+      </section>
 
-      {/* Row 2: section pills */}
-      <nav
-        className="-mx-3 mt-2 overflow-x-auto overscroll-x-contain px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        aria-label="Subcompany sections"
-      >
-        <div className="flex w-max gap-1 pb-0.5">
+      <nav className="subco-ws-tabs" aria-label="Subcompany sections">
+        <div className="subco-ws-tabs-track">
           {items.map((item) => {
             const active = isSubcompanyWorkspaceNavItemActive(section, item);
             return (
-              <Link key={item.href} href={item.href} scroll={false} className={active ? "rph-pill-active" : "rph-pill"}>
+              <Link
+                key={item.href}
+                href={item.href}
+                scroll={false}
+                className={active ? "subco-ws-tab subco-ws-tab-active" : "subco-ws-tab"}
+              >
                 {item.label}
               </Link>
             );
@@ -160,13 +224,18 @@ export function SubcompanyWorkspaceTopBar({
         </div>
       </nav>
 
-      {/* Mobile-only status under nav */}
-      <div className="mt-2 flex items-center gap-2 sm:hidden">
-        <SubcompanyStatusChip status={subcompany.status} />
-        <span className="min-w-0 truncate text-xs font-medium text-rph-fg-muted">
-          {subcompany.company_number ?? "No company number"}
-        </span>
-      </div>
+      {shell.canWriteRentals ? (
+        <HireContractWizardModal
+          open={hireOpen}
+          hireGroupId={null}
+          onClose={() => setHireOpen(false)}
+          onSaved={() => {
+            setHireOpen(false);
+            refreshShell();
+            router.refresh();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

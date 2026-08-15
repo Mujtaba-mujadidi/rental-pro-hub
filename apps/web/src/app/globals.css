@@ -1445,3 +1445,64 @@ html {
   @apply inline-flex shrink-0 items-center gap-1 text-sm font-semibold text-sky-600 transition-colors hover:text-sky-700 dark:text-sky-300 dark:hover:text-sky-200;
 }
 
+/* ——— Subcompany workspace chrome ——— */
+.subco-ws-chrome {
+  @apply max-w-full;
+}
+.subco-ws-back {
+  @apply inline-flex items-center gap-1.5 text-sm font-medium text-sky-700 hover:text-sky-800 dark:text-sky-300 dark:hover:text-sky-200;
+}
+.subco-ws-hero {
+  @apply p-4 sm:p-5;
+}
+.subco-ws-avatar {
+  @apply flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-rph-rail text-sm font-bold tracking-wide text-white sm:h-14 sm:w-14 sm:text-base;
+}
+.subco-ws-badge {
+  @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold;
+}
+.subco-ws-badge-status {
+  @apply bg-emerald-100 text-emerald-800 dark:bg-emerald-950/45 dark:text-emerald-100;
+}
+.subco-ws-badge-pending {
+  @apply bg-amber-100 text-amber-900 dark:bg-amber-950/45 dark:text-amber-100;
+}
+.subco-ws-badge-inactive {
+  @apply bg-rph-chrome text-rph-fg-muted;
+}
+.subco-ws-badge-type {
+  @apply bg-sky-100 text-sky-800 dark:bg-sky-950/45 dark:text-sky-100;
+}
+.subco-ws-switcher-btn {
+  @apply inline-flex items-center gap-1 rounded-full border border-rph-border bg-rph-raised px-2.5 py-0.5 text-[11px] font-semibold text-rph-fg-secondary hover:bg-rph-chrome;
+}
+.subco-ws-switcher-menu {
+  @apply absolute left-0 z-40 mt-1 w-[min(100vw-2rem,20rem)] overflow-hidden rounded-lg border border-rph-border bg-rph-elevated shadow-lg;
+}
+.subco-ws-title {
+  @apply mt-2 text-xl font-semibold tracking-tight text-rph-fg sm:text-2xl;
+}
+.subco-ws-meta {
+  @apply mt-1 text-sm text-rph-fg-muted;
+}
+.subco-ws-tabs {
+  @apply -mx-1 overflow-x-auto overscroll-x-contain border-b border-rph-border px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden;
+}
+.subco-ws-tabs-track {
+  @apply flex w-max min-w-full gap-1;
+}
+.subco-ws-tab {
+  @apply inline-flex shrink-0 items-center border-b-2 border-transparent px-3 py-2.5 text-sm font-medium text-rph-fg-muted transition-colors hover:text-rph-fg;
+}
+.subco-ws-tab-active {
+  @apply border-sky-600 font-semibold text-sky-700 dark:border-sky-400 dark:text-sky-300;
+}
+
+/* ——— Subcompany overview ——— */
+.subco-ov-health-ok {
+  @apply inline-flex rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800 dark:bg-emerald-950/45 dark:text-emerald-100;
+}
+.subco-ov-health-warn {
+  @apply inline-flex rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold text-amber-900 dark:bg-amber-950/45 dark:text-amber-100;
+}
+

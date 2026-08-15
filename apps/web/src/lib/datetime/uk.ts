@@ -34,6 +34,12 @@ const UK_DATE_TEXT: Intl.DateTimeFormatOptions = {
   year: "numeric",
 };
 
+const UK_DATE_TEXT_LONG: Intl.DateTimeFormatOptions = {
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+};
+
 const UK_DATETIME_TEXT: Intl.DateTimeFormatOptions = {
   ...UK_DATE_TEXT,
   hour: "2-digit",
@@ -174,6 +180,19 @@ export function formatUkDateText(value: string | Date | null | undefined, empty 
   const d = parseInstant(value);
   if (!d) return empty;
   return d.toLocaleDateString(LOCALE, { ...UK_DATE_TEXT, timeZone: "Europe/London" });
+}
+
+/** Calendar date with long month: `10 August 2026`. */
+export function formatUkDateTextLong(value: string | Date | null | undefined, empty = "—"): string {
+  if (value == null || value === "") return empty;
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value.trim()) && !value.includes("T")) {
+    const d = parseCalendarDay(value);
+    if (!d) return empty;
+    return d.toLocaleDateString(LOCALE, { ...UK_DATE_TEXT_LONG, timeZone: "UTC" });
+  }
+  const d = parseInstant(value);
+  if (!d) return empty;
+  return d.toLocaleDateString(LOCALE, { ...UK_DATE_TEXT_LONG, timeZone: "Europe/London" });
 }
 
 /** Inclusive calendar range with short month: `29 Jul – 8 Aug 2026`. */
