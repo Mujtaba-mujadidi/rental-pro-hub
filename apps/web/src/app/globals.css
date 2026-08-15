@@ -10,12 +10,12 @@
   Avoid ad-hoc dark:bg-zinc-* / dark:bg-slate-* on new screens.
 */
 :root {
-  --background: #ffffff;
+  --background: #eef2f7;
   --foreground: #0f172a;
 
-  --rph-page: #f4f7fb;
+  --rph-page: #eef2f7;
   --rph-raised: #ffffff;
-  --rph-chrome: #f1f5f9;
+  --rph-chrome: #e8eef5;
   --rph-elevated: #ffffff;
   --rph-border: #e2e8f0;
   --rph-border-strong: #cbd5e1;
@@ -1257,5 +1257,114 @@ html {
 }
 .company-dash-activity-dot-neutral {
   @apply border-2 border-rph-border-strong bg-rph-raised;
+}
+
+/* ——— Driver home dashboard ——— */
+.driver-dash {
+  @apply max-w-full;
+}
+.driver-dash-kicker {
+  @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-rph-rail;
+}
+.driver-dash-section-label {
+  @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-rph-rail;
+}
+.driver-dash-hire-hero {
+  @apply rounded-2xl bg-rph-rail p-4 text-white shadow-sm sm:p-5;
+}
+.driver-dash-hire-initials {
+  @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/15 text-sm font-bold tracking-wide text-white;
+}
+.driver-dash-hire-pill {
+  @apply inline-flex items-center rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] font-semibold text-white;
+}
+.driver-dash-hire-pill-ok {
+  @apply bg-emerald-400/25 text-emerald-100;
+}
+.driver-dash-hire-cta {
+  @apply h-11 rounded-xl bg-sky-500 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-400;
+}
+.driver-dash-kpi {
+  @apply min-w-0;
+}
+.driver-dash-lower {
+  @apply items-stretch;
+}
+.driver-dash-panel {
+  @apply min-h-0;
+}
+.driver-dash-side {
+  @apply min-h-0;
+}
+.driver-dash-panel-scroll {
+  @apply max-h-[23.5rem] overflow-y-auto overscroll-contain pr-1;
+}
+@media (min-width: 1024px) {
+  .driver-dash-lower {
+    /* Shared row height so the left card and right stack always align (~2 extra next-step rows). */
+    @apply min-h-[37rem];
+  }
+  .driver-dash-lower > .driver-dash-panel,
+  .driver-dash-side {
+    @apply h-auto min-h-full self-stretch;
+  }
+  .driver-dash-side {
+    @apply flex flex-col;
+  }
+  .driver-dash-side > .driver-dash-panel {
+    /* Grow Updates to fill remaining height beside Next steps. */
+    @apply flex min-h-0 flex-1 flex-col;
+    flex-basis: 0;
+  }
+  .driver-dash-lower > .driver-dash-panel {
+    @apply flex min-h-full flex-col;
+  }
+  .driver-dash-panel-scroll {
+    @apply max-h-none overflow-y-auto overscroll-contain;
+    flex: 1 1 0;
+    min-height: 0;
+  }
+}
+.driver-dash-scroll {
+  @apply max-h-[16.5rem] overflow-y-auto overscroll-contain pr-1;
+}
+.driver-dash-step-icon {
+  @apply mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-bold;
+}
+.driver-dash-step-icon-pound {
+  @apply bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-100;
+}
+.driver-dash-step-icon-count {
+  @apply bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-100;
+}
+.driver-dash-step-icon-insurance {
+  @apply border border-amber-200/80 bg-amber-50 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100;
+}
+.driver-dash-step-icon-warn {
+  @apply bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-100;
+}
+.driver-dash-updates {
+  @apply relative pb-2;
+}
+.driver-dash-update-row {
+  @apply pb-4;
+}
+.driver-dash-updates > li:last-child {
+  @apply pb-1;
+}
+.driver-dash-update-dot {
+  @apply mt-1 h-3.5 w-3.5;
+}
+.driver-dash-update-body {
+  @apply min-w-0;
+}
+.driver-dash-updates > li:last-child .driver-dash-updates-rail {
+  @apply hidden;
+}
+.driver-dash-updates-rail {
+  /* Centre of the 14px (h-3.5) dot column */
+  @apply pointer-events-none absolute bottom-0 top-[1.125rem] w-px bg-rph-border;
+  left: 0.4375rem;
+  transform: translateX(-50%);
 }
 

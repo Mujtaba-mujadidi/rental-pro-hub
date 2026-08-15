@@ -772,7 +772,7 @@ export function Option7Shell({
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col bg-rph-page">
-          <main className="min-h-0 w-full min-w-0 flex-1 overflow-auto p-3">
+          <main className="min-h-0 w-full min-w-0 flex-1 overflow-auto bg-rph-page p-3 sm:p-4">
             {variant === "driver" && driverLicenceBanner && driverLicenceBanner.bullets.length > 0 ? (
               <div
                 className="mb-3 w-full rounded-xl border border-amber-300/90 bg-amber-50 px-4 py-3 dark:border-amber-800/80 dark:bg-amber-950/50"
@@ -800,9 +800,7 @@ export function Option7Shell({
                 signBlockedReason={rentalRenewalBanner.signBlockedReason}
               />
             ) : null}
-            <div className="rph-panel w-full min-w-0 max-w-none p-3 sm:p-4">
-              {children}
-            </div>
+            <div className="w-full min-w-0 max-w-none">{children}</div>
           </main>
 
           <footer className="shrink-0 border-t border-rph-border bg-rph-raised px-4 py-3 text-center text-xs text-rph-fg-muted">
