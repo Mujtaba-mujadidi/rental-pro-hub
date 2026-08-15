@@ -54,7 +54,7 @@ export function SubcompanyAttentionClient({ data }: { data: SubcompanyAttentionD
           tone="urgent"
           title="Overdue rent"
           value={summary.overdueRentLabel}
-          detail="Due on active contracts"
+          detail="Overdue on active contracts"
           icon={<IconBanknote />}
         />
         <SummaryCard
@@ -137,7 +137,7 @@ export function SubcompanyAttentionClient({ data }: { data: SubcompanyAttentionD
         {!visible.length ? (
           <p className="px-4 py-10 text-sm text-rph-fg-muted sm:px-5">
             {filter === "resolved"
-              ? "No recently resolved items."
+              ? "No resolved attention items yet. Completed issues will appear here once resolution tracking is recorded."
               : "Nothing needs attention right now."}
           </p>
         ) : (

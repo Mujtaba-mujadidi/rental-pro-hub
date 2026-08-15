@@ -1,3 +1,4 @@
+import { getSubcompanyAttentionData } from "@/lib/rental/load-subcompany-attention-data";
 import { ukTodayYmd } from "@/lib/datetime/uk";
 import { vehicleExpiryAttentionItems } from "@/lib/fleet/vehicle-expiry-attention";
 import {
@@ -144,6 +145,7 @@ async function loadVehicleAttentionCount(
       .from("vehicles")
       .select("id, mot_expiry, tax_expiry, phv_licence_expiry, status")
       .eq("subcompany_id", subcompanyId)
+      .eq("parent_company_id", companyId)
       .neq("status", "sold"),
   ]);
   const notifySettings = parseCompanyNotificationSettings(company ?? undefined);
@@ -296,9 +298,13 @@ export async function loadSubcompanyOverviewData(
       };
     });
 
+  const attentionRes = await getSubcompanyAttentionData(companyId, loaded.row.id);
+  const attentionOpenCount = attentionRes.ok ? attentionRes.data.summary.openCount : 0;
+
   const health = subcompanyOverviewHealth({
     openRequirementCount: openRequirements.length,
     vehicleAttentionCount,
+    attentionOpenCount,
   });
 
   const auditEvents: SubcompanyAuditRow[] = (eventRows ?? []).map((e) => ({

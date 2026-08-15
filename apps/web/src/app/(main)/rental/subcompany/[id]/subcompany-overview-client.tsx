@@ -126,8 +126,8 @@ export function SubcompanyOverviewClient({
               </p>
               <p className="mt-1.5 text-xs leading-snug text-rph-fg-muted">
                 {healthy
-                  ? "Fleet documents and MOT, tax, and PHV renewals are up to date. No hire paperwork needs updating."
-                  : "Something needs attention — missing or expiring vehicle documents, or hire paperwork that must be updated after a details change."}
+                  ? "No open rent, contract or document issues for this subcompany."
+                  : "Open items need action — see the Attention tab for rent, contracts and documents."}
               </p>
             </div>
           </div>

@@ -4,7 +4,7 @@ import {
   type HirePaymentScheduleRowInput,
 } from "@/lib/fleet/hire-payment-summary";
 import { deriveHireInsuranceDocumentStatus, isHireInsuranceProvidedBy } from "@/lib/fleet/hire-insurance";
-import { ACTIVE_HIRE_GROUP_STATUSES, type HirePaymentStatus } from "@/lib/fleet/hire-types";
+import { type HirePaymentStatus } from "@/lib/fleet/hire-types";
 import {
   missingRequiredDocTypes,
   VEHICLE_DOC_TYPE_LABELS,
@@ -16,12 +16,14 @@ import { vehicleExpiryAttentionItems } from "@/lib/fleet/vehicle-expiry-attentio
 import { SUBCOMPANY_SELECT, mapSubcompanyRow } from "@/lib/rental/subcompany";
 import {
   attentionPriority,
-  accruedRentDueGbp,
+  countUnsignedLiveAgreements,
+  dedupeAttentionItemsById,
   buildSubcompanyAttentionSummary,
   dueStatusForDaysRemaining,
   formatAttentionAmount,
+  overdueRentDueGbp,
   overdueRentDueLabel,
-  resolvedCompletedLabel,
+  pickContractAttentionEndDate,
   type SubcompanyAttentionItem,
   type SubcompanyAttentionSummary,
 } from "@/lib/rental/subcompany-attention-display";
@@ -168,17 +170,28 @@ export async function loadSubcompanyAttentionData(
       .select("vehicle_id, doc_type")
       .in("vehicle_id", vehicleIds)
       .eq("version_status", "current");
-    const docs =
-      versioned.error && String(versioned.error.message).toLowerCase().includes("version_status")
-        ? (
-            await supabase
-              .from("vehicle_documents")
-              .select("vehicle_id, doc_type")
-              .in("vehicle_id", vehicleIds)
-          ).data
-        : versioned.error
-          ? null
-          : versioned.data;
+    let docs = versioned.data;
+    if (versioned.error) {
+      const msg = String(versioned.error.message).toLowerCase();
+      if (msg.includes("version_status")) {
+        // Pre-migration DBs: take latest row per vehicle+type by created_at when available.
+        const legacy = await supabase
+          .from("vehicle_documents")
+          .select("vehicle_id, doc_type, created_at")
+          .in("vehicle_id", vehicleIds)
+          .order("created_at", { ascending: false });
+        const seen = new Set<string>();
+        docs = [];
+        for (const d of legacy.data ?? []) {
+          const key = `${d.vehicle_id}:${String(d.doc_type ?? "").toLowerCase()}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          docs.push(d);
+        }
+      } else {
+        docs = [];
+      }
+    }
     for (const d of docs ?? []) {
       const vid = String(d.vehicle_id ?? "");
       if (!vid) continue;
@@ -221,10 +234,17 @@ export async function loadSubcompanyAttentionData(
   }
 
   const items: SubcompanyAttentionItem[] = [];
+  const hireIdSet = new Set(hireIds);
 
   for (const vehicle of vehicleById.values()) {
     const present = docsByVehicle.get(vehicle.id) ?? [];
-    for (const expiry of vehicleExpiryAttentionItems(vehicle, notifySettings)) {
+    const expiryItems = vehicleExpiryAttentionItems(vehicle, notifySettings);
+    const expiryKindsWithAlert = new Set(
+      expiryItems.filter((e) => e.tone === "expired" || e.tone === "expiring").map((e) => e.kind),
+    );
+
+    for (const expiry of expiryItems) {
+      if (expiry.tone !== "expired" && expiry.tone !== "expiring") continue;
       const days = expiry.daysUntil ?? 0;
       const due = dueStatusForDaysRemaining(days);
       const urgency = expiry.tone === "expired" || days <= 0 ? "urgent" : due.urgency;
@@ -245,10 +265,15 @@ export async function loadSubcompanyAttentionData(
         primaryActionLabel: "Open vehicle",
         primaryActionHref: `/rental/vehicles/${vehicle.id}/details`,
         priority: attentionPriority({ urgency, category: "documents" }),
+        dueSortDays: days,
+        newestSortKey: expiry.isoDate?.slice(0, 10) ?? todayYmd,
       });
     }
 
     for (const missing of missingRequiredDocTypes(present)) {
+      // One alert per compliance gap: skip missing-file when an expiry alert already covers it.
+      if (missing === "mot" && expiryKindsWithAlert.has("mot")) continue;
+      if (missing === "phv_taxi_licence_paper" && expiryKindsWithAlert.has("phv")) continue;
       const label = VEHICLE_DOC_TYPE_LABELS[missing as VehicleDocType] ?? missing;
       items.push({
         id: `veh-miss-${vehicle.id}-${missing}`,
@@ -264,26 +289,12 @@ export async function loadSubcompanyAttentionData(
         primaryActionLabel: "Replace document",
         primaryActionHref: `/rental/vehicles/${vehicle.id}/details`,
         priority: attentionPriority({ urgency: "due_soon", category: "documents" }),
+        dueSortDays: 0,
+        newestSortKey: todayYmd,
       });
     }
-
-    if (!present.map((t) => t.toLowerCase()).includes("insurance")) {
-      items.push({
-        id: `veh-miss-${vehicle.id}-insurance`,
-        category: "documents",
-        urgency: "due_soon",
-        title: "Vehicle insurance missing",
-        description: "No current vehicle insurance document is on file.",
-        meta: `${vehicle.vrm} · ${vehicleStatusMeta(vehicle.status)}`,
-        dueStatusLabel: "Required now",
-        dueStatusTone: "warn",
-        amountGbp: null,
-        amountLabel: "—",
-        primaryActionLabel: "Review insurance",
-        primaryActionHref: `/rental/vehicles/${vehicle.id}/details`,
-        priority: attentionPriority({ urgency: "due_soon", category: "documents" }),
-      });
-    }
+    // Vehicle insurance is optional in the required pack — do not alert here.
+    // Hire-level insurance is handled separately when insurance_provided_by is set.
   }
 
   for (const hire of hires ?? []) {
@@ -292,38 +303,43 @@ export async function loadSubcompanyAttentionData(
     const vrm = vehicle?.vrm ?? "Hire";
     const status = String(hire.status ?? "");
     const meta = `${vrm} · ${hireStatusMeta(status)}`;
+    const agreements = (hire.vehicle_hire_agreements ?? []) as Array<{
+      end_date?: string | null;
+      signed_at?: string | null;
+      status?: string | null;
+    }>;
 
-    // Due rent on active hires: accrued periods (incl. current), net of discounts.
-    if ((ACTIVE_HIRE_GROUP_STATUSES as readonly string[]).includes(status)) {
+    // Overdue rent on active hires only (period ended + unpaid), net of discounts.
+    if (status === "active") {
       const rows = scheduleByHire.get(hireId) ?? [];
-      const due = accruedRentDueGbp(rows, todayYmd);
+      const due = overdueRentDueGbp(rows, todayYmd);
       if (due.totalGbp > 0.005) {
         const daysPastEnd =
           due.oldestUnpaidPeriodEnd != null
             ? Math.max(0, -(daysFromCalendarDateToExpiry(due.oldestUnpaidPeriodEnd, todayYmd) ?? 0))
             : 0;
-        const hasEndedUnpaid = due.oldestUnpaidPeriodEnd != null && due.oldestUnpaidPeriodEnd < todayYmd;
         items.push({
           id: `hire-rent-${hireId}`,
           category: "rent",
           urgency: "urgent",
-          title: hasEndedUnpaid ? "Rent payment overdue" : "Rent payment due",
+          title: "Rent payment overdue",
           description:
             due.unpaidPeriodCount > 1
               ? `${due.unpaidPeriodCount} rent periods remain unpaid.`
-              : "Outstanding rent is due on this hire.",
+              : "Outstanding rent is overdue on this hire.",
           meta,
-          dueStatusLabel: hasEndedUnpaid ? overdueRentDueLabel(daysPastEnd) : "Due now",
+          dueStatusLabel: overdueRentDueLabel(daysPastEnd),
           dueStatusTone: "urgent",
           amountGbp: due.totalGbp,
           amountLabel: formatAttentionAmount(due.totalGbp),
           primaryActionLabel: "Record payment",
           primaryActionHref: `/rental/balances/${hireId}`,
           priority: attentionPriority({ urgency: "urgent", category: "rent" }),
+          dueSortDays: -daysPastEnd,
+          newestSortKey: due.oldestUnpaidPeriodEnd ?? todayYmd,
         });
       }
     } else if (status === "completed" || status === "terminated") {
-      // Ended hire settlement owed by driver
       const direction = hire.settlement_balance_direction as string | null;
       const settlement = Number(hire.settlement_balance_gbp ?? 0);
       if (direction === "driver_owes_company" && settlement > 0.005) {
@@ -341,113 +357,116 @@ export async function loadSubcompanyAttentionData(
           primaryActionLabel: "Record payment",
           primaryActionHref: `/rental/balances/${hireId}`,
           priority: attentionPriority({ urgency: "urgent", category: "rent" }),
+          dueSortDays: 0,
+          newestSortKey: todayYmd,
         });
       }
     }
 
-    // Contract ending soon
+    // Contract ending soon or already expired while hire still active
     if (status === "active") {
-      const agreements = (hire.vehicle_hire_agreements ?? []) as Array<{
-        end_date?: string | null;
-        signed_at?: string | null;
-        status?: string | null;
-      }>;
-      const endDates = agreements
-        .map((a) => a.end_date?.slice(0, 10))
-        .filter((d): d is string => Boolean(d))
-        .sort();
-      const endDate = endDates[0] ?? null;
+      const endDate = pickContractAttentionEndDate(agreements, todayYmd);
       if (endDate) {
         const days = daysFromCalendarDateToExpiry(endDate, todayYmd);
-        if (
-          days != null &&
-          days >= 0 &&
-          days <= notifySettings.notify_contract_expiry_days_before
-        ) {
+        if (days != null && days <= notifySettings.notify_contract_expiry_days_before) {
           const due = dueStatusForDaysRemaining(days);
+          const urgency = days < 0 ? "urgent" : due.urgency;
           items.push({
             id: `hire-end-${hireId}`,
             category: "contracts",
-            urgency: due.urgency,
-            title: days <= 7 ? "Hire contract ending soon" : "Contract review approaching",
+            urgency,
+            title:
+              days < 0
+                ? "Hire contract expired"
+                : days <= 7
+                  ? "Hire contract ending soon"
+                  : "Contract review approaching",
             description:
-              days <= 7
-                ? "Review extension or return arrangements with the driver."
-                : "Confirm whether the rolling hire should continue.",
+              days < 0
+                ? "The contract end date has passed while the hire is still active."
+                : days <= 7
+                  ? "Review extension or return arrangements with the driver."
+                  : "Confirm whether the rolling hire should continue.",
             meta,
             dueStatusLabel: due.label,
-            dueStatusTone: due.tone,
+            dueStatusTone: urgency === "urgent" ? "urgent" : due.tone,
             amountGbp: null,
             amountLabel: "—",
             primaryActionLabel: "Review contract",
             primaryActionHref: `/rental/hires/${hireId}`,
-            priority: attentionPriority({ urgency: due.urgency, category: "contracts" }),
+            priority: attentionPriority({ urgency, category: "contracts" }),
+            dueSortDays: days,
+            newestSortKey: endDate,
           });
         }
       }
     }
 
-    // Hire insurance
+    // Hire insurance (only when responsibility is configured on the hire)
     if (["pending_signature", "reserved", "active"].includes(status)) {
       const providedByRaw = (hire.insurance_provided_by as string | null) ?? null;
       const providedBy =
         providedByRaw && isHireInsuranceProvidedBy(providedByRaw) ? providedByRaw : null;
-      const insuranceRow = insuranceByHire.get(hireId);
-      const insuranceStatus = deriveHireInsuranceDocumentStatus({
-        providedBy,
-        hasDocument: Boolean(insuranceRow?.hasDocument),
-        expiryDate: insuranceRow?.expiryDate ?? null,
-        notifyDaysBefore: notifySettings.notify_insurance_days_before,
-        todayYmd,
-      });
-      if (
-        insuranceStatus === "awaiting_upload" ||
-        insuranceStatus === "expired" ||
-        insuranceStatus === "expiring"
-      ) {
-        const urgency =
-          insuranceStatus === "expired" || insuranceStatus === "awaiting_upload"
-            ? "urgent"
-            : "due_soon";
-        items.push({
-          id: `hire-ins-${hireId}`,
-          category: "documents",
-          urgency,
-          title:
-            insuranceStatus === "expired"
-              ? "Hire insurance expired"
-              : insuranceStatus === "expiring"
-                ? "Hire insurance expiring"
-                : "Driver insurance missing",
-          description:
-            insuranceStatus === "awaiting_upload"
-              ? "A current insurance document is required for the hire record."
-              : "Review the hire insurance certificate.",
-          meta,
-          dueStatusLabel:
-            insuranceStatus === "awaiting_upload"
-              ? "Required now"
-              : insuranceStatus === "expired"
-                ? "Expired"
-                : "Due soon",
-          dueStatusTone: urgency === "urgent" ? "urgent" : "warn",
-          amountGbp: null,
-          amountLabel: "—",
-          primaryActionLabel:
-            insuranceStatus === "awaiting_upload" ? "Request document" : "Review insurance",
-          primaryActionHref: `/rental/hires/${hireId}/details`,
-          priority: attentionPriority({ urgency, category: "documents" }),
+      if (providedBy) {
+        const insuranceRow = insuranceByHire.get(hireId);
+        const insuranceStatus = deriveHireInsuranceDocumentStatus({
+          providedBy,
+          hasDocument: Boolean(insuranceRow?.hasDocument),
+          expiryDate: insuranceRow?.expiryDate ?? null,
+          notifyDaysBefore: notifySettings.notify_insurance_days_before,
+          todayYmd,
         });
+        if (
+          insuranceStatus === "awaiting_upload" ||
+          insuranceStatus === "expired" ||
+          insuranceStatus === "expiring"
+        ) {
+          const urgency =
+            insuranceStatus === "expired" || insuranceStatus === "awaiting_upload"
+              ? "urgent"
+              : "due_soon";
+          const insuranceDays =
+            insuranceRow?.expiryDate != null
+              ? (daysFromCalendarDateToExpiry(insuranceRow.expiryDate, todayYmd) ?? 0)
+              : 0;
+          items.push({
+            id: `hire-ins-${hireId}`,
+            category: "documents",
+            urgency,
+            title:
+              insuranceStatus === "expired"
+                ? "Hire insurance expired"
+                : insuranceStatus === "expiring"
+                  ? "Hire insurance expiring"
+                  : "Driver insurance missing",
+            description:
+              insuranceStatus === "awaiting_upload"
+                ? "A current insurance document is required for the hire record."
+                : "Review the hire insurance certificate.",
+            meta,
+            dueStatusLabel:
+              insuranceStatus === "awaiting_upload"
+                ? "Required now"
+                : insuranceStatus === "expired"
+                  ? "Expired"
+                  : "Due soon",
+            dueStatusTone: urgency === "urgent" ? "urgent" : "warn",
+            amountGbp: null,
+            amountLabel: "—",
+            primaryActionLabel:
+              insuranceStatus === "awaiting_upload" ? "Request document" : "Review insurance",
+            primaryActionHref: `/rental/hires/${hireId}/details`,
+            priority: attentionPriority({ urgency, category: "documents" }),
+            dueSortDays: insuranceStatus === "awaiting_upload" ? 0 : insuranceDays,
+            newestSortKey: insuranceRow?.expiryDate ?? todayYmd,
+          });
+        }
       }
     }
 
-    // Unsigned agreements
+    // Unsigned live agreements on pre-active hires
     if (status === "pending_signature" || status === "reserved") {
-      const agreements = (hire.vehicle_hire_agreements ?? []) as Array<{
-        signed_at?: string | null;
-        status?: string | null;
-      }>;
-      const unsigned = agreements.filter((a) => !a.signed_at).length;
+      const unsigned = countUnsignedLiveAgreements(agreements);
       if (unsigned > 0) {
         items.push({
           id: `hire-sign-${hireId}`,
@@ -466,45 +485,20 @@ export async function loadSubcompanyAttentionData(
           primaryActionLabel: "Open hire",
           primaryActionHref: `/rental/hires/${hireId}`,
           priority: attentionPriority({ urgency: "due_soon", category: "contracts" }),
+          dueSortDays: 0,
+          newestSortKey: todayYmd,
         });
       }
     }
-
-    // Resolved: recently signed
-    const agreements = (hire.vehicle_hire_agreements ?? []) as Array<{
-      signed_at?: string | null;
-    }>;
-    for (const a of agreements) {
-      const signedAt = a.signed_at?.trim();
-      if (!signedAt) continue;
-      const signedDay = signedAt.slice(0, 10);
-      const age = daysFromCalendarDateToExpiry(signedDay, todayYmd);
-      if (age == null || age < -30) continue;
-      items.push({
-        id: `hire-resolved-${hireId}-${signedDay}`,
-        category: "contracts",
-        urgency: "resolved",
-        title: "Agreement signature completed",
-        description: "All parties signed and the agreement was archived.",
-        meta: `${vrm} · Previous hire`,
-        dueStatusLabel: resolvedCompletedLabel(signedAt),
-        dueStatusTone: "ok",
-        amountGbp: null,
-        amountLabel: "—",
-        primaryActionLabel: "View agreement",
-        primaryActionHref: `/rental/hires/${hireId}/details`,
-        priority: attentionPriority({ urgency: "resolved", category: "contracts" }),
-      });
-      break;
-    }
   }
 
-  // Open subcompany document impact requirements
+  // Open subcompany document-impact requirements (scoped hire must still exist here)
   const statusByHire = new Map(
     (hires ?? []).map((h) => [h.id as string, String(h.status ?? "")]),
   );
   for (const r of reqs ?? []) {
     const hireGroupId = r.hire_group_id as string;
+    if (!hireIdSet.has(hireGroupId)) continue;
     if (hireIsEndedForSubcompanyDocumentImpact(statusByHire.get(hireGroupId) ?? "")) continue;
     const hire = (hires ?? []).find((h) => h.id === hireGroupId);
     const vehicle = hire ? vehicleById.get(hire.vehicle_id as string) : null;
@@ -531,18 +525,21 @@ export async function loadSubcompanyAttentionData(
       primaryActionLabel: "Open hire",
       primaryActionHref: href,
       priority: attentionPriority({ urgency: "due_soon", category: "documents" }),
+      dueSortDays: 0,
+      newestSortKey: todayYmd,
     });
   }
 
-  items.sort((a, b) => a.priority - b.priority || a.title.localeCompare(b.title));
-  const summary = buildSubcompanyAttentionSummary(items);
+  const uniqueItems = dedupeAttentionItemsById(items);
+  uniqueItems.sort((a, b) => a.priority - b.priority || a.title.localeCompare(b.title));
+  const summary = buildSubcompanyAttentionSummary(uniqueItems);
 
   return {
     ok: true,
     data: {
       subcompanyName: subcompany.name,
       summary,
-      items,
+      items: uniqueItems,
     },
   };
 }

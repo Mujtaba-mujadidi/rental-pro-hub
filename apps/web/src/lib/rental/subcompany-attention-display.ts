@@ -17,7 +17,7 @@ export type SubcompanyAttentionFilter =
   | "documents"
   | "resolved";
 
-export type SubcompanyAttentionSort = "priority" | "amount";
+export type SubcompanyAttentionSort = "priority" | "due_date" | "newest";
 
 export type SubcompanyAttentionItem = {
   id: string;
@@ -34,6 +34,10 @@ export type SubcompanyAttentionItem = {
   primaryActionHref: string;
   /** Lower = higher priority. */
   priority: number;
+  /** Calendar days until due (negative = overdue). Lower sorts first for Due date. */
+  dueSortDays: number;
+  /** YYYY-MM-DD (or ISO day) — higher sorts first for Newest first. */
+  newestSortKey: string;
 };
 
 export type SubcompanyAttentionSummary = {
@@ -62,7 +66,8 @@ export const SUBCOMPANY_ATTENTION_SORT_OPTIONS: Array<{
   label: string;
 }> = [
   { value: "priority", label: "Priority first" },
-  { value: "amount", label: "Highest amount" },
+  { value: "due_date", label: "Due date" },
+  { value: "newest", label: "Newest first" },
 ];
 
 export function formatAttentionAmountDigits(amountGbp: number): string {
@@ -78,11 +83,29 @@ export function formatAttentionAmount(amountGbp: number | null): string {
 
 /**
  * Outstanding rent on accrued schedule rows (period started), after discounts.
- * Includes the current period — not only periods whose end date has passed.
+ * Includes the current period — use for open-balance style totals, not Attention overdue.
  */
 export function accruedRentDueGbp(
   rows: readonly HirePaymentScheduleRowInput[],
   todayYmd: string,
+): { totalGbp: number; unpaidPeriodCount: number; oldestUnpaidPeriodEnd: string | null } {
+  return sumUnpaidRentRows(rows, todayYmd, { requirePeriodEnded: false });
+}
+
+/**
+ * Genuinely overdue rent: unpaid accrued periods whose period_end is before today.
+ */
+export function overdueRentDueGbp(
+  rows: readonly HirePaymentScheduleRowInput[],
+  todayYmd: string,
+): { totalGbp: number; unpaidPeriodCount: number; oldestUnpaidPeriodEnd: string | null } {
+  return sumUnpaidRentRows(rows, todayYmd, { requirePeriodEnded: true });
+}
+
+function sumUnpaidRentRows(
+  rows: readonly HirePaymentScheduleRowInput[],
+  todayYmd: string,
+  options: { requirePeriodEnded: boolean },
 ): { totalGbp: number; unpaidPeriodCount: number; oldestUnpaidPeriodEnd: string | null } {
   let totalGbp = 0;
   let unpaidPeriodCount = 0;
@@ -90,6 +113,7 @@ export function accruedRentDueGbp(
   for (const row of rows) {
     if (row.rowKind !== "rent") continue;
     if (!isHirePaymentRowAccrued(row, todayYmd)) continue;
+    if (options.requirePeriodEnded && row.periodEnd >= todayYmd) continue;
     const balance = hirePaymentRowBalanceGbp(row);
     if (balance <= 0.005) continue;
     totalGbp = Math.round((totalGbp + balance) * 100) / 100;
@@ -101,13 +125,65 @@ export function accruedRentDueGbp(
   return { totalGbp, unpaidPeriodCount, oldestUnpaidPeriodEnd };
 }
 
+const DEAD_HIRE_AGREEMENT_STATUSES = new Set(["cancelled", "superseded", "draft"]);
+
+/** Agreements that still matter for Attention (not cancelled / superseded / draft). */
+export function isLiveHireAgreement(status: string | null | undefined): boolean {
+  const s = String(status ?? "").trim().toLowerCase();
+  return !DEAD_HIRE_AGREEMENT_STATUSES.has(s);
+}
+
+/**
+ * Contract end date for Attention: soonest upcoming live end, else latest past live end.
+ */
+export function pickContractAttentionEndDate(
+  agreements: readonly { end_date?: string | null; status?: string | null }[],
+  todayYmd: string,
+): string | null {
+  const ends = agreements
+    .filter((a) => isLiveHireAgreement(a.status))
+    .map((a) => a.end_date?.slice(0, 10) ?? "")
+    .filter((d) => Boolean(d))
+    .sort();
+  if (!ends.length) return null;
+  const upcoming = ends.filter((d) => d >= todayYmd);
+  if (upcoming.length) return upcoming[0]!;
+  return ends[ends.length - 1]!;
+}
+
+export function countUnsignedLiveAgreements(
+  agreements: readonly { signed_at?: string | null; status?: string | null }[],
+): number {
+  return agreements.filter((a) => isLiveHireAgreement(a.status) && !a.signed_at).length;
+}
+
+/** Drop duplicate ids while preserving first-seen order. */
+export function dedupeAttentionItemsById(
+  items: readonly SubcompanyAttentionItem[],
+): SubcompanyAttentionItem[] {
+  const seen = new Set<string>();
+  const out: SubcompanyAttentionItem[] = [];
+  for (const item of items) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    out.push(item);
+  }
+  return out;
+}
+
 export function buildSubcompanyAttentionSummary(
   items: readonly SubcompanyAttentionItem[],
 ): SubcompanyAttentionSummary {
   const open = items.filter((item) => item.urgency !== "resolved");
   let overdueRentGbp = 0;
   for (const item of open) {
-    if (item.category === "rent" && item.amountGbp != null && item.amountGbp > 0) {
+    // Schedule arrears only — exclude settlement rows from the Overdue rent card.
+    if (
+      item.category === "rent" &&
+      item.id.startsWith("hire-rent-") &&
+      item.amountGbp != null &&
+      item.amountGbp > 0
+    ) {
       overdueRentGbp += item.amountGbp;
     }
   }
@@ -158,10 +234,19 @@ export function sortSubcompanyAttentionItems(
   sort: SubcompanyAttentionSort,
 ): SubcompanyAttentionItem[] {
   const copy = [...items];
-  if (sort === "amount") {
+  if (sort === "due_date") {
     copy.sort(
       (a, b) =>
-        (b.amountGbp ?? 0) - (a.amountGbp ?? 0) ||
+        a.dueSortDays - b.dueSortDays ||
+        a.priority - b.priority ||
+        a.title.localeCompare(b.title),
+    );
+    return copy;
+  }
+  if (sort === "newest") {
+    copy.sort(
+      (a, b) =>
+        b.newestSortKey.localeCompare(a.newestSortKey) ||
         a.priority - b.priority ||
         a.title.localeCompare(b.title),
     );

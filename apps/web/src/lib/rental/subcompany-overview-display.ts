@@ -17,7 +17,10 @@ export type SubcompanyOverviewActivityItem = {
 export function subcompanyOverviewHealth(input: {
   openRequirementCount: number;
   vehicleAttentionCount: number;
+  /** Same open Attention count as the workspace tab badge (preferred). */
+  attentionOpenCount?: number;
 }): SubcompanyOverviewHealth {
+  if ((input.attentionOpenCount ?? 0) > 0) return "attention";
   if (input.openRequirementCount > 0 || input.vehicleAttentionCount > 0) return "attention";
   return "healthy";
 }
