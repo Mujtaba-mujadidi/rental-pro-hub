@@ -189,7 +189,9 @@ export function SubcompanyOverviewClient({
                   ? "bg-emerald-500"
                   : item.tone === "warn"
                     ? "bg-amber-500"
-                    : "bg-sky-600";
+                    : item.tone === "neutral"
+                      ? "border-2 border-slate-300 bg-transparent dark:border-slate-600"
+                      : "bg-sky-600";
               return (
                 <li key={item.id} className="relative flex gap-3 pb-4 last:pb-0">
                   {!isLast ? (

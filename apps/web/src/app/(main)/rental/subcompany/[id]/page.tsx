@@ -4,6 +4,7 @@ import { loadVehiclesPageData } from "@/app/actions/rental-vehicles";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
 import {
   loadSubcompanyAuditTrailData,
+  loadSubcompanyHireIncomeThisMonthGbp,
   loadSubcompanyOverviewData,
 } from "@/lib/rental/load-subcompany-section-data";
 import { parseSubcompanyWorkspaceSectionParam } from "@/lib/rental/subcompany-workspace-nav";
@@ -52,8 +53,16 @@ export default async function SubcompanyWorkspacePage({
       if (!res.ok) {
         return <p className="rph-alert-error text-sm">{res.error}</p>;
       }
+      const scopedIds = res.rows
+        .filter((row) => row.subcompany_id === id)
+        .map((row) => row.id);
+      const incomeThisMonthGbp = await loadSubcompanyHireIncomeThisMonthGbp(scopedIds);
       return (
-        <SubcompanyHiresClient initialRows={res.rows} initialCanWrite={res.canWrite} />
+        <SubcompanyHiresClient
+          initialRows={res.rows}
+          initialCanWrite={res.canWrite}
+          incomeThisMonthGbp={incomeThisMonthGbp}
+        />
       );
     }
     default: {

@@ -1,5 +1,9 @@
 import { formatUkDateTextLong } from "@/lib/datetime/uk";
 import type { SubcompanyAuditRow } from "@/lib/rental/subcompany-audit";
+import {
+  splitSubcompanyActivitySummary,
+  subcompanyActivityTone,
+} from "@/lib/rental/subcompany-activity-display";
 
 export type SubcompanyOverviewHealth = "healthy" | "attention";
 
@@ -7,7 +11,7 @@ export type SubcompanyOverviewActivityItem = {
   id: string;
   title: string;
   detail: string;
-  tone: "info" | "ok" | "warn";
+  tone: "info" | "ok" | "warn" | "neutral";
 };
 
 export function subcompanyOverviewHealth(input: {
@@ -32,33 +36,13 @@ export function mapSubcompanyOverviewActivity(
 ): SubcompanyOverviewActivityItem[] {
   return events.slice(0, Math.max(0, limit)).map((event) => {
     const dateLabel = formatUkDateTextLong(event.created_at);
-    const summary = event.summary.trim() || "Activity";
-    const sep = summary.indexOf(" · ");
-    const rawTitle = sep > 0 ? summary.slice(0, sep) : summary;
-    const title = rawTitle.replace(/\.+$/, "").trim() || "Activity";
-    const rest = sep > 0 ? summary.slice(sep + 3).replace(/\.+$/, "").trim() : "";
+    const { title, rest } = splitSubcompanyActivitySummary(event.summary);
     const detail = rest ? `${rest} · ${dateLabel}` : dateLabel;
     return {
       id: event.id,
       title,
       detail,
-      tone: activityTone(event.event_type, title),
+      tone: subcompanyActivityTone(event.event_type, title),
     };
   });
-}
-
-function activityTone(
-  eventType: SubcompanyAuditRow["event_type"],
-  title: string,
-): "info" | "ok" | "warn" {
-  const t = title.toLowerCase();
-  if (eventType === "deactivated" || /\bdeactivat|\boverdue\b/.test(t)) return "warn";
-  if (
-    eventType === "created" ||
-    eventType === "contracts_impact_answered" ||
-    /\bcompleted\b|\bsigned\b|\bapproved\b/.test(t)
-  ) {
-    return "ok";
-  }
-  return "info";
 }

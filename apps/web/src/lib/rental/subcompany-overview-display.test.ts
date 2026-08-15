@@ -90,9 +90,10 @@ describe("mapSubcompanyOverviewActivity", () => {
     expect(items).toHaveLength(5);
     expect(items[0]?.title).toBe("Vehicle assigned");
     expect(items[0]?.detail).toBe("KE18 FSX · 9 August 2026");
-    expect(items[0]?.tone).toBe("info");
+    expect(items[0]?.tone).toBe("neutral");
     expect(items[1]?.title).toBe("Hire agreement completed");
     expect(items[1]?.tone).toBe("ok");
     expect(items[2]?.title).toBe("Extra event");
+    expect(items[2]?.tone).toBe("neutral");
   });
 });

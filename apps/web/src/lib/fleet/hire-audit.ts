@@ -40,10 +40,28 @@ export type HireGroupAuditRow = {
   event_type: HireGroupEventType;
   actor_user_id: string | null;
   actor_role: HireAuditActorRole;
+  /** Resolved display name for the actor (staff audit views only). */
+  actor_display_name?: string | null;
   summary: string;
   metadata: Record<string, unknown>;
   created_at: string;
 };
+
+/** Load profile display names for hire audit actors (after authorisation). */
+export async function loadHireAuditActorDisplayNames(
+  admin: Admin,
+  userIds: Array<string | null | undefined>,
+): Promise<Record<string, string>> {
+  const ids = [...new Set(userIds.map((id) => id?.trim()).filter((id): id is string => Boolean(id)))];
+  if (!ids.length) return {};
+  const { data } = await admin.from("profiles").select("id, display_name").in("id", ids);
+  const names: Record<string, string> = {};
+  for (const row of data ?? []) {
+    const name = (row.display_name as string | null)?.trim();
+    if (name) names[row.id as string] = name;
+  }
+  return names;
+}
 
 export async function logHireGroupEvent(
   admin: Admin,

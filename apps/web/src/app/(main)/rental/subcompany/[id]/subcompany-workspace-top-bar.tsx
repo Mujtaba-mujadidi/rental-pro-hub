@@ -7,6 +7,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { HireContractWizardModal } from "@/app/(main)/rental/hires/hire-contract-wizard-modal";
 import type { SubcompanySwitcherOption } from "@/app/actions/rental-subcompany-workspace";
 import { subcompanyInitials } from "@/lib/rental/subcompanies-portfolio-display";
+import { formatSubcompanyAddressLines } from "@/lib/rental/subcompany-legal-snapshot";
 import {
   isSubcompanyWorkspaceNavItemActive,
   parseSubcompanyWorkspaceSection,
@@ -16,16 +17,21 @@ import {
 import { SUBCOMPANY_STATUS_LABELS } from "./subcompany-status-chip";
 import { useSubcompanyWorkspace } from "./subcompany-workspace-provider";
 
-function locationLine(input: {
+function headerMetaLine(input: {
   company_number: string | null;
+  registered_address_line1?: string | null;
+  registered_address_line2?: string | null;
   registered_town: string | null;
+  registered_county?: string | null;
+  registered_postcode?: string | null;
   country: string | null;
 }): string {
   const parts: string[] = [];
   if (input.company_number?.trim()) {
     parts.push(`Company number ${input.company_number.trim()}`);
   }
-  const place = [input.registered_town?.trim(), input.country?.trim()].filter(Boolean).join(", ");
+  const address = formatSubcompanyAddressLines(input);
+  const place = [address, input.country?.trim()].filter(Boolean).join(", ");
   if (place) parts.push(place);
   return parts.join(" · ");
 }
@@ -43,7 +49,7 @@ export function SubcompanyWorkspaceTopBar({
   const section = parseSubcompanyWorkspaceSection(pathname, subcompany.id, searchParams.get("section"));
   const items = subcompanyWorkspaceNav(subcompany.id);
   const initials = subcompanyInitials(subcompany.name);
-  const meta = locationLine(subcompany);
+  const meta = headerMetaLine(subcompany);
   const typeBadge = subcompany.is_primary ? "Main company" : "Subcompany";
 
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -177,23 +183,8 @@ export function SubcompanyWorkspaceTopBar({
             </div>
           </div>
 
-          <div className="flex w-full shrink-0 flex-col gap-2 sm:flex-row lg:w-auto">
-            {shell.canWrite ? (
-              <Link
-                href={subcompanyWorkspaceHref(subcompany.id, "details")}
-                className="rph-btn-ghost w-full sm:w-auto"
-              >
-                Edit details
-              </Link>
-            ) : (
-              <Link
-                href={subcompanyWorkspaceHref(subcompany.id, "details")}
-                className="rph-btn-ghost w-full sm:w-auto"
-              >
-                View details
-              </Link>
-            )}
-            {shell.canWriteRentals ? (
+          {shell.canWriteRentals ? (
+            <div className="flex w-full shrink-0 flex-col gap-2 sm:flex-row lg:w-auto">
               <button
                 type="button"
                 className="rph-btn-primary w-full sm:w-auto"
@@ -201,8 +192,8 @@ export function SubcompanyWorkspaceTopBar({
               >
                 Create hire
               </button>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
         </div>
       </section>
 

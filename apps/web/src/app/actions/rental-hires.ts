@@ -16,7 +16,7 @@ import {
   releaseVehicleIfNoBlockingHire,
   syncVehicleStatusForHireGroup,
 } from "@/lib/fleet/sync-vehicle-hire-status";
-import { logHireGroupEvent, type HireGroupAuditRow } from "@/lib/fleet/hire-audit";
+import { logHireGroupEvent, loadHireAuditActorDisplayNames, type HireGroupAuditRow } from "@/lib/fleet/hire-audit";
 import { clearHireGroupSigningBundle } from "@/lib/esign/hire-signing-bundle";
 import {
   hireAgreementsToEnvelopeReadyRows,
@@ -785,16 +785,31 @@ export async function loadHireGroupAuditTrailAction(
     .order("created_at", { ascending: true });
   if (error) return { ok: false, error: error.message };
 
+  const events = (data ?? []).map((row) => ({
+    id: row.id as string,
+    event_type: row.event_type as HireGroupAuditRow["event_type"],
+    actor_user_id: row.actor_user_id as string | null,
+    actor_role: row.actor_role as HireGroupAuditRow["actor_role"],
+    summary: row.summary as string,
+    metadata: (row.metadata ?? {}) as Record<string, unknown>,
+    created_at: row.created_at as string,
+  }));
+
+  let actorNames: Record<string, string> = {};
+  try {
+    actorNames = await loadHireAuditActorDisplayNames(
+      createSupabaseAdminClient(),
+      events.map((event) => event.actor_user_id),
+    );
+  } catch {
+    actorNames = {};
+  }
+
   return {
     ok: true,
-    events: (data ?? []).map((row) => ({
-      id: row.id as string,
-      event_type: row.event_type as HireGroupAuditRow["event_type"],
-      actor_user_id: row.actor_user_id as string | null,
-      actor_role: row.actor_role as HireGroupAuditRow["actor_role"],
-      summary: row.summary as string,
-      metadata: (row.metadata ?? {}) as Record<string, unknown>,
-      created_at: row.created_at as string,
+    events: events.map((event) => ({
+      ...event,
+      actor_display_name: event.actor_user_id ? actorNames[event.actor_user_id] ?? null : null,
     })),
   };
 }

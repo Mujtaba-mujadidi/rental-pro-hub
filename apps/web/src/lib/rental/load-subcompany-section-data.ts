@@ -9,6 +9,7 @@ import { missingRequiredDocTypes } from "@/lib/fleet/vehicles";
 import { formatGbp } from "@/lib/fleet/maintenance";
 import type { HirePaymentStatus } from "@/lib/fleet/hire-types";
 import type { SubcompanyAuditRow } from "@/lib/rental/subcompany-audit";
+import { loadHireAuditActorDisplayNames } from "@/lib/fleet/hire-audit";
 import { SUBCOMPANY_SELECT, mapSubcompanyRow, type SubcompanyRow } from "@/lib/rental/subcompany";
 import type { SubcompanyDocumentKind, SubcompanyOpenRequirement } from "@/lib/rental/subcompany-workspace-types";
 import {
@@ -346,16 +347,58 @@ export async function loadSubcompanyAuditTrailData(
     .limit(200);
   if (error) return { ok: false, error: error.message };
 
+  const events: SubcompanyAuditRow[] = (data ?? []).map((e) => ({
+    id: e.id as string,
+    event_type: e.event_type as SubcompanyAuditRow["event_type"],
+    actor_user_id: (e.actor_user_id as string | null) ?? null,
+    actor_role: (e.actor_role as string | null) ?? null,
+    summary: e.summary as string,
+    metadata: (e.metadata ?? {}) as Record<string, unknown>,
+    created_at: e.created_at as string,
+  }));
+
+  let actorNames: Record<string, string> = {};
+  try {
+    actorNames = await loadHireAuditActorDisplayNames(
+      createSupabaseAdminClient(),
+      events.map((event) => event.actor_user_id),
+    );
+  } catch {
+    actorNames = {};
+  }
+
   return {
     ok: true,
-    events: (data ?? []).map((e) => ({
-      id: e.id as string,
-      event_type: e.event_type as SubcompanyAuditRow["event_type"],
-      actor_user_id: (e.actor_user_id as string | null) ?? null,
-      actor_role: (e.actor_role as string | null) ?? null,
-      summary: e.summary as string,
-      metadata: (e.metadata ?? {}) as Record<string, unknown>,
-      created_at: e.created_at as string,
+    events: events.map((event) => ({
+      ...event,
+      actor_display_name: event.actor_user_id ? actorNames[event.actor_user_id] ?? null : null,
     })),
   };
+}
+
+/** Approved hire schedule income for the current UK calendar month, scoped to hire groups. */
+export async function loadSubcompanyHireIncomeThisMonthGbp(
+  hireGroupIds: readonly string[],
+): Promise<number> {
+  if (!hireGroupIds.length) return 0;
+  const supabase = await createClient();
+  const today = ukTodayYmd();
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const { data, error } = await supabase
+    .from("vehicle_hire_payment_schedule")
+    .select("approved_amount_gbp, payment_status, period_start, period_end, hire_group_id")
+    .in("hire_group_id", [...hireGroupIds])
+    .eq("payment_status", "approved")
+    .lte("period_start", today)
+    .gte("period_end", monthStart);
+  if (error) {
+    console.error("subcompany hire income query failed", error.message);
+    return 0;
+  }
+  let total = 0;
+  for (const row of data ?? []) {
+    const amount = Number(row.approved_amount_gbp ?? 0);
+    if (Number.isFinite(amount) && amount > 0) total += amount;
+  }
+  return Math.round(total * 100) / 100;
 }

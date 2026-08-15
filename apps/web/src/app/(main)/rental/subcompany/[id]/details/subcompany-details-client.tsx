@@ -12,22 +12,22 @@ import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { FormModalField } from "@/components/forms/form-modal-step-progress";
 import { formatUkDate } from "@/lib/datetime/uk";
+import { subcompanyInitials } from "@/lib/rental/subcompanies-portfolio-display";
 import type { SubcompanyRow } from "@/lib/rental/subcompany";
 import type {
   SubcompanyEditablePatch,
   SubcompanyFieldChange,
 } from "@/lib/rental/subcompany-contract-impact";
 import { formatSubcompanyAddressLines } from "@/lib/rental/subcompany-legal-snapshot";
-import { SUBCOMPANY_STATUS_LABELS } from "../subcompany-status-chip";
+import { SubcompanyStatusChip } from "../subcompany-status-chip";
 import { SubcompanyContractImpactModal } from "../subcompany-contract-impact-modal";
 import { useSubcompanyWorkspace } from "../subcompany-workspace-provider";
 
-type EditSection = "company" | "office" | "contact";
+type EditSection = "company" | "operations";
 
 const SECTION_TITLES: Record<EditSection, string> = {
-  company: "Edit company",
-  office: "Edit registered office",
-  contact: "Edit primary contact",
+  company: "Edit legal details",
+  operations: "Edit contact & address",
 };
 
 const btnPrimary =
@@ -66,17 +66,13 @@ function patchForSection(section: EditSection, draft: Draft): SubcompanyEditable
       notes: draft.notes,
     };
   }
-  if (section === "office") {
-    return {
-      registered_address_line1: draft.registered_address_line1,
-      registered_address_line2: draft.registered_address_line2,
-      registered_town: draft.registered_town,
-      registered_county: draft.registered_county,
-      registered_postcode: draft.registered_postcode,
-      country: draft.country,
-    };
-  }
   return {
+    registered_address_line1: draft.registered_address_line1,
+    registered_address_line2: draft.registered_address_line2,
+    registered_town: draft.registered_town,
+    registered_county: draft.registered_county,
+    registered_postcode: draft.registered_postcode,
+    country: draft.country,
     primary_contact_first_name: draft.primary_contact_first_name,
     primary_contact_last_name: draft.primary_contact_last_name,
     primary_contact_dob: draft.primary_contact_dob,
@@ -218,118 +214,154 @@ export function SubcompanyDetailsClient() {
   const contactName = [subcompany.primary_contact_first_name, subcompany.primary_contact_last_name]
     .filter(Boolean)
     .join(" ");
+  const tradingName = subcompany.display_name?.trim() || subcompany.name;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="rph-h1">Details</h1>
-        <p className="rph-muted mt-1 text-sm">
-          Company name and company number are fixed after registration. Other changes may affect live hire documents.
-        </p>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <section className="rph-card p-4">
-          <CardHeader
-            title="Company"
-            onEdit={canWrite ? () => openSection("company") : null}
-            editLabel="Edit company"
-          />
-          <dl className="mt-3 space-y-2 text-sm">
-            <Row label="Company name" value={subcompany.name} hint="Fixed after registration" />
-            <Row label="Company number" value={subcompany.company_number} hint="Fixed after registration" />
-            <Row label="Legal name" value={subcompany.legal_name} />
-            <Row label="Display name" value={subcompany.display_name} />
-            <Row label="Status" value={SUBCOMPANY_STATUS_LABELS[subcompany.status]} />
-            <Row label="Internal notes" value={subcompany.notes} />
-          </dl>
-        </section>
-
-        <section className="rph-card p-4">
-          <CardHeader title="Logo" onEdit={null} editLabel="" />
-          <p className="rph-muted mt-1 text-sm">Shown on hire agreements and permission letters.</p>
-          {logoError ? <p className="rph-alert-error mt-3 text-sm">{logoError}</p> : null}
-          <div className="mt-3 flex flex-wrap items-center gap-4">
-            <div className="relative flex h-24 w-40 items-center justify-center rounded-lg border border-rph-border bg-rph-raised p-2">
-              {logoPending ? (
-                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-lg bg-rph-raised/95">
-                  <span
-                    className="h-6 w-6 animate-spin rounded-full border-2 border-rph-rail/30 border-t-rph-rail"
-                    aria-hidden
-                  />
-                  <span className="rph-muted text-xs">
-                    {logoAction === "remove" ? "Removing…" : "Uploading…"}
-                  </span>
-                </div>
-              ) : null}
-              {logoPreviewUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={logoPreviewUrl}
-                  alt={`${subcompany.name} logo`}
-                  className={`max-h-20 w-auto object-contain ${logoPending ? "opacity-40" : ""}`}
-                />
-              ) : shell.logoOnFile ? (
-                <span className="rph-muted text-xs">Loading logo…</span>
-              ) : (
-                <span className="rph-muted text-xs">No logo</span>
-              )}
+    <div className="subco-dt space-y-4 sm:space-y-5">
+      <div className="grid gap-4 lg:grid-cols-3">
+        <section className="rph-card overflow-hidden p-0">
+          <div className="flex items-start justify-between gap-3 border-b border-rph-border px-4 py-3.5 sm:px-5">
+            <div className="min-w-0">
+              <p className="company-dash-section-label">Registration</p>
+              <h2 className="mt-1 text-base font-semibold text-rph-fg">Legal details</h2>
             </div>
             {canWrite ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  className="rph-input max-w-xs"
-                  disabled={logoPending}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) uploadLogo(file);
-                  }}
-                />
-                {subcompany.logo_storage_path ? (
-                  <button
-                    type="button"
-                    className="rph-btn-ghost"
-                    disabled={logoPending}
-                    onClick={() => setRemoveLogoConfirmOpen(true)}
-                  >
-                    Remove
-                  </button>
-                ) : null}
-              </div>
+              <button
+                type="button"
+                className="rph-btn-ghost h-9 min-w-0 px-3 text-sm"
+                onClick={() => openSection("company")}
+              >
+                Edit
+              </button>
             ) : null}
           </div>
-        </section>
-
-        <section className="rph-card p-4">
-          <CardHeader
-            title="Registered office"
-            onEdit={canWrite ? () => openSection("office") : null}
-            editLabel="Edit registered office"
-          />
-          <dl className="mt-3 space-y-2 text-sm">
-            <Row label="Address" value={address} />
-            <Row label="Country" value={subcompany.country} />
-          </dl>
-        </section>
-
-        <section className="rph-card p-4">
-          <CardHeader
-            title="Primary contact"
-            onEdit={canWrite ? () => openSection("contact") : null}
-            editLabel="Edit primary contact"
-          />
-          <dl className="mt-3 space-y-2 text-sm">
-            <Row label="Name" value={contactName} />
-            <Row
-              label="Date of birth"
-              value={subcompany.primary_contact_dob ? formatUkDate(subcompany.primary_contact_dob) : null}
+          <dl className="divide-y divide-rph-border">
+            <DetailRow label="Legal name" value={subcompany.legal_name || subcompany.name} />
+            <DetailRow
+              label="Company number"
+              value={subcompany.company_number}
+              hint="Fixed after registration"
             />
-            <Row label="Phone" value={subcompany.primary_contact_phone} />
-            <Row label="Email" value={subcompany.primary_contact_email} />
+            <DetailRow label="Trading name" value={tradingName} />
+            <div className="flex items-start justify-between gap-4 px-4 py-3.5 text-sm sm:px-5">
+              <dt className="shrink-0 text-rph-fg-muted">Trading status</dt>
+              <dd className="min-w-0 text-right">
+                <SubcompanyStatusChip status={subcompany.status} />
+              </dd>
+            </div>
+            {subcompany.notes?.trim() ? (
+              <DetailRow label="Internal notes" value={subcompany.notes} />
+            ) : null}
           </dl>
+        </section>
+
+        <section className="rph-card overflow-hidden p-0">
+          <div className="flex items-start justify-between gap-3 border-b border-rph-border px-4 py-3.5 sm:px-5">
+            <div className="min-w-0">
+              <p className="company-dash-section-label">Operations</p>
+              <h2 className="mt-1 text-base font-semibold text-rph-fg">Contact & address</h2>
+            </div>
+            {canWrite ? (
+              <button
+                type="button"
+                className="rph-btn-ghost h-9 min-w-0 px-3 text-sm"
+                onClick={() => openSection("operations")}
+              >
+                Edit
+              </button>
+            ) : null}
+          </div>
+          <dl className="divide-y divide-rph-border">
+            <DetailRow label="Operations email" value={subcompany.primary_contact_email} />
+            <DetailRow label="Telephone" value={subcompany.primary_contact_phone} />
+            <DetailRow label="Registered office" value={address} />
+            <DetailRow label="Primary contact" value={contactName} />
+            <DetailRow
+              label="Date of birth"
+              value={
+                subcompany.primary_contact_dob ? formatUkDate(subcompany.primary_contact_dob) : null
+              }
+            />
+            <DetailRow label="Country" value={subcompany.country} />
+          </dl>
+        </section>
+
+        <section className="rph-card flex flex-col overflow-hidden p-0">
+          <div className="border-b border-rph-border px-4 py-3.5 sm:px-5">
+            <p className="company-dash-section-label">Branding</p>
+            <h2 className="mt-1 text-base font-semibold text-rph-fg">Logo</h2>
+          </div>
+          <div className="flex flex-1 flex-col px-4 py-4 sm:px-5">
+            {logoError ? <p className="rph-alert-error mb-3 text-sm">{logoError}</p> : null}
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
+              <div className="relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl border border-rph-border bg-rph-chrome/50 p-3 shadow-sm">
+                {logoPending ? (
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-2xl bg-rph-raised/95">
+                    <span
+                      className="h-6 w-6 animate-spin rounded-full border-2 border-rph-rail/30 border-t-rph-rail"
+                      aria-hidden
+                    />
+                    <span className="rph-muted text-xs">
+                      {logoAction === "remove" ? "Removing…" : "Uploading…"}
+                    </span>
+                  </div>
+                ) : null}
+                {logoPreviewUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={logoPreviewUrl}
+                    alt={`${subcompany.name} logo`}
+                    className={`max-h-full max-w-full object-contain ${logoPending ? "opacity-40" : ""}`}
+                  />
+                ) : shell.logoOnFile ? (
+                  <span className="rph-muted text-xs">Loading…</span>
+                ) : (
+                  <span className="flex h-full w-full flex-col items-center justify-center gap-1 text-rph-fg-muted">
+                    <span className="text-2xl font-semibold tracking-tight text-rph-fg-secondary">
+                      {subcompanyInitials(subcompany.name)}
+                    </span>
+                    <span className="text-[11px]">No logo yet</span>
+                  </span>
+                )}
+              </div>
+              <p className="max-w-[16rem] text-xs leading-snug text-rph-fg-muted">
+                Used on hire agreements and permission letters. PNG, JPEG or WebP.
+              </p>
+              {canWrite ? (
+                <div className="flex w-full flex-col gap-2 sm:max-w-[14rem]">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="sr-only"
+                    disabled={logoPending}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) uploadLogo(file);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="rph-btn-primary h-10 w-full min-w-0 text-sm"
+                    disabled={logoPending}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    {logoPreviewUrl || shell.logoOnFile ? "Change logo" : "Upload logo"}
+                  </button>
+                  {subcompany.logo_storage_path ? (
+                    <button
+                      type="button"
+                      className="rph-btn-ghost h-10 w-full min-w-0 text-sm"
+                      disabled={logoPending}
+                      onClick={() => setRemoveLogoConfirmOpen(true)}
+                    >
+                      Remove logo
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
         </section>
       </div>
 
@@ -385,7 +417,7 @@ export function SubcompanyDetailsClient() {
                 onChange={(e) => patch("legal_name", e.target.value)}
               />
             </FormModalField>
-            <FormModalField label="Display name">
+            <FormModalField label="Trading name">
               <input
                 className="rph-input"
                 value={draft.display_name}
@@ -403,8 +435,46 @@ export function SubcompanyDetailsClient() {
           </div>
         ) : null}
 
-        {section === "office" ? (
+        {section === "operations" ? (
           <div className="grid gap-4 sm:grid-cols-2">
+            <FormModalField label="First name">
+              <input
+                className="rph-input"
+                value={draft.primary_contact_first_name}
+                onChange={(e) => patch("primary_contact_first_name", e.target.value)}
+              />
+            </FormModalField>
+            <FormModalField label="Last name">
+              <input
+                className="rph-input"
+                value={draft.primary_contact_last_name}
+                onChange={(e) => patch("primary_contact_last_name", e.target.value)}
+              />
+            </FormModalField>
+            <FormModalField label="Email" className="sm:col-span-2">
+              <input
+                type="email"
+                className="rph-input"
+                value={draft.primary_contact_email}
+                onChange={(e) => patch("primary_contact_email", e.target.value)}
+              />
+            </FormModalField>
+            <FormModalField label="Phone">
+              <input
+                type="tel"
+                className="rph-input"
+                value={draft.primary_contact_phone}
+                onChange={(e) => patch("primary_contact_phone", e.target.value)}
+              />
+            </FormModalField>
+            <FormModalField label="Date of birth">
+              <input
+                type="date"
+                className="rph-input"
+                value={draft.primary_contact_dob}
+                onChange={(e) => patch("primary_contact_dob", e.target.value)}
+              />
+            </FormModalField>
             <FormModalField label="Address line 1" className="sm:col-span-2">
               <input
                 className="rph-input"
@@ -445,49 +515,6 @@ export function SubcompanyDetailsClient() {
             </FormModalField>
           </div>
         ) : null}
-
-        {section === "contact" ? (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <FormModalField label="First name">
-              <input
-                className="rph-input"
-                value={draft.primary_contact_first_name}
-                onChange={(e) => patch("primary_contact_first_name", e.target.value)}
-              />
-            </FormModalField>
-            <FormModalField label="Last name">
-              <input
-                className="rph-input"
-                value={draft.primary_contact_last_name}
-                onChange={(e) => patch("primary_contact_last_name", e.target.value)}
-              />
-            </FormModalField>
-            <FormModalField label="Date of birth">
-              <input
-                type="date"
-                className="rph-input"
-                value={draft.primary_contact_dob}
-                onChange={(e) => patch("primary_contact_dob", e.target.value)}
-              />
-            </FormModalField>
-            <FormModalField label="Phone">
-              <input
-                type="tel"
-                className="rph-input"
-                value={draft.primary_contact_phone}
-                onChange={(e) => patch("primary_contact_phone", e.target.value)}
-              />
-            </FormModalField>
-            <FormModalField label="Email" className="sm:col-span-2">
-              <input
-                type="email"
-                className="rph-input"
-                value={draft.primary_contact_email}
-                onChange={(e) => patch("primary_contact_email", e.target.value)}
-              />
-            </FormModalField>
-          </div>
-        ) : null}
       </FormModalShell>
 
       <ConfirmDialog
@@ -511,35 +538,22 @@ export function SubcompanyDetailsClient() {
   );
 }
 
-function CardHeader({
-  title,
-  onEdit,
-  editLabel,
+function DetailRow({
+  label,
+  value,
+  hint,
 }: {
-  title: string;
-  onEdit: (() => void) | null;
-  editLabel: string;
+  label: string;
+  value: string | null | undefined;
+  hint?: string;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3">
-      <p className="rph-meta font-semibold uppercase tracking-wide">{title}</p>
-      {onEdit ? (
-        <button type="button" className="rph-btn-toolbar" onClick={onEdit} aria-label={editLabel}>
-          Edit
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function Row({ label, value, hint }: { label: string; value: string | null; hint?: string }) {
-  return (
-    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-      <dt className="text-rph-fg-muted">
+    <div className="flex items-start justify-between gap-4 px-4 py-3.5 text-sm sm:px-5">
+      <dt className="shrink-0 text-rph-fg-muted">
         {label}
-        {hint ? <span className="rph-meta block text-xs">{hint}</span> : null}
+        {hint ? <span className="mt-0.5 block text-xs text-rph-fg-muted/80">{hint}</span> : null}
       </dt>
-      <dd className="min-w-0 break-words text-right text-rph-fg-secondary">{value || "—"}</dd>
+      <dd className="min-w-0 break-words text-right font-semibold text-rph-fg">{value?.trim() || "—"}</dd>
     </div>
   );
 }

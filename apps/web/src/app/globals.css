@@ -1506,3 +1506,75 @@ html {
   @apply inline-flex rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold text-amber-900 dark:bg-amber-950/45 dark:text-amber-100;
 }
 
+/* Subcompany fleet: space vehicle cards on small screens */
+@media (max-width: 1023px) {
+  .rph-table-responsive.subco-fleet-table {
+    @apply overflow-visible rounded-none border-0 bg-transparent;
+  }
+  .rph-table-responsive.subco-fleet-table tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    @apply px-4 pb-4 pt-4 sm:px-5;
+  }
+  .rph-table-responsive.subco-fleet-table tr {
+    @apply rounded-xl border border-rph-border last:border-b;
+  }
+}
+
+/* Subcompany activity audit trail */
+.subco-activity-card {
+  @apply flex flex-col overflow-hidden;
+  /* Leave clear space above the app footer / page bottom. */
+  max-height: calc(100dvh - 32rem);
+}
+@media (min-width: 640px) {
+  .subco-activity-card {
+    max-height: calc(100dvh - 28rem);
+  }
+}
+@media (min-width: 1024px) {
+  .subco-activity-card {
+    max-height: calc(100dvh - 26rem);
+  }
+}
+.subco-activity-head {
+  @apply shrink-0;
+}
+.subco-activity-scroll {
+  @apply min-h-0 flex-1 overflow-y-auto overscroll-y-contain;
+}
+.subco-activity-day + .subco-activity-day {
+  @apply mt-5;
+}
+.subco-activity-day-label {
+  @apply mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-rph-fg-muted;
+}
+.subco-activity-list {
+  @apply space-y-0;
+}
+.subco-activity-row {
+  @apply relative flex gap-3 pb-4 last:pb-0;
+}
+.subco-activity-rail {
+  @apply absolute left-[7px] top-4 bottom-0 w-px bg-rph-border;
+}
+.subco-activity-dot {
+  @apply relative z-[1] mt-1.5 h-[15px] w-[15px] shrink-0 rounded-full border-2 bg-rph-raised;
+}
+.subco-activity-dot-neutral {
+  @apply border-slate-300 dark:border-slate-600;
+}
+.subco-activity-dot-info {
+  @apply border-sky-600 bg-sky-600 dark:border-sky-400 dark:bg-sky-400;
+  box-shadow: inset 0 0 0 3px var(--color-rph-raised, #fff);
+}
+.subco-activity-dot-ok {
+  @apply border-emerald-500 bg-emerald-500 dark:border-emerald-400 dark:bg-emerald-400;
+  box-shadow: inset 0 0 0 3px var(--color-rph-raised, #fff);
+}
+.subco-activity-dot-warn {
+  @apply border-amber-600 bg-amber-600 dark:border-amber-500 dark:bg-amber-500;
+  box-shadow: inset 0 0 0 3px var(--color-rph-raised, #fff);
+}
+

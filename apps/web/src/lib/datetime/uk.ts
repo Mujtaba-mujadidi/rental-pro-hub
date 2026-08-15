@@ -195,6 +195,27 @@ export function formatUkDateTextLong(value: string | Date | null | undefined, em
   return d.toLocaleDateString(LOCALE, { ...UK_DATE_TEXT_LONG, timeZone: "Europe/London" });
 }
 
+/** 24-hour clock time in Europe/London: `09:00`. */
+export function formatUkTime(value: string | Date | null | undefined, empty = "—"): string {
+  if (value == null || value === "") return empty;
+  const d = parseInstant(value);
+  if (!d) return empty;
+  return d.toLocaleTimeString(LOCALE, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Europe/London",
+  });
+}
+
+/** Europe/London calendar day as `YYYY-MM-DD` for an instant. */
+export function ukLondonDayYmd(value: string | Date | null | undefined): string | null {
+  if (value == null || value === "") return null;
+  const d = parseInstant(value);
+  if (!d) return null;
+  return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+}
+
 /** Inclusive calendar range with short month: `29 Jul – 8 Aug 2026`. */
 export function formatUkDateRangeText(
   startYmd: string | null | undefined,

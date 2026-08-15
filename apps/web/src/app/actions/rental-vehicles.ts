@@ -724,6 +724,14 @@ export async function loadVehiclesPageData(options?: {
       loadUserAccessibleSubcompanyIds(profile),
     ]);
 
+  if (
+    subcompanyId &&
+    accessibleSubcompanyIds !== "all" &&
+    !accessibleSubcompanyIds.includes(subcompanyId)
+  ) {
+    return { error: "You do not have access to this subcompany." };
+  }
+
   const subsList: { id: string; name: string | null; is_primary: boolean | null }[] = subcompanyId
     ? subsResult.data
       ? [subsResult.data as { id: string; name: string | null; is_primary: boolean | null }]

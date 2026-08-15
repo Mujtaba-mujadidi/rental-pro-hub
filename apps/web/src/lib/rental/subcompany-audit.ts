@@ -17,6 +17,8 @@ export type SubcompanyAuditRow = {
   event_type: SubcompanyEventType;
   actor_user_id: string | null;
   actor_role: string | null;
+  /** Resolved display name for staff activity views. */
+  actor_display_name?: string | null;
   summary: string;
   metadata: Record<string, unknown>;
   created_at: string;

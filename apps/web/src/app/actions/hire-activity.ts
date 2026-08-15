@@ -8,7 +8,7 @@ import {
   hireActivityExportFileName,
   type HireActivityItem,
 } from "@/lib/fleet/hire-activity-display";
-import type { HireGroupAuditRow } from "@/lib/fleet/hire-audit";
+import { loadHireAuditActorDisplayNames, type HireGroupAuditRow } from "@/lib/fleet/hire-audit";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -68,35 +68,23 @@ async function loadAuthorisedHireEvents(
   };
 }
 
-async function loadActorDisplayNames(userIds: string[]): Promise<Record<string, string>> {
-  const ids = [...new Set(userIds.map((id) => id.trim()).filter(Boolean))];
-  if (!ids.length) return {};
-  try {
-    const admin = createSupabaseAdminClient();
-    const { data } = await admin.from("profiles").select("id, display_name").in("id", ids);
-    const names: Record<string, string> = {};
-    for (const row of data ?? []) {
-      const name = (row.display_name as string | null)?.trim();
-      if (name) names[row.id as string] = name;
-    }
-    return names;
-  } catch {
-    return {};
-  }
-}
-
 export async function loadHireActivityAction(
   hireGroupId: string,
   audience: "staff" | "driver",
 ): Promise<ActivityResult> {
   const loaded = await loadAuthorisedHireEvents(hireGroupId, audience);
   if (!loaded.ok) return loaded;
-  const actorNames =
-    audience === "staff"
-      ? await loadActorDisplayNames(
-          loaded.events.map((event) => event.actor_user_id).filter((id): id is string => Boolean(id)),
-        )
-      : {};
+  let actorNames: Record<string, string> = {};
+  if (audience === "staff") {
+    try {
+      actorNames = await loadHireAuditActorDisplayNames(
+        createSupabaseAdminClient(),
+        loaded.events.map((event) => event.actor_user_id),
+      );
+    } catch {
+      actorNames = {};
+    }
+  }
   return {
     ok: true,
     items: buildHireActivityItems(loaded.events, { audience, actorNames }),

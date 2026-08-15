@@ -31,6 +31,8 @@ type Props = {
   row: HireContractTableRow;
   canWrite: boolean;
   disabled?: boolean;
+  /** When true (e.g. subcompany workspace), open hire links in a new tab. */
+  openInNewTab?: boolean;
   onAudit: () => void;
   onContinue: () => void;
   onPrepareForSignature: () => void;
@@ -43,6 +45,7 @@ export function HireContractRowActionsMenu({
   row,
   canWrite,
   disabled = false,
+  openInNewTab = false,
   onAudit,
   onContinue,
   onPrepareForSignature,
@@ -56,6 +59,9 @@ export function HireContractRowActionsMenu({
   const showRegenerateContracts = row.can_regenerate_contracts && canWrite;
   const showCancel = row.can_cancel && canWrite;
   const showViewSignedDocuments = row.can_view_signed_documents;
+  const linkProps = openInNewTab
+    ? ({ target: "_blank", rel: "noopener noreferrer" } as const)
+    : {};
 
   return (
     <DropdownMenu.Root>
@@ -69,19 +75,25 @@ export function HireContractRowActionsMenu({
         <DropdownMenu.Content side="bottom" align="end" sideOffset={6} collisionPadding={12} className={contentClass}>
           {row.status !== "draft" ? (
             <DropdownMenu.Item className={itemClass} asChild>
-              <Link href={`/rental/hires/${row.id}`}>Open hire workspace</Link>
+              <Link href={`/rental/hires/${row.id}`} {...linkProps}>
+                Open hire workspace
+              </Link>
             </DropdownMenu.Item>
           ) : null}
 
           {row.can_checkout ? (
             <DropdownMenu.Item className={itemClass} asChild>
-              <Link href={`/rental/hires/${row.id}/checkout`}>Vehicle checkout</Link>
+              <Link href={`/rental/hires/${row.id}/checkout`} {...linkProps}>
+                Vehicle checkout
+              </Link>
             </DropdownMenu.Item>
           ) : null}
 
           {row.can_checkin ? (
             <DropdownMenu.Item className={itemClass} asChild>
-              <Link href={`/rental/hires/${row.id}/checkin`}>Vehicle check-in</Link>
+              <Link href={`/rental/hires/${row.id}/checkin`} {...linkProps}>
+                Vehicle check-in
+              </Link>
             </DropdownMenu.Item>
           ) : null}
 
@@ -111,7 +123,7 @@ export function HireContractRowActionsMenu({
 
           {showViewSignedDocuments ? (
             <DropdownMenu.Item className={itemClass} asChild>
-              <Link href={`/rental/hires/${row.id}/details`}>
+              <Link href={`/rental/hires/${row.id}/details`} {...linkProps}>
                 View signed document{row.signed_agreement_count === 1 ? "" : "s"}
                 {row.agreement_count > 1 ? ` (${row.signed_agreement_count}/${row.agreement_count})` : ""}
               </Link>
