@@ -659,7 +659,11 @@ export function AddVehicleModal({
                     </span>
                     <VehicleDocAddMenu disabled={busy} onFiles={(files) => addFiles(docType, files)} />
                     {ready ? (
-                      <button type="button" className={btnGhost} onClick={() => clearBundle(docType)}>
+                      <button
+                        type="button"
+                        className={`${formModalBtnGhost} !w-auto`}
+                        onClick={() => clearBundle(docType)}
+                      >
                         Clear
                       </button>
                     ) : null}
