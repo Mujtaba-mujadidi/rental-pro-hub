@@ -45,12 +45,13 @@ export function SubcompanyWorkspaceTopBar({
   /** Server-streamed Attention count badge (optional). */
   attentionBadge?: ReactNode;
 }) {
-  const { shell, refreshShell } = useSubcompanyWorkspace();
+  const { shell, refreshShell, section, navigateSection } = useSubcompanyWorkspace();
   const subcompany = shell.subcompany;
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const section = parseSubcompanyWorkspaceSection(pathname, subcompany.id, searchParams.get("section"));
+  const urlSection = parseSubcompanyWorkspaceSection(pathname, subcompany.id, searchParams.get("section"));
+  const activeSection = section ?? urlSection;
   const items = subcompanyWorkspaceNav(subcompany.id);
   const initials = subcompanyInitials(subcompany.name);
   const meta = headerMetaLine(subcompany);
@@ -100,7 +101,7 @@ export function SubcompanyWorkspaceTopBar({
     setQuery("");
     if (id === subcompany.id) return;
     setSwitchingToId(id);
-    router.push(subcompanyWorkspaceHref(id, section));
+    router.push(subcompanyWorkspaceHref(id, activeSection));
   }
 
   return (
@@ -225,12 +226,17 @@ export function SubcompanyWorkspaceTopBar({
       <nav className="subco-ws-tabs" aria-label="Subcompany sections">
         <div className="subco-ws-tabs-track">
           {items.map((item) => {
-            const active = isSubcompanyWorkspaceNavItemActive(section, item);
+            const active = isSubcompanyWorkspaceNavItemActive(activeSection, item);
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 scroll={false}
+                prefetch
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigateSection(item.section);
+                }}
                 className={active ? "subco-ws-tab subco-ws-tab-active" : "subco-ws-tab"}
               >
                 <span>{item.label}</span>

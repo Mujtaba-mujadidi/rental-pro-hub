@@ -9,7 +9,6 @@ import { logSubcompanyEvent, type SubcompanyAuditRow } from "@/lib/rental/subcom
 import {
   loadSubcompanyAuditTrailData,
   loadSubcompanyOverviewData,
-  type SubcompanyOverviewStats,
 } from "@/lib/rental/load-subcompany-section-data";
 import {
   buildSubcompanyChangeSummary,
@@ -599,11 +598,34 @@ export async function loadSubcompanyAuditTrailAction(
 
 export async function loadSubcompanyOverviewAction(
   subcompanyId: string,
+): Promise<{ ok: true; data: import("@/lib/rental/load-subcompany-section-data").SubcompanyOverviewData } | { ok: false; error: string }> {
+  const { profile } = await requireRentalCompanyArea();
+  const companyId = profile.company_id?.trim();
+  if (!companyId) return { ok: false, error: "No active company." };
+  return loadSubcompanyOverviewData(companyId, subcompanyId);
+}
+
+export async function loadSubcompanyAttentionAction(
+  subcompanyId: string,
+): Promise<
+  | { ok: true; data: import("@/lib/rental/load-subcompany-attention-data").SubcompanyAttentionData }
+  | { ok: false; error: string }
+> {
+  const { profile } = await requireRentalCompanyArea();
+  const companyId = profile.company_id?.trim();
+  if (!companyId) return { ok: false, error: "No active company." };
+  const { getSubcompanyAttentionData } = await import("@/lib/rental/load-subcompany-attention-data");
+  return getSubcompanyAttentionData(companyId, subcompanyId);
+}
+
+export async function loadSubcompanyHiresSectionAction(
+  subcompanyId: string,
 ): Promise<
   | {
       ok: true;
-      stats: SubcompanyOverviewStats;
-      openRequirements: import("@/lib/rental/subcompany-workspace-types").SubcompanyOpenRequirement[];
+      rows: import("@/app/actions/rental-hire-wizard").HireContractTableRow[];
+      canWrite: boolean;
+      incomeThisMonthGbp: number;
     }
   | { ok: false; error: string }
 > {
@@ -611,12 +633,21 @@ export async function loadSubcompanyOverviewAction(
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
 
-  const res = await loadSubcompanyOverviewData(companyId, subcompanyId);
+  const { listHireContractsAction } = await import("@/app/actions/rental-hire-wizard");
+  const { loadSubcompanyHireIncomeThisMonthForSubcompany } = await import(
+    "@/lib/rental/load-subcompany-section-data"
+  );
+
+  const [res, incomeThisMonthGbp] = await Promise.all([
+    listHireContractsAction("", undefined, subcompanyId),
+    loadSubcompanyHireIncomeThisMonthForSubcompany(companyId, subcompanyId),
+  ]);
   if (!res.ok) return res;
   return {
     ok: true,
-    stats: res.data.stats,
-    openRequirements: res.data.openRequirements,
+    rows: res.rows,
+    canWrite: res.canWrite,
+    incomeThisMonthGbp,
   };
 }
 

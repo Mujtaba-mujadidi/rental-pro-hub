@@ -22,7 +22,7 @@ export function SubcompanyOverviewClient({
   openRequirements: SubcompanyOpenRequirement[];
   recentActivity: SubcompanyOverviewActivityItem[];
 }) {
-  const { shell, refreshShell } = useSubcompanyWorkspace();
+  const { shell, refreshShell, navigateSection } = useSubcompanyWorkspace();
   const subcompany = shell.subcompany;
   const [pendingDismissId, setPendingDismissId] = useState<string | null>(null);
   const [dismissError, setDismissError] = useState<string | null>(null);
@@ -139,6 +139,10 @@ export function SubcompanyOverviewClient({
             <Link
               href={subcompanyWorkspaceHref(subcompany.id, "details")}
               className="rph-open-link-sm"
+              onClick={(e) => {
+                e.preventDefault();
+                navigateSection("details");
+              }}
             >
               {shell.canWrite ? "Edit" : "View"}
             </Link>
@@ -174,6 +178,10 @@ export function SubcompanyOverviewClient({
           <Link
             href={subcompanyWorkspaceHref(subcompany.id, "activity")}
             className="text-sm font-medium text-sky-600 hover:text-sky-700 dark:text-sky-300 dark:hover:text-sky-200"
+            onClick={(e) => {
+              e.preventDefault();
+              navigateSection("activity");
+            }}
           >
             View all
           </Link>
