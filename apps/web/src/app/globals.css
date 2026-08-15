@@ -1492,10 +1492,13 @@ html {
   @apply flex w-max min-w-full gap-1;
 }
 .subco-ws-tab {
-  @apply inline-flex shrink-0 items-center border-b-2 border-transparent px-3 py-2.5 text-sm font-medium text-rph-fg-muted transition-colors hover:text-rph-fg;
+  @apply inline-flex shrink-0 items-center gap-1.5 border-b-2 border-transparent px-3 py-2.5 text-sm font-medium text-rph-fg-muted transition-colors hover:text-rph-fg;
 }
 .subco-ws-tab-active {
   @apply border-sky-600 font-semibold text-sky-700 dark:border-sky-400 dark:text-sky-300;
+}
+.subco-ws-tab-badge {
+  @apply inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-700 px-1.5 text-[10px] font-bold leading-none text-white;
 }
 
 /* ——— Subcompany overview ——— */
@@ -1525,8 +1528,8 @@ html {
 /* Subcompany activity audit trail */
 .subco-activity-card {
   @apply flex flex-col overflow-hidden;
-  /* Leave clear space above the app footer / page bottom. */
-  max-height: calc(100dvh - 32rem);
+  /* Small screens: taller card so more rows show; still leave footer gap. */
+  max-height: calc(100dvh - 24rem);
 }
 @media (min-width: 640px) {
   .subco-activity-card {
@@ -1545,36 +1548,86 @@ html {
   @apply min-h-0 flex-1 overflow-y-auto overscroll-y-contain;
 }
 .subco-activity-day + .subco-activity-day {
-  @apply mt-5;
+  @apply mt-1 border-t border-rph-border pt-3;
 }
 .subco-activity-day-label {
-  @apply mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-rph-fg-muted;
+  @apply mb-1 px-0.5 pt-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-rph-fg-muted;
 }
 .subco-activity-list {
-  @apply space-y-0;
+  @apply divide-y divide-rph-border;
 }
 .subco-activity-row {
-  @apply relative flex gap-3 pb-4 last:pb-0;
-}
-.subco-activity-rail {
-  @apply absolute left-[7px] top-4 bottom-0 w-px bg-rph-border;
+  @apply flex items-start gap-3 py-3.5;
 }
 .subco-activity-dot {
-  @apply relative z-[1] mt-1.5 h-[15px] w-[15px] shrink-0 rounded-full border-2 bg-rph-raised;
+  @apply relative z-[1] mt-1 h-[14px] w-[14px] shrink-0 rounded-full border-2 bg-rph-raised;
 }
 .subco-activity-dot-neutral {
   @apply border-slate-300 dark:border-slate-600;
 }
 .subco-activity-dot-info {
   @apply border-sky-600 bg-sky-600 dark:border-sky-400 dark:bg-sky-400;
-  box-shadow: inset 0 0 0 3px var(--color-rph-raised, #fff);
+  box-shadow: inset 0 0 0 2.5px var(--color-rph-raised, #fff);
 }
 .subco-activity-dot-ok {
   @apply border-emerald-500 bg-emerald-500 dark:border-emerald-400 dark:bg-emerald-400;
-  box-shadow: inset 0 0 0 3px var(--color-rph-raised, #fff);
+  box-shadow: inset 0 0 0 2.5px var(--color-rph-raised, #fff);
 }
 .subco-activity-dot-warn {
   @apply border-amber-600 bg-amber-600 dark:border-amber-500 dark:bg-amber-500;
-  box-shadow: inset 0 0 0 3px var(--color-rph-raised, #fff);
+  box-shadow: inset 0 0 0 2.5px var(--color-rph-raised, #fff);
+}
+
+/* Subcompany Attention tab */
+.subco-att-summary {
+  @apply rounded-xl border p-4 shadow-sm;
+}
+.subco-att-summary-urgent {
+  @apply border-rose-200/80 bg-rose-50/70 dark:border-rose-900/40 dark:bg-rose-950/25;
+}
+.subco-att-summary-warn {
+  @apply border-amber-200/80 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/20;
+}
+.subco-att-summary-icon {
+  @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-lg;
+}
+.subco-att-summary-urgent .subco-att-summary-icon {
+  @apply bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-200;
+}
+.subco-att-summary-warn .subco-att-summary-icon {
+  @apply bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200;
+}
+.subco-att-row {
+  @apply relative flex;
+}
+.subco-att-bar {
+  @apply w-1.5 shrink-0 self-stretch rounded-l-[2px];
+}
+.subco-att-bar-urgent {
+  @apply bg-red-500;
+}
+.subco-att-bar-doc {
+  @apply bg-amber-600;
+}
+.subco-att-bar-contract {
+  @apply bg-sky-600;
+}
+.subco-att-bar-ok {
+  @apply bg-emerald-500;
+}
+.subco-att-row-icon {
+  @apply mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg;
+}
+.subco-att-row-icon.subco-att-bar-urgent {
+  @apply bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-200;
+}
+.subco-att-row-icon.subco-att-bar-doc {
+  @apply bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200;
+}
+.subco-att-row-icon.subco-att-bar-contract {
+  @apply bg-sky-100 text-sky-800 dark:bg-sky-950/50 dark:text-sky-200;
+}
+.subco-att-row-icon.subco-att-bar-ok {
+  @apply bg-emerald-100 text-emerald-800 dark:bg-emerald-950/45 dark:text-emerald-100;
 }
 

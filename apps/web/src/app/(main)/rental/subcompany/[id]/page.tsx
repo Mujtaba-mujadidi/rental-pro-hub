@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { listHireContractsAction } from "@/app/actions/rental-hire-wizard";
 import { loadVehiclesPageData } from "@/app/actions/rental-vehicles";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
+import { getSubcompanyAttentionData } from "@/lib/rental/load-subcompany-attention-data";
 import {
   loadSubcompanyAuditTrailData,
   loadSubcompanyHireIncomeThisMonthGbp,
@@ -9,6 +10,7 @@ import {
 } from "@/lib/rental/load-subcompany-section-data";
 import { parseSubcompanyWorkspaceSectionParam } from "@/lib/rental/subcompany-workspace-nav";
 import { SubcompanyActivityClient } from "./activity/subcompany-activity-client";
+import { SubcompanyAttentionClient } from "./attention/subcompany-attention-client";
 import { SubcompanyDetailsClient } from "./details/subcompany-details-client";
 import { SubcompanyHiresClient } from "./subcompany-hires-client";
 import { SubcompanyOverviewClient } from "./subcompany-overview-client";
@@ -31,6 +33,14 @@ export default async function SubcompanyWorkspacePage({
   }
 
   switch (section) {
+    case "attention": {
+      const res = await getSubcompanyAttentionData(companyId, id);
+      if (!res.ok) {
+        if (res.error === "Subcompany not found.") notFound();
+        return <p className="rph-alert-error text-sm">{res.error}</p>;
+      }
+      return <SubcompanyAttentionClient data={res.data} />;
+    }
     case "details":
       return <SubcompanyDetailsClient />;
     case "activity": {

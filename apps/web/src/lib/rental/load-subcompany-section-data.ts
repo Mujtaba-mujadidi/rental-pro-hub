@@ -98,18 +98,20 @@ async function loadOpenBalanceGbp(
     const { data: scheduleRows } = await supabase
       .from("vehicle_hire_payment_schedule")
       .select(
-        "period_start, period_end, row_kind, base_amount_gbp, discount_total_gbp, payment_status, approved_amount_gbp",
+        "period_start, period_end, row_kind, base_amount_gbp, payment_status, approved_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp)",
       )
       .in("hire_group_id", openHireIds)
       .eq("row_kind", "rent");
     for (const row of scheduleRows ?? []) {
+      const discounts = row.vehicle_hire_schedule_discounts as { amount_gbp: number }[] | null;
+      const discountTotalGbp = (discounts ?? []).reduce((sum, d) => sum + Number(d.amount_gbp ?? 0), 0);
       const input: HirePaymentScheduleRowInput = {
         id: "row",
         periodStart: String(row.period_start ?? ""),
         periodEnd: String(row.period_end ?? ""),
         rowKind: "rent",
         baseAmountGbp: Number(row.base_amount_gbp ?? 0),
-        discountTotalGbp: Number(row.discount_total_gbp ?? 0),
+        discountTotalGbp,
         paymentStatus: (row.payment_status as HirePaymentStatus) ?? "unpaid",
         approvedAmountGbp:
           row.approved_amount_gbp == null ? null : Number(row.approved_amount_gbp),

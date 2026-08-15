@@ -38,8 +38,10 @@ function headerMetaLine(input: {
 
 export function SubcompanyWorkspaceTopBar({
   subcompanies,
+  attentionOpenCount = 0,
 }: {
   subcompanies: SubcompanySwitcherOption[];
+  attentionOpenCount?: number;
 }) {
   const { shell, refreshShell } = useSubcompanyWorkspace();
   const subcompany = shell.subcompany;
@@ -208,7 +210,12 @@ export function SubcompanyWorkspaceTopBar({
                 scroll={false}
                 className={active ? "subco-ws-tab subco-ws-tab-active" : "subco-ws-tab"}
               >
-                {item.label}
+                <span>{item.label}</span>
+                {item.section === "attention" && attentionOpenCount > 0 ? (
+                  <span className="subco-ws-tab-badge" aria-label={`${attentionOpenCount} open items`}>
+                    {attentionOpenCount > 99 ? "99+" : attentionOpenCount}
+                  </span>
+                ) : null}
               </Link>
             );
           })}

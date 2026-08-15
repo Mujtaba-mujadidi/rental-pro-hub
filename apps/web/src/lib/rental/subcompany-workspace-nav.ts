@@ -4,14 +4,21 @@ export type SubcompanyWorkspaceNavItem = {
   section: SubcompanyWorkspaceSection;
 };
 
-export type SubcompanyWorkspaceSection = "" | "details" | "activity" | "vehicles" | "hires";
+export type SubcompanyWorkspaceSection =
+  | ""
+  | "attention"
+  | "details"
+  | "activity"
+  | "vehicles"
+  | "hires";
 
-const INTERNAL_SECTIONS = new Set<string>(["details", "activity", "vehicles", "hires"]);
+const INTERNAL_SECTIONS = new Set<string>(["attention", "details", "activity", "vehicles", "hires"]);
 
 export function subcompanyWorkspaceNav(subcompanyId: string): SubcompanyWorkspaceNavItem[] {
   const base = `/rental/subcompany/${subcompanyId}`;
   return [
     { href: base, label: "Overview", section: "" },
+    { href: `${base}?section=attention`, label: "Attention", section: "attention" },
     { href: `${base}?section=details`, label: "Details", section: "details" },
     { href: `${base}?section=vehicles`, label: "Vehicles", section: "vehicles" },
     { href: `${base}?section=hires`, label: "Hires", section: "hires" },

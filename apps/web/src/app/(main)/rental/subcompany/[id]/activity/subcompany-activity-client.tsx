@@ -46,15 +46,17 @@ export function SubcompanyActivityClient({ events }: { events: SubcompanyAuditRo
     <div className="subco-activity pb-4 sm:pb-5">
       <section className="subco-activity-card rph-card p-0 shadow-sm">
         <div className="subco-activity-head border-b border-rph-border px-4 py-4 sm:px-5">
-          <p className="company-dash-section-label">Audit trail</p>
-          <h2 className="mt-1 text-lg font-semibold text-rph-fg">Company activity</h2>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="min-w-0 flex-1">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+            <div className="min-w-0">
+              <p className="company-dash-section-label">Audit trail</p>
+              <h2 className="mt-1 text-lg font-semibold text-rph-fg">Company activity</h2>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
               <DropdownMenu.Root>
                 <DropdownMenu.Trigger asChild>
                   <button
                     type="button"
-                    className="rph-input flex w-full items-center justify-between gap-2 text-left"
+                    className="rph-input inline-flex h-9 min-w-[10.5rem] items-center justify-between gap-2 px-3 text-left text-sm font-medium"
                     aria-label="Filter activity"
                   >
                     <span className="truncate">{filterLabel}</span>
@@ -82,10 +84,14 @@ export function SubcompanyActivityClient({ events }: { events: SubcompanyAuditRo
                   </DropdownMenu.Content>
                 </DropdownMenu.Portal>
               </DropdownMenu.Root>
+              <button
+                type="button"
+                className="rph-btn-ghost h-9 shrink-0 px-3.5 text-sm font-semibold"
+                onClick={exportCsv}
+              >
+                Export
+              </button>
             </div>
-            <button type="button" className="rph-btn-ghost shrink-0 sm:px-4" onClick={exportCsv}>
-              Export
-            </button>
           </div>
         </div>
 
@@ -94,17 +100,13 @@ export function SubcompanyActivityClient({ events }: { events: SubcompanyAuditRo
             {items.length ? "No activity matches this filter." : "No events recorded yet."}
           </p>
         ) : (
-          <div className="subco-activity-scroll px-4 py-4 sm:px-5">
+          <div className="subco-activity-scroll px-4 py-2 sm:px-5 sm:py-3">
             {groups.map((group) => (
               <div key={group.dayKey} className="subco-activity-day">
                 <p className="subco-activity-day-label">{group.dayLabel}</p>
                 <ol className="subco-activity-list">
-                  {group.items.map((item, index) => (
-                    <ActivityRow
-                      key={item.id}
-                      item={item}
-                      isLast={index === group.items.length - 1}
-                    />
+                  {group.items.map((item) => (
+                    <ActivityRow key={item.id} item={item} />
                   ))}
                 </ol>
               </div>
@@ -116,7 +118,7 @@ export function SubcompanyActivityClient({ events }: { events: SubcompanyAuditRo
   );
 }
 
-function ActivityRow({ item, isLast }: { item: SubcompanyActivityItem; isLast: boolean }) {
+function ActivityRow({ item }: { item: SubcompanyActivityItem }) {
   const toneClass =
     item.tone === "ok"
       ? "subco-activity-dot-ok"
@@ -130,17 +132,18 @@ function ActivityRow({ item, isLast }: { item: SubcompanyActivityItem; isLast: b
 
   return (
     <li className="subco-activity-row">
-      {!isLast ? <span className="subco-activity-rail" aria-hidden /> : null}
       <span className={`subco-activity-dot ${toneClass}`} aria-hidden />
       <div className="subco-activity-body min-w-0 flex-1">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm font-semibold text-rph-fg">{item.title}</p>
             {detailParts.length ? (
-              <p className="mt-0.5 text-xs text-rph-fg-secondary">{detailParts.join(" · ")}</p>
+              <p className="mt-0.5 text-xs leading-relaxed text-rph-fg-muted">
+                {detailParts.join(" · ")}
+              </p>
             ) : null}
           </div>
-          <p className="shrink-0 text-xs tabular-nums text-rph-fg-muted">{item.timeLabel}</p>
+          <p className="shrink-0 pt-0.5 text-xs tabular-nums text-rph-fg-muted">{item.timeLabel}</p>
         </div>
       </div>
     </li>
