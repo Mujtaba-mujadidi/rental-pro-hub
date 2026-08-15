@@ -94,7 +94,7 @@ export function SubcompanyHiresClient({
 
   const reload = useCallback(() => {
     startTransition(async () => {
-      const res = await listHireContractsAction();
+      const res = await listHireContractsAction("", undefined, subcompanyId);
       if (!res.ok) {
         setError(res.error);
         return;
@@ -103,7 +103,7 @@ export function SubcompanyHiresClient({
       setCanWrite(res.canWrite);
       setError(null);
     });
-  }, []);
+  }, [subcompanyId]);
 
   useHireContractsRealtime(reload);
 
@@ -111,10 +111,7 @@ export function SubcompanyHiresClient({
     setIncomeGbp(incomeThisMonthGbp);
   }, [incomeThisMonthGbp]);
 
-  const scopedRows = useMemo(
-    () => rows.filter((r) => r.subcompany_id === subcompanyId),
-    [rows, subcompanyId],
-  );
+  const scopedRows = rows;
 
   const currentRows = useMemo(
     () => scopedRows.filter((r) => isSubcompanyCurrentHireStatus(r.status)),

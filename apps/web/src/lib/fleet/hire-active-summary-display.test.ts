@@ -65,7 +65,8 @@ function dashboard(overrides: Partial<HireDashboardData> = {}): HireDashboardDat
 describe("buildActiveHirePaymentPosition", () => {
   it("sums deposit balance and rent balance for currently due", () => {
     const position = buildActiveHirePaymentPosition({
-      dashboard: dashboard(),
+      includeDeposit: dashboard().includeDeposit,
+      summary: dashboard().summary,
       paymentRows: [{ rowKind: "deposit", balanceGbp: 100, netDueGbp: 100 }],
     });
     expect(position.currentlyDueGbp).toBe(110);
@@ -75,8 +76,10 @@ describe("buildActiveHirePaymentPosition", () => {
   });
 
   it("ignores deposit when includeDeposit is false", () => {
+    const d = dashboard({ includeDeposit: false });
     const position = buildActiveHirePaymentPosition({
-      dashboard: dashboard({ includeDeposit: false }),
+      includeDeposit: d.includeDeposit,
+      summary: d.summary,
       paymentRows: [{ rowKind: "deposit", balanceGbp: 100, netDueGbp: 100 }],
     });
     expect(position.depositOutstandingGbp).toBe(0);
@@ -107,8 +110,10 @@ describe("formatAmountDueChip", () => {
 
 describe("buildActiveHirePaymentRatingDisplay", () => {
   it("flags attention when deposit and rent are unpaid even if health is on_track", () => {
+    const d = dashboard();
     const position = buildActiveHirePaymentPosition({
-      dashboard: dashboard(),
+      includeDeposit: d.includeDeposit,
+      summary: d.summary,
       paymentRows: [{ rowKind: "deposit", balanceGbp: 100, netDueGbp: 100 }],
     });
     const rating = buildActiveHirePaymentRatingDisplay({

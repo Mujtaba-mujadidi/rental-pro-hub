@@ -51,7 +51,8 @@ export function HireActiveDriverSummary({
 }) {
   const includeDeposit = paymentRows.some((row) => row.rowKind === "deposit");
   const position = buildActiveHirePaymentPosition({
-    dashboard: data,
+    includeDeposit: data.includeDeposit,
+    summary: data.summary,
     paymentRows,
     audience: "driver",
   });

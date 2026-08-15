@@ -29,23 +29,24 @@ export function depositRowFromPayments(
 
 /** Payment position for active-hire summary cards — uses existing schedule/summary fields only. */
 export function buildActiveHirePaymentPosition(input: {
-  dashboard: HireDashboardData;
+  includeDeposit: boolean;
+  summary: Pick<HireDashboardData["summary"], "totalDueGbp" | "balanceGbp" | "totalPaidGbp">;
   paymentRows: readonly Pick<HirePaymentPageRow, "rowKind" | "balanceGbp" | "netDueGbp">[];
   audience?: "staff" | "driver";
 }): ActiveHirePaymentPosition {
-  const { dashboard, paymentRows, audience = "staff" } = input;
+  const { summary, paymentRows, audience = "staff" } = input;
   const includeDeposit =
     audience === "driver"
-      ? dashboard.includeDeposit || paymentRows.some((row) => row.rowKind === "deposit")
-      : dashboard.includeDeposit;
+      ? input.includeDeposit || paymentRows.some((row) => row.rowKind === "deposit")
+      : input.includeDeposit;
   const depositRow = depositRowFromPayments(paymentRows);
   const depositOutstandingGbp =
     includeDeposit && depositRow && depositRow.balanceGbp > 0.005
       ? roundGbp(depositRow.balanceGbp)
       : 0;
-  const rentDueToDateGbp = roundGbp(dashboard.summary.totalDueGbp);
-  const rentOutstandingGbp = roundGbp(dashboard.summary.balanceGbp);
-  const rentPaidGbp = roundGbp(dashboard.summary.totalPaidGbp);
+  const rentDueToDateGbp = roundGbp(summary.totalDueGbp);
+  const rentOutstandingGbp = roundGbp(summary.balanceGbp);
+  const rentPaidGbp = roundGbp(summary.totalPaidGbp);
   const currentlyDueGbp = roundGbp(depositOutstandingGbp + rentOutstandingGbp);
 
   let dueBreakdownLabel: string | null = null;

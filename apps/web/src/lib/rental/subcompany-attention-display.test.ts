@@ -193,15 +193,11 @@ describe("subcompany attention display", () => {
   it("aligns overview health with attention open count", () => {
     expect(
       subcompanyOverviewHealth({
-        openRequirementCount: 0,
-        vehicleAttentionCount: 0,
         attentionOpenCount: 2,
       }),
     ).toBe("attention");
     expect(
       subcompanyOverviewHealth({
-        openRequirementCount: 0,
-        vehicleAttentionCount: 0,
         attentionOpenCount: 0,
       }),
     ).toBe("healthy");

@@ -7,7 +7,7 @@ import {
   type SubcompanyWorkspaceShell,
 } from "@/lib/rental/subcompany";
 import { resolveSubcompanyWorkspaceLogoDisplayUrl } from "@/lib/rental/subcompany-logo";
-import { reconcileEndedHireSubcompanyDocumentRequirements } from "@/lib/rental/subcompany-hire-document-requirements";
+import { reconcileSubcompanyRequirementsOnce } from "@/lib/rental/reconcile-subcompany-requirements-cached";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -69,15 +69,7 @@ async function fetchSubcompanyWorkspaceShell(
     logo_storage_path: (data as { logo_storage_path?: string | null }).logo_storage_path ?? null,
   });
 
-  try {
-    const admin = createSupabaseAdminClient();
-    await reconcileEndedHireSubcompanyDocumentRequirements(admin, {
-      subcompanyId: id,
-      parentCompanyId,
-    });
-  } catch {
-    // Non-fatal — shell still loads.
-  }
+  await reconcileSubcompanyRequirementsOnce(id, parentCompanyId);
 
   let openRequirementCount = 0;
   const { count, error: reqErr } = await supabase

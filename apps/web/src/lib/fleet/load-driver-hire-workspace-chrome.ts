@@ -54,7 +54,8 @@ async function fetchDriverHireWorkspaceChrome(groupId: string): Promise<DriverHi
   const context = dashboardRes.data.overview;
   const hero = dashboardRes.data.workspaceHero;
   const paymentPosition = buildActiveHirePaymentPosition({
-    dashboard: dashboardRes.data,
+    includeDeposit: dashboardRes.data.includeDeposit,
+    summary: dashboardRes.data.summary,
     paymentRows: paymentsRes.data.rows,
     audience: "driver",
   });

@@ -5,7 +5,7 @@ import { requireRentalCompanyArea } from "@/lib/auth/profile";
 import { getSubcompanyAttentionData } from "@/lib/rental/load-subcompany-attention-data";
 import {
   loadSubcompanyAuditTrailData,
-  loadSubcompanyHireIncomeThisMonthGbp,
+  loadSubcompanyHireIncomeThisMonthForSubcompany,
   loadSubcompanyOverviewData,
 } from "@/lib/rental/load-subcompany-section-data";
 import { parseSubcompanyWorkspaceSectionParam } from "@/lib/rental/subcompany-workspace-nav";
@@ -59,14 +59,13 @@ export default async function SubcompanyWorkspacePage({
       return <SubcompanyVehiclesClient pageData={data} subcompanyId={id} />;
     }
     case "hires": {
-      const res = await listHireContractsAction();
+      const [res, incomeThisMonthGbp] = await Promise.all([
+        listHireContractsAction("", undefined, id),
+        loadSubcompanyHireIncomeThisMonthForSubcompany(companyId, id),
+      ]);
       if (!res.ok) {
         return <p className="rph-alert-error text-sm">{res.error}</p>;
       }
-      const scopedIds = res.rows
-        .filter((row) => row.subcompany_id === id)
-        .map((row) => row.id);
-      const incomeThisMonthGbp = await loadSubcompanyHireIncomeThisMonthGbp(scopedIds);
       return (
         <SubcompanyHiresClient
           initialRows={res.rows}

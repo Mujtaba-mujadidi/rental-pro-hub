@@ -1,14 +1,16 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { loadPaymentSettingsAction } from "@/app/actions/rental-payment-settings";
 import { createVehicleAction, uploadVehicleDocumentAction } from "@/app/actions/rental-vehicles";
 import { recordVehiclePurchaseOnCreateAction } from "@/app/actions/rental-vehicle-financials";
 import { VehiclePurchaseFormFields } from "@/components/fleet/vehicle-purchase-form-fields";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
+import { formModalBtnContinue, formModalBtnGhost } from "@/components/forms/form-modal-actions";
 import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
+import { FormModalStepProgress } from "@/components/forms/form-modal-step-progress";
 import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
 import { formatGbp } from "@/lib/fleet/maintenance";
 import {
@@ -29,70 +31,6 @@ import {
 import { VehicleDocAddMenu } from "./vehicle-doc-add-menu";
 
 const STEP_LABELS = ["Basics", "Specs", "Documents", "Purchase", "Review"] as const;
-
-const btnContinue =
-  "flex h-11 min-w-[7rem] items-center justify-center rounded-lg bg-rph-rail px-4 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer";
-const btnGhost =
-  "flex h-11 shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-raised px-4 text-sm font-medium text-rph-fg-secondary hover:bg-rph-chrome disabled:opacity-50";
-
-function StepProgress({ step }: { step: number }) {
-  const displayStep = step + 1;
-  return (
-    <nav className="mb-2" aria-label="Add vehicle steps">
-      <p className="rph-meta mb-4 text-center font-medium uppercase tracking-wide">
-        Step {displayStep} of {STEP_LABELS.length}
-      </p>
-      <ol className="flex w-full items-center px-0.5 sm:px-2">
-        {STEP_LABELS.map((label, i) => {
-          const n = i + 1;
-          const done = n < displayStep;
-          const active = n === displayStep;
-          const segmentBeforeOrange = i > 0 && displayStep > i;
-          return (
-            <Fragment key={label}>
-              {i > 0 ? (
-                <li className="mx-1 h-1 min-w-[8px] flex-1 list-none sm:mx-2" aria-hidden>
-                  <div
-                    className={[
-                      "h-full w-full rounded-full transition-colors duration-300",
-                      segmentBeforeOrange ? "bg-orange-500" : "bg-rph-border",
-                    ].join(" ")}
-                  />
-                </li>
-              ) : null}
-              <li className="flex list-none flex-col items-center">
-                <div
-                  className={[
-                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 text-sm font-bold transition-all",
-                    done && "border-orange-500 bg-orange-500 text-white shadow-md shadow-orange-500/25",
-                    active &&
-                      "border-orange-500 bg-rph-raised text-orange-600 shadow-md ring-4 ring-orange-100 dark:text-orange-500 dark:ring-orange-950/40",
-                    !done &&
-                      !active &&
-                      "border-rph-border bg-rph-raised text-rph-fg-muted",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  title={`${n}. ${label}`}
-                >
-                  {done ? "✓" : n}
-                </div>
-                <span
-                  className={[
-                    "mt-2 hidden max-w-[5.5rem] text-center text-[11px] font-semibold leading-tight sm:block",
-                    active ? "text-orange-700 dark:text-orange-400" : done ? "text-rph-fg-muted" : "text-rph-fg-muted/70",
-                  ].join(" ")}
-                >
-                  {label}
-                </span>
-              </li>
-            </Fragment>
-          );
-        })}
-      </ol>
-    </nav>
-  );
-}
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -447,7 +385,9 @@ export function AddVehicleModal({
       titleId="add-vehicle-title"
       title="Add vehicle"
       description="Register a fleet vehicle and optionally attach compliance documents."
-      headerExtra={<StepProgress step={step} />}
+      headerExtra={
+        <FormModalStepProgress step={step} labels={STEP_LABELS} ariaLabel="Add vehicle steps" />
+      }
       pending={busy}
       maxWidthClass="max-w-3xl"
       saveNotice={saveNotice}
@@ -465,26 +405,26 @@ export function AddVehicleModal({
       onCancelStartFresh={cancelStartFresh}
       footer={
         <>
-          <button type="button" className={btnGhost} disabled={busy} onClick={requestClose}>
+          <button type="button" className={formModalBtnGhost} disabled={busy} onClick={requestClose}>
             Cancel
           </button>
-          <div className="flex flex-wrap gap-3">
+          <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:gap-3">
             {step > 0 ? (
-              <button type="button" className={btnGhost} disabled={busy} onClick={() => setStep((s) => s - 1)}>
+              <button type="button" className={formModalBtnGhost} disabled={busy} onClick={() => setStep((s) => s - 1)}>
                 Back
               </button>
             ) : null}
             {step < STEP_LABELS.length - 1 ? (
               <button
                 type="button"
-                className={btnContinue}
+                className={formModalBtnContinue}
                 disabled={busy || !canGoNext()}
                 onClick={() => setStep((s) => Math.min(STEP_LABELS.length - 1, s + 1))}
               >
                 Continue
               </button>
             ) : (
-              <button type="button" className={btnContinue} disabled={busy || !canGoNext()} onClick={submitAll}>
+              <button type="button" className={formModalBtnContinue} disabled={busy || !canGoNext()} onClick={submitAll}>
                 {busy ? "Saving…" : "Save vehicle"}
               </button>
             )}

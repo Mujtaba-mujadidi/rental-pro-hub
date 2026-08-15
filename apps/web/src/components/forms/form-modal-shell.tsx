@@ -127,7 +127,46 @@ export function FormModalShell({
 
   const outerClass = maximized
     ? `fixed inset-0 ${zClass} flex items-stretch justify-stretch p-0`
-    : `fixed inset-0 ${zClass} flex items-center justify-center p-4 sm:p-6`;
+    : `fixed inset-0 ${zClass} flex items-center justify-center p-3 sm:p-6`;
+
+  const draftActions =
+    showDraftActions &&
+    (onRequestStartFresh || onSaveProgress || onSaveAndClose) ? (
+      <div className="flex flex-wrap gap-2 sm:justify-end">
+        {hasStoredDraft && onRequestStartFresh ? (
+          <button
+            type="button"
+            className={`${btnGhost} min-h-10 flex-1 sm:min-h-9 sm:flex-none`}
+            disabled={pending}
+            onClick={onRequestStartFresh}
+          >
+            Start fresh
+          </button>
+        ) : null}
+        {onSaveProgress ? (
+          <button
+            type="button"
+            className={`${btnGhost} min-h-10 flex-1 sm:min-h-9 sm:flex-none`}
+            disabled={pending || !isDirty}
+            onClick={onSaveProgress}
+            title="Stores a draft in this browser and keeps the form open. Does not create a record yet."
+          >
+            Save draft
+          </button>
+        ) : null}
+        {onSaveAndClose ? (
+          <button
+            type="button"
+            className={`${btnSave} min-h-10 flex-1 basis-full sm:min-h-9 sm:flex-none sm:basis-auto`}
+            disabled={pending}
+            onClick={onSaveAndClose}
+            title="Stores a draft in this browser, then closes. Does not create a record yet."
+          >
+            Save and close
+          </button>
+        ) : null}
+      </div>
+    ) : null;
 
   return (
     <>
@@ -140,64 +179,43 @@ export function FormModalShell({
           aria-labelledby={titleId}
           className={panelClasses}
         >
-          <div className="shrink-0 border-b border-zinc-200/90 px-6 pb-4 pt-6 dark:border-zinc-700 sm:px-10 sm:pt-8">
-            <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="shrink-0 border-b border-zinc-200/90 px-4 pb-4 pt-5 dark:border-zinc-700 sm:px-10 sm:pb-4 sm:pt-8">
+            <div className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
-                <h2 id={titleId} className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+                <h2 id={titleId} className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 sm:text-xl">
                   {title}
                 </h2>
                 {description ? (
-                  <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{description}</p>
+                  <p className="mt-1 text-sm leading-snug text-zinc-500 dark:text-zinc-400">{description}</p>
                 ) : null}
               </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                {showDraftActions && hasStoredDraft && onRequestStartFresh ? (
-                  <button type="button" className={btnGhost} disabled={pending} onClick={onRequestStartFresh}>
-                    Start fresh
-                  </button>
-                ) : null}
-                {showDraftActions && onSaveProgress ? (
+              <div className="flex shrink-0 items-center gap-1">
+                {allowMaximize ? (
                   <button
                     type="button"
-                    className={btnGhost}
-                    disabled={pending || !isDirty}
-                    onClick={onSaveProgress}
-                    title="Stores a draft in this browser and keeps the form open. Does not create a record yet."
-                  >
-                    Save draft
-                  </button>
-                ) : null}
-                {showDraftActions && onSaveAndClose ? (
-                  <button
-                    type="button"
-                    className={btnSave}
+                    className={iconGhostBtn}
                     disabled={pending}
-                    onClick={onSaveAndClose}
-                    title="Stores a draft in this browser, then closes. Does not create a record yet."
+                    aria-pressed={maximized}
+                    onClick={toggleMaximize}
+                    title={maximized ? "Exit full screen" : "Full screen"}
                   >
-                    Save and close
+                    {maximized ? <IconCollapse /> : <IconExpand />}
+                    <span className="sr-only">{maximized ? "Exit full screen" : "Full screen"}</span>
                   </button>
                 ) : null}
-                <div className="flex shrink-0 items-center gap-1">
-                  {allowMaximize ? (
-                    <button
-                      type="button"
-                      className={iconGhostBtn}
-                      disabled={pending}
-                      aria-pressed={maximized}
-                      onClick={toggleMaximize}
-                      title={maximized ? "Exit full screen" : "Full screen"}
-                    >
-                      {maximized ? <IconCollapse /> : <IconExpand />}
-                      <span className="sr-only">{maximized ? "Exit full screen" : "Full screen"}</span>
-                    </button>
-                  ) : null}
-                  <button type="button" className={btnGhost} disabled={pending} onClick={onRequestClose}>
-                    Close
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className={`${btnGhost} h-10 px-3 sm:h-9`}
+                  disabled={pending}
+                  onClick={onRequestClose}
+                >
+                  Close
+                </button>
               </div>
             </div>
+
+            {draftActions ? <div className="mt-3">{draftActions}</div> : null}
+
             {saveNotice ? (
               <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/35 dark:text-emerald-100">
                 {saveNotice}
@@ -211,9 +229,9 @@ export function FormModalShell({
             {headerExtra}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 sm:px-10">{children}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-10">{children}</div>
 
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-zinc-200 px-6 py-4 dark:border-zinc-700 sm:px-10">
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-zinc-200 px-4 py-4 dark:border-zinc-700 sm:gap-3 sm:px-10">
             {footer}
           </div>
 

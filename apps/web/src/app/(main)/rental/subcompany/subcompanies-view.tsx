@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useLinkStatus } from "next/link";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { loadSubcompaniesPortfolioAction } from "@/app/actions/subcompanies-portfolio";
 import type {
   SubcompanyPortfolioCard,
@@ -23,9 +24,37 @@ function OpenChevron() {
   );
 }
 
+function PortfolioCardPending() {
+  const { pending } = useLinkStatus();
+  if (!pending) return null;
+  return (
+    <div
+      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-[inherit] bg-rph-raised/85 backdrop-blur-[1px]"
+      role="status"
+      aria-live="polite"
+    >
+      <span
+        className="h-7 w-7 animate-spin rounded-full border-[3px] border-rph-border border-t-rph-rail"
+        aria-hidden
+      />
+      <span className="text-sm font-medium text-rph-fg-secondary">Opening…</span>
+    </div>
+  );
+}
+
+function PortfolioCardOpenLabel() {
+  const { pending } = useLinkStatus();
+  return pending ? "Opening…" : "Open";
+}
+
 function PortfolioCard({ card }: { card: SubcompanyPortfolioCard }) {
   return (
-    <Link href={card.href} className="subco-port-card rph-card" aria-label={`Open ${card.name}`}>
+    <Link
+      href={card.href}
+      className="subco-port-card rph-card relative"
+      aria-label={`Open ${card.name}`}
+    >
+      <PortfolioCardPending />
       <div className="flex items-start justify-between gap-3">
         <div className="subco-port-avatar" aria-hidden>
           {card.initials}
@@ -47,7 +76,7 @@ function PortfolioCard({ card }: { card: SubcompanyPortfolioCard }) {
           </span>
         </div>
         <span className="rph-open-link" aria-hidden>
-          Open
+          <PortfolioCardOpenLabel />
           <OpenChevron />
         </span>
       </div>
@@ -55,11 +84,20 @@ function PortfolioCard({ card }: { card: SubcompanyPortfolioCard }) {
   );
 }
 
-export function SubcompaniesView({ canRegisterSubcompany }: { canRegisterSubcompany: boolean }) {
+export function SubcompaniesView({
+  canRegisterSubcompany,
+  initialData = null,
+  initialError = null,
+}: {
+  canRegisterSubcompany: boolean;
+  initialData?: SubcompanyPortfolioPayload | null;
+  initialError?: string | null;
+}) {
   const [registerOpen, setRegisterOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [data, setData] = useState<SubcompanyPortfolioPayload | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<SubcompanyPortfolioPayload | null>(initialData);
+  const [error, setError] = useState<string | null>(initialError);
+  const skipSeededReload = useRef(Boolean(initialData));
 
   const reload = useCallback(() => {
     startTransition(() => {
@@ -77,6 +115,10 @@ export function SubcompaniesView({ canRegisterSubcompany }: { canRegisterSubcomp
   }, []);
 
   useEffect(() => {
+    if (skipSeededReload.current) {
+      skipSeededReload.current = false;
+      return;
+    }
     reload();
   }, [reload]);
 

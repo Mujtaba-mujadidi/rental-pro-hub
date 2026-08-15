@@ -27,17 +27,14 @@ import {
   type SubcompanyAttentionItem,
   type SubcompanyAttentionSummary,
 } from "@/lib/rental/subcompany-attention-display";
-import {
-  hireIsEndedForSubcompanyDocumentImpact,
-  reconcileEndedHireSubcompanyDocumentRequirements,
-} from "@/lib/rental/subcompany-hire-document-requirements";
+import { hireIsEndedForSubcompanyDocumentImpact } from "@/lib/rental/subcompany-hire-document-requirements";
 import type { SubcompanyDocumentKind } from "@/lib/rental/subcompany-workspace-types";
 import { SUBCOMPANY_DOCUMENT_KIND_LABELS } from "@/lib/rental/subcompany-workspace-types";
 import {
   parseCompanyNotificationSettings,
   type CompanyNotificationSettings,
 } from "@/lib/settings/notification-settings";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { reconcileSubcompanyRequirementsOnce } from "@/lib/rental/reconcile-subcompany-requirements-cached";
 import { createClient } from "@/lib/supabase/server";
 
 export type SubcompanyAttentionData = {
@@ -79,15 +76,7 @@ export async function loadSubcompanyAttentionData(
   if (!subRow) return { ok: false, error: "Subcompany not found." };
   const subcompany = mapSubcompanyRow(subRow as Record<string, unknown>);
 
-  try {
-    const admin = createSupabaseAdminClient();
-    await reconcileEndedHireSubcompanyDocumentRequirements(admin, {
-      subcompanyId: subcompany.id,
-      parentCompanyId: companyId,
-    });
-  } catch {
-    // Non-fatal.
-  }
+  await reconcileSubcompanyRequirementsOnce(subcompany.id, companyId);
 
   const todayYmd = ukTodayYmd();
   const { data: settingsRow } = await supabase
@@ -544,7 +533,7 @@ export async function loadSubcompanyAttentionData(
   };
 }
 
-/** Lightweight open-count for the Attention tab badge. */
+/** Lightweight open-count for the Attention tab badge (shares full attention cache). */
 export async function loadSubcompanyAttentionOpenCount(
   companyId: string,
   subcompanyId: string,
@@ -555,3 +544,4 @@ export async function loadSubcompanyAttentionOpenCount(
 }
 
 export const getSubcompanyAttentionData = cache(loadSubcompanyAttentionData);
+export const getSubcompanyAttentionOpenCount = cache(loadSubcompanyAttentionOpenCount);

@@ -1,79 +1,17 @@
 "use client";
 
-import { Fragment, useCallback, useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import { registerSubcompanyAction } from "@/app/actions/rental-subcompanies";
+import { formModalBtnContinue, formModalBtnGhost } from "@/components/forms/form-modal-actions";
 import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
+import { FormModalStepProgress } from "@/components/forms/form-modal-step-progress";
 import { useFormModalDraft } from "@/hooks/use-form-modal-draft";
 
 const STEP_LABELS = ["Company", "Registered office", "Primary contact", "Review"] as const;
 
-const btnContinue =
-  "flex h-11 min-w-[7rem] items-center justify-center rounded-lg bg-rph-rail px-4 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50";
-const btnGhost =
-  "flex h-11 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800";
-
 function inputClass() {
   return "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none focus:border-rph-rail focus:ring-2 focus:ring-rph-rail/20 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100";
-}
-
-function StepProgress({ step }: { step: number }) {
-  const displayStep = step + 1;
-  return (
-    <nav className="mb-2" aria-label="Register subcompany steps">
-      <p className="mb-4 text-center text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-        Step {displayStep} of {STEP_LABELS.length}
-      </p>
-      <ol className="flex w-full items-center px-0.5 sm:px-2">
-        {STEP_LABELS.map((label, i) => {
-          const n = i + 1;
-          const done = n < displayStep;
-          const active = n === displayStep;
-          const segmentBeforeOrange = i > 0 && displayStep > i;
-          return (
-            <Fragment key={label}>
-              {i > 0 ? (
-                <li className="mx-1 h-1 min-w-[8px] flex-1 list-none sm:mx-2" aria-hidden>
-                  <div
-                    className={[
-                      "h-full w-full rounded-full transition-colors duration-300",
-                      segmentBeforeOrange ? "bg-orange-500" : "bg-zinc-200 dark:bg-zinc-700",
-                    ].join(" ")}
-                  />
-                </li>
-              ) : null}
-              <li className="flex list-none flex-col items-center">
-                <div
-                  className={[
-                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 text-sm font-bold transition-all",
-                    done && "border-orange-500 bg-orange-500 text-white shadow-md shadow-orange-500/25",
-                    active &&
-                      "border-orange-500 bg-white text-orange-600 shadow-md ring-4 ring-orange-100 dark:bg-zinc-950 dark:text-orange-500 dark:ring-orange-950/40",
-                    !done &&
-                      !active &&
-                      "border-zinc-200 bg-white text-zinc-400 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-500",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  title={`${n}. ${label}`}
-                >
-                  {done ? "✓" : n}
-                </div>
-                <span
-                  className={[
-                    "mt-2 hidden max-w-[5.5rem] text-center text-[11px] font-semibold leading-tight sm:block",
-                    active ? "text-orange-700 dark:text-orange-400" : done ? "text-zinc-600 dark:text-zinc-400" : "text-zinc-400",
-                  ].join(" ")}
-                >
-                  {label}
-                </span>
-              </li>
-            </Fragment>
-          );
-        })}
-      </ol>
-    </nav>
-  );
 }
 
 const initialDraft = {
@@ -204,7 +142,9 @@ export function RegisterSubcompanyModal({
       titleId="register-subcompany-title"
       title="Register subcompany"
       description="Add a subcompany record under your rental company. This does not create a login account."
-      headerExtra={<StepProgress step={step} />}
+      headerExtra={
+        <FormModalStepProgress step={step} labels={STEP_LABELS} ariaLabel="Register subcompany steps" />
+      }
       pending={pending}
       saveNotice={saveNotice}
       hasStoredDraft={hasStoredDraft}
@@ -221,26 +161,31 @@ export function RegisterSubcompanyModal({
       onCancelStartFresh={cancelStartFresh}
       footer={
         <>
-          <button type="button" className={btnGhost} disabled={pending} onClick={requestClose}>
+          <button type="button" className={formModalBtnGhost} disabled={pending} onClick={requestClose}>
             Cancel
           </button>
-          <div className="flex flex-wrap gap-3">
+          <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:gap-3">
             {step > 0 ? (
-              <button type="button" className={btnGhost} disabled={pending} onClick={() => setStep((s) => s - 1)}>
+              <button
+                type="button"
+                className={formModalBtnGhost}
+                disabled={pending}
+                onClick={() => setStep((s) => s - 1)}
+              >
                 Back
               </button>
             ) : null}
             {step < STEP_LABELS.length - 1 ? (
               <button
                 type="button"
-                className={btnContinue}
+                className={formModalBtnContinue}
                 disabled={pending || !canGoNext()}
                 onClick={() => setStep((s) => Math.min(STEP_LABELS.length - 1, s + 1))}
               >
                 Continue
               </button>
             ) : (
-              <button type="button" className={btnContinue} disabled={pending} onClick={submit}>
+              <button type="button" className={formModalBtnContinue} disabled={pending} onClick={submit}>
                 {pending ? "Saving…" : "Save subcompany"}
               </button>
             )}

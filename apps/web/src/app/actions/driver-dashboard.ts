@@ -95,7 +95,8 @@ export async function loadDriverDashboardAction(): Promise<LoadResult> {
 
     if (dashboardRes.ok && paymentsRes.ok) {
       const position = buildActiveHirePaymentPosition({
-        dashboard: dashboardRes.data,
+        includeDeposit: dashboardRes.data.includeDeposit,
+        summary: dashboardRes.data.summary,
         paymentRows: paymentsRes.data.rows,
         audience: "driver",
       });

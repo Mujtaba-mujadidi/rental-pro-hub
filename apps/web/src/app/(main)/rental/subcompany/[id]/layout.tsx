@@ -2,8 +2,8 @@ import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { loadSubcompanySwitcherListAction } from "@/app/actions/rental-subcompany-workspace";
 import { requireRentalCompanyArea } from "@/lib/auth/profile";
-import { getSubcompanyAttentionData } from "@/lib/rental/load-subcompany-attention-data";
 import { getSubcompanyWorkspaceShell } from "@/lib/rental/load-subcompany-workspace-shell";
+import { AttentionOpenCountBadge } from "./attention-open-count-badge";
 import { SubcompanyWorkspaceProvider } from "./subcompany-workspace-provider";
 import { SubcompanyWorkspaceTopBar } from "./subcompany-workspace-top-bar";
 
@@ -17,10 +17,9 @@ export default async function SubcompanyWorkspaceLayout({
   const { id } = await params;
   const { profile } = await requireRentalCompanyArea();
   const companyId = profile.company_id?.trim() ?? "";
-  const [result, switcher, attention] = await Promise.all([
+  const [result, switcher] = await Promise.all([
     getSubcompanyWorkspaceShell(id),
     loadSubcompanySwitcherListAction(),
-    companyId ? getSubcompanyAttentionData(companyId, id) : Promise.resolve(null),
   ]);
 
   if (!result.ok) {
@@ -40,9 +39,6 @@ export default async function SubcompanyWorkspaceLayout({
     return <p className="rph-alert-error text-sm">{switcher.error}</p>;
   }
 
-  const attentionOpenCount =
-    attention && attention.ok ? attention.data.summary.openCount : 0;
-
   return (
     <SubcompanyWorkspaceProvider shell={result.shell}>
       <Suspense
@@ -52,7 +48,11 @@ export default async function SubcompanyWorkspaceLayout({
       >
         <SubcompanyWorkspaceTopBar
           subcompanies={switcher}
-          attentionOpenCount={attentionOpenCount}
+          attentionBadge={
+            <Suspense fallback={null}>
+              <AttentionOpenCountBadge companyId={companyId} subcompanyId={id} />
+            </Suspense>
+          }
         />
       </Suspense>
       {children}

@@ -47,7 +47,11 @@ export function HireActiveCompanySummary({
   detailsHref: string;
   onRecordPayment?: () => void;
 }) {
-  const position = buildActiveHirePaymentPosition({ dashboard: data, paymentRows });
+  const position = buildActiveHirePaymentPosition({
+    includeDeposit: data.includeDeposit,
+    summary: data.summary,
+    paymentRows,
+  });
   const rating = buildActiveHirePaymentRatingDisplay({
     health: data.health,
     position,

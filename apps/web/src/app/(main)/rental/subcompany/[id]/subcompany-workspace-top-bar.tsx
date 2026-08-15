@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { HireContractWizardModal } from "@/app/(main)/rental/hires/hire-contract-wizard-modal";
 import type { SubcompanySwitcherOption } from "@/app/actions/rental-subcompany-workspace";
+import { PageLoading } from "@/components/ui/page-loading";
 import { subcompanyInitials } from "@/lib/rental/subcompanies-portfolio-display";
 import { formatSubcompanyAddressLines } from "@/lib/rental/subcompany-legal-snapshot";
 import {
@@ -38,10 +39,11 @@ function headerMetaLine(input: {
 
 export function SubcompanyWorkspaceTopBar({
   subcompanies,
-  attentionOpenCount = 0,
+  attentionBadge = null,
 }: {
   subcompanies: SubcompanySwitcherOption[];
-  attentionOpenCount?: number;
+  /** Server-streamed Attention count badge (optional). */
+  attentionBadge?: ReactNode;
 }) {
   const { shell, refreshShell } = useSubcompanyWorkspace();
   const subcompany = shell.subcompany;
@@ -57,8 +59,13 @@ export function SubcompanyWorkspaceTopBar({
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [hireOpen, setHireOpen] = useState(false);
+  const [switchingToId, setSwitchingToId] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setSwitchingToId(null);
+  }, [subcompany.id]);
 
   useEffect(() => {
     if (!switcherOpen) return;
@@ -83,15 +90,31 @@ export function SubcompanyWorkspaceTopBar({
     return subcompanies.filter((s) => s.name.toLowerCase().includes(q));
   }, [subcompanies, query]);
 
+  const switchingName =
+    switchingToId != null
+      ? (subcompanies.find((s) => s.id === switchingToId)?.name ?? "subcompany")
+      : null;
+
   function switchTo(id: string) {
     setSwitcherOpen(false);
     setQuery("");
     if (id === subcompany.id) return;
+    setSwitchingToId(id);
     router.push(subcompanyWorkspaceHref(id, section));
   }
 
   return (
     <div className="subco-ws-chrome mb-5 space-y-4">
+      {switchingToId ? (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-rph-page/70 backdrop-blur-[1px]"
+          role="status"
+          aria-live="polite"
+        >
+          <PageLoading label={`Opening ${switchingName}…`} />
+        </div>
+      ) : null}
+
       <Link href="/rental/subcompany" className="subco-ws-back">
         <IconArrowLeft className="h-3.5 w-3.5 shrink-0" />
         Back to subcompanies
@@ -211,11 +234,7 @@ export function SubcompanyWorkspaceTopBar({
                 className={active ? "subco-ws-tab subco-ws-tab-active" : "subco-ws-tab"}
               >
                 <span>{item.label}</span>
-                {item.section === "attention" && attentionOpenCount > 0 ? (
-                  <span className="subco-ws-tab-badge" aria-label={`${attentionOpenCount} open items`}>
-                    {attentionOpenCount > 99 ? "99+" : attentionOpenCount}
-                  </span>
-                ) : null}
+                {item.section === "attention" ? attentionBadge : null}
               </Link>
             );
           })}

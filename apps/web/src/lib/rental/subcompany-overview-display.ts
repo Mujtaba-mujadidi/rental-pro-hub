@@ -15,13 +15,16 @@ export type SubcompanyOverviewActivityItem = {
 };
 
 export function subcompanyOverviewHealth(input: {
-  openRequirementCount: number;
-  vehicleAttentionCount: number;
-  /** Same open Attention count as the workspace tab badge (preferred). */
+  /** Preferred: same open Attention count as the workspace tab badge. */
   attentionOpenCount?: number;
+  /** Legacy fallbacks when Attention pipeline is not loaded. */
+  openRequirementCount?: number;
+  vehicleAttentionCount?: number;
 }): SubcompanyOverviewHealth {
   if ((input.attentionOpenCount ?? 0) > 0) return "attention";
-  if (input.openRequirementCount > 0 || input.vehicleAttentionCount > 0) return "attention";
+  if ((input.openRequirementCount ?? 0) > 0 || (input.vehicleAttentionCount ?? 0) > 0) {
+    return "attention";
+  }
   return "healthy";
 }
 

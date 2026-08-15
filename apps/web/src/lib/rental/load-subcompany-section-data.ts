@@ -1,22 +1,17 @@
 import { getSubcompanyAttentionData } from "@/lib/rental/load-subcompany-attention-data";
 import { ukTodayYmd } from "@/lib/datetime/uk";
-import { vehicleExpiryAttentionItems } from "@/lib/fleet/vehicle-expiry-attention";
 import {
   hirePaymentRowBalanceGbp,
   isHirePaymentRowAccrued,
   type HirePaymentScheduleRowInput,
 } from "@/lib/fleet/hire-payment-summary";
-import { missingRequiredDocTypes } from "@/lib/fleet/vehicles";
 import { formatGbp } from "@/lib/fleet/maintenance";
 import type { HirePaymentStatus } from "@/lib/fleet/hire-types";
 import type { SubcompanyAuditRow } from "@/lib/rental/subcompany-audit";
 import { loadHireAuditActorDisplayNames } from "@/lib/fleet/hire-audit";
 import { SUBCOMPANY_SELECT, mapSubcompanyRow, type SubcompanyRow } from "@/lib/rental/subcompany";
 import type { SubcompanyDocumentKind, SubcompanyOpenRequirement } from "@/lib/rental/subcompany-workspace-types";
-import {
-  hireIsEndedForSubcompanyDocumentImpact,
-  reconcileEndedHireSubcompanyDocumentRequirements,
-} from "@/lib/rental/subcompany-hire-document-requirements";
+import { hireIsEndedForSubcompanyDocumentImpact } from "@/lib/rental/subcompany-hire-document-requirements";
 import {
   mapSubcompanyOverviewActivity,
   subcompanyOverviewComplianceLabel,
@@ -25,7 +20,7 @@ import {
   type SubcompanyOverviewActivityItem,
   type SubcompanyOverviewHealth,
 } from "@/lib/rental/subcompany-overview-display";
-import { parseCompanyNotificationSettings } from "@/lib/settings/notification-settings";
+import { reconcileSubcompanyRequirementsOnce } from "@/lib/rental/reconcile-subcompany-requirements-cached";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -37,7 +32,6 @@ export type SubcompanyOverviewStats = {
   openRequirementCount: number;
   openBalanceGbp: number;
   openBalanceLabel: string;
-  vehicleAttentionCount: number;
   health: SubcompanyOverviewHealth;
   healthLabel: string;
   complianceLabel: string;
@@ -128,67 +122,6 @@ async function loadOpenBalanceGbp(
   return roundGbp(Math.max(0, total));
 }
 
-async function loadVehicleAttentionCount(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  companyId: string,
-  subcompanyId: string,
-): Promise<number> {
-  const [{ data: company }, { data: vehicles }] = await Promise.all([
-    supabase
-      .from("companies")
-      .select(
-        "notify_mot_days_before, notify_tax_days_before, notify_phv_licence_days_before, notify_contract_expiry_days_before, notify_insurance_days_before",
-      )
-      .eq("id", companyId)
-      .maybeSingle(),
-    supabase
-      .from("vehicles")
-      .select("id, mot_expiry, tax_expiry, phv_licence_expiry, status")
-      .eq("subcompany_id", subcompanyId)
-      .eq("parent_company_id", companyId)
-      .neq("status", "sold"),
-  ]);
-  const notifySettings = parseCompanyNotificationSettings(company ?? undefined);
-  const vehicleIds = (vehicles ?? []).map((v) => String(v.id));
-  const docsByVehicle = new Map<string, string[]>();
-  if (vehicleIds.length) {
-    const versioned = await supabase
-      .from("vehicle_documents")
-      .select("vehicle_id, doc_type")
-      .in("vehicle_id", vehicleIds)
-      .eq("version_status", "current");
-    const docs =
-      versioned.error && String(versioned.error.message).toLowerCase().includes("version_status")
-        ? (await supabase.from("vehicle_documents").select("vehicle_id, doc_type").in("vehicle_id", vehicleIds))
-            .data
-        : versioned.error
-          ? null
-          : versioned.data;
-    for (const d of docs ?? []) {
-      const vid = String(d.vehicle_id ?? "");
-      if (!vid) continue;
-      const list = docsByVehicle.get(vid) ?? [];
-      list.push(String(d.doc_type ?? ""));
-      docsByVehicle.set(vid, list);
-    }
-  }
-
-  let attention = 0;
-  for (const v of vehicles ?? []) {
-    const present = docsByVehicle.get(String(v.id)) ?? [];
-    if (missingRequiredDocTypes(present).length > 0) attention += 1;
-    attention += vehicleExpiryAttentionItems(
-      {
-        mot_expiry: (v.mot_expiry as string | null) ?? null,
-        tax_expiry: (v.tax_expiry as string | null) ?? null,
-        phv_licence_expiry: (v.phv_licence_expiry as string | null) ?? null,
-      },
-      notifySettings,
-    ).length;
-  }
-  return attention;
-}
-
 export async function loadSubcompanyOverviewData(
   companyId: string,
   subcompanyId: string,
@@ -196,15 +129,7 @@ export async function loadSubcompanyOverviewData(
   const loaded = await loadSubcompanyRow(companyId, subcompanyId);
   if (!loaded.ok) return loaded;
 
-  try {
-    const admin = createSupabaseAdminClient();
-    await reconcileEndedHireSubcompanyDocumentRequirements(admin, {
-      subcompanyId: loaded.row.id,
-      parentCompanyId: companyId,
-    });
-  } catch {
-    // Non-fatal — overview still loads; stale flags may remain until next reconcile.
-  }
+  await reconcileSubcompanyRequirementsOnce(loaded.row.id, companyId);
 
   const supabase = await createClient();
   const [
@@ -214,8 +139,8 @@ export async function loadSubcompanyOverviewData(
     { count: totalHireCount },
     { data: reqs },
     openBalanceGbp,
-    vehicleAttentionCount,
     { data: eventRows },
+    attentionRes,
   ] = await Promise.all([
     supabase
       .from("vehicles")
@@ -243,13 +168,13 @@ export async function loadSubcompanyOverviewData(
       .eq("status", "required")
       .order("created_at", { ascending: true }),
     loadOpenBalanceGbp(supabase, loaded.row.id),
-    loadVehicleAttentionCount(supabase, companyId, loaded.row.id),
     supabase
       .from("subcompany_events")
       .select("id, event_type, actor_user_id, actor_role, summary, metadata, created_at")
       .eq("subcompany_id", loaded.row.id)
       .order("created_at", { ascending: false })
       .limit(5),
+    getSubcompanyAttentionData(companyId, loaded.row.id),
   ]);
 
   const hireIds = [...new Set((reqs ?? []).map((r) => r.hire_group_id as string))];
@@ -298,13 +223,11 @@ export async function loadSubcompanyOverviewData(
       };
     });
 
-  const attentionRes = await getSubcompanyAttentionData(companyId, loaded.row.id);
   const attentionOpenCount = attentionRes.ok ? attentionRes.data.summary.openCount : 0;
-
   const health = subcompanyOverviewHealth({
-    openRequirementCount: openRequirements.length,
-    vehicleAttentionCount,
     attentionOpenCount,
+    // Keep overview requirements as fallback if Attention fails to load.
+    openRequirementCount: openRequirements.length,
   });
 
   const auditEvents: SubcompanyAuditRow[] = (eventRows ?? []).map((e) => ({
@@ -328,7 +251,6 @@ export async function loadSubcompanyOverviewData(
         openRequirementCount: openRequirements.length,
         openBalanceGbp,
         openBalanceLabel: formatGbp(openBalanceGbp),
-        vehicleAttentionCount,
         health,
         healthLabel: subcompanyOverviewHealthLabel(health),
         complianceLabel: subcompanyOverviewComplianceLabel(health),
@@ -409,4 +331,23 @@ export async function loadSubcompanyHireIncomeThisMonthGbp(
     if (Number.isFinite(amount) && amount > 0) total += amount;
   }
   return Math.round(total * 100) / 100;
+}
+
+/** Income for a single subcompany — resolves hire IDs server-side (tenant-scoped). */
+export async function loadSubcompanyHireIncomeThisMonthForSubcompany(
+  companyId: string,
+  subcompanyId: string,
+): Promise<number> {
+  const supabase = await createClient();
+  const { data: hires, error } = await supabase
+    .from("vehicle_hire_groups")
+    .select("id")
+    .eq("parent_company_id", companyId.trim())
+    .eq("subcompany_id", subcompanyId.trim())
+    .neq("status", "cancelled");
+  if (error) {
+    console.error("subcompany hire id query for income failed", error.message);
+    return 0;
+  }
+  return loadSubcompanyHireIncomeThisMonthGbp((hires ?? []).map((h) => h.id as string));
 }

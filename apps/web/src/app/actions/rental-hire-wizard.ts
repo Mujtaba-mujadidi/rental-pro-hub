@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requireRentalCompanyArea, getSessionUser } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
 import { canReadDriverIdentity, canReadRentals, canWriteRentals } from "@/lib/auth/rental-permissions";
+import { loadUserAccessibleSubcompanyIds } from "@/lib/auth/rental-subcompany-access";
 import { computeContractEndDate } from "@/lib/fleet/hire-lifecycle";
 import {
   sendDriverRegistrationInviteEmail,
@@ -220,6 +221,7 @@ function formFromRow(row: Record<string, unknown>): HireWizardFormState {
 export async function listHireContractsAction(
   search = "",
   vehicleId?: string,
+  subcompanyId?: string,
 ): Promise<{ ok: true; rows: HireContractTableRow[]; canWrite: boolean } | { ok: false; error: string }> {
   const { profile } = await requireRentalCompanyArea();
   if (!canReadRentals(profile)) return { ok: false, error: "You do not have permission." };
@@ -228,6 +230,14 @@ export async function listHireContractsAction(
 
   const supabase = await createClient();
   const vehicleFilter = vehicleId?.trim();
+  const subcompanyFilter = subcompanyId?.trim();
+
+  if (subcompanyFilter) {
+    const accessible = await loadUserAccessibleSubcompanyIds(profile);
+    if (accessible !== "all" && !accessible.includes(subcompanyFilter)) {
+      return { ok: false, error: "You do not have permission." };
+    }
+  }
 
   let groupsQuery = supabase
     .from("vehicle_hire_groups")
@@ -240,8 +250,11 @@ export async function listHireContractsAction(
   if (vehicleFilter) {
     groupsQuery = groupsQuery.eq("vehicle_id", vehicleFilter);
   }
+  if (subcompanyFilter) {
+    groupsQuery = groupsQuery.eq("subcompany_id", subcompanyFilter);
+  }
 
-  const { data, error } = await groupsQuery.order("updated_at", { ascending: false }).limit(vehicleFilter ? 100 : 200);
+  const { data, error } = await groupsQuery.order("updated_at", { ascending: false }).limit(vehicleFilter || subcompanyFilter ? 100 : 200);
 
   if (error) return { ok: false, error: error.message };
 

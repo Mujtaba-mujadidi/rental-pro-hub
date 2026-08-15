@@ -10,7 +10,6 @@ import {
 import { formatGbp } from "@/lib/fleet/maintenance";
 import type { ActiveHirePaymentPosition } from "@/lib/fleet/hire-active-summary-display";
 import { buildActiveHirePaymentPosition } from "@/lib/fleet/hire-active-summary-display";
-import type { HirePaymentSummary as DashboardSummary } from "@/lib/fleet/hire-payment-summary";
 
 const UPCOMING_STATUSES = new Set<HirePaymentDisplayStatus>([
   "due",
@@ -43,10 +42,8 @@ export function buildActiveHirePaymentPositionFromPage(input: {
   audience?: "staff" | "driver";
 }): ActiveHirePaymentPosition {
   return buildActiveHirePaymentPosition({
-    dashboard: {
-      summary: input.summary as DashboardSummary,
-      includeDeposit: input.includeDeposit,
-    } as Parameters<typeof buildActiveHirePaymentPosition>[0]["dashboard"],
+    includeDeposit: input.includeDeposit,
+    summary: input.summary,
     paymentRows: input.paymentRows,
     audience: input.audience,
   });

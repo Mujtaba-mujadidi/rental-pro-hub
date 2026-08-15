@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   exportCompanyDashboardAction,
@@ -327,19 +327,26 @@ function FilterControlIcon({ kind }: { kind: "grid" | "clock" }) {
   );
 }
 
-export function CompanyDashboardView() {
+export function CompanyDashboardView({
+  initialData = null,
+  initialError = null,
+}: {
+  initialData?: CompanyDashboardPayload | null;
+  initialError?: string | null;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [exporting, startExport] = useTransition();
-  const [data, setData] = useState<CompanyDashboardPayload | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<CompanyDashboardPayload | null>(initialData);
+  const [error, setError] = useState<string | null>(initialError);
   const [subcompanyId, setSubcompanyId] = useState(COMPANY_DASHBOARD_ALL_SUBCOMPANIES);
   const [periodKind, setPeriodKind] = useState<CompanyDashboardPeriodKind>("this_month");
   const [customStartYmd, setCustomStartYmd] = useState("");
   const [customEndYmd, setCustomEndYmd] = useState("");
   const [hireOpen, setHireOpen] = useState(false);
   const [vehicleOpen, setVehicleOpen] = useState(false);
-  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(() => (initialData ? new Date() : null));
+  const skipSeededReload = useRef(Boolean(initialData));
 
   const query = useMemo(
     () => ({
@@ -372,6 +379,10 @@ export function CompanyDashboardView() {
   }, [query, periodKind, customStartYmd, customEndYmd]);
 
   useEffect(() => {
+    if (skipSeededReload.current) {
+      skipSeededReload.current = false;
+      return;
+    }
     reload();
   }, [reload]);
 
