@@ -184,7 +184,7 @@ export function HireEndedCompanySummary({
             <GlanceCell label="Contract ended" value={glance.contractEndedLabel} />
           </dl>
           <p className="mt-3 border-t border-rph-border pt-3">
-            <Link href={detailsHref} className="text-xs font-medium text-rph-link hover:text-rph-link-hover">
+            <Link href={detailsHref} className="rph-open-link-sm">
               View contract details →
             </Link>
           </p>
@@ -227,7 +227,7 @@ export function HireEndedCompanySummary({
           )}
           {!payments.checkinCompleted ? (
             <p className="mt-3 border-t border-rph-border pt-3">
-              <Link href={inspectionsHref} className="text-xs font-medium text-rph-link hover:text-rph-link-hover">
+              <Link href={inspectionsHref} className="rph-open-link-sm">
                 Open inspections →
               </Link>
             </p>

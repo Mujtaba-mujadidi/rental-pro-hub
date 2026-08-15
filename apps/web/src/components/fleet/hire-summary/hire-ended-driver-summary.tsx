@@ -193,7 +193,7 @@ export function HireEndedDriverSummary({
             <GlanceCell label="Hire ended" value={glance.contractEndedLabel} />
           </dl>
           <p className="mt-3 border-t border-rph-border pt-3">
-            <Link href={detailsHref} className="text-xs font-medium text-rph-link hover:text-rph-link-hover">
+            <Link href={detailsHref} className="rph-open-link-sm">
               View hire details →
             </Link>
           </p>
@@ -224,7 +224,7 @@ export function HireEndedDriverSummary({
             <p className="mt-3 text-xs text-rph-fg-muted">No charges were applied on this hire.</p>
           )}
           <p className="mt-3 border-t border-rph-border pt-3">
-            <Link href={paymentsHref} className="text-xs font-medium text-rph-link hover:text-rph-link-hover">
+            <Link href={paymentsHref} className="rph-open-link-sm">
               View payments →
             </Link>
           </p>

@@ -516,7 +516,7 @@ export function CompanyDashboardView() {
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">{insightParts.title}</p>
                 <p className="mt-0.5 text-sm text-rph-fg-secondary">{insightParts.body}</p>
-                <Link href={data.insight.href} className="mt-2 inline-block text-sm font-semibold text-sky-700 hover:underline dark:text-sky-300">
+                <Link href={data.insight.href} className="rph-open-link mt-2">
                   {data.insight.hrefLabel}
                 </Link>
               </div>
@@ -617,7 +617,7 @@ export function CompanyDashboardView() {
                     </div>
                   </dl>
                   <div className="mt-4 text-center">
-                    <Link href={data.financial.fullFinancialsHref} className="text-sm font-semibold text-sky-700 hover:underline dark:text-sky-300">
+                    <Link href={data.financial.fullFinancialsHref} className="rph-open-link">
                       View full financials →
                     </Link>
                   </div>
@@ -631,7 +631,7 @@ export function CompanyDashboardView() {
                   <p className="company-dash-section-label">Fleet</p>
                   <h2 className="text-base font-semibold text-rph-fg">Vehicle performance</h2>
                 </div>
-                <Link href="/rental/vehicles" className="shrink-0 text-sm font-semibold text-sky-700 hover:underline dark:text-sky-300">
+                <Link href="/rental/vehicles" className="rph-open-link">
                   View fleet
                 </Link>
               </div>
@@ -803,7 +803,7 @@ export function CompanyDashboardView() {
                   <p className="company-dash-section-label">Vehicle contribution</p>
                   <h2 className="text-base font-semibold text-rph-fg">Most profitable vehicles</h2>
                 </div>
-                <Link href="/rental/vehicles" className="text-sm font-semibold text-sky-700 hover:underline dark:text-sky-300">
+                <Link href="/rental/vehicles" className="rph-open-link">
                   All vehicles
                 </Link>
               </div>
@@ -890,7 +890,7 @@ export function CompanyDashboardView() {
                   <p className="company-dash-section-label">Latest</p>
                   <h2 className="text-base font-semibold text-rph-fg">Recent business activity</h2>
                 </div>
-                <Link href="/rental/hires" className="text-sm font-semibold text-sky-700 hover:underline dark:text-sky-300">
+                <Link href="/rental/hires" className="rph-open-link">
                   View all
                 </Link>
               </div>

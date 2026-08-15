@@ -217,7 +217,7 @@ export function HireActiveCompanySummary({
             <GlanceCell label="Checkout reading" value={checkoutOdometer} hint={`Fuel at checkout: ${checkoutFuel}`} />
           </dl>
           <p className="mt-3 border-t border-rph-border pt-3">
-            <Link href={detailsHref} className="text-xs font-medium text-rph-link hover:text-rph-link-hover">
+            <Link href={detailsHref} className="rph-open-link-sm">
               View hire details →
             </Link>
           </p>
