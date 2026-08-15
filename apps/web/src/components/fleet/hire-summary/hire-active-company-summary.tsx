@@ -20,6 +20,7 @@ import {
 } from "@/components/fleet/hire-workspace/hire-workspace-ui";
 import { HireDepositPendingBanner } from "@/components/fleet/hire-dashboard/hire-deposit-pending-banner";
 import { HireActiveSummaryProgress } from "@/components/fleet/hire-summary/hire-active-summary-progress";
+import { InsuranceDocumentIcon } from "@/components/fleet/insurance-document-icon";
 
 function paymentRatingProgressTone(
   level: "on_track" | "attention" | "at_risk",
@@ -302,6 +303,13 @@ function ActionNeededIcon({ item }: { item: HireSummaryActionItem }) {
     return (
       <span className="hire-ws-action-icon hire-ws-action-icon-count" aria-hidden>
         {item.iconCount}
+      </span>
+    );
+  }
+  if (item.icon === "insurance") {
+    return (
+      <span className="hire-ws-action-icon hire-ws-action-icon-insurance" aria-hidden>
+        <InsuranceDocumentIcon />
       </span>
     );
   }

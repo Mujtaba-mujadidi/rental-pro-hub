@@ -3,7 +3,7 @@ import type { HireLifecycleAttentionItem } from "@/lib/fleet/hire-lifecycle-atte
 import type { ActiveHirePaymentPosition } from "@/lib/fleet/hire-active-summary-display";
 import { formatGbp } from "@/lib/fleet/maintenance";
 
-export type HireSummaryActionIcon = "warning" | "pound" | "count";
+export type HireSummaryActionIcon = "warning" | "pound" | "count" | "insurance";
 
 export type HireSummaryActionItem = {
   key: string;
@@ -97,7 +97,7 @@ function mapLifecycleActionItem(item: HireLifecycleAttentionItem): HireSummaryAc
     detail: item.detail,
     href: item.href,
     warn: true,
-    icon: isInsurance ? "warning" : "warning",
+    icon: isInsurance ? "insurance" : "warning",
   };
 }
 

@@ -10,13 +10,12 @@ import {
 } from "@/components/fleet/hire-details/hire-details-document-row";
 import {
   CarIcon,
-  DocTileIcon,
   FactRow,
   HireDetailsAgreementsSection,
   HireDetailsVehiclePanel,
-  WarnIcon,
 } from "@/components/fleet/hire-details/hire-details-shared";
 import { HireInsuranceCard } from "@/components/fleet/hire-insurance/hire-insurance-card";
+import { InsuranceDocumentIcon } from "@/components/fleet/insurance-document-icon";
 import {
   buildHireDetailsDriverComplianceTiles,
   buildHireDetailsInsuranceDocumentRow,
@@ -153,7 +152,7 @@ export function HireDetailsDriverView({ data }: { data: HireDetailsPayload }) {
               >
                 <div className="flex items-start gap-3">
                   <span className="hire-ws-details-compliance-icon" aria-hidden>
-                    {tile.tone === "warn" ? <WarnIcon /> : <DocTileIcon />}
+                    <InsuranceDocumentIcon />
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-rph-fg">{tile.title}</p>
@@ -245,7 +244,7 @@ export function HireDetailsDriverView({ data }: { data: HireDetailsPayload }) {
           <div className="hire-ws-details-docs-column">
             <div className="hire-ws-details-docs-column-head">
               <span className="hire-ws-details-docs-column-icon" aria-hidden>
-                <DocTileIcon />
+                <InsuranceDocumentIcon className="h-5 w-5" />
               </span>
               <div>
                 <h3 className="text-sm font-semibold text-rph-fg">Hire insurance</h3>
@@ -259,6 +258,7 @@ export function HireDetailsDriverView({ data }: { data: HireDetailsPayload }) {
                 subtitle={insuranceRow.subtitle}
                 statusLabel={insuranceRow.status.label}
                 statusTone={insuranceRow.status.tone}
+                icon={<InsuranceDocumentIcon />}
                 resolveUrl={data.hireInsurance.hasDocument ? resolveInsuranceUrl : undefined}
                 fileName={hireDetailsDocumentFileName(insuranceRow.label, insuranceRow.document.fileName)}
                 onError={setError}

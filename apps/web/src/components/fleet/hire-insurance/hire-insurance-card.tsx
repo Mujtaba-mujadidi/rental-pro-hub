@@ -7,6 +7,7 @@ import {
   type HireInsuranceSummary,
 } from "@/app/actions/hire-insurance";
 import { FormModalSelect } from "@/components/forms/form-modal-select";
+import { InsuranceDocumentIcon } from "@/components/fleet/insurance-document-icon";
 import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
 import {
   HIRE_INSURANCE_TYPE_LABELS,
@@ -112,7 +113,12 @@ export function HireInsuranceCard({
   return (
     <section className={cardClass}>
       <div className="flex items-start justify-between gap-2">
-        <h2 className={sectionTitleClass}>Hire insurance</h2>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-chrome text-rph-fg-secondary" aria-hidden>
+            <InsuranceDocumentIcon className="h-3.5 w-3.5" />
+          </span>
+          <h2 className={sectionTitleClass}>Hire insurance</h2>
+        </div>
         <span
           className={`shrink-0 rounded-full px-1.5 py-px text-[10px] font-semibold ${statusBadgeClass(summary.status)}`}
         >

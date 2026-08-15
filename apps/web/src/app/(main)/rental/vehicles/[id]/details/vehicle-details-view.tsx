@@ -39,6 +39,7 @@ import {
 } from "@/lib/fleet/vehicle-transfer-document-requirements";
 import type { CompanyNotificationSettings } from "@/lib/settings/notification-settings";
 import { VehicleExpiryAlert } from "@/app/(main)/rental/vehicles/vehicle-expiry-indicators";
+import { InsuranceDocumentIcon } from "@/components/fleet/insurance-document-icon";
 import { VehicleDocRowMenu } from "./vehicle-doc-actions";
 
 const btnPrimary = "rph-btn-primary";
@@ -206,6 +207,17 @@ function DocFileIcon() {
       />
     </svg>
   );
+}
+
+function VehicleDocTypeIcon({ docType }: { docType: string }) {
+  if (docType === "insurance") {
+    return (
+      <span className="shrink-0 text-sky-600 dark:text-sky-400">
+        <InsuranceDocumentIcon className="h-5 w-5" />
+      </span>
+    );
+  }
+  return <DocFileIcon />;
 }
 
 export function VehicleDetailsView({
@@ -696,7 +708,7 @@ export function VehicleDetailsView({
                     <li key={d.id} className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <DocFileIcon />
+                          <VehicleDocTypeIcon docType={d.doc_type} />
                           <p className="text-sm font-semibold text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[d.doc_type]}</p>
                         </div>
                         <p className="rph-meta mt-1 pl-7">
@@ -763,7 +775,7 @@ export function VehicleDetailsView({
                   <li key={d.id} className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <DocFileIcon />
+                        <VehicleDocTypeIcon docType={d.doc_type} />
                         <p className="text-sm font-semibold text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[d.doc_type]}</p>
                         {transferRequirement ? (
                           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">

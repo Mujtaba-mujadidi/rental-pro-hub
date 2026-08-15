@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { hireDetailsDocumentFileName } from "@/components/fleet/hire-details/hire-details-doc-actions";
 
 async function downloadFile(url: string, fileName: string) {
@@ -26,6 +26,7 @@ export function HireDetailsDocumentRow({
   viewUrl,
   resolveUrl,
   fileName,
+  icon,
   onError,
 }: {
   label: string;
@@ -35,6 +36,7 @@ export function HireDetailsDocumentRow({
   viewUrl?: string | null;
   resolveUrl?: () => Promise<string>;
   fileName: string;
+  icon?: ReactNode;
   onError?: (message: string) => void;
 }) {
   const [pending, setPending] = useState<"view" | "download" | null>(null);
@@ -78,7 +80,7 @@ export function HireDetailsDocumentRow({
     <li className="hire-ws-details-doc-row">
       <div className="flex min-w-0 flex-1 items-start gap-3">
         <span className="hire-ws-details-doc-icon" aria-hidden>
-          <DocIcon />
+          {icon ?? <DocIcon />}
         </span>
         <div className="min-w-0">
           <p className="text-sm font-semibold text-rph-fg">{label}</p>

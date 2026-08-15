@@ -501,6 +501,9 @@ html {
 .hire-ws-action-icon-warning {
   @apply bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-300;
 }
+.hire-ws-action-icon-insurance {
+  @apply border border-sky-200/80 bg-sky-50 text-sky-800 dark:border-sky-900/50 dark:bg-sky-950/40 dark:text-sky-200;
+}
 .hire-ws-rating-divider {
   @apply hidden w-px self-stretch bg-rph-border lg:block;
 }
@@ -1206,4 +1209,53 @@ html {
   @apply min-w-0;
 }
 
+/* ——— Company dashboard ——— */
+.company-dash {
+  @apply max-w-full overflow-x-hidden;
+}
+.company-dash-section-label {
+  @apply text-[11px] font-semibold uppercase tracking-[0.12em] text-sky-700 dark:text-sky-300;
+}
+.company-dash-insight {
+  @apply rounded-xl border px-4 py-3;
+}
+.company-dash-insight-ok {
+  @apply border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30;
+}
+.company-dash-insight-warn {
+  @apply border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30;
+}
+.company-dash-insight-neutral {
+  @apply border-rph-border bg-rph-raised;
+}
+.company-dash-kpi-due {
+  @apply border-amber-200 bg-amber-50/80 dark:border-amber-900/40 dark:bg-amber-950/25;
+}
+.company-dash-panel {
+  @apply max-h-[28rem];
+}
+.company-dash-scroll {
+  @apply max-h-[20rem] overflow-y-auto overscroll-contain pr-1;
+}
+.company-dash-activity-row:last-child {
+  @apply pb-0;
+}
+.company-dash-activity-rail {
+  @apply absolute left-[4px] top-3 bottom-0 w-px bg-rph-border;
+}
+.company-dash-activity-row:last-child .company-dash-activity-rail {
+  @apply hidden;
+}
+.company-dash-activity-dot-ok {
+  @apply bg-emerald-500;
+}
+.company-dash-activity-dot-info {
+  @apply bg-sky-600;
+}
+.company-dash-activity-dot-warn {
+  @apply bg-amber-500;
+}
+.company-dash-activity-dot-neutral {
+  @apply border-2 border-rph-border-strong bg-rph-raised;
+}
 

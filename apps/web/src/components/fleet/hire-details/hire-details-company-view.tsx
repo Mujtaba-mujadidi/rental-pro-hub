@@ -18,6 +18,7 @@ import {
   PersonIcon,
   WarnIcon,
 } from "@/components/fleet/hire-details/hire-details-shared";
+import { InsuranceDocumentIcon } from "@/components/fleet/insurance-document-icon";
 import {
   buildHireDetailsComplianceTiles,
   buildHireDetailsDriverDocumentRows,
@@ -176,7 +177,13 @@ export function HireDetailsCompanyView({ data }: { data: HireDetailsPayload }) {
             >
               <div className="flex items-start gap-3">
                 <span className="hire-ws-details-compliance-icon" aria-hidden>
-                  {tile.tone === "warn" ? <WarnIcon /> : <DocTileIcon />}
+                  {tile.id === "insurance" ? (
+                    <InsuranceDocumentIcon />
+                  ) : tile.tone === "warn" ? (
+                    <WarnIcon />
+                  ) : (
+                    <DocTileIcon />
+                  )}
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-rph-fg">{tile.title}</p>
@@ -320,6 +327,7 @@ export function HireDetailsCompanyView({ data }: { data: HireDetailsPayload }) {
                 subtitle={insuranceRow.subtitle}
                 statusLabel={insuranceRow.status.label}
                 statusTone={insuranceRow.status.tone}
+                icon={<InsuranceDocumentIcon />}
                 resolveUrl={
                   data.hireInsurance.hasDocument
                     ? async () => {
