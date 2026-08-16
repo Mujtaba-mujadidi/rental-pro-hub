@@ -6,6 +6,12 @@ import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-gua
 import { canReadMaintenance, canWriteMaintenance } from "@/lib/auth/rental-permissions";
 import { parseCsv } from "@/lib/csv/parse-csv";
 import {
+  getCompanyAccessToken,
+  loadCompanyFleetTracking,
+} from "@/lib/fleet-tracking/credentials";
+import { trackDevices } from "@/lib/fleet-tracking/smartcar-tracker-client";
+import { metresToMiles } from "@/lib/fleet-tracking/units";
+import {
   expiryFromStartOrOverride,
   isMaintenanceCategory,
   MAINTENANCE_CATEGORIES,
@@ -17,7 +23,10 @@ import {
   type PaymentAccountRow,
   type PaymentMethodRow,
 } from "@/lib/fleet/maintenance";
-import { buildMaintenanceExcelTemplate, parseMaintenanceExcel } from "@/lib/fleet/maintenance-excel";
+import { buildMaintenanceExcelTemplate, buildMaintenanceRecordsExcelExport, parseMaintenanceExcel } from "@/lib/fleet/maintenance-excel";
+import {
+  resolveEffectiveCurrentMileage,
+} from "@/lib/fleet/vehicle-maintenance-summary";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { revalidateVehicleWorkspaceCache } from "@/lib/fleet/vehicle-workspace-cache";
 import { createClient } from "@/lib/supabase/server";
@@ -89,6 +98,8 @@ export type VehicleMaintenancePageData = {
   accounts: PaymentAccountRow[];
   staff: MaintenanceStaffOption[];
   canWrite: boolean;
+  /** Purchase date when recorded on Financials — used for spend hint only. */
+  purchaseOccurredOn: string | null;
   vehicle: {
     id: string;
     vrm: string;
@@ -97,6 +108,7 @@ export type VehicleMaintenancePageData = {
     subcompany_id: string;
     service_due_at: string | null;
     next_service_mileage: number | null;
+    current_mileage: number | null;
     mot_expiry: string | null;
     tax_expiry: string | null;
     phv_licence_expiry: string | null;
@@ -149,12 +161,24 @@ export async function loadVehicleMaintenancePageAction(
   if (!id) return { ok: false, error: "Missing vehicle." };
 
   const supabase = await createClient();
-  const { data: vehicle, error: vErr } = await supabase
-    .from("vehicles")
-    .select("id, vrm, make, model, subcompany_id, service_due_at, next_service_mileage, mot_expiry, tax_expiry, phv_licence_expiry")
-    .eq("id", id)
-    .eq("parent_company_id", companyId)
-    .maybeSingle();
+  const [{ data: vehicle, error: vErr }, { data: purchase }] = await Promise.all([
+    supabase
+      .from("vehicles")
+      .select(
+        "id, vrm, make, model, subcompany_id, service_due_at, next_service_mileage, current_mileage, mot_expiry, tax_expiry, phv_licence_expiry",
+      )
+      .eq("id", id)
+      .eq("parent_company_id", companyId)
+      .maybeSingle(),
+    supabase
+      .from("vehicle_ownership_events")
+      .select("occurred_on")
+      .eq("vehicle_id", id)
+      .eq("event_type", "purchase")
+      .order("occurred_on", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+  ]);
   if (vErr) return { ok: false, error: vErr.message };
   if (!vehicle) return { ok: false, error: "Vehicle not found." };
 
@@ -230,8 +254,119 @@ export async function loadVehicleMaintenancePageAction(
       accounts: (accounts ?? []) as PaymentAccountRow[],
       staff,
       canWrite: canWriteMaintenance(profile),
-      vehicle,
+      purchaseOccurredOn: (purchase?.occurred_on as string | null) ?? null,
+      vehicle: {
+        ...vehicle,
+        current_mileage:
+          vehicle.current_mileage != null ? Number(vehicle.current_mileage) : null,
+        next_service_mileage:
+          vehicle.next_service_mileage != null ? Number(vehicle.next_service_mileage) : null,
+      },
     },
+  };
+}
+
+/**
+ * One-shot odometer for Maintenance: prefer linked tracker reading when fleet tracking is on.
+ * Ignores tracker readings below the highest logged maintenance odometer / stored mileage.
+ * Soft-writes `vehicles.current_mileage` only when the accepted reading is higher.
+ */
+export async function refreshMaintenanceMileageFromTrackerAction(
+  vehicleId: string,
+): Promise<
+  | {
+      ok: true;
+      currentMileage: number | null;
+      source: "tracker" | "stored" | "recorded";
+      persisted: boolean;
+    }
+  | { ok: false; error: string }
+> {
+  const { profile } = await requireRentalCompanyArea();
+  if (!canReadMaintenance(profile)) {
+    return { ok: false, error: "You do not have permission to view maintenance." };
+  }
+  const companyId = profile.company_id?.trim();
+  if (!companyId) return { ok: false, error: "No active company." };
+  const id = vehicleId.trim();
+  if (!id) return { ok: false, error: "Missing vehicle." };
+
+  const supabase = await createClient();
+  const [{ data: vehicle, error }, { data: odoRows }] = await Promise.all([
+    supabase
+      .from("vehicles")
+      .select("id, current_mileage, gps_primary_imei")
+      .eq("id", id)
+      .eq("parent_company_id", companyId)
+      .maybeSingle(),
+    supabase
+      .from("vehicle_maintenance_records")
+      .select("odometer_miles")
+      .eq("vehicle_id", id)
+      .eq("parent_company_id", companyId)
+      .not("odometer_miles", "is", null),
+  ]);
+  if (error) return { ok: false, error: error.message };
+  if (!vehicle) return { ok: false, error: "Vehicle not found." };
+
+  const stored =
+    vehicle.current_mileage != null && Number.isFinite(Number(vehicle.current_mileage))
+      ? Math.round(Number(vehicle.current_mileage))
+      : null;
+  let recordedFloor: number | null = null;
+  for (const row of odoRows ?? []) {
+    const n = Number(row.odometer_miles);
+    if (!Number.isFinite(n)) continue;
+    const miles = Math.round(n);
+    if (recordedFloor == null || miles > recordedFloor) recordedFloor = miles;
+  }
+
+  const tracking = await loadCompanyFleetTracking(companyId);
+  let trackerMiles: number | null = null;
+  if (tracking?.fleet_tracking_enabled && vehicle.gps_primary_imei?.trim()) {
+    const tokenRes = await getCompanyAccessToken(companyId);
+    if (tokenRes.ok) {
+      const track = await trackDevices(tokenRes.token, [vehicle.gps_primary_imei.trim()]);
+      if (track.ok) {
+        const rawMetres = track.data[0]?.mileage;
+        if (rawMetres != null && Number.isFinite(rawMetres) && rawMetres >= 0) {
+          trackerMiles = Math.round(metresToMiles(rawMetres));
+        }
+      }
+    }
+  }
+
+  const resolved = resolveEffectiveCurrentMileage({
+    trackerMiles,
+    storedMiles: stored,
+    recordedFloorMiles: recordedFloor,
+  });
+
+  let persisted = false;
+  if (
+    canWriteMaintenance(profile) &&
+    resolved.miles != null &&
+    (stored == null || resolved.miles > stored)
+  ) {
+    const writable = await assertRentalCompanyWritable(profile);
+    if (writable.ok) {
+      const { error: upErr } = await supabase
+        .from("vehicles")
+        .update({ current_mileage: resolved.miles })
+        .eq("id", vehicle.id)
+        .eq("parent_company_id", companyId);
+      if (!upErr) {
+        persisted = true;
+        revalidateMaintenance(vehicle.id);
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    currentMileage: resolved.miles,
+    source: resolved.source,
+    persisted,
   };
 }
 
@@ -1017,6 +1152,92 @@ export async function getMaintenanceExcelTemplateAction(
     ok: true,
     fileBase64: buf.toString("base64"),
     fileName: `maintenance-template-${vehicle.vrm}.xlsx`,
+  };
+}
+
+/** Export this vehicle's maintenance records (any role with maintenance.read). */
+export async function exportMaintenanceRecordsAction(
+  vehicleId: string,
+): Promise<{ ok: true; fileBase64: string; fileName: string } | { ok: false; error: string }> {
+  const { profile } = await requireRentalCompanyArea();
+  if (!canReadMaintenance(profile)) {
+    return { ok: false, error: "You do not have permission to export maintenance." };
+  }
+  const companyId = profile.company_id?.trim();
+  if (!companyId) return { ok: false, error: "No active company." };
+  const id = vehicleId.trim();
+  if (!id) return { ok: false, error: "Missing vehicle." };
+
+  const supabase = await createClient();
+  const { data: vehicle, error: vErr } = await supabase
+    .from("vehicles")
+    .select("id, vrm")
+    .eq("id", id)
+    .eq("parent_company_id", companyId)
+    .maybeSingle();
+  if (vErr) return { ok: false, error: vErr.message };
+  if (!vehicle) return { ok: false, error: "Vehicle not found." };
+
+  const [{ data: rows, error: rErr }, { data: methods }, { data: accounts }, staff] = await Promise.all([
+    supabase
+      .from("vehicle_maintenance_records")
+      .select(
+        "occurred_on, category, description, amount_gbp, paid_to, paid_by_user_id, paid_by_label, payment_method_id, payment_account_id, payment_reference, odometer_miles",
+      )
+      .eq("vehicle_id", id)
+      .eq("parent_company_id", companyId)
+      .order("occurred_on", { ascending: false })
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("company_payment_methods")
+      .select("id, name")
+      .eq("parent_company_id", companyId),
+    supabase
+      .from("company_payment_accounts")
+      .select("id, name")
+      .eq("parent_company_id", companyId),
+    loadStaffOptions(companyId),
+  ]);
+  if (rErr) return { ok: false, error: rErr.message };
+
+  const methodName = new Map((methods ?? []).map((m) => [m.id, m.name]));
+  const accountName = new Map((accounts ?? []).map((a) => [a.id, a.name]));
+  const staffLabel = new Map(staff.map((s) => [s.user_id, s.label]));
+
+  const buf = await buildMaintenanceRecordsExcelExport({
+    vrm: vehicle.vrm,
+    rows: (rows ?? []).map((r) => {
+      const amount =
+        typeof r.amount_gbp === "string" ? Number.parseFloat(r.amount_gbp) : Number(r.amount_gbp);
+      const paidBy =
+        (r.paid_by_user_id ? staffLabel.get(r.paid_by_user_id) : null) ||
+        r.paid_by_label?.trim() ||
+        "";
+      return {
+        occurred_on: r.occurred_on ?? "",
+        category: r.category ?? "",
+        description: r.description ?? "",
+        amount_gbp: Number.isFinite(amount) ? amount : 0,
+        paid_to: r.paid_to ?? "",
+        paid_by: paidBy,
+        payment_method: methodName.get(r.payment_method_id) ?? "",
+        payment_account: r.payment_account_id
+          ? accountName.get(r.payment_account_id) ?? ""
+          : "",
+        payment_reference: r.payment_reference ?? "",
+        odometer_miles:
+          r.odometer_miles != null && Number.isFinite(Number(r.odometer_miles))
+            ? Number(r.odometer_miles)
+            : null,
+      };
+    }),
+  });
+
+  const safeVrm = String(vehicle.vrm).replace(/[^a-zA-Z0-9_-]+/g, "-");
+  return {
+    ok: true,
+    fileBase64: buf.toString("base64"),
+    fileName: `maintenance-${safeVrm}.xlsx`,
   };
 }
 

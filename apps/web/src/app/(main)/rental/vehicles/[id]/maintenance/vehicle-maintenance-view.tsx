@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   deleteMaintenanceRecordAction,
+  exportMaintenanceRecordsAction,
   getMaintenanceExcelTemplateAction,
   importMaintenanceCsvAction,
   previewMaintenanceImportAction,
+  refreshMaintenanceMileageFromTrackerAction,
   saveMaintenanceRecordAction,
   type CsvImportPreviewRow,
   type MaintenanceStaffOption,
@@ -16,7 +18,7 @@ import {
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
-import { formatUkDate } from "@/lib/datetime/uk";
+import { formatUkDate, formatUkDateText, ukTodayYmd } from "@/lib/datetime/uk";
 import {
   expiryOneYearFromDate,
   formatGbp,
@@ -28,6 +30,17 @@ import {
   type PaymentAccountRow,
   type PaymentMethodRow,
 } from "@/lib/fleet/maintenance";
+import {
+  buildLastServiceSummary,
+  buildNextServiceSummary,
+  formatMiles,
+  highestRecordedOdometer,
+  maintenanceTypeLabel,
+  mileageSourceHint,
+  resolveEffectiveCurrentMileage,
+  type EffectiveMileageSource,
+} from "@/lib/fleet/vehicle-maintenance-summary";
+import { responsiveTableCellProps } from "@/lib/ui/responsive-table";
 
 type FormState = {
   id?: string;
@@ -56,6 +69,11 @@ type DocConfirmState = {
   expiry: string;
 };
 
+/** Inner scroll kicks in from this many stacked rows on small screens. */
+const MAINTENANCE_LIST_SCROLL_MOBILE = 8;
+/** Inner scroll kicks in from this many table rows on large screens. */
+const MAINTENANCE_LIST_SCROLL_DESKTOP = 10;
+
 function emptyForm(
   methods: PaymentMethodRow[],
   accounts: PaymentAccountRow[],
@@ -68,7 +86,7 @@ function emptyForm(
     category: "service",
     description: "",
     amount_gbp: "",
-    odometer_miles: "",
+    odometer_miles: vehicle?.current_mileage != null ? String(vehicle.current_mileage) : "",
     paid_to: "",
     paid_by_user_id: "",
     paid_by_label: "",
@@ -124,6 +142,103 @@ function fromRecord(
   };
 }
 
+function MetricCard({
+  label,
+  value,
+  hint,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  tone?: "neutral" | "info" | "success" | "warn";
+}) {
+  const dot =
+    tone === "info"
+      ? "bg-sky-500"
+      : tone === "success"
+        ? "bg-emerald-500"
+        : tone === "warn"
+          ? "bg-amber-500"
+          : "bg-rph-fg-muted/50";
+  const valueClass =
+    tone === "warn"
+      ? "text-amber-700 dark:text-amber-400"
+      : tone === "success"
+        ? "text-rph-fg"
+        : "text-rph-fg";
+  return (
+    <div className="rph-card relative px-4 py-3.5 sm:px-5">
+      <span className={`absolute right-3.5 top-3.5 h-2 w-2 rounded-full ${dot}`} aria-hidden />
+      <p className="pr-4 text-xs font-medium text-rph-fg-muted">{label}</p>
+      <p className={`mt-1 text-xl font-semibold tabular-nums tracking-tight sm:text-2xl ${valueClass}`}>
+        {value}
+      </p>
+      <p className="mt-1 text-xs text-rph-fg-muted">{hint}</p>
+    </div>
+  );
+}
+
+function MobileField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <dt className="shrink-0 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-rph-fg-muted">
+        {label}
+      </dt>
+      <dd className="min-w-0 flex-1 text-right text-sm text-rph-fg">{children}</dd>
+    </div>
+  );
+}
+
+function RecordActionsMenu({
+  busy,
+  onEdit,
+  onDelete,
+}: {
+  busy: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button
+          type="button"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-rph-fg-muted hover:bg-rph-chrome hover:text-rph-fg disabled:opacity-50"
+          disabled={busy}
+          aria-label="Record actions"
+        >
+          <svg width={16} height={16} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+            <circle cx="12" cy="5" r="1.75" />
+            <circle cx="12" cy="12" r="1.75" />
+            <circle cx="12" cy="19" r="1.75" />
+          </svg>
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="end"
+          sideOffset={4}
+          className="z-[200] min-w-[8.5rem] overflow-hidden rounded-lg border border-rph-border bg-rph-elevated py-1 shadow-lg"
+        >
+          <DropdownMenu.Item
+            className="flex cursor-default select-none items-center px-3 py-2 text-sm text-rph-fg outline-none data-[highlighted]:bg-rph-chrome"
+            onSelect={onEdit}
+          >
+            Edit
+          </DropdownMenu.Item>
+          <DropdownMenu.Item
+            className="flex cursor-default select-none items-center px-3 py-2 text-sm text-red-700 outline-none data-[highlighted]:bg-rph-chrome dark:text-red-300"
+            onSelect={onDelete}
+          >
+            Delete
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+
 export function VehicleMaintenanceView({
   initial,
   onDataChange,
@@ -137,6 +252,8 @@ export function VehicleMaintenanceView({
   const [records, setRecords] = useState(initial.records);
   const [totalAmount, setTotalAmount] = useState(initial.totalAmount);
   const [yearTotalAmount, setYearTotalAmount] = useState(initial.yearTotalAmount);
+  const [vehicle, setVehicle] = useState(initial.vehicle);
+  const [purchaseOccurredOn, setPurchaseOccurredOn] = useState(initial.purchaseOccurredOn);
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState<FormState>(() => emptyForm(initial.methods, initial.accounts, initial.vehicle));
   const [discardConfirm, setDiscardConfirm] = useState(false);
@@ -156,6 +273,9 @@ export function VehicleMaintenanceView({
   const [csvStats, setCsvStats] = useState<{ validCount: number; invalidCount: number } | null>(null);
   const [docConfirm, setDocConfirm] = useState<DocConfirmState | null>(null);
   const [docConfirmChecked, setDocConfirmChecked] = useState(false);
+  const [mileageSource, setMileageSource] = useState<EffectiveMileageSource>("stored");
+  const trackerMileageRequested = useRef(false);
+  const trackerMilesThisVisit = useRef<number | null>(null);
 
   const activeMethods = useMemo(() => initial.methods.filter((m) => m.is_active), [initial.methods]);
   const activeAccounts = useMemo(() => initial.accounts.filter((a) => a.is_active), [initial.accounts]);
@@ -181,11 +301,67 @@ export function VehicleMaintenanceView({
     form.category !== "phv_taxi_licence" || Boolean((form.phv_start_date || form.occurred_on).trim());
   const busy = pending || overlay?.phase === "pending";
 
+  const lastService = useMemo(() => buildLastServiceSummary(records), [records]);
+  const nextService = useMemo(
+    () =>
+      buildNextServiceSummary({
+        serviceDueAt: vehicle.service_due_at,
+        nextServiceMileage: vehicle.next_service_mileage,
+        currentMileage: vehicle.current_mileage,
+        todayYmd: ukTodayYmd(),
+      }),
+    [vehicle.service_due_at, vehicle.next_service_mileage, vehicle.current_mileage],
+  );
+  const spendHint = purchaseOccurredOn ? "Since purchase" : "All recorded expenses";
+  const listNeedsScroll =
+    records.length >= MAINTENANCE_LIST_SCROLL_DESKTOP
+      ? "max-h-[min(70vh,36rem)] overflow-y-auto"
+      : records.length >= MAINTENANCE_LIST_SCROLL_MOBILE
+        ? "max-h-[min(70vh,36rem)] overflow-y-auto lg:max-h-none lg:overflow-visible"
+        : "";
+  const showActionsMenu = initial.canWrite || records.length > 0;
+
+  useEffect(() => {
+    trackerMileageRequested.current = false;
+    trackerMilesThisVisit.current = null;
+    setMileageSource("stored");
+  }, [initial.vehicle.id]);
+
   useEffect(() => {
     setRecords(initial.records);
     setTotalAmount(initial.totalAmount);
     setYearTotalAmount(initial.yearTotalAmount);
-  }, [initial.records, initial.totalAmount, initial.yearTotalAmount]);
+    setPurchaseOccurredOn(initial.purchaseOccurredOn);
+    const trackerMiles = trackerMilesThisVisit.current;
+    const floor = highestRecordedOdometer(initial.records);
+    const resolved = resolveEffectiveCurrentMileage({
+      trackerMiles,
+      storedMiles: initial.vehicle.current_mileage,
+      recordedFloorMiles: floor,
+    });
+    setMileageSource(resolved.source);
+    setVehicle({
+      ...initial.vehicle,
+      current_mileage: resolved.miles,
+    });
+  }, [initial]);
+
+  useEffect(() => {
+    if (trackerMileageRequested.current) return;
+    trackerMileageRequested.current = true;
+    const vehicleId = initial.vehicle.id;
+    void (async () => {
+      const res = await refreshMaintenanceMileageFromTrackerAction(vehicleId);
+      if (!res.ok || res.currentMileage == null) return;
+      if (res.source === "tracker") {
+        trackerMilesThisVisit.current = res.currentMileage;
+      }
+      setMileageSource(res.source);
+      setVehicle((prev) =>
+        prev.id === vehicleId ? { ...prev, current_mileage: res.currentMileage } : prev,
+      );
+    })();
+  }, [initial.vehicle.id]);
 
   function refreshFromServer() {
     void onDataChange?.();
@@ -193,7 +369,7 @@ export function VehicleMaintenanceView({
 
   function openAdd() {
     setError(null);
-    const next = emptyForm(initial.methods, initial.accounts, initial.vehicle);
+    const next = emptyForm(initial.methods, initial.accounts, vehicle);
     setForm(next);
     setBaselineForm(next);
     setFormOpen(true);
@@ -201,7 +377,7 @@ export function VehicleMaintenanceView({
 
   function openEdit(r: MaintenanceRecordRow) {
     setError(null);
-    const next = fromRecord(r, initial.methods, initial.accounts, initial.vehicle);
+    const next = fromRecord(r, initial.methods, initial.accounts, vehicle);
     setForm(next);
     setBaselineForm(next);
     setFormOpen(true);
@@ -341,6 +517,26 @@ export function VehicleMaintenanceView({
     setOverlay(null);
   }
 
+  async function downloadRecordsExport() {
+    setOverlay({ phase: "pending", title: "Preparing export…", detail: "" });
+    const res = await exportMaintenanceRecordsAction(initial.vehicle.id);
+    if (!res.ok) {
+      setOverlay({ phase: "error", title: "Could not export records", detail: res.error });
+      return;
+    }
+    const bytes = Uint8Array.from(atob(res.fileBase64), (c) => c.charCodeAt(0));
+    const blob = new Blob([bytes], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = res.fileName;
+    a.click();
+    URL.revokeObjectURL(url);
+    setOverlay(null);
+  }
+
   function onImportFile(file: File | null) {
     if (!file) return;
     setError(null);
@@ -400,65 +596,7 @@ export function VehicleMaintenanceView({
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="rph-h1">Maintenance</h1>
-          <p className="rph-muted mt-1 text-sm">
-            Expense history for {initial.vehicle.make} {initial.vehicle.model}{" "}
-            <span className="font-mono font-semibold text-rph-fg">{initial.vehicle.vrm}</span>.
-          </p>
-        </div>
-        {initial.canWrite ? (
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger asChild>
-              <button
-                type="button"
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-rph-rail px-3 text-xs font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer"
-                disabled={busy}
-              >
-                Actions
-                <svg className="h-3.5 w-3.5 opacity-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content
-                align="end"
-                sideOffset={6}
-                className="z-[200] min-w-[12.5rem] overflow-hidden rounded-lg border border-rph-border bg-rph-elevated py-1 shadow-lg"
-              >
-                <DropdownMenu.Item
-                  className="flex cursor-default select-none items-center px-3 py-2 text-sm text-rph-fg outline-none data-[highlighted]:bg-rph-chrome"
-                  onSelect={() => openAdd()}
-                >
-                  Add maintenance
-                </DropdownMenu.Item>
-                <DropdownMenu.Item
-                  className="flex cursor-default select-none items-center px-3 py-2 text-sm text-rph-fg outline-none data-[highlighted]:bg-rph-chrome"
-                  onSelect={() => {
-                    void downloadTemplate();
-                  }}
-                >
-                  Export template
-                </DropdownMenu.Item>
-                <DropdownMenu.Item
-                  className="flex cursor-default select-none items-center px-3 py-2 text-sm text-rph-fg outline-none data-[highlighted]:bg-rph-chrome"
-                  onSelect={() => {
-                    setCsvPreview(null);
-                    setCsvStats(null);
-                    setCsvOpen(true);
-                  }}
-                >
-                  Import
-                </DropdownMenu.Item>
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
-        ) : null}
-      </div>
-
+    <div className="space-y-4 sm:space-y-5">
       {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
 
       {!activeAccounts.length && initial.canWrite ? (
@@ -468,110 +606,284 @@ export function VehicleMaintenanceView({
         </div>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="rph-card p-4">
-          <p className="rph-meta font-semibold uppercase tracking-wide">Total spent</p>
-          <p className="mt-1 text-2xl font-bold text-rph-fg">{formatGbp(totalAmount)}</p>
-        </div>
-        <div className="rph-card p-4">
-          <p className="rph-meta font-semibold uppercase tracking-wide">This year</p>
-          <p className="mt-1 text-2xl font-bold text-rph-fg">{formatGbp(yearTotalAmount)}</p>
-        </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label="Maintenance spend" value={formatGbp(totalAmount)} hint={spendHint} tone="neutral" />
+        <MetricCard
+          label="Last service"
+          value={lastService?.dateLabel ?? "—"}
+          hint={lastService?.mileageHint ?? "No service logged yet"}
+          tone={lastService ? "success" : "neutral"}
+        />
+        <MetricCard
+          label="Next service"
+          value={nextService.value}
+          hint={nextService.hint}
+          tone={nextService.tone}
+        />
+        <MetricCard
+          label="This year"
+          value={formatGbp(yearTotalAmount)}
+          hint="Calendar year to date"
+          tone="info"
+        />
       </div>
 
-      {!records.length ? (
-        <p className="rph-muted text-sm">No maintenance expenses recorded yet.</p>
-      ) : (
-        <div className="rph-table-responsive">
-          <table className="min-w-full divide-y divide-rph-border text-sm">
-            <thead className="bg-rph-chrome text-left text-xs uppercase tracking-wide text-rph-fg-muted">
-              <tr>
-                <th className="px-3 py-2.5 font-semibold">Date</th>
-                <th className="px-3 py-2.5 font-semibold">Category</th>
-                <th className="px-3 py-2.5 font-semibold">Description</th>
-                <th className="px-3 py-2.5 font-semibold">Amount</th>
-                <th className="px-3 py-2.5 font-semibold">Paid to</th>
-                <th className="px-3 py-2.5 font-semibold">Paid by</th>
-                <th className="px-3 py-2.5 font-semibold">Method</th>
-                <th className="px-3 py-2.5 font-semibold">Account</th>
-                <th className="px-3 py-2.5 font-semibold">Reference</th>
-                {initial.canWrite ? <th className="px-3 py-2.5 font-semibold" /> : null}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-rph-border">
-              {records.map((r) => (
-                <tr key={r.id} className="bg-rph-raised">
-                  <td data-label="Date" className="whitespace-nowrap px-3 py-2.5 text-rph-fg-secondary">
-                    <span className="rph-table-cell-value">{formatUkDate(r.occurred_on)}</span>
-                  </td>
-                  <td data-label="Category" className="px-3 py-2.5 text-rph-fg-secondary">
-                    <span className="rph-table-cell-value">{MAINTENANCE_CATEGORY_LABELS[r.category]}</span>
-                  </td>
-                  <td data-label="Description" className="rph-table-primary max-w-[14rem] truncate px-3 py-2.5 text-rph-fg" title={r.description}>
-                    {r.description || "—"}
-                  </td>
-                  <td data-label="Amount" className="whitespace-nowrap px-3 py-2.5 font-semibold text-rph-fg">
-                    <span className="rph-table-cell-value">{formatGbp(r.amount_gbp)}</span>
-                  </td>
-                  <td data-label="Paid to" className="px-3 py-2.5 text-rph-fg-muted">
-                    <span className="rph-table-cell-value">{r.paid_to || "—"}</span>
-                  </td>
-                  <td data-label="Paid by" className="px-3 py-2.5 text-rph-fg-muted">
-                    <span className="rph-table-cell-value">{r.paid_by_display || "—"}</span>
-                  </td>
-                  <td data-label="Method" className="px-3 py-2.5 text-rph-fg-muted">
-                    <span className="rph-table-cell-value">{r.payment_method_name || "—"}</span>
-                  </td>
-                  <td data-label="Account" className="px-3 py-2.5 text-rph-fg-muted">
-                    <span className="rph-table-cell-value">{r.payment_account_name || "—"}</span>
-                  </td>
-                  <td data-label="Reference" className="max-w-[10rem] truncate px-3 py-2.5 text-rph-fg-muted" title={r.payment_reference || undefined}>
-                    <span className="rph-table-cell-value">{r.payment_reference || "—"}</span>
-                  </td>
-                  {initial.canWrite ? (
-                    <td data-label="" className="rph-table-actions whitespace-nowrap px-3 py-2.5 text-right">
-                      <DropdownMenu.Root>
-                        <DropdownMenu.Trigger asChild>
-                          <button
-                            type="button"
-                            className="inline-flex h-7 items-center gap-1 rounded-md border border-rph-border bg-rph-raised px-2 text-xs font-medium text-rph-fg-secondary hover:bg-rph-chrome disabled:opacity-50"
-                            disabled={busy}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <section className="rph-card overflow-hidden lg:col-span-2">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-rph-border px-4 py-4 sm:px-5">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-rph-link">
+                Service history
+              </p>
+              <h2 className="mt-0.5 text-lg font-semibold tracking-tight text-rph-fg">Maintenance records</h2>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {showActionsMenu ? (
+                <DropdownMenu.Root>
+                  <DropdownMenu.Trigger asChild>
+                    <button type="button" className="rph-btn-primary" disabled={busy}>
+                      Actions
+                    </button>
+                  </DropdownMenu.Trigger>
+                  <DropdownMenu.Portal>
+                    <DropdownMenu.Content
+                      align="end"
+                      sideOffset={6}
+                      className="z-[200] min-w-[12.5rem] overflow-hidden rounded-lg border border-rph-border bg-rph-elevated py-1 shadow-lg"
+                    >
+                      {initial.canWrite ? (
+                        <DropdownMenu.Item
+                          className="flex cursor-default select-none items-center px-3 py-2 text-sm text-rph-fg outline-none data-[highlighted]:bg-rph-chrome"
+                          onSelect={() => openAdd()}
+                        >
+                          Add maintenance
+                        </DropdownMenu.Item>
+                      ) : null}
+                      {records.length > 0 ? (
+                        <DropdownMenu.Item
+                          className="flex cursor-default select-none items-center px-3 py-2 text-sm text-rph-fg outline-none data-[highlighted]:bg-rph-chrome"
+                          onSelect={() => {
+                            void downloadRecordsExport();
+                          }}
+                        >
+                          Export records
+                        </DropdownMenu.Item>
+                      ) : null}
+                      {initial.canWrite ? (
+                        <>
+                          <DropdownMenu.Item
+                            className="flex cursor-default select-none items-center px-3 py-2 text-sm text-rph-fg outline-none data-[highlighted]:bg-rph-chrome"
+                            onSelect={() => {
+                              void downloadTemplate();
+                            }}
                           >
-                            Manage
-                            <svg className="h-3 w-3 opacity-80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                            </svg>
-                          </button>
-                        </DropdownMenu.Trigger>
-                        <DropdownMenu.Portal>
-                          <DropdownMenu.Content
-                            align="end"
-                            sideOffset={4}
-                            className="z-[200] min-w-[8.5rem] overflow-hidden rounded-lg border border-rph-border bg-rph-elevated py-1 shadow-lg"
+                            Export template
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item
+                            className="flex cursor-default select-none items-center px-3 py-2 text-sm text-rph-fg outline-none data-[highlighted]:bg-rph-chrome"
+                            onSelect={() => {
+                              setCsvPreview(null);
+                              setCsvStats(null);
+                              setCsvOpen(true);
+                            }}
                           >
-                            <DropdownMenu.Item
-                              className="flex cursor-default select-none items-center px-3 py-2 text-sm text-rph-fg outline-none data-[highlighted]:bg-rph-chrome"
-                              onSelect={() => openEdit(r)}
+                            Import
+                          </DropdownMenu.Item>
+                        </>
+                      ) : null}
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Portal>
+                </DropdownMenu.Root>
+              ) : null}
+            </div>
+          </div>
+
+          {!records.length ? (
+            <p className="px-4 py-8 text-sm text-rph-fg-muted sm:px-5">No maintenance expenses recorded yet.</p>
+          ) : (
+            <div className={listNeedsScroll}>
+              <ul className="divide-y divide-rph-border lg:hidden">
+                {records.map((r) => {
+                  const type = maintenanceTypeLabel(r.category, r.description);
+                  return (
+                    <li key={r.id} className="px-4 py-4 sm:px-5">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm text-rph-fg-muted">{formatUkDateText(r.occurred_on)}</p>
+                        {initial.canWrite ? (
+                          <RecordActionsMenu
+                            busy={busy}
+                            onEdit={() => openEdit(r)}
+                            onDelete={() => openDelete(r)}
+                          />
+                        ) : null}
+                      </div>
+                      <dl className="mt-3 space-y-2.5">
+                        <MobileField label="Type">
+                          <span className="inline-flex flex-wrap items-baseline justify-end gap-x-2 gap-y-0.5">
+                            <span className="font-semibold text-rph-fg">{type.primary}</span>
+                            {type.secondary ? (
+                              <span className="text-xs text-rph-fg-muted">{type.secondary}</span>
+                            ) : null}
+                          </span>
+                        </MobileField>
+                        <MobileField label="Supplier">
+                          <span className="text-rph-fg-secondary">{r.paid_to || "—"}</span>
+                        </MobileField>
+                        <MobileField label="Mileage">
+                          <span className="tabular-nums text-rph-fg-secondary">
+                            {r.odometer_miles != null ? formatMiles(r.odometer_miles) : "—"}
+                          </span>
+                        </MobileField>
+                        <MobileField label="Cost">
+                          <span className="font-semibold tabular-nums text-rph-fg">
+                            {formatGbp(r.amount_gbp)}
+                          </span>
+                        </MobileField>
+                      </dl>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              <div className="rph-table-responsive hidden lg:block">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="sticky top-0 z-10 border-b border-rph-border bg-rph-chrome/95 text-[11px] font-semibold uppercase tracking-wide text-rph-fg-muted backdrop-blur-sm">
+                    <tr>
+                      <th className="px-4 py-3 sm:px-5">Date</th>
+                      <th className="px-4 py-3">Type</th>
+                      <th className="px-4 py-3">Supplier</th>
+                      <th className="px-4 py-3">Mileage</th>
+                      <th className="px-4 py-3">Cost</th>
+                      {initial.canWrite ? (
+                        <th className="px-4 py-3 sm:px-5">
+                          <span className="sr-only">Actions</span>
+                        </th>
+                      ) : null}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {records.map((r) => {
+                      const type = maintenanceTypeLabel(r.category, r.description);
+                      return (
+                        <tr key={r.id} className="border-b border-rph-border last:border-0">
+                          <td
+                            {...responsiveTableCellProps(
+                              { header: "Date", meta: { tablePrimary: true } },
+                              "whitespace-nowrap px-4 py-3.5 text-rph-fg sm:px-5",
+                            )}
+                          >
+                            {formatUkDateText(r.occurred_on)}
+                          </td>
+                          <td {...responsiveTableCellProps({ header: "Type" }, "px-4 py-3.5")}>
+                            <p className="font-medium text-rph-fg">{type.primary}</p>
+                            {type.secondary ? (
+                              <p className="mt-0.5 text-xs text-rph-fg-muted">{type.secondary}</p>
+                            ) : null}
+                          </td>
+                          <td
+                            {...responsiveTableCellProps(
+                              { header: "Supplier" },
+                              "px-4 py-3.5 text-rph-fg-secondary",
+                            )}
+                          >
+                            {r.paid_to || "—"}
+                          </td>
+                          <td
+                            {...responsiveTableCellProps(
+                              { header: "Mileage" },
+                              "px-4 py-3.5 tabular-nums text-rph-fg-secondary",
+                            )}
+                          >
+                            {r.odometer_miles != null ? formatMiles(r.odometer_miles) : "—"}
+                          </td>
+                          <td
+                            {...responsiveTableCellProps(
+                              { header: "Cost" },
+                              "px-4 py-3.5 font-semibold tabular-nums text-rph-fg",
+                            )}
+                          >
+                            {formatGbp(r.amount_gbp)}
+                          </td>
+                          {initial.canWrite ? (
+                            <td
+                              {...responsiveTableCellProps(
+                                { header: "Actions", meta: { tableActions: true, dataLabel: "" } },
+                                "px-4 py-3.5 text-right sm:px-5",
+                              )}
                             >
-                              Edit
-                            </DropdownMenu.Item>
-                            <DropdownMenu.Item
-                              className="flex cursor-default select-none items-center px-3 py-2 text-sm text-red-700 outline-none data-[highlighted]:bg-rph-chrome dark:text-red-300"
-                              onSelect={() => openDelete(r)}
-                            >
-                              Delete
-                            </DropdownMenu.Item>
-                          </DropdownMenu.Content>
-                        </DropdownMenu.Portal>
-                      </DropdownMenu.Root>
-                    </td>
-                  ) : null}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+                              <RecordActionsMenu
+                                busy={busy}
+                                onEdit={() => openEdit(r)}
+                                onDelete={() => openDelete(r)}
+                              />
+                            </td>
+                          ) : null}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="rph-card hidden flex-col p-4 sm:p-5 lg:flex">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-rph-link">Next service</p>
+          <h2 className="mt-0.5 text-lg font-semibold tracking-tight text-rph-fg">Service due</h2>
+          <dl className="mt-4 space-y-3 text-sm">
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wide text-rph-fg-muted">
+                {nextService.valueLabel}
+              </dt>
+              <dd
+                className={`mt-1 text-lg font-semibold ${
+                  nextService.tone === "warn"
+                    ? "text-amber-700 dark:text-amber-400"
+                    : "text-rph-fg"
+                }`}
+              >
+                {nextService.value}
+              </dd>
+              <p className="mt-1 text-xs text-rph-fg-muted">{nextService.hint}</p>
+            </div>
+            {vehicle.service_due_at ? (
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-rph-fg-muted">Due date</dt>
+                <dd className="mt-1 text-rph-fg-secondary">
+                  {formatUkDateText(vehicle.service_due_at)}
+                </dd>
+              </div>
+            ) : null}
+            {vehicle.next_service_mileage != null ? (
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-rph-fg-muted">
+                  Due at mileage
+                </dt>
+                <dd className="mt-1 tabular-nums text-rph-fg-secondary">
+                  {formatMiles(vehicle.next_service_mileage)} miles
+                </dd>
+              </div>
+            ) : null}
+            {vehicle.current_mileage != null ? (
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-rph-fg-muted">
+                  Current mileage
+                </dt>
+                <dd className="mt-1 tabular-nums text-rph-fg-secondary">
+                  {formatMiles(vehicle.current_mileage)} miles
+                  <span className="mt-0.5 block text-xs text-rph-fg-muted">
+                    {mileageSourceHint(mileageSource)}
+                  </span>
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+          <p className="mt-auto pt-4 text-xs text-rph-fg-muted">
+            Update the due date or mileage when you log the next service. Set tracker mileage if the device reading is behind a workshop log.
+          </p>
+        </section>
+      </div>
 
       <FormModalShell
         open={formOpen}

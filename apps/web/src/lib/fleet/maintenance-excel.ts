@@ -167,6 +167,72 @@ export async function buildMaintenanceExcelTemplate(lists: MaintenanceExcelLists
   return Buffer.from(buffer);
 }
 
+export type MaintenanceExportRow = {
+  occurred_on: string;
+  category: string;
+  description: string;
+  amount_gbp: number;
+  paid_to: string;
+  paid_by: string;
+  payment_method: string;
+  payment_account: string;
+  payment_reference: string;
+  odometer_miles: number | null;
+};
+
+/** Build .xlsx of existing maintenance records (read-friendly export). */
+export async function buildMaintenanceRecordsExcelExport(opts: {
+  vrm: string;
+  rows: MaintenanceExportRow[];
+}): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Rental Pro Hub";
+  const sheet = wb.addWorksheet("Maintenance", {
+    views: [{ state: "frozen", ySplit: 1 }],
+  });
+
+  const headers = [
+    "occurred_on",
+    "category",
+    "description",
+    "amount_gbp",
+    "paid_to",
+    "paid_by",
+    "payment_method",
+    "payment_account",
+    "payment_reference",
+    "odometer_miles",
+  ] as const;
+  sheet.addRow([...headers]);
+  sheet.getRow(HEADER_ROW).font = { bold: true };
+  headers.forEach((_, i) => {
+    sheet.getColumn(i + 1).width = i === 2 ? 28 : 16;
+  });
+
+  for (const row of opts.rows) {
+    sheet.addRow([
+      row.occurred_on,
+      row.category,
+      row.description,
+      row.amount_gbp,
+      row.paid_to,
+      row.paid_by,
+      row.payment_method,
+      row.payment_account,
+      row.payment_reference,
+      row.odometer_miles ?? "",
+    ]);
+  }
+
+  if (!opts.rows.length) {
+    const note = sheet.addRow([]);
+    note.getCell(1).value = `No maintenance records for ${opts.vrm}.`;
+  }
+
+  const buffer = await wb.xlsx.writeBuffer();
+  return Buffer.from(buffer);
+}
+
 export async function parseMaintenanceExcel(
   data: ArrayBuffer | Buffer,
 ): Promise<{ headers: string[]; rows: string[][] }> {
