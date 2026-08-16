@@ -190,6 +190,7 @@ async function buildDashboardPayload(query: CompanyDashboardQuery): Promise<Load
       "id, vrm, make, model, status, subcompany_id, mot_expiry, tax_expiry, phv_licence_expiry, gps_primary_imei, subcompanies(name)",
     )
     .eq("parent_company_id", parentCompanyId)
+    .is("archived_at", null)
     .order("vrm", { ascending: true });
   if (accessible !== "all") vehicleQuery = vehicleQuery.in("subcompany_id", accessibleIds);
 

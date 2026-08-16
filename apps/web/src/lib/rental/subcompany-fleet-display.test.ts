@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { vehicleNextComplianceLabel } from "@/lib/rental/subcompany-fleet-display";
+import { defaultNotificationSettings } from "@/lib/settings/notification-settings";
+import {
+  vehicleListNextExpiryDisplay,
+  vehicleNextComplianceLabel,
+} from "@/lib/rental/subcompany-fleet-display";
 
 describe("vehicleNextComplianceLabel", () => {
   it("picks the soonest compliance date", () => {
@@ -20,5 +24,35 @@ describe("vehicleNextComplianceLabel", () => {
         phv_licence_expiry: null,
       }),
     ).toBe("—");
+  });
+});
+
+describe("vehicleListNextExpiryDisplay", () => {
+  const settings = defaultNotificationSettings();
+
+  it("uses attention message when a date is expired", () => {
+    const result = vehicleListNextExpiryDisplay(
+      {
+        mot_expiry: "2020-01-01",
+        tax_expiry: "2030-01-01",
+        phv_licence_expiry: "2030-01-01",
+      },
+      settings,
+    );
+    expect(result.tone).toBe("expired");
+    expect(result.label).toMatch(/^MOT expired/);
+  });
+
+  it("falls back to soonest compliance when all dates are healthy", () => {
+    const result = vehicleListNextExpiryDisplay(
+      {
+        mot_expiry: "2030-03-30",
+        tax_expiry: "2031-01-01",
+        phv_licence_expiry: "2031-06-01",
+      },
+      settings,
+    );
+    expect(result.tone).toBe("ok");
+    expect(result.label).toBe("MOT 30 Mar 2030");
   });
 });

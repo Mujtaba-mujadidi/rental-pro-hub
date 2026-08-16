@@ -795,6 +795,7 @@ export async function searchAvailableVehiclesAction(
     .select("id, vrm, make, model, colour, first_reg_date, first_reg_uk_date, subcompany_id, status, subcompanies(name)")
     .eq("parent_company_id", companyId)
     .eq("status", "available")
+    .is("archived_at", null)
     .order("vrm", { ascending: true })
     .limit(40);
 

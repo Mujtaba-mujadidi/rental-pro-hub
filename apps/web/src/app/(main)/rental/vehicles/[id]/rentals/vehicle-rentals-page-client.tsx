@@ -4,7 +4,7 @@ import { useVehicleWorkspace } from "@/app/(main)/rental/vehicles/[id]/vehicle-w
 import { VehicleRentalsTableView } from "./vehicle-rentals-table-view";
 
 export function VehicleRentalsPageClient() {
-  const { vehicleId, shell } = useVehicleWorkspace();
+  const { vehicleId, shell, refreshShell, invalidateOverview } = useVehicleWorkspace();
 
   return (
     <VehicleRentalsTableView
@@ -14,6 +14,10 @@ export function VehicleRentalsPageClient() {
       historicSubcompanyName={
         shell.access.kind === "historic" ? shell.access.transfer.from_name ?? null : null
       }
+      onHireListChanged={() => {
+        invalidateOverview();
+        void refreshShell();
+      }}
     />
   );
 }

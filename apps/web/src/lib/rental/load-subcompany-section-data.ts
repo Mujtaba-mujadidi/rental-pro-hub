@@ -146,6 +146,7 @@ export async function loadSubcompanyOverviewData(
       .from("vehicles")
       .select("id", { count: "exact", head: true })
       .eq("subcompany_id", loaded.row.id)
+      .is("archived_at", null)
       .neq("status", "sold"),
     supabase
       .from("vehicle_hire_groups")

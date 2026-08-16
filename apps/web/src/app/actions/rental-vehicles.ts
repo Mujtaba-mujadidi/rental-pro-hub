@@ -238,13 +238,14 @@ export async function updateVehicleAction(vehicleId: string, formData: FormData)
   const supabase = await createClient();
   const { data: existing, error: gErr } = await supabase
     .from("vehicles")
-    .select("id, parent_company_id, subcompany_id")
+    .select("id, parent_company_id, subcompany_id, archived_at")
     .eq("id", id)
     .maybeSingle();
   if (gErr) return { ok: false, error: gErr.message };
   if (!existing || existing.parent_company_id !== parentCompanyId) {
     return { ok: false, error: "Vehicle not found." };
   }
+  if (existing.archived_at) return { ok: false, error: "This vehicle is archived and cannot be edited." };
 
   // Subcompany changes go through transferVehicleAction (audit trail).
   const { error } = await supabase
@@ -284,13 +285,14 @@ export async function transferVehicleAction(
   const supabase = await createClient();
   const { data: vehicle, error: gErr } = await supabase
     .from("vehicles")
-    .select("id, parent_company_id, subcompany_id")
+    .select("id, parent_company_id, subcompany_id, archived_at")
     .eq("id", id)
     .maybeSingle();
   if (gErr) return { ok: false, error: gErr.message };
   if (!vehicle || vehicle.parent_company_id !== parentCompanyId) {
     return { ok: false, error: "Vehicle not found." };
   }
+  if (vehicle.archived_at) return { ok: false, error: "This vehicle is archived and cannot be transferred." };
   if (vehicle.subcompany_id === toId) {
     return { ok: false, error: "Vehicle is already at that subcompany." };
   }
@@ -332,7 +334,7 @@ export async function deleteVehicleAction(vehicleId: string): Promise<VehicleAct
   const { profile } = await requireRentalCompanyArea();
   const frozen = await assertRentalCompanyWritable(profile);
   if (!frozen.ok) return frozen;
-  if (!canDeleteFleet(profile)) return { ok: false, error: "Only owners or admins can delete vehicles." };
+  if (!canDeleteFleet(profile)) return { ok: false, error: "Only owners or admins can archive vehicles." };
 
   const parentCompanyId = profile.company_id?.trim();
   if (!parentCompanyId) return { ok: false, error: "No active company." };
@@ -341,7 +343,30 @@ export async function deleteVehicleAction(vehicleId: string): Promise<VehicleAct
   if (!id) return { ok: false, error: "Missing vehicle." };
 
   const supabase = await createClient();
-  const { error } = await supabase.from("vehicles").delete().eq("id", id).eq("parent_company_id", parentCompanyId);
+  const { data: existing, error: gErr } = await supabase
+    .from("vehicles")
+    .select("id, parent_company_id, archived_at")
+    .eq("id", id)
+    .eq("parent_company_id", parentCompanyId)
+    .maybeSingle();
+  if (gErr) return { ok: false, error: gErr.message };
+  if (!existing) return { ok: false, error: "Vehicle not found." };
+  if (existing.archived_at) return { ok: false, error: "This vehicle is already archived." };
+
+  const blockingHire = await getActiveHireForVehicle(id);
+  if (blockingHire) {
+    return {
+      ok: false,
+      error: "End or transfer the open hire on this vehicle before archiving it.",
+    };
+  }
+
+  const { error } = await supabase
+    .from("vehicles")
+    .update({ archived_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("parent_company_id", parentCompanyId)
+    .is("archived_at", null);
   if (error) return { ok: false, error: error.message };
 
   revalidateVehiclePaths(id, parentCompanyId);
@@ -694,9 +719,10 @@ export async function loadVehiclesPageData(options?: {
   let vehicleQuery = supabase
     .from("vehicles")
     .select(
-      "id, parent_company_id, subcompany_id, vrm, make, model, colour, first_reg_date, first_reg_uk_date, fuel_type, seats, cc, mot_expiry, tax_expiry, phv_licence_no, phv_licence_expiry, licensing_authority_name, status, vehicle_age_limit_years, service_due_at, current_mileage, next_service_mileage, notes, created_at, updated_at, subcompanies(name)",
+      "id, parent_company_id, subcompany_id, vrm, make, model, colour, first_reg_date, first_reg_uk_date, fuel_type, seats, cc, mot_expiry, tax_expiry, phv_licence_no, phv_licence_expiry, licensing_authority_name, status, vehicle_age_limit_years, service_due_at, current_mileage, next_service_mileage, notes, archived_at, created_at, updated_at, subcompanies(name)",
     )
     .eq("parent_company_id", parentCompanyId)
+    .is("archived_at", null)
     .order("vrm", { ascending: true });
 
   if (subcompanyId) {
@@ -780,6 +806,7 @@ export async function loadVehiclesPageData(options?: {
       status: rest.status as VehicleStatus,
       mot_doc_attention_at: (rest as { mot_doc_attention_at?: string | null }).mot_doc_attention_at ?? null,
       phv_doc_attention_at: (rest as { phv_doc_attention_at?: string | null }).phv_doc_attention_at ?? null,
+      archived_at: (rest as { archived_at?: string | null }).archived_at ?? null,
       subcompany_name: subName ?? null,
       missing_docs: missingRequiredDocTypes(typesByVehicle.get(v.id) ?? []),
     };

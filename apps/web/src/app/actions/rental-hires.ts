@@ -11,6 +11,7 @@ import {
 } from "@/lib/fleet/hire-lifecycle";
 import { persistHireTimesheetForGroup } from "@/lib/fleet/persist-hire-timesheet";
 import { revalidateVehicleFinancialsForHireGroup } from "@/app/actions/rental-vehicle-financials";
+import { revalidateVehicleWorkspaceCache } from "@/lib/fleet/vehicle-workspace-cache";
 import {
   assertVehicleAvailableForHire,
   releaseVehicleIfNoBlockingHire,
@@ -81,8 +82,10 @@ export type VehicleRentalsPageData = {
 };
 
 function revalidateVehicleRentals(vehicleId: string) {
+  revalidateVehicleWorkspaceCache(vehicleId);
   revalidatePath(`/rental/vehicles/${vehicleId}`);
   revalidatePath(`/rental/vehicles/${vehicleId}/rentals`);
+  revalidatePath(`/rental/vehicles/${vehicleId}`, "layout");
   revalidatePath("/rental/hires");
 }
 

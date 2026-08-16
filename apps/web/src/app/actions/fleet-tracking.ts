@@ -179,6 +179,7 @@ export async function loadMappingSuggestionsAction(): Promise<
     .from("vehicles")
     .select("id, vrm, make, model, gps_primary_imei, gps_secondary_imei")
     .eq("parent_company_id", companyId)
+    .is("archived_at", null)
     .order("vrm", { ascending: true });
   if (error) return { ok: false, error: error.message };
 
@@ -478,6 +479,7 @@ export async function loadWeeklyMileageReportAction(): Promise<
     .from("vehicles")
     .select("id, vrm, make, model, gps_primary_imei")
     .eq("parent_company_id", companyId)
+    .is("archived_at", null)
     .order("vrm", { ascending: true });
   if (error) return { ok: false, error: error.message };
 

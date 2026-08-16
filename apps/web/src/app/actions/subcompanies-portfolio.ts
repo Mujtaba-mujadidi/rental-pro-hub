@@ -108,6 +108,7 @@ export async function loadSubcompaniesPortfolioAction(): Promise<LoadResult> {
         .select("id, subcompany_id, status, mot_expiry, tax_expiry, phv_licence_expiry")
         .eq("parent_company_id", parentCompanyId)
         .in("subcompany_id", ids)
+        .is("archived_at", null)
         .neq("status", "sold"),
       supabase
         .from("vehicle_hire_groups")

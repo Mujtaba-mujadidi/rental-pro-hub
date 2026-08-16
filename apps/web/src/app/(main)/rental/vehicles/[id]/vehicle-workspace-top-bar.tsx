@@ -4,10 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { VehicleSwitcherOption } from "@/app/actions/rental-vehicles";
-import {
-  VEHICLE_STATUS_LABELS,
-  type VehicleStatus,
-} from "@/lib/fleet/vehicles";
+import { HireWorkspaceChip, HireWorkspacePlate } from "@/components/fleet/hire-workspace/hire-workspace-ui";
 import { formatUkDateTime } from "@/lib/datetime/uk";
 import { isHistoricVehicleWorkspaceAccess } from "@/lib/fleet/vehicle-historic-access";
 import {
@@ -16,7 +13,18 @@ import {
   vehicleWorkspaceHref,
   vehicleWorkspaceNav,
 } from "@/lib/fleet/vehicle-workspace-nav";
+import { vehicleStatusPillClass, type VehicleStatus } from "@/lib/fleet/vehicles";
 import { useVehicleWorkspace } from "@/app/(main)/rental/vehicles/[id]/vehicle-workspace-provider";
+
+function fleetStatusLabel(status: VehicleStatus): string {
+  if (status === "on_rent") return "On hire";
+  if (status === "available") return "Available";
+  if (status === "reserved") return "Reserved";
+  if (status === "repair") return "Repair";
+  if (status === "accident_claim") return "Accident claim";
+  if (status === "sold") return "Sold";
+  return status;
+}
 
 export function VehicleWorkspaceTopBar({
   fleet,
@@ -71,109 +79,129 @@ export function VehicleWorkspaceTopBar({
     router.push(vehicleWorkspaceHref(id, section));
   }
 
+  const missing = vehicle.missing_docs ?? [];
+  const docsComplete = missing.length === 0;
+  const currentHireId = shell.currentOpenHire?.id ?? null;
+  const showOpenHire = Boolean(currentHireId);
+
   return (
-    <div className="rph-chrome -mx-3 -mt-3 mb-5 border-b px-3 py-2.5">
-      {/* Row 1: back + vehicle switcher (+ status on sm+) */}
-      <div className="flex items-center gap-2">
-        <Link
-          href="/rental/vehicles"
-          className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-rph-border bg-rph-raised px-2 text-xs font-semibold text-rph-fg-secondary shadow-sm transition-colors hover:bg-rph-chrome hover:text-rph-fg"
-          aria-label="Back to fleet"
-        >
-          <IconArrowLeft className="h-3.5 w-3.5 shrink-0" />
-          Fleet
-        </Link>
+    <div className="mb-5 space-y-4">
+      <Link
+        href="/rental/vehicles"
+        className="inline-flex items-center gap-1.5 text-sm font-medium text-rph-link hover:text-rph-link-hover"
+      >
+        <IconArrowLeft className="h-4 w-4 shrink-0" />
+        Back to vehicles
+      </Link>
 
-        <div className="relative min-w-0 flex-1 sm:max-w-56 sm:flex-none" ref={rootRef}>
-          <button
-            type="button"
-            className="flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-rph-border bg-rph-raised px-2.5 text-left text-sm shadow-sm"
-            aria-expanded={open}
-            aria-haspopup="listbox"
-            onClick={() => setOpen((v) => !v)}
-          >
-            <span className="min-w-0 truncate">
-              <span className="font-mono font-semibold text-rph-fg">{vehicle.vrm}</span>
-              <span className="text-rph-fg-muted">
-                {" "}
-                · {vehicle.make} {vehicle.model}
-              </span>
-            </span>
-            <span className="shrink-0 text-xs text-rph-fg-muted" aria-hidden>
-              ▾
-            </span>
-          </button>
-
-          {open ? (
-            <div className="absolute left-0 right-0 z-40 mt-1 max-h-[min(70vh,24rem)] overflow-hidden rounded-lg border border-rph-border bg-rph-elevated shadow-lg sm:left-0 sm:right-auto sm:w-[min(100vw-2rem,20rem)]">
-              <div className="border-b border-rph-border p-2">
-                <input
-                  ref={inputRef}
-                  className="rph-input py-1.5"
-                  placeholder="Search VRM, make, model…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                />
+      <section className="rph-card p-4 sm:p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-start gap-3 sm:gap-4">
+            <HireWorkspacePlate vrm={vehicle.vrm} />
+            <div className="relative min-w-0 flex-1" ref={rootRef}>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={vehicleStatusPillClass(vehicle.status)}>{fleetStatusLabel(vehicle.status)}</span>
+                <HireWorkspaceChip tone={docsComplete ? "success" : "warn"}>
+                  {docsComplete ? "Documents complete" : "Documents incomplete"}
+                </HireWorkspaceChip>
               </div>
-              <ul className="max-h-64 overflow-y-auto overscroll-contain py-1" role="listbox">
-                {!filtered.length ? (
-                  <li className="px-3 py-2 text-sm text-rph-fg-muted">No vehicles match.</li>
-                ) : (
-                  filtered.map((v) => {
-                    const active = v.id === vehicle.id;
-                    return (
-                      <li key={v.id}>
-                        <button
-                          type="button"
-                          role="option"
-                          aria-selected={active}
-                          className={[
-                            "flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm sm:py-2",
-                            active
-                              ? "bg-rph-rail/10 text-rph-link"
-                              : "text-rph-fg hover:bg-rph-chrome",
-                          ].join(" ")}
-                          onClick={() => switchTo(v.id)}
-                        >
-                          <span className="min-w-0 truncate">
-                            <span className="font-mono font-semibold">{v.vrm}</span>
-                            <span className="text-rph-fg-muted">
-                              {" "}
-                              · {v.make} {v.model}
-                            </span>
-                          </span>
-                          <StatusChip status={v.status} />
-                        </button>
-                      </li>
-                    );
-                  })
-                )}
-              </ul>
+              <button
+                type="button"
+                className="mt-2 block w-full min-w-0 text-left"
+                aria-expanded={open}
+                aria-haspopup="listbox"
+                onClick={() => setOpen((v) => !v)}
+              >
+                <h1 className="text-xl font-semibold tracking-tight text-rph-fg sm:text-2xl">
+                  {vehicle.make} {vehicle.model}
+                </h1>
+                <p className="mt-0.5 text-sm text-rph-fg-secondary">
+                  <span className="font-medium text-rph-fg">{vehicle.vrm}</span>
+                  <span className="text-rph-fg-muted"> · </span>
+                  <span>{vehicle.subcompany_name ?? "—"}</span>
+                  <span className="ml-1 text-xs text-rph-fg-muted" aria-hidden>
+                    ▾
+                  </span>
+                </p>
+              </button>
+
+              {open ? (
+                <div className="absolute z-40 mt-2 w-[min(100vw-2rem,22rem)] max-w-full overflow-hidden rounded-lg border border-rph-border bg-rph-elevated shadow-lg">
+                  <div className="border-b border-rph-border p-2">
+                    <input
+                      ref={inputRef}
+                      className="rph-input py-1.5"
+                      placeholder="Search VRM, make, model…"
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                    />
+                  </div>
+                  <ul className="max-h-64 overflow-y-auto overscroll-contain py-1" role="listbox">
+                    {!filtered.length ? (
+                      <li className="px-3 py-2 text-sm text-rph-fg-muted">No vehicles match.</li>
+                    ) : (
+                      filtered.map((v) => {
+                        const active = v.id === vehicle.id;
+                        return (
+                          <li key={v.id}>
+                            <button
+                              type="button"
+                              role="option"
+                              aria-selected={active}
+                              className={[
+                                "flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm",
+                                active ? "bg-rph-rail/10 text-rph-link" : "text-rph-fg hover:bg-rph-chrome",
+                              ].join(" ")}
+                              onClick={() => switchTo(v.id)}
+                            >
+                              <span className="min-w-0 truncate">
+                                <span className="font-semibold">{v.vrm}</span>
+                                <span className="text-rph-fg-muted">
+                                  {" "}
+                                  · {v.make} {v.model}
+                                </span>
+                              </span>
+                              <span className={vehicleStatusPillClass(v.status)}>{fleetStatusLabel(v.status)}</span>
+                            </button>
+                          </li>
+                        );
+                      })
+                    )}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {showOpenHire && currentHireId ? (
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
+              <Link
+                href={`/rental/hires/${currentHireId}`}
+                className="rph-btn-primary inline-flex h-10 w-full items-center justify-center sm:w-auto"
+              >
+                Open current hire
+              </Link>
             </div>
           ) : null}
         </div>
+      </section>
 
-        <div className="hidden shrink-0 items-center gap-2 sm:flex">
-          <StatusChip status={vehicle.status} />
-          <span className="max-w-[8rem] truncate text-xs font-medium text-rph-fg-muted lg:max-w-[12rem]">
-            {vehicle.subcompany_name ?? "—"}
-          </span>
-        </div>
-      </div>
-
-      {/* Row 2: section pills — full-width scroll on all sizes */}
       <nav
-        className="-mx-3 mt-2 overflow-x-auto overscroll-x-contain px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="-mx-1 overflow-x-auto overscroll-x-contain px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         aria-label="Vehicle sections"
       >
-        <div className="flex w-max gap-1 pb-0.5">
+        <div className="flex w-max gap-1 border-b border-rph-border pb-px">
           {items.map((item) => {
             const active = isVehicleWorkspaceNavItemActive(pathname, item);
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className={active ? "rph-pill-active" : "rph-pill"}
+                className={
+                  active
+                    ? "inline-flex shrink-0 items-center border-b-2 border-sky-600 px-3 py-2.5 text-sm font-semibold text-sky-700 dark:border-sky-400 dark:text-sky-300"
+                    : "inline-flex shrink-0 items-center border-b-2 border-transparent px-3 py-2.5 text-sm font-medium text-rph-fg-muted transition-colors hover:text-rph-fg"
+                }
               >
                 {item.label}
               </Link>
@@ -183,19 +211,11 @@ export function VehicleWorkspaceTopBar({
       </nav>
 
       {isHistoricVehicleWorkspaceAccess(shell.access) ? (
-        <p className="rph-alert-warn mt-2 text-xs">
+        <p className="rph-alert-warn text-xs">
           Historic read-only — transferred to {shell.access.transfer.to_name ?? "another company"} on{" "}
           {formatUkDateTime(shell.access.transfer.transferred_at)}.
         </p>
       ) : null}
-
-      {/* Mobile-only status / subcompany under nav */}
-      <div className="mt-2 flex items-center gap-2 sm:hidden">
-        <StatusChip status={vehicle.status} />
-        <span className="min-w-0 truncate text-xs font-medium text-rph-fg-muted">
-          {vehicle.subcompany_name ?? "—"}
-        </span>
-      </div>
     </div>
   );
 }
@@ -205,26 +225,5 @@ function IconArrowLeft({ className }: { className?: string }) {
     <svg className={className} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden>
       <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
     </svg>
-  );
-}
-
-function StatusChip({ status }: { status: VehicleStatus }) {
-  const tone =
-    status === "available"
-      ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200 dark:ring-emerald-800/60"
-      : status === "on_rent" || status === "reserved"
-        ? "bg-sky-50 text-sky-800 dark:bg-sky-950/60 dark:text-sky-200 dark:ring-sky-800/60"
-        : status === "repair" || status === "accident_claim"
-          ? "bg-amber-50 text-amber-900 dark:bg-amber-950/50 dark:text-amber-100 dark:ring-amber-800/50"
-          : status === "sold"
-            ? "bg-rph-chrome text-rph-fg-muted dark:ring-rph-border-strong"
-            : "bg-rph-chrome text-rph-fg-secondary dark:ring-rph-border-strong";
-
-  return (
-    <span
-      className={`inline-flex shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide dark:ring-1 ${tone}`}
-    >
-      {VEHICLE_STATUS_LABELS[status]}
-    </span>
   );
 }

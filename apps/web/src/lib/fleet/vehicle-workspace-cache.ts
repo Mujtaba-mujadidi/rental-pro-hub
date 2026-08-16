@@ -1,4 +1,5 @@
 import { unstable_cache, revalidateTag } from "next/cache";
+import { HIRE_VEHICLE_BLOCKING_STATUSES, type HireGroupStatus } from "@/lib/fleet/hire-types";
 import {
   missingRequiredDocTypes,
   type VehicleDocumentRow,
@@ -14,6 +15,7 @@ import {
   mapVehicleTransferOpenRequirements,
   type VehicleTransferOpenRequirement,
 } from "@/lib/fleet/vehicle-transfer-document-requirements";
+import type { VehicleWorkspaceOpenHire } from "@/lib/fleet/vehicle-workspace-shell-types";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export type VehicleWorkspaceShellData = {
@@ -24,6 +26,7 @@ export type VehicleWorkspaceShellData = {
   transferDocumentRequirements: VehicleTransferOpenRequirement[];
   subcompanies: { id: string; name: string | null; is_primary: boolean }[];
   notifySettings: CompanyNotificationSettings;
+  currentOpenHire: VehicleWorkspaceOpenHire | null;
 };
 
 export type VehicleSwitcherOption = {
@@ -97,6 +100,7 @@ async function fetchVehicleWorkspaceShellData(
     { data: transferRequirements, error: trErr },
     { data: subs, error: sErr },
     { data: company },
+    { data: openHire },
   ] = await Promise.all([
     admin
       .from("vehicles")
@@ -111,7 +115,7 @@ async function fetchVehicleWorkspaceShellData(
       .select("id, vehicle_id, from_subcompany_id, to_subcompany_id, transferred_at, notes")
       .eq("vehicle_id", id)
       .order("transferred_at", { ascending: false })
-      .limit(20),
+      .limit(100),
     admin
       .from("vehicle_transfer_document_requirements")
       .select("id, document_kind, vehicle_transfer_id, hire_group_id, agreement_id, inspection_id")
@@ -129,6 +133,14 @@ async function fetchVehicleWorkspaceShellData(
         "notify_mot_days_before, notify_tax_days_before, notify_phv_licence_days_before, notify_contract_expiry_days_before, notify_insurance_days_before",
       )
       .eq("id", parentCompanyId)
+      .maybeSingle(),
+    admin
+      .from("vehicle_hire_groups")
+      .select("id, status")
+      .eq("vehicle_id", id)
+      .in("status", [...HIRE_VEHICLE_BLOCKING_STATUSES])
+      .order("created_at", { ascending: false })
+      .limit(1)
       .maybeSingle(),
   ]);
 
@@ -159,12 +171,17 @@ async function fetchVehicleWorkspaceShellData(
 
   const notifySettings: CompanyNotificationSettings = parseCompanyNotificationSettings(company ?? undefined);
 
+  const currentOpenHire: VehicleWorkspaceOpenHire | null = openHire?.id
+    ? { id: openHire.id as string, status: openHire.status as HireGroupStatus }
+    : null;
+
   return {
     vehicle: {
       ...(rest as Omit<VehicleRow, "subcompany_name" | "missing_docs">),
       status: rest.status as VehicleStatus,
       mot_doc_attention_at: (rest as { mot_doc_attention_at?: string | null }).mot_doc_attention_at ?? null,
       phv_doc_attention_at: (rest as { phv_doc_attention_at?: string | null }).phv_doc_attention_at ?? null,
+      archived_at: (rest as { archived_at?: string | null }).archived_at ?? null,
       subcompany_name: subName ?? null,
       missing_docs: missingRequiredDocTypes((docs ?? []).map((d) => d.doc_type)),
     },
@@ -182,6 +199,7 @@ async function fetchVehicleWorkspaceShellData(
       is_primary: Boolean(s.is_primary),
     })),
     notifySettings,
+    currentOpenHire,
   };
 }
 
@@ -195,7 +213,7 @@ export function getCachedVehicleWorkspaceShellData(
 
   const cached = unstable_cache(
     () => fetchVehicleWorkspaceShellData(id, parentCompanyId),
-    ["vehicle-workspace-shell-v4", id, parentCompanyId],
+    ["vehicle-workspace-shell-v5", id, parentCompanyId],
     { revalidate: 30, tags: [vehicleWorkspaceTag(id), vehicleSwitcherTag(parentCompanyId)] },
   );
   return cached();
@@ -207,6 +225,7 @@ async function fetchVehicleSwitcherList(companyId: string): Promise<VehicleSwitc
     .from("vehicles")
     .select("id, vrm, make, model, status")
     .eq("parent_company_id", companyId)
+    .is("archived_at", null)
     .order("vrm", { ascending: true });
   if (error) return [];
 

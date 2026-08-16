@@ -9,6 +9,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import {
+  loadVehicleOverviewSummaryAction,
+  type VehicleOverviewSummary,
+} from "@/app/actions/rental-vehicle-overview";
 import { loadVehicleDetailAction } from "@/app/actions/rental-vehicles";
 import {
   loadVehicleFinancialsAction,
@@ -31,6 +35,7 @@ type VehicleWorkspaceContextValue = {
   shell: VehicleWorkspaceShell;
   financials: TabCache<VehicleFinancialsPageData>;
   maintenance: TabCache<VehicleMaintenancePageData>;
+  overview: TabCache<VehicleOverviewSummary>;
   refreshShell: () => Promise<boolean>;
   ensureFinancials: () => Promise<VehicleFinancialsPageData | null>;
   reloadFinancials: () => Promise<VehicleFinancialsPageData | null>;
@@ -38,6 +43,9 @@ type VehicleWorkspaceContextValue = {
   ensureMaintenance: () => Promise<VehicleMaintenancePageData | null>;
   reloadMaintenance: () => Promise<VehicleMaintenancePageData | null>;
   invalidateMaintenance: () => void;
+  ensureOverview: () => Promise<VehicleOverviewSummary | null>;
+  reloadOverview: () => Promise<VehicleOverviewSummary | null>;
+  invalidateOverview: () => void;
 };
 
 const VehicleWorkspaceContext = createContext<VehicleWorkspaceContextValue | null>(null);
@@ -58,6 +66,7 @@ function shellFromResult(
     transferDocumentRequirements,
     subcompanies,
     notifySettings,
+    currentOpenHire,
     access,
     canManage,
     canDelete,
@@ -70,6 +79,7 @@ function shellFromResult(
     transferDocumentRequirements,
     subcompanies,
     notifySettings,
+    currentOpenHire,
     access,
     canManage,
     canDelete,
@@ -88,15 +98,20 @@ export function VehicleWorkspaceProvider({
   const [shell, setShell] = useState(initialShell);
   const [financials, setFinancials] = useState<TabCache<VehicleFinancialsPageData>>(emptyTabCache);
   const [maintenance, setMaintenance] = useState<TabCache<VehicleMaintenancePageData>>(emptyTabCache);
+  const [overview, setOverview] = useState<TabCache<VehicleOverviewSummary>>(emptyTabCache);
 
   const financialsInflight = useRef<Promise<VehicleFinancialsPageData | null> | null>(null);
   const maintenanceInflight = useRef<Promise<VehicleMaintenancePageData | null> | null>(null);
+  const overviewInflight = useRef<Promise<VehicleOverviewSummary | null> | null>(null);
 
   const refreshShell = useCallback(async () => {
     const res = await loadVehicleDetailAction(vehicleId);
     const next = shellFromResult(res);
     if (!next) return false;
     setShell(next);
+    // Hire status often changes with shell-affecting mutations — drop stale overview.
+    overviewInflight.current = null;
+    setOverview(emptyTabCache());
     return true;
   }, [vehicleId]);
 
@@ -160,12 +175,43 @@ export function VehicleWorkspaceProvider({
     [vehicleId, maintenance.data],
   );
 
+  const loadOverview = useCallback(
+    async (force: boolean) => {
+      if (overview.data && !force) return overview.data;
+      if (overviewInflight.current && !force) return overviewInflight.current;
+
+      setOverview((prev) => ({ ...prev, loading: true, error: null }));
+      const promise = loadVehicleOverviewSummaryAction(vehicleId)
+        .then((res) => {
+          if (!res.ok) {
+            setOverview({ data: null, loading: false, error: res.error });
+            return null;
+          }
+          setOverview({ data: res.data, loading: false, error: null });
+          return res.data;
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : "Could not load overview.";
+          setOverview({ data: null, loading: false, error: message });
+          return null;
+        })
+        .finally(() => {
+          overviewInflight.current = null;
+        });
+
+      overviewInflight.current = promise;
+      return promise;
+    },
+    [vehicleId, overview.data],
+  );
+
   const value = useMemo<VehicleWorkspaceContextValue>(
     () => ({
       vehicleId,
       shell,
       financials,
       maintenance,
+      overview,
       refreshShell,
       ensureFinancials: () => loadFinancials(false),
       reloadFinancials: () => loadFinancials(true),
@@ -179,8 +225,14 @@ export function VehicleWorkspaceProvider({
         maintenanceInflight.current = null;
         setMaintenance(emptyTabCache());
       },
+      ensureOverview: () => loadOverview(false),
+      reloadOverview: () => loadOverview(true),
+      invalidateOverview: () => {
+        overviewInflight.current = null;
+        setOverview(emptyTabCache());
+      },
     }),
-    [vehicleId, shell, financials, maintenance, refreshShell, loadFinancials, loadMaintenance],
+    [vehicleId, shell, financials, maintenance, overview, refreshShell, loadFinancials, loadMaintenance, loadOverview],
   );
 
   return <VehicleWorkspaceContext.Provider value={value}>{children}</VehicleWorkspaceContext.Provider>;

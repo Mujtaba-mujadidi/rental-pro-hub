@@ -11,6 +11,7 @@ type Props = {
   notifyDays: number;
   readOnlyHistoric?: boolean;
   historicSubcompanyName?: string | null;
+  onHireListChanged?: () => void;
 };
 
 export function VehicleRentalsTableView({
@@ -18,6 +19,7 @@ export function VehicleRentalsTableView({
   notifyDays: _notifyDays,
   readOnlyHistoric = false,
   historicSubcompanyName = null,
+  onHireListChanged,
 }: Props) {
   const [pending, startTransition] = useTransition();
   const [rows, setRows] = useState<HireContractTableRow[]>([]);
@@ -26,24 +28,28 @@ export function VehicleRentalsTableView({
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editDraftId, setEditDraftId] = useState<string | null>(null);
 
-  const reload = useCallback(() => {
-    startTransition(async () => {
-      const res = await listHireContractsAction("", vehicleId);
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      setRows(res.rows);
-      setCanWrite(res.canWrite);
-      setError(null);
-    });
-  }, [vehicleId]);
+  const reload = useCallback(
+    (opts?: { syncWorkspace?: boolean }) => {
+      startTransition(async () => {
+        const res = await listHireContractsAction("", vehicleId);
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
+        setRows(res.rows);
+        setCanWrite(res.canWrite);
+        setError(null);
+        if (opts?.syncWorkspace) onHireListChanged?.();
+      });
+    },
+    [vehicleId, onHireListChanged],
+  );
 
   useEffect(() => {
     reload();
   }, [reload]);
 
-  useHireContractsRealtime(reload, { vehicleId });
+  useHireContractsRealtime(() => reload({ syncWorkspace: true }), { vehicleId });
 
   return (
     <div className="space-y-4">
@@ -76,7 +82,7 @@ export function VehicleRentalsTableView({
           setEditDraftId(id);
           setWizardOpen(true);
         }}
-        onRefresh={reload}
+        onRefresh={() => reload({ syncWorkspace: true })}
       />
       <HireContractWizardModal
         open={wizardOpen}
@@ -85,9 +91,9 @@ export function VehicleRentalsTableView({
         onClose={() => {
           setWizardOpen(false);
           setEditDraftId(null);
-          reload();
+          reload({ syncWorkspace: true });
         }}
-        onSaved={reload}
+        onSaved={() => reload({ syncWorkspace: true })}
       />
     </div>
   );

@@ -11,6 +11,7 @@ import { loadDraft } from "@/lib/forms/form-draft";
 import {
   vehicleExpiryAttentionItems,
   vehicleExpiryTextClass,
+  vehicleHasExpiryAttention,
   worstVehicleExpiryTone,
 } from "@/lib/fleet/vehicle-expiry-attention";
 import { vehicleWorkspaceHref } from "@/lib/fleet/vehicle-workspace-nav";
@@ -20,10 +21,15 @@ import {
   VEHICLE_STATUSES,
   vehicleStatusPillClass,
 } from "@/lib/fleet/vehicles";
-import {
-  vehicleNextComplianceLabel,
-} from "@/lib/rental/subcompany-fleet-display";
+import { vehicleListNextExpiryDisplay } from "@/lib/rental/subcompany-fleet-display";
+import { RphOpenLink } from "@/components/ui/rph-open-link";
+import { RphTablePaginationBar } from "@/components/ui/rph-table-pagination-bar";
 import { useSubcompanyWorkspace } from "./subcompany-workspace-provider";
+
+function fleetStatusLabel(status: keyof typeof VEHICLE_STATUS_LABELS): string {
+  if (status === "on_rent") return "On hire";
+  return VEHICLE_STATUS_LABELS[status];
+}
 
 export function SubcompanyVehiclesClient({
   pageData,
@@ -38,7 +44,9 @@ export function SubcompanyVehiclesClient({
   const lockedSubs = subcompanies.filter((s) => s.id === subcompanyId);
 
   const [filter, setFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [listFilter, setListFilter] = useState("all");
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pageSize, setPageSize] = useState(25);
   const [createOpen, setCreateOpen] = useState(false);
   const [docUploadNotice, setDocUploadNotice] = useState<AddVehicleCreatedResult | null>(null);
   const [draftHint, setDraftHint] = useState<{
@@ -66,10 +74,18 @@ export function SubcompanyVehiclesClient({
     refreshDraftHint();
   }, [createOpen]);
 
+  useEffect(() => {
+    setPageIndex(0);
+  }, [filter, listFilter]);
+
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return vehicles.filter((v) => {
-      if (statusFilter !== "all" && v.status !== statusFilter) return false;
+      if (listFilter === "attention") {
+        if (!vehicleHasExpiryAttention(v, notifySettings)) return false;
+      } else if (listFilter !== "all" && v.status !== listFilter) {
+        return false;
+      }
       if (!q) return true;
       return (
         v.vrm.toLowerCase().includes(q) ||
@@ -77,7 +93,37 @@ export function SubcompanyVehiclesClient({
         v.model.toLowerCase().includes(q)
       );
     });
-  }, [vehicles, filter, statusFilter]);
+  }, [vehicles, filter, listFilter, notifySettings]);
+
+  const total = filtered.length;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const safePageIndex = Math.min(pageIndex, pageCount - 1);
+
+  useEffect(() => {
+    setPageIndex((current) => Math.min(current, Math.max(0, pageCount - 1)));
+  }, [pageCount]);
+
+  const paginated = useMemo(
+    () => filtered.slice(safePageIndex * pageSize, safePageIndex * pageSize + pageSize),
+    [filtered, safePageIndex, pageSize],
+  );
+  const fromRow = total === 0 ? 0 : safePageIndex * pageSize + 1;
+  const toRow = Math.min((safePageIndex + 1) * pageSize, total);
+
+  const paginationProps = {
+    pageIndex: safePageIndex,
+    pageCount,
+    pageSize,
+    total,
+    fromRow,
+    toRow,
+    onPrevious: () => setPageIndex((p) => Math.max(0, p - 1)),
+    onNext: () => setPageIndex((p) => Math.min(pageCount - 1, p + 1)),
+    onPageSizeChange: (size: number) => {
+      setPageSize(size);
+      setPageIndex(0);
+    },
+  };
 
   const attentionCount = useMemo(
     () => vehicles.filter((v) => vehicleExpiryAttentionItems(v, notifySettings).length > 0).length,
@@ -174,15 +220,16 @@ export function SubcompanyVehiclesClient({
             onChange={(e) => setFilter(e.target.value)}
             aria-label="Search this fleet"
           />
-          <div className="w-full min-w-0 sm:w-[12rem] sm:shrink-0">
+          <div className="w-full min-w-0 sm:w-[14rem] sm:shrink-0">
             <RphSelect
-              value={statusFilter}
-              aria-label="Filter by status"
+              value={listFilter}
+              aria-label="Filter vehicles"
               options={[
-                { value: "all", label: "All statuses" },
-                ...VEHICLE_STATUSES.map((st) => ({ value: st, label: VEHICLE_STATUS_LABELS[st] })),
+                { value: "all", label: "All vehicles" },
+                { value: "attention", label: "Needs attention" },
+                ...VEHICLE_STATUSES.map((st) => ({ value: st, label: fleetStatusLabel(st) })),
               ]}
-              onValueChange={setStatusFilter}
+              onValueChange={setListFilter}
             />
           </div>
         </div>
@@ -195,104 +242,97 @@ export function SubcompanyVehiclesClient({
         ) : !filtered.length ? (
           <p className="px-4 py-8 text-sm text-rph-fg-muted sm:px-5">No vehicles match your filters.</p>
         ) : (
-          <div className="rph-table-responsive subco-fleet-table">
-            <table className="min-w-full divide-y divide-rph-border text-sm">
-              <thead className="bg-rph-chrome text-left text-xs uppercase tracking-wide text-rph-fg-muted">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">Vehicle</th>
-                  <th className="px-4 py-3 font-semibold">Status</th>
-                  <th className="px-4 py-3 font-semibold">Documents</th>
-                  <th className="px-4 py-3 font-semibold">Next compliance</th>
-                  <th className="px-4 py-3 font-semibold">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-rph-border">
-                {filtered.map((v) => {
-                  const missing = v.missing_docs ?? [];
-                  const workspaceHref = vehicleWorkspaceHref(v.id);
-                  const detailsHref = vehicleWorkspaceHref(v.id, "details");
-                  const attention = vehicleExpiryAttentionItems(v, notifySettings);
-                  const expiryTone = worstVehicleExpiryTone(attention);
-                  const nextCompliance = vehicleNextComplianceLabel(v);
-                  const motItem = attention.find((i) => i.kind === "mot");
-                  return (
-                    <tr
-                      key={v.id}
-                      className={`bg-rph-raised ${
-                        expiryTone === "expired"
-                          ? "bg-red-50/70 dark:bg-red-950/20"
-                          : expiryTone === "expiring"
-                            ? "bg-amber-50/70 dark:bg-amber-950/20"
-                            : ""
-                      }`}
-                    >
-                      <td data-label="Vehicle" className="rph-table-primary px-4 py-3">
-                        <Link
-                          href={workspaceHref}
-                          className="block hover:underline"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          <span className="font-mono font-semibold text-rph-fg">{v.vrm}</span>
-                          <span className="mt-0.5 block text-xs text-rph-fg-muted">
-                            {v.make} {v.model}
-                          </span>
-                        </Link>
-                      </td>
-                      <td data-label="Status" className="px-4 py-3">
-                        <span className={vehicleStatusPillClass(v.status)}>
-                          {VEHICLE_STATUS_LABELS[v.status]}
-                        </span>
-                      </td>
-                      <td data-label="Documents" className="px-4 py-3">
-                        {missing.length ? (
+          <>
+            <div className="rph-table-responsive subco-fleet-table">
+              <table className="min-w-full divide-y divide-rph-border text-sm">
+                <thead className="bg-rph-chrome text-left text-xs uppercase tracking-wide text-rph-fg-muted">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Vehicle</th>
+                    <th className="px-4 py-3 font-semibold">Status</th>
+                    <th className="px-4 py-3 font-semibold">Documents</th>
+                    <th className="px-4 py-3 font-semibold">Next expiry</th>
+                    <th className="px-4 py-3 font-semibold">
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-rph-border">
+                  {paginated.map((v) => {
+                    const missing = v.missing_docs ?? [];
+                    const workspaceHref = vehicleWorkspaceHref(v.id);
+                    const detailsHref = vehicleWorkspaceHref(v.id, "details");
+                    const attention = vehicleExpiryAttentionItems(v, notifySettings);
+                    const expiryTone = worstVehicleExpiryTone(attention);
+                    const nextExpiry = vehicleListNextExpiryDisplay(v, notifySettings);
+                    return (
+                      <tr
+                        key={v.id}
+                        className={`bg-rph-raised ${
+                          expiryTone === "expired"
+                            ? "bg-red-50/70 dark:bg-red-950/20"
+                            : expiryTone === "expiring"
+                              ? "bg-amber-50/70 dark:bg-amber-950/20"
+                              : ""
+                        }`}
+                      >
+                        <td data-label="Vehicle" className="rph-table-primary px-4 py-3">
                           <Link
-                            href={`${detailsHref}#documents`}
-                            className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100"
-                            title={missing.map((t) => VEHICLE_DOC_TYPE_LABELS[t]).join(", ")}
+                            href={workspaceHref}
+                            className="block hover:underline"
                             target="_blank"
                             rel="noopener noreferrer"
                           >
-                            {missing.length === 1
-                              ? `Missing ${VEHICLE_DOC_TYPE_LABELS[missing[0]!]}`
-                              : `${missing.length} missing`}
+                            <span className="font-semibold text-rph-fg">{v.vrm}</span>
+                            <span className="mt-0.5 block text-xs text-rph-fg-muted">
+                              {v.make} {v.model}
+                            </span>
                           </Link>
-                        ) : (
-                          <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
-                            Complete
+                        </td>
+                        <td data-label="Status" className="px-4 py-3">
+                          <span className={vehicleStatusPillClass(v.status)}>
+                            {fleetStatusLabel(v.status)}
                           </span>
-                        )}
-                      </td>
-                      <td data-label="Next compliance" className="px-4 py-3">
-                        <span
-                          className={
-                            attention.length
-                              ? vehicleExpiryTextClass(motItem?.tone ?? expiryTone)
-                              : "text-rph-fg-secondary"
-                          }
-                        >
-                          {nextCompliance}
-                        </span>
-                      </td>
-                      <td data-label="" className="rph-table-actions px-4 py-3 text-right">
-                        <Link
-                          href={workspaceHref}
-                          className="rph-btn-ghost h-9 min-w-0 px-3 text-sm"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          aria-label={`Open ${v.vrm}`}
-                        >
-                          Open
-                        </Link>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                        <td data-label="Documents" className="px-4 py-3">
+                          {missing.length ? (
+                            <Link
+                              href={`${detailsHref}#documents`}
+                              className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100"
+                              title={missing.map((t) => VEHICLE_DOC_TYPE_LABELS[t]).join(", ")}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {missing.length === 1
+                                ? `Missing ${VEHICLE_DOC_TYPE_LABELS[missing[0]!]}`
+                                : `${missing.length} missing`}
+                            </Link>
+                          ) : (
+                            <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+                              Complete
+                            </span>
+                          )}
+                        </td>
+                        <td data-label="Next expiry" className="px-4 py-3">
+                          <span className={vehicleExpiryTextClass(nextExpiry.tone)}>{nextExpiry.label}</span>
+                        </td>
+                        <td data-label="" className="rph-table-actions px-4 py-3 text-right">
+                          <RphOpenLink
+                            href={workspaceHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`Open ${v.vrm}`}
+                          >
+                            Open
+                          </RphOpenLink>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <RphTablePaginationBar {...paginationProps} />
+          </>
         )}
       </section>
 
@@ -342,14 +382,9 @@ export function SubcompanyVehiclesClient({
                         {formatUkDateTime(row.transferredAt)}
                       </td>
                       <td data-label="" className="rph-table-actions px-4 py-3 text-right">
-                        <Link
-                          href={href}
-                          className="rph-btn-ghost h-9 min-w-0 px-3 text-sm"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
+                        <RphOpenLink href={href} target="_blank" rel="noopener noreferrer" aria-label={`Historic view ${row.vrm}`}>
                           Historic view
-                        </Link>
+                        </RphOpenLink>
                       </td>
                     </tr>
                   );

@@ -406,6 +406,41 @@ async function loadVehicleHireIncomeContext(vehicleId: string): Promise<
   return { ok: true, scheduleRows, balancePayments, driverChargeLineItems, groupContextByGroupId };
 }
 
+export async function loadVehiclePurchaseDateAction(
+  vehicleId: string,
+): Promise<{ ok: true; occurredOn: string | null } | { ok: false; error: string }> {
+  const { profile } = await requireRentalCompanyArea();
+  if (!canReadMaintenance(profile)) {
+    return { ok: false, error: "You do not have permission to view purchase details." };
+  }
+  const companyId = profile.company_id?.trim();
+  if (!companyId) return { ok: false, error: "No active company." };
+  const id = vehicleId.trim();
+  if (!id) return { ok: false, error: "Missing vehicle." };
+
+  const supabase = await createClient();
+  const { data: vehicle, error: vErr } = await supabase
+    .from("vehicles")
+    .select("id")
+    .eq("id", id)
+    .eq("parent_company_id", companyId)
+    .maybeSingle();
+  if (vErr) return { ok: false, error: vErr.message };
+  if (!vehicle) return { ok: false, error: "Vehicle not found." };
+
+  const { data, error } = await supabase
+    .from("vehicle_ownership_events")
+    .select("occurred_on")
+    .eq("vehicle_id", id)
+    .eq("event_type", "purchase")
+    .order("occurred_on", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+
+  return { ok: true, occurredOn: (data?.occurred_on as string | null) ?? null };
+}
+
 export async function loadVehicleFinancialsAction(
   vehicleId: string,
 ): Promise<{ ok: true; data: VehicleFinancialsPageData } | { ok: false; error: string }> {

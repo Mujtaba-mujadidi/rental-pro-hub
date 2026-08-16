@@ -2,21 +2,23 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState, useTransition } from "react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   deleteVehicleAction,
   deleteVehicleDocumentAction,
   updateVehicleAction,
   uploadVehicleDocumentAction,
 } from "@/app/actions/rental-vehicles";
+import { loadVehiclePurchaseDateAction } from "@/app/actions/rental-vehicle-financials";
 import { VehicleSubcompanyTransferModal } from "@/app/(main)/rental/vehicles/[id]/details/vehicle-subcompany-transfer-modal";
 import { useVehicleWorkspace } from "@/app/(main)/rental/vehicles/[id]/vehicle-workspace-provider";
 import { ActionStatusOverlay, type ActionStatusOverlayState } from "@/components/action-status-overlay";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
-import { RphSelect } from "@/components/forms/rph-select";
-import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
+import { formatUkDate, formatUkDateTextLong, formatUkDateTime, formatUkDateTimeText } from "@/lib/datetime/uk";
 import {
+  assessVehicleExpiries,
   vehicleExpiryAttentionItems,
   worstVehicleExpiryTone,
 } from "@/lib/fleet/vehicle-expiry-attention";
@@ -26,6 +28,7 @@ import {
   VEHICLE_STATUS_LABELS,
   VEHICLE_STATUSES,
   isPhvTaxiLicencePaperDocType,
+  vehicleStatusPillClass,
   type RequiredVehicleDocType,
   type VehicleDocumentRow,
   type VehicleRow,
@@ -46,18 +49,71 @@ const btnPrimary = "rph-btn-primary";
 const btnContinue =
   "flex h-11 min-w-[7rem] items-center justify-center rounded-lg bg-rph-rail px-4 text-sm font-semibold text-white shadow-sm hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer";
 const btnGhost = "rph-btn-ghost";
-const btnGhostTall =
-  "flex h-11 shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-raised px-4 text-sm font-medium text-rph-fg-secondary hover:bg-rph-chrome disabled:opacity-50";
-const btnDangerTall =
-  "flex h-11 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300";
-const btnCardEdit =
-  "inline-flex h-7 shrink-0 items-center rounded-md border border-rph-border bg-rph-raised px-2 text-xs font-medium text-rph-fg-secondary hover:bg-rph-chrome disabled:opacity-50";
 const btnDocGhost =
   "inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-raised px-2.5 text-xs font-medium text-rph-fg-secondary hover:bg-rph-chrome disabled:opacity-50";
 const btnDocPrimary =
   "inline-flex h-8 shrink-0 items-center justify-center rounded-lg bg-rph-rail px-2.5 text-xs font-semibold text-white hover:bg-rph-rail-hover disabled:opacity-50 dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer";
 
-type EditSection = "specs" | "registration" | "notes";
+const cardMenuTriggerClass =
+  "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-raised text-rph-fg-secondary transition-colors hover:bg-rph-chrome data-[state=open]:bg-rph-chrome disabled:opacity-50";
+const cardMenuContentClass =
+  "z-[200] min-w-[12.5rem] overflow-hidden rounded-lg border border-rph-border bg-rph-elevated py-1 shadow-lg";
+const cardMenuItemClass =
+  "flex cursor-default select-none items-center px-3 py-2 text-sm text-rph-fg outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-rph-chrome";
+const cardMenuDangerItemClass = `${cardMenuItemClass} text-red-700 dark:text-red-300`;
+
+function IconKebabVertical() {
+  return (
+    <svg width={18} height={18} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <circle cx="12" cy="6" r="1.75" />
+      <circle cx="12" cy="12" r="1.75" />
+      <circle cx="12" cy="18" r="1.75" />
+    </svg>
+  );
+}
+
+type CardMenuItem = {
+  label: string;
+  onSelect: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+};
+
+function CardActionsMenu({
+  label,
+  disabled,
+  items,
+}: {
+  label: string;
+  disabled?: boolean;
+  items: CardMenuItem[];
+}) {
+  if (!items.length) return null;
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button type="button" className={cardMenuTriggerClass} disabled={disabled} aria-label={label} title={label}>
+          <IconKebabVertical />
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content side="bottom" align="end" sideOffset={6} collisionPadding={12} className={cardMenuContentClass}>
+          {items.map((item) => (
+            <DropdownMenu.Item
+              key={item.label}
+              className={item.danger ? cardMenuDangerItemClass : cardMenuItemClass}
+              disabled={item.disabled}
+              onSelect={() => item.onSelect()}
+            >
+              {item.label}
+            </DropdownMenu.Item>
+          ))}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+type EditSection = "specs" | "registration" | "doc_expiry" | "notes";
 
 type SubOpt = { id: string; name: string | null; is_primary: boolean };
 
@@ -140,36 +196,83 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function SpecCell({ label, value }: { label: string; value: React.ReactNode }) {
+function fleetStatusLabel(status: VehicleStatus): string {
+  if (status === "on_rent") return "On hire";
+  return VEHICLE_STATUS_LABELS[status];
+}
+
+function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="min-w-0">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-rph-fg-muted">{label}</p>
-      <p className="mt-0.5 truncate text-sm font-semibold text-rph-fg">{value || "—"}</p>
+    <div className="flex items-baseline justify-between gap-3 border-b border-rph-border py-2.5 last:border-b-0">
+      <dt className="shrink-0 text-sm text-rph-fg-muted">{label}</dt>
+      <dd className="min-w-0 text-right text-sm font-semibold text-rph-fg">{value || "—"}</dd>
     </div>
   );
 }
 
-function RegRow({ label, value, hint }: { label: string; value: React.ReactNode; hint?: React.ReactNode }) {
+function SectionKicker({ children }: { children: React.ReactNode }) {
+  return <p className="company-dash-section-label">{children}</p>;
+}
+
+function TransferTimelineIcon() {
   return (
-    <div className="border-b border-rph-border py-2.5 last:border-b-0">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-rph-fg-muted">{label}</p>
-      <p className="mt-0.5 text-sm font-semibold text-rph-fg">{value || "—"}</p>
-      {hint ? <p className="mt-0.5 text-xs text-rph-fg-muted">{hint}</p> : null}
-    </div>
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M7 16V4M7 4L3 8M7 4l4 4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M17 8v12M17 20l4-4M17 20l-4-4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
-function statusBadgeClass(status: VehicleStatus): string {
-  if (status === "available") {
-    return "bg-emerald-600 text-white";
+function requiredDocTitle(docType: RequiredVehicleDocType): string {
+  if (docType === "mot") return "MOT certificate";
+  if (docType === "logbook") return "V5C logbook";
+  return "PHV vehicle licence";
+}
+
+function docCardMeta(
+  vehicle: VehicleRow,
+  docType: RequiredVehicleDocType,
+  onFile: VehicleDocumentRow | undefined,
+  notifySettings: CompanyNotificationSettings,
+): { detail: string; badge: string; ok: boolean } {
+  if (docType === "mot") {
+    const mot = assessVehicleExpiries(vehicle, notifySettings).find((i) => i.kind === "mot");
+    if (!onFile) return { detail: "Not uploaded yet", badge: "Missing", ok: false };
+    if (mot?.tone === "expired") {
+      return {
+        detail: mot.message,
+        badge: "Expired",
+        ok: false,
+      };
+    }
+    return {
+      detail: mot?.isoDate
+        ? `Expires ${formatUkDateTextLong(mot.isoDate)} · File uploaded`
+        : `Uploaded ${formatUkDateTextLong(onFile.created_at.slice(0, 10))}`,
+      badge: "Current",
+      ok: true,
+    };
   }
-  if (status === "on_rent" || status === "reserved") {
-    return "bg-sky-600 text-white";
+  if (docType === "logbook") {
+    if (!onFile) return { detail: "Not uploaded yet", badge: "Missing", ok: false };
+    return {
+      detail: `Uploaded ${formatUkDateTextLong(onFile.created_at.slice(0, 10))}`,
+      badge: "Complete",
+      ok: true,
+    };
   }
-  if (status === "repair" || status === "accident_claim") {
-    return "bg-amber-600 text-white";
+  const phv = assessVehicleExpiries(vehicle, notifySettings).find((i) => i.kind === "phv");
+  if (!onFile) return { detail: "Not uploaded yet", badge: "Missing", ok: false };
+  if (phv?.tone === "expired") {
+    return { detail: phv.message, badge: "Expired", ok: false };
   }
-  return "bg-rph-chrome text-rph-fg-secondary";
+  return {
+    detail: phv?.isoDate
+      ? `Expires ${formatUkDateTextLong(phv.isoDate)} · File uploaded`
+      : `Uploaded ${formatUkDateTextLong(onFile.created_at.slice(0, 10))}`,
+    badge: "Current",
+    ok: true,
+  };
 }
 
 function docOnFile(docs: VehicleDocumentRow[], docType: RequiredVehicleDocType): VehicleDocumentRow | undefined {
@@ -185,10 +288,6 @@ function isExpiryDocType(docType: RequiredVehicleDocType): docType is ExpiryDocT
 
 function defaultExpiryForDocType(vehicle: VehicleRow, docType: ExpiryDocType): string {
   return docType === "mot" ? vehicle.mot_expiry ?? "" : vehicle.phv_licence_expiry ?? "";
-}
-
-function miles(n: number | null | undefined): string {
-  return n != null ? `${n.toLocaleString("en-GB")} miles` : "—";
 }
 
 function yearFromDate(iso: string | null | undefined): string {
@@ -252,6 +351,7 @@ export function VehicleDetailsView({
   const busy = pending || saving;
   const [error, setError] = useState<string | null>(null);
   const [vehicle, setVehicle] = useState(initialVehicle);
+  const [purchaseDate, setPurchaseDate] = useState<string | null>(null);
   const [docs, setDocs] = useState(initialDocuments);
   const [documentHistory, setDocumentHistory] = useState(initialDocumentHistory);
   const [transfers, setTransfers] = useState(initialTransfers);
@@ -299,6 +399,19 @@ export function VehicleDetailsView({
     const ok = await refreshShell();
     if (!ok) setError("Could not refresh vehicle.");
   }, [refreshShell]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadVehiclePurchaseDateAction(vehicle.id).then((res) => {
+      if (cancelled) return;
+      if (res.ok) setPurchaseDate(res.occurredOn);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [vehicle.id]);
+
+  const isArchived = Boolean(vehicle.archived_at);
 
   function openEdit(section: EditSection) {
     setForm(fromVehicle(vehicle));
@@ -428,53 +541,7 @@ export function VehicleDetailsView({
   }
 
   return (
-    <div className="space-y-5">
-      {/* Hero header — matches compact fleet detail mock */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-2xl font-bold uppercase tracking-tight text-rph-fg sm:text-3xl">
-              {vehicle.make} {vehicle.model}
-            </h1>
-            <span
-              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusBadgeClass(vehicle.status)}`}
-            >
-              {VEHICLE_STATUS_LABELS[vehicle.status]}
-            </span>
-          </div>
-          <p className="mt-1 text-sm text-rph-fg-muted">
-            {yearFromDate(vehicle.first_reg_date)}
-            {" · "}
-            {(vehicle.colour || "—").toUpperCase()}
-            {" · "}
-            VRM: <span className="font-mono font-semibold text-rph-fg">{vehicle.vrm}</span>
-            {vehicle.subcompany_name ? (
-              <>
-                {" · "}
-                {vehicle.subcompany_name}
-              </>
-            ) : null}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {canManage ? (
-            <button
-              type="button"
-              className={btnGhostTall}
-              disabled={busy}
-              onClick={() => setTransferOpen(true)}
-            >
-              Transfer
-            </button>
-          ) : null}
-          {canDelete ? (
-            <button type="button" className={btnDangerTall} disabled={busy} onClick={() => setDeleteConfirm(true)}>
-              Delete
-            </button>
-          ) : null}
-        </div>
-      </div>
-
+    <div className="space-y-4 sm:space-y-5">
       {error && !editSection ? <p className="rph-alert-error text-sm">{error}</p> : null}
 
       {readOnlyHistoric && historicTransfer ? (
@@ -490,337 +557,439 @@ export function VehicleDetailsView({
 
       {!readOnlyHistoric ? <VehicleExpiryAlert items={expiryAttention} tone={expiryTone} /> : null}
 
-      <div className="grid gap-4 xl:grid-cols-12">
-        <section className="rph-card flex flex-col p-4 sm:p-5 xl:col-span-5">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Specifications</h2>
-            {canManage ? (
-              <button type="button" className={btnCardEdit} disabled={busy} onClick={() => openEdit("specs")}>
-                Edit
-              </button>
-            ) : null}
-          </div>
-          <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-4">
-            <SpecCell label="Make" value={vehicle.make.toUpperCase()} />
-            <SpecCell label="Model" value={vehicle.model.toUpperCase()} />
-            <SpecCell label="Year" value={yearFromDate(vehicle.first_reg_date)} />
-            <SpecCell label="Colour" value={(vehicle.colour || "—").toUpperCase()} />
-            <SpecCell label="Fuel type" value={(vehicle.fuel_type || "—").toUpperCase()} />
-            <SpecCell label="Seats" value={vehicle.seats != null ? String(vehicle.seats) : "—"} />
-            <SpecCell
-              label="Engine CC"
-              value={vehicle.cc != null ? `${vehicle.cc.toLocaleString("en-GB")}cc` : "—"}
-            />
-            <SpecCell
-              label="Age limit"
-              value={
-                vehicle.vehicle_age_limit_years != null ? `${vehicle.vehicle_age_limit_years} years` : "—"
-              }
-            />
-          </div>
-          <div className="mt-auto border-t border-rph-border pt-4">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-rph-fg-muted">Mileage</p>
-            <p className="mt-1 text-xl font-bold text-rph-fg">{miles(vehicle.current_mileage)}</p>
-            {vehicle.next_service_mileage != null ? (
-              <p className="mt-0.5 text-xs text-rph-fg-muted">
-                Next service at {vehicle.next_service_mileage.toLocaleString("en-GB")} miles
-              </p>
-            ) : null}
-          </div>
-        </section>
+      {isArchived ? (
+        <div className="rph-alert-warn text-sm">
+          <p className="font-semibold">Archived vehicle</p>
+          <p className="mt-1">
+            Hidden from the active fleet list. Hire history and documents are kept. Use{" "}
+            <span className="font-medium">Sell vehicle</span> on Financials when the car is sold.
+          </p>
+        </div>
+      ) : null}
 
-        <section className="rph-card p-4 sm:p-5 xl:col-span-3">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Registration</h2>
-            {canManage ? (
-              <button type="button" className={btnCardEdit} disabled={busy} onClick={() => openEdit("registration")}>
-                Edit
-              </button>
-            ) : null}
-          </div>
-          <div className="mt-2">
-            <RegRow label="First registration" value={formatUkDate(vehicle.first_reg_date)} />
-            <RegRow label="UK registration" value={formatUkDate(vehicle.first_reg_uk_date)} />
-            <RegRow label="Tax expiry" value={formatUkDate(vehicle.tax_expiry)} />
-            <RegRow label="MOT expiry" value={formatUkDate(vehicle.mot_expiry)} />
-            <RegRow label="Service due" value={formatUkDate(vehicle.service_due_at)} />
-            <RegRow
-              label="PHV licence"
-              value={vehicle.phv_licence_no || "—"}
-              hint={
-                <>
-                  Expires {formatUkDate(vehicle.phv_licence_expiry)}
-                  {vehicle.licensing_authority_name ? ` · ${vehicle.licensing_authority_name}` : ""}
-                </>
-              }
-            />
-          </div>
-        </section>
-
-        <div className="flex flex-col gap-4 xl:col-span-4">
-          <section className="rph-card p-4 sm:p-5">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Ownership history</h2>
-            {!transfers.length ? (
-              <p className="mt-3 text-sm text-rph-fg-muted">No transfers recorded yet.</p>
-            ) : (
-              <ul className="mt-3 space-y-2.5">
-                {transfers.slice(0, 4).map((t) => (
-                  <li key={t.id} className="text-sm">
-                    <p className="font-medium text-rph-fg">
-                      {t.from_name ?? "—"} → {t.to_name ?? "—"}
-                    </p>
-                    <p className="rph-meta">{formatUkDateTime(t.transferred_at)}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section id="documents" className="rph-card scroll-mt-6 p-4 sm:p-5">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">
-              {readOnlyHistoric ? "Historic documents" : "Documents"}
-            </h2>
-              <div className="flex flex-wrap items-center justify-end gap-1.5">
-                {fleetTransferRequirements.length ? (
-                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-                    {fleetTransferRequirements.length} update{fleetTransferRequirements.length === 1 ? "" : "s"} required
-                  </span>
-                ) : null}
-                {missingDocs.length ? (
-                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-                    {missingDocs.length} missing
-                  </span>
-                ) : !fleetTransferRequirements.length ? (
-                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
-                    Complete
-                  </span>
-                ) : null}
-              </div>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <section className="rph-card p-4 sm:p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <SectionKicker>Vehicle record</SectionKicker>
+              <h2 className="mt-1 text-lg font-semibold text-rph-fg">Specifications</h2>
             </div>
+            {canManage && !isArchived ? (
+              <CardActionsMenu
+                label="Specifications actions"
+                disabled={busy}
+                items={[{ label: "Edit details", onSelect: () => openEdit("specs") }]}
+              />
+            ) : null}
+          </div>
+          <div className="mt-4 grid gap-x-8 sm:grid-cols-2">
+            <dl>
+              <DetailRow label="Registration" value={<span className="font-mono">{vehicle.vrm}</span>} />
+              <DetailRow label="Model" value={vehicle.model} />
+              <DetailRow label="Fuel type" value={vehicle.fuel_type || "—"} />
+              <DetailRow label="Year" value={yearFromDate(vehicle.first_reg_date)} />
+              <DetailRow label="PHV/Taxi licence no." value={vehicle.phv_licence_no || "—"} />
+            </dl>
+            <dl>
+              <DetailRow label="Make" value={vehicle.make} />
+              <DetailRow label="Colour" value={vehicle.colour || "—"} />
+              <DetailRow label="Seats" value={vehicle.seats != null ? String(vehicle.seats) : "—"} />
+              <DetailRow
+                label="Engine CC"
+                value={vehicle.cc != null ? `${vehicle.cc.toLocaleString("en-GB")} cc` : "—"}
+              />
+              <DetailRow label="Licensing authority" value={vehicle.licensing_authority_name || "—"} />
+            </dl>
+          </div>
+        </section>
+
+        <section className="rph-card p-4 sm:p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <SectionKicker>Registration</SectionKicker>
+              <h2 className="mt-1 text-lg font-semibold text-rph-fg">Ownership</h2>
+            </div>
+            <CardActionsMenu
+              label="Ownership actions"
+              disabled={busy}
+              items={
+                [
+                  ...(canManage && !isArchived
+                    ? [
+                        {
+                          label: "Edit registration",
+                          onSelect: () => openEdit("registration"),
+                        } satisfies CardMenuItem,
+                      ]
+                    : []),
+                  ...(canDelete && !isArchived && !readOnlyHistoric
+                    ? [
+                        {
+                          label: "Archive vehicle",
+                          onSelect: () => setDeleteConfirm(true),
+                          danger: true,
+                        } satisfies CardMenuItem,
+                      ]
+                    : []),
+                ] as CardMenuItem[]
+              }
+            />
+          </div>
+          <dl className="mt-4">
+            <DetailRow label="Subcompany" value={vehicle.subcompany_name ?? "—"} />
+            <DetailRow
+              label="Vehicle status"
+              value={
+                isArchived ? (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                    Archived
+                  </span>
+                ) : (
+                  <span className={vehicleStatusPillClass(vehicle.status)}>{fleetStatusLabel(vehicle.status)}</span>
+                )
+              }
+            />
+            <DetailRow label="First registered" value={formatUkDateTextLong(vehicle.first_reg_date)} />
+            <DetailRow label="First UK registration" value={formatUkDateTextLong(vehicle.first_reg_uk_date)} />
+            <DetailRow
+              label="Purchase date"
+              value={purchaseDate ? formatUkDateTextLong(purchaseDate) : "—"}
+            />
+          </dl>
+        </section>
+
+        <section className="rph-card flex max-h-[28rem] flex-col overflow-hidden p-0">
+          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-rph-border px-4 py-4 sm:px-5">
+            <div>
+              <SectionKicker>Moves</SectionKicker>
+              <h2 className="mt-1 text-lg font-semibold text-rph-fg">Transfer history</h2>
+            </div>
+            {canManage && !isArchived && !readOnlyHistoric ? (
+              <CardActionsMenu
+                label="Transfer actions"
+                disabled={busy}
+                items={[{ label: "Transfer", onSelect: () => setTransferOpen(true) }]}
+              />
+            ) : null}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain">
+            {transfers.length ? (
+              <ol className="hire-ws-activity-list">
+                {[...transfers]
+                  .sort((a, b) => Date.parse(b.transferred_at) - Date.parse(a.transferred_at))
+                  .map((t) => {
+                    const timestampLabel = formatUkDateTimeText(t.transferred_at);
+                    return (
+                      <li
+                        key={t.id}
+                        className="hire-ws-activity-row !grid-cols-[2.25rem_minmax(0,1fr)] sm:!grid-cols-[2.25rem_minmax(0,1fr)]"
+                      >
+                        <div className="hire-ws-activity-rail">
+                          <span className="hire-ws-activity-icon hire-ws-activity-icon-inspection" aria-hidden>
+                            <TransferTimelineIcon />
+                          </span>
+                        </div>
+                        <div className="hire-ws-activity-body">
+                          <p className="mb-1 text-xs text-rph-fg-muted">{timestampLabel}</p>
+                          <p className="text-sm font-semibold text-rph-fg">
+                            Transferred to {t.to_name ?? "another subcompany"}
+                          </p>
+                          <p className="mt-1 text-sm leading-relaxed text-rph-fg-secondary">
+                            From {t.from_name ?? "—"} → {t.to_name ?? "—"}
+                          </p>
+                          {t.notes?.trim() ? (
+                            <p className="mt-1.5 text-xs text-rph-fg-muted">{t.notes.trim()}</p>
+                          ) : null}
+                        </div>
+                      </li>
+                    );
+                  })}
+              </ol>
+            ) : (
+              <p className="px-4 py-5 text-sm text-rph-fg-secondary sm:px-5">No subcompany transfers yet.</p>
+            )}
+          </div>
+        </section>
+      </div>
+
+      <section id="documents" className="rph-card scroll-mt-6 p-4 sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <SectionKicker>Compliance</SectionKicker>
+            <h2 className="mt-1 text-lg font-semibold text-rph-fg">
+              {readOnlyHistoric ? "Historic documents" : "Documents & expiry dates"}
+            </h2>
             <p className="rph-meta mt-1">
               {readOnlyHistoric
                 ? "Superseded fleet documents from your assignment period."
                 : "Required: MOT, Logbook (V5C), and PHV/Taxi licence paper."}
             </p>
-            {transferDocumentRequirements.length ? (
-              <div className="rph-alert-warn mt-3 text-sm">
-                <p className="font-semibold">
-                  {transferDocumentRequirements.length === 1
-                    ? "1 document needs updating after the recent subcompany transfer."
-                    : `${transferDocumentRequirements.length} documents need updating after the recent subcompany transfer.`}
-                </p>
-                <p className="mt-1">
-                  Upload replacements below for fleet documents. Previous files are kept as superseded versions.
-                </p>
-                {hireTransferRequirements.length ? (
-                  <ul className="mt-2 space-y-1">
-                    {hireTransferRequirements.map((req) => (
-                      <li key={req.id}>
-                        <Link href={req.href!} className="rph-link">
-                          {req.label}
-                        </Link>
-                        <span className="text-rph-fg-secondary"> · update on the hire workspace</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {fleetTransferRequirements.length ? (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                {fleetTransferRequirements.length} update{fleetTransferRequirements.length === 1 ? "" : "s"} required
+              </span>
             ) : null}
-            {!readOnlyHistoric ? (
-            <ul className="mt-3 divide-y divide-rph-border">
-              {REQUIRED_VEHICLE_DOC_TYPES.map((docType) => {
-                const onFile = docOnFile(docs, docType);
-                const bundle = uploadBundles[docType];
-                const ready = bundle.files.length > 0;
-                const transferRequirement = openTransferRequirementForVehicleDocType(
-                  transferDocumentRequirements,
-                  docType,
-                );
-                return (
-                  <li key={docType} className="py-3 first:pt-1">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <DocFileIcon />
-                          <p className="text-sm font-semibold text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[docType]}</p>
-                          {transferRequirement ? (
-                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-                              Update required
-                            </span>
-                          ) : !onFile ? (
-                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-                              Missing
-                            </span>
-                          ) : null}
+            {missingDocs.length ? (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                {missingDocs.length} missing
+              </span>
+            ) : !fleetTransferRequirements.length && !readOnlyHistoric ? (
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+                Complete
+              </span>
+            ) : null}
+            {canManage && !isArchived && !readOnlyHistoric ? (
+              <CardActionsMenu
+                label="Documents actions"
+                disabled={busy}
+                items={[{ label: "Edit document expiry", onSelect: () => openEdit("doc_expiry") }]}
+              />
+            ) : null}
+          </div>
+        </div>
+
+        <dl className="mt-4 max-w-md">
+          <DetailRow label="First UK registration" value={formatUkDateTextLong(vehicle.first_reg_uk_date)} />
+        </dl>
+
+        {transferDocumentRequirements.length ? (
+          <div className="rph-alert-warn mt-4 text-sm">
+            <p className="font-semibold">
+              {transferDocumentRequirements.length === 1
+                ? "1 document needs updating after the recent subcompany transfer."
+                : `${transferDocumentRequirements.length} documents need updating after the recent subcompany transfer.`}
+            </p>
+            <p className="mt-1">
+              Upload replacements below for fleet documents. Previous files are kept as superseded versions.
+            </p>
+            {hireTransferRequirements.length ? (
+              <ul className="mt-2 space-y-1">
+                {hireTransferRequirements.map((req) => (
+                  <li key={req.id}>
+                    <Link href={req.href!} className="rph-link">
+                      {req.label}
+                    </Link>
+                    <span className="text-rph-fg-secondary"> · update on the hire workspace</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+
+        {!readOnlyHistoric ? (
+          <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+            {REQUIRED_VEHICLE_DOC_TYPES.map((docType) => {
+              const onFile = docOnFile(docs, docType);
+              const bundle = uploadBundles[docType];
+              const ready = bundle.files.length > 0;
+              const transferRequirement = openTransferRequirementForVehicleDocType(
+                transferDocumentRequirements,
+                docType,
+              );
+              const meta = docCardMeta(vehicle, docType, onFile, notifySettings);
+              return (
+                <li key={docType} className="rounded-xl border border-rph-border bg-rph-page/40 p-3.5">
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">
+                      <DocFileIcon />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-rph-fg">{requiredDocTitle(docType)}</p>
+                          <p className="mt-0.5 text-xs text-rph-fg-muted">
+                            {transferRequirement ? "Upload a replacement after the subcompany transfer." : meta.detail}
+                          </p>
                         </div>
-                        <p className="rph-meta mt-1 pl-7">
-                          {transferRequirement
-                            ? "Upload a replacement after the subcompany transfer."
-                            : onFile
-                              ? (onFile.file_name ?? "PDF on file")
-                              : "Not uploaded yet"}
-                        </p>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <span
+                            className={`text-xs font-semibold ${
+                              transferRequirement || !meta.ok
+                                ? "text-amber-800 dark:text-amber-200"
+                                : "text-emerald-700 dark:text-emerald-300"
+                            }`}
+                          >
+                            {transferRequirement ? "Update required" : meta.badge}
+                          </span>
+                          <VehicleDocRowMenu
+                            doc={onFile}
+                            canManage={canManage}
+                            removeDisabled={busy}
+                            onRemove={
+                              onFile
+                                ? () =>
+                                    setRemoveDocConfirm({
+                                      id: onFile.id,
+                                      label: VEHICLE_DOC_TYPE_LABELS[docType],
+                                    })
+                                : undefined
+                            }
+                            onFiles={canManage ? (files) => addUploadFiles(docType, files) : undefined}
+                            onError={setError}
+                          />
+                        </div>
                       </div>
-                      <VehicleDocRowMenu
-                        doc={onFile}
-                        canManage={canManage}
-                        removeDisabled={busy}
-                        onRemove={
-                          onFile
-                            ? () =>
-                                setRemoveDocConfirm({
-                                  id: onFile.id,
-                                  label: VEHICLE_DOC_TYPE_LABELS[docType],
-                                })
-                            : undefined
-                        }
-                        onFiles={canManage ? (files) => addUploadFiles(docType, files) : undefined}
-                        onError={setError}
-                      />
+                      {canManage && ready ? (
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <ul className="rph-meta flex-1">
+                            {bundle.files.map((f, i) => (
+                              <li key={`${f.name}-${i}`}>{f.name}</li>
+                            ))}
+                          </ul>
+                          <button
+                            type="button"
+                            className={btnDocGhost}
+                            disabled={busy}
+                            onClick={() => clearUploadBundle(docType)}
+                          >
+                            Clear
+                          </button>
+                          <button
+                            type="button"
+                            className={btnDocPrimary}
+                            disabled={busy}
+                            onClick={() => requestDocUpload(docType)}
+                          >
+                            {pending ? "Uploading…" : onFile ? "Replace" : "Upload"}
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
-                    {canManage && ready ? (
-                      <div className="mt-2 flex flex-wrap items-center gap-2 pl-7">
-                        <ul className="rph-meta flex-1">
-                          {bundle.files.map((f, i) => (
-                            <li key={`${f.name}-${i}`}>{f.name}</li>
-                          ))}
-                        </ul>
-                        <button type="button" className={btnDocGhost} disabled={busy} onClick={() => clearUploadBundle(docType)}>
-                          Clear
-                        </button>
-                        <button type="button" className={btnDocPrimary} disabled={busy} onClick={() => requestDocUpload(docType)}>
-                          {pending ? "Uploading…" : onFile ? "Replace" : "Upload"}
-                        </button>
-                      </div>
-                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : documentHistory.length ? (
+          <ul className="mt-4 space-y-3">
+            {documentHistory.map((d) => {
+              const transfer = d.vehicle_transfer_id
+                ? transfers.find((t) => t.id === d.vehicle_transfer_id)
+                : null;
+              return (
+                <li key={d.id} className="flex items-start justify-between gap-3 rounded-xl border border-rph-border p-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <VehicleDocTypeIcon docType={d.doc_type} />
+                      <p className="text-sm font-semibold text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[d.doc_type]}</p>
+                    </div>
+                    <p className="rph-meta mt-1 pl-7">
+                      {d.file_name ?? "PDF on file"} · uploaded {formatUkDateTime(d.created_at)}
+                    </p>
+                    <p className="rph-meta pl-7">
+                      {vehicleDocumentHistoryLabel({
+                        versionStatus: d.version_status,
+                        createdAt: d.created_at,
+                        transferFromName: transfer?.from_name,
+                        transferToName: transfer?.to_name,
+                        transferredAt: transfer?.transferred_at,
+                      })}
+                    </p>
+                  </div>
+                  <VehicleDocRowMenu doc={d} canManage={false} removeDisabled onError={setError} />
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="mt-4 text-sm text-rph-fg-muted">No historic fleet documents on file.</p>
+        )}
+
+        {!readOnlyHistoric && documentHistory.length ? (
+          <div className="mt-4 border-t border-rph-border pt-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Document history</h3>
+            <p className="rph-meta mt-1">Previous versions kept after subcompany transfers.</p>
+            <ul className="mt-3 space-y-3">
+              {documentHistory.map((d) => {
+                const transfer = d.vehicle_transfer_id
+                  ? transfers.find((t) => t.id === d.vehicle_transfer_id)
+                  : null;
+                return (
+                  <li key={d.id} className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[d.doc_type]}</p>
+                      <p className="rph-meta">
+                        {d.file_name ?? "PDF"} · {formatUkDateTime(d.created_at)} ·{" "}
+                        {vehicleDocumentHistoryLabel({
+                          versionStatus: d.version_status,
+                          createdAt: d.created_at,
+                          transferFromName: transfer?.from_name,
+                          transferToName: transfer?.to_name,
+                          transferredAt: transfer?.transferred_at,
+                        })}
+                      </p>
+                    </div>
+                    <VehicleDocRowMenu doc={d} canManage={false} removeDisabled onError={setError} />
                   </li>
                 );
               })}
             </ul>
-            ) : documentHistory.length ? (
-              <ul className="mt-3 space-y-3">
-                {documentHistory.map((d) => {
-                  const transfer = d.vehicle_transfer_id
-                    ? transfers.find((t) => t.id === d.vehicle_transfer_id)
-                    : null;
-                  return (
-                    <li key={d.id} className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <VehicleDocTypeIcon docType={d.doc_type} />
-                          <p className="text-sm font-semibold text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[d.doc_type]}</p>
-                        </div>
-                        <p className="rph-meta mt-1 pl-7">
-                          {d.file_name ?? "PDF on file"} · uploaded {formatUkDateTime(d.created_at)}
-                        </p>
-                        <p className="rph-meta pl-7">
-                          {vehicleDocumentHistoryLabel({
-                            versionStatus: d.version_status,
-                            createdAt: d.created_at,
-                            transferFromName: transfer?.from_name,
-                            transferToName: transfer?.to_name,
-                            transferredAt: transfer?.transferred_at,
-                          })}
-                        </p>
-                      </div>
-                      <VehicleDocRowMenu doc={d} canManage={false} removeDisabled onError={setError} />
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <p className="mt-3 text-sm text-rph-fg-muted">No historic fleet documents on file.</p>
-            )}
+          </div>
+        ) : null}
 
-            {!readOnlyHistoric && documentHistory.length ? (
-              <div className="mt-4 border-t border-rph-border pt-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Document history</h3>
-                <p className="rph-meta mt-1">Previous versions kept after subcompany transfers.</p>
-                <ul className="mt-3 space-y-3">
-                  {documentHistory.map((d) => {
-                    const transfer = d.vehicle_transfer_id
-                      ? transfers.find((t) => t.id === d.vehicle_transfer_id)
-                      : null;
-                    return (
-                      <li key={d.id} className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[d.doc_type]}</p>
-                          <p className="rph-meta">
-                            {d.file_name ?? "PDF"} · {formatUkDateTime(d.created_at)} ·{" "}
-                            {vehicleDocumentHistoryLabel({
-                              versionStatus: d.version_status,
-                              createdAt: d.created_at,
-                              transferFromName: transfer?.from_name,
-                              transferToName: transfer?.to_name,
-                              transferredAt: transfer?.transferred_at,
-                            })}
-                          </p>
-                        </div>
-                        <VehicleDocRowMenu doc={d} canManage={false} removeDisabled onError={setError} />
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ) : null}
-            {!readOnlyHistoric && otherDocs.length ? (
-              <ul className="mt-2 space-y-3 border-t border-rph-border pt-3">
-                {otherDocs.map((d) => {
-                  const transferRequirement = openTransferRequirementForVehicleDocType(
-                    transferDocumentRequirements,
-                    d.doc_type,
-                  );
-                  return (
-                  <li key={d.id} className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <VehicleDocTypeIcon docType={d.doc_type} />
-                        <p className="text-sm font-semibold text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[d.doc_type]}</p>
-                        {transferRequirement ? (
-                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-                            Update required
-                          </span>
-                        ) : null}
-                      </div>
-                      <p className="rph-meta mt-1 pl-7">
-                        {transferRequirement
-                          ? "Upload a replacement after the subcompany transfer."
-                          : (d.file_name ?? d.file_path)}
-                      </p>
+        {!readOnlyHistoric && otherDocs.length ? (
+          <ul className="mt-4 space-y-3 border-t border-rph-border pt-4">
+            {otherDocs.map((d) => {
+              const transferRequirement = openTransferRequirementForVehicleDocType(
+                transferDocumentRequirements,
+                d.doc_type,
+              );
+              return (
+                <li key={d.id} className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <VehicleDocTypeIcon docType={d.doc_type} />
+                      <p className="text-sm font-semibold text-rph-fg">{VEHICLE_DOC_TYPE_LABELS[d.doc_type]}</p>
+                      {transferRequirement ? (
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                          Update required
+                        </span>
+                      ) : null}
                     </div>
-                    <VehicleDocRowMenu
-                      doc={d}
-                      canManage={canManage}
-                      removeDisabled={busy}
-                      onRemove={() =>
-                        setRemoveDocConfirm({
-                          id: d.id,
-                          label: VEHICLE_DOC_TYPE_LABELS[d.doc_type],
-                        })
-                      }
-                      onError={setError}
-                    />
-                  </li>
-                  );
-                })}
-              </ul>
-            ) : null}
-          </section>
-        </div>
-      </div>
+                    <p className="rph-meta mt-1 pl-7">
+                      {transferRequirement
+                        ? "Upload a replacement after the subcompany transfer."
+                        : (d.file_name ?? d.file_path)}
+                    </p>
+                  </div>
+                  <VehicleDocRowMenu
+                    doc={d}
+                    canManage={canManage}
+                    removeDisabled={busy}
+                    onRemove={() =>
+                      setRemoveDocConfirm({
+                        id: d.id,
+                        label: VEHICLE_DOC_TYPE_LABELS[d.doc_type],
+                      })
+                    }
+                    onError={setError}
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+      </section>
 
       {(vehicle.notes || canManage) ? (
         <section className="rph-card p-4 sm:p-5">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Notes</h2>
-            {canManage ? (
-              <button type="button" className={btnCardEdit} disabled={busy} onClick={() => openEdit("notes")}>
-                Edit
-              </button>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <SectionKicker>Internal</SectionKicker>
+              <h2 className="mt-1 text-lg font-semibold text-rph-fg">Vehicle notes</h2>
+            </div>
+            {canManage && !isArchived ? (
+              <CardActionsMenu
+                label="Notes actions"
+                disabled={busy}
+                items={[{ label: "Edit notes", onSelect: () => openEdit("notes") }]}
+              />
             ) : null}
           </div>
-          <p className="mt-2 whitespace-pre-wrap text-sm text-rph-fg-secondary">
+          <p className="mt-3 whitespace-pre-wrap text-sm text-rph-fg-secondary">
             {vehicle.notes?.trim() ? vehicle.notes : "No notes yet."}
           </p>
         </section>
@@ -835,13 +1004,15 @@ export function VehicleDetailsView({
             ? "Edit specifications"
             : editSection === "registration"
               ? "Edit registration"
-              : "Edit notes"
+              : editSection === "doc_expiry"
+                ? "Edit document expiry"
+                : "Edit notes"
         }
         description={`${vehicle.vrm} · ${vehicle.make} ${vehicle.model}`}
         showDraftActions={false}
         pending={busy}
         isDirty={JSON.stringify(form) !== JSON.stringify(fromVehicle(vehicle))}
-        maxWidthClass={editSection === "notes" ? "max-w-lg" : "max-w-2xl"}
+        maxWidthClass={editSection === "notes" || editSection === "registration" ? "max-w-lg" : "max-w-2xl"}
         onRequestClose={requestCloseEdit}
         discardConfirmOpen={discardConfirm}
         onConfirmDiscard={() => {
@@ -875,7 +1046,7 @@ export function VehicleDetailsView({
                 aria-label="Status"
                 options={VEHICLE_STATUSES.map((st) => ({
                   value: st,
-                  label: VEHICLE_STATUS_LABELS[st],
+                  label: fleetStatusLabel(st),
                 }))}
                 onValueChange={(value) => setForm((p) => ({ ...p, status: value as VehicleStatus }))}
               />
@@ -920,22 +1091,18 @@ export function VehicleDetailsView({
                 onChange={(e) => setForm((p) => ({ ...p, vehicle_age_limit_years: e.target.value }))}
               />
             </Field>
-            <Field label="Current mileage">
+            <Field label="PHV/Taxi licence no.">
               <input
-                type="number"
-                min={0}
                 className="rph-input"
-                value={form.current_mileage}
-                onChange={(e) => setForm((p) => ({ ...p, current_mileage: e.target.value }))}
+                value={form.phv_licence_no}
+                onChange={(e) => setForm((p) => ({ ...p, phv_licence_no: e.target.value }))}
               />
             </Field>
-            <Field label="Next service mileage">
+            <Field label="Licensing authority">
               <input
-                type="number"
-                min={0}
                 className="rph-input"
-                value={form.next_service_mileage}
-                onChange={(e) => setForm((p) => ({ ...p, next_service_mileage: e.target.value }))}
+                value={form.licensing_authority_name}
+                onChange={(e) => setForm((p) => ({ ...p, licensing_authority_name: e.target.value }))}
               />
             </Field>
           </div>
@@ -985,14 +1152,11 @@ export function VehicleDetailsView({
                 Same as first registration
               </label>
             </div>
-            <Field label="Tax expiry">
-              <input
-                type="date"
-                className="rph-input"
-                value={form.tax_expiry}
-                onChange={(e) => setForm((p) => ({ ...p, tax_expiry: e.target.value }))}
-              />
-            </Field>
+          </div>
+        ) : null}
+
+        {editSection === "doc_expiry" ? (
+          <div className="grid gap-4 sm:grid-cols-2">
             <Field label="MOT expiry">
               <input
                 type="date"
@@ -1001,19 +1165,12 @@ export function VehicleDetailsView({
                 onChange={(e) => setForm((p) => ({ ...p, mot_expiry: e.target.value }))}
               />
             </Field>
-            <Field label="Service due date">
+            <Field label="Tax expiry">
               <input
                 type="date"
                 className="rph-input"
-                value={form.service_due_at}
-                onChange={(e) => setForm((p) => ({ ...p, service_due_at: e.target.value }))}
-              />
-            </Field>
-            <Field label="PHV/Taxi licence no.">
-              <input
-                className="rph-input"
-                value={form.phv_licence_no}
-                onChange={(e) => setForm((p) => ({ ...p, phv_licence_no: e.target.value }))}
+                value={form.tax_expiry}
+                onChange={(e) => setForm((p) => ({ ...p, tax_expiry: e.target.value }))}
               />
             </Field>
             <Field label="PHV/Taxi licence expiry">
@@ -1022,13 +1179,6 @@ export function VehicleDetailsView({
                 className="rph-input"
                 value={form.phv_licence_expiry}
                 onChange={(e) => setForm((p) => ({ ...p, phv_licence_expiry: e.target.value }))}
-              />
-            </Field>
-            <Field label="Licensing authority">
-              <input
-                className="rph-input"
-                value={form.licensing_authority_name}
-                onChange={(e) => setForm((p) => ({ ...p, licensing_authority_name: e.target.value }))}
               />
             </Field>
           </div>
@@ -1060,9 +1210,9 @@ export function VehicleDetailsView({
 
       <ConfirmDialog
         open={deleteConfirm}
-        title="Delete vehicle?"
-        description="This permanently removes the vehicle and its documents from the fleet list."
-        confirmLabel={pending ? "Deleting…" : "Delete"}
+        title="Archive vehicle?"
+        description="This hides the vehicle from the active fleet list. Hire history and documents are kept. End any open hire first. To record a sale, use Sell vehicle on Financials instead."
+        confirmLabel={pending ? "Archiving…" : "Archive"}
         cancelLabel="Cancel"
         variant="danger"
         pending={pending}

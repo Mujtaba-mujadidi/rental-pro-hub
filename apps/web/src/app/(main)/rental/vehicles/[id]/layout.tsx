@@ -30,13 +30,14 @@ export default async function VehicleWorkspaceLayout({
     transferDocumentRequirements: data.transferDocumentRequirements,
     subcompanies: data.subcompanies,
     notifySettings: data.notifySettings,
+    currentOpenHire: data.currentOpenHire,
     access: data.access,
     canManage: data.canManage,
     canDelete: data.canDelete,
   };
 
   return (
-    <VehicleWorkspaceProvider vehicleId={id} initialShell={initialShell}>
+    <VehicleWorkspaceProvider key={id} vehicleId={id} initialShell={initialShell}>
       <VehicleWorkspaceTopBar fleet={fleet} />
       <VehicleDocAttentionBanner canConfirm={profile ? canWriteMaintenance(profile) : false} />
       {children}

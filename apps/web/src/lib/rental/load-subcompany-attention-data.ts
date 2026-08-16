@@ -98,6 +98,7 @@ export async function loadSubcompanyAttentionData(
       )
       .eq("subcompany_id", subcompany.id)
       .eq("parent_company_id", companyId)
+      .is("archived_at", null)
       .neq("status", "sold"),
     supabase
       .from("vehicle_hire_groups")

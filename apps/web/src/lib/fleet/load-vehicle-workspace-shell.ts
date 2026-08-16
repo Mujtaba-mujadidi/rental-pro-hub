@@ -56,6 +56,7 @@ async function fetchVehicleWorkspaceShell(vehicleId: string): Promise<VehicleWor
     transferDocumentRequirements,
     subcompanies: shell.subcompanies,
     notifySettings: shell.notifySettings,
+    currentOpenHire: shell.currentOpenHire,
     access,
     canManage: canManageBase,
     canDelete: canDeleteBase,

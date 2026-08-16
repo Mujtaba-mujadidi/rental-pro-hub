@@ -159,6 +159,8 @@ export type VehicleRow = {
   mot_doc_attention_at: string | null;
   /** Set when PHV maintenance logged; cleared on PHV paper upload or confirm. */
   phv_doc_attention_at: string | null;
+  /** Soft-archive timestamp — hidden from active fleet when set. */
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
   subcompany_name?: string | null;

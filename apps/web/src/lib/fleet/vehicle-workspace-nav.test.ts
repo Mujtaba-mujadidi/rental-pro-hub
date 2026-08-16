@@ -10,10 +10,14 @@ import {
 describe("vehicleWorkspaceNav / href", () => {
   it("builds section links for a vehicle id", () => {
     const nav = vehicleWorkspaceNav("v1");
-    expect(nav[0]).toEqual({ href: "/rental/vehicles/v1", label: "Dashboard", match: "exact" });
+    expect(nav[0]).toEqual({ href: "/rental/vehicles/v1", label: "Overview", match: "exact" });
+    expect(nav.find((i) => i.label === "Vehicle & documents")?.href).toBe("/rental/vehicles/v1/details");
+    expect(nav.find((i) => i.label === "Hires")?.href).toBe("/rental/vehicles/v1/rentals");
     expect(nav.find((i) => i.label === "Maintenance")?.href).toBe("/rental/vehicles/v1/maintenance");
     expect(nav.find((i) => i.label === "Tracking")?.href).toBe("/rental/vehicles/v1/tracking");
     expect(nav.find((i) => i.label === "Financials")?.href).toBe("/rental/vehicles/v1/financials");
+    expect(nav.find((i) => i.label === "Incidents")?.href).toBe("/rental/vehicles/v1/claims");
+    expect(nav.find((i) => i.label === "PCN")).toBeUndefined();
     expect(vehicleWorkspaceHref("v1")).toBe("/rental/vehicles/v1");
     expect(vehicleWorkspaceHref("v1", "maintenance")).toBe("/rental/vehicles/v1/maintenance");
     expect(vehicleWorkspaceHref("v1", "financials")).toBe("/rental/vehicles/v1/financials");

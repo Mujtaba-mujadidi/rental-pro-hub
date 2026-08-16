@@ -9,14 +9,13 @@ export type VehicleWorkspaceNavItem = {
 export function vehicleWorkspaceNav(vehicleId: string): VehicleWorkspaceNavItem[] {
   const base = `/rental/vehicles/${vehicleId}`;
   return [
-    { href: base, label: "Dashboard", match: "exact" },
-    { href: `${base}/details`, label: "Details", match: "prefix" },
-    { href: `${base}/rentals`, label: "Rentals", match: "prefix" },
+    { href: base, label: "Overview", match: "exact" },
+    { href: `${base}/details`, label: "Vehicle & documents", match: "prefix" },
+    { href: `${base}/rentals`, label: "Hires", match: "prefix" },
     { href: `${base}/maintenance`, label: "Maintenance", match: "prefix" },
     { href: `${base}/tracking`, label: "Tracking", match: "prefix" },
     { href: `${base}/financials`, label: "Financials", match: "prefix" },
-    { href: `${base}/pcn`, label: "PCN", match: "prefix" },
-    { href: `${base}/claims`, label: "Claims", match: "prefix" },
+    { href: `${base}/claims`, label: "Incidents", match: "prefix" },
   ];
 }
 
