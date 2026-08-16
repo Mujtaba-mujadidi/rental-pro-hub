@@ -20,6 +20,7 @@ import { loadHireLessorDisplayName } from "@/lib/fleet/hire-lessor-display";
 import type { RentCadence } from "@/lib/fleet/hire-types";
 import { buildHireWorkspaceHeroMetrics } from "@/lib/fleet/hire-workspace-hero-display";
 import type { HireWorkspaceChromeData } from "@/lib/fleet/hire-workspace-chrome-types";
+import { hireAllowsCompanyDriverPackageAccess } from "@/lib/fleet/hire-driver-package-access";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -79,7 +80,7 @@ async function fetchStaffHireWorkspaceChrome(groupId: string): Promise<HireWorks
     supabase
       .from("vehicle_hire_groups")
       .select(
-        "start_date, start_time, end_time, status, include_deposit, activated_at, terminated_at, ended_at, rent_cadence, rent_amount_gbp, driver_user_id, driver_email, driver_licence_number, vehicles(vrm, make, model), vehicle_hire_agreements(end_date)",
+        "start_date, start_time, end_time, status, include_deposit, activated_at, terminated_at, ended_at, rent_cadence, rent_amount_gbp, driver_user_id, driver_email, driver_licence_number, driver_access_status, driver_documents_retain_until, vehicles(vrm, make, model), vehicle_hire_agreements(end_date)",
       )
       .eq("id", id)
       .eq("parent_company_id", companyId)
@@ -132,8 +133,14 @@ async function fetchStaffHireWorkspaceChrome(groupId: string): Promise<HireWorks
 
   const admin = createSupabaseAdminClient();
   let profileLabel: string | undefined;
+  const mayLoadLiveDriverProfile = hireAllowsCompanyDriverPackageAccess({
+    driverAccessStatus: (group.driver_access_status as string | null) ?? null,
+    hireStatus,
+    retainUntilYmd: (group.driver_documents_retain_until as string | null) ?? null,
+    todayYmd: today,
+  });
   try {
-    if (driverUserId) {
+    if (driverUserId && mayLoadLiveDriverProfile) {
       const labels = await loadDriverLabelsMap(admin, [driverUserId]);
       profileLabel = labels.get(driverUserId);
     }
@@ -141,7 +148,9 @@ async function fetchStaffHireWorkspaceChrome(groupId: string): Promise<HireWorks
     profileLabel = undefined;
   }
   const lessorName = await loadHireLessorDisplayName(admin, id);
-  const driverName = resolveChromeDriverName(profileLabel, driverEmail, driverLicence);
+  const driverName = mayLoadLiveDriverProfile
+    ? resolveChromeDriverName(profileLabel, driverEmail, driverLicence)
+    : null;
 
   const vehicleVrm = vehicle?.vrm?.trim() || paymentsRes.data.vehicleVrm;
   const vehicleMakeModel =

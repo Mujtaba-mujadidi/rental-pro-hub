@@ -46,6 +46,7 @@ import {
 } from "@/lib/fleet/hire-workspace-hero-display";
 import { driverHireStatusLabel } from "@/lib/fleet/driver-hire-nav";
 import { loadDriverLabelsMap } from "@/lib/fleet/driver-labels";
+import { hireAllowsCompanyDriverPackageAccess } from "@/lib/fleet/hire-driver-package-access";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -249,7 +250,7 @@ export async function loadHireDashboardAction(
   const { data: group } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "start_date, start_time, end_time, status, include_deposit, activated_at, terminated_at, ended_at, rent_cadence, rent_amount_gbp, deposit_gbp, driver_email, driver_licence_number, driver_user_id, parent_company_id, insurance_provided_by, vehicles(vrm, make, model, mot_expiry, tax_expiry, phv_licence_expiry), vehicle_hire_agreements(end_date)",
+      "start_date, start_time, end_time, status, include_deposit, activated_at, terminated_at, ended_at, rent_cadence, rent_amount_gbp, deposit_gbp, driver_email, driver_licence_number, driver_user_id, driver_access_status, driver_documents_retain_until, parent_company_id, insurance_provided_by, vehicles(vrm, make, model, mot_expiry, tax_expiry, phv_licence_expiry), vehicle_hire_agreements(end_date)",
     )
     .eq("id", hireGroupId.trim())
     .maybeSingle();
@@ -316,7 +317,13 @@ export async function loadHireDashboardAction(
   ];
 
   const driverUserId = (group?.driver_user_id as string | null) ?? null;
-  if (driverUserId) {
+  const mayLoadLiveDriverProfile = hireAllowsCompanyDriverPackageAccess({
+    driverAccessStatus: (group?.driver_access_status as string | null) ?? null,
+    hireStatus,
+    retainUntilYmd: (group?.driver_documents_retain_until as string | null) ?? null,
+    todayYmd: today,
+  });
+  if (driverUserId && mayLoadLiveDriverProfile) {
     try {
       const admin = createSupabaseAdminClient();
       const { data: driverProfile } = await admin
@@ -434,9 +441,15 @@ export async function loadHireDashboardAction(
     depositGbp: page.data.depositGbp,
   });
   const scheduleDepositStatusLabel = depositStatusLabel(analyticsRows, today);
-  const driverEmail = (group?.driver_email as string | null) ?? null;
-  const driverLicence = (group?.driver_licence_number as string | null) ?? null;
-  const driverName = await loadHireDriverDisplayName(driverUserId, driverEmail, driverLicence);
+  const driverEmail = mayLoadLiveDriverProfile
+    ? ((group?.driver_email as string | null) ?? null)
+    : null;
+  const driverLicence = mayLoadLiveDriverProfile
+    ? ((group?.driver_licence_number as string | null) ?? null)
+    : null;
+  const driverName = mayLoadLiveDriverProfile
+    ? await loadHireDriverDisplayName(driverUserId, driverEmail, driverLicence)
+    : null;
   const agreementEndDates = (
     (group?.vehicle_hire_agreements as { end_date?: string | null }[] | null | undefined) ?? []
   ).map((a) => a.end_date);

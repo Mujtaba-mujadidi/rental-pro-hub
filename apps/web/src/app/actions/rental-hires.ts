@@ -34,6 +34,7 @@ import {
   assertDriverLinkedToCompany,
 } from "@/app/actions/rental-driver-links";
 import { loadDriverLabelsMap } from "@/lib/fleet/driver-labels";
+import { syncCompanyDriverLinkAfterAccessChange } from "@/lib/fleet/sync-company-driver-link";
 import { buildSubcompanyLegalSnapshot } from "@/lib/rental/subcompany-legal-snapshot";
 import { cancelOpenSubcompanyDocumentRequirementsForHire } from "@/lib/rental/subcompany-hire-document-requirements";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -488,7 +489,7 @@ export async function cancelHireGroupAction(
 
   const { data: group } = await admin
     .from("vehicle_hire_groups")
-    .select("id, parent_company_id, status, vehicle_id")
+    .select("id, parent_company_id, status, vehicle_id, driver_user_id")
     .eq("id", hireGroupId.trim())
     .maybeSingle();
   if (!group || group.parent_company_id !== profile.company_id) {
@@ -541,6 +542,14 @@ export async function cancelHireGroupAction(
     actorRole: "company_staff",
     actorUserId: user.id,
   });
+
+  if (group.driver_user_id) {
+    await syncCompanyDriverLinkAfterAccessChange(
+      admin,
+      group.parent_company_id as string,
+      group.driver_user_id as string,
+    );
+  }
 
   revalidatePath("/rental/hires");
   revalidatePath("/rental/vehicles");

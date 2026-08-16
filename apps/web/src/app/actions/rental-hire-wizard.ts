@@ -30,6 +30,7 @@ import {
 import { prepareHireAgreementEsignAction } from "@/app/actions/rental-hires";
 import { assertDriverLinkedToCompany } from "@/app/actions/rental-driver-links";
 import { loadDriverPreviewBundle } from "@/lib/admin/load-driver-preview";
+import { syncCompanyDriverLinkAfterAccessChange } from "@/lib/fleet/sync-company-driver-link";
 import { enrichHireAccessSnapshot, hireAccessSnapshotIsSparse, loadHireGroupAccessSnapshot } from "@/lib/fleet/hire-access-enrich";
 import {
   approveHireAccessViaToken,
@@ -1539,6 +1540,12 @@ export async function respondToHireAccessRequestAction(
       { onConflict: "parent_company_id,driver_user_id" },
     );
     if (linkErr) return { ok: false, error: linkErr.message };
+  } else {
+    await syncCompanyDriverLinkAfterAccessChange(
+      admin,
+      req.parent_company_id as string,
+      user.id,
+    );
   }
 
   if (req.hire_group_id) {

@@ -406,6 +406,25 @@ async function loadVehicleHireIncomeContext(vehicleId: string): Promise<
   return { ok: true, scheduleRows, balancePayments, driverChargeLineItems, groupContextByGroupId };
 }
 
+/**
+ * Net hire income for a vehicle (same calculation as Financials P&L).
+ * Caller must already authorise vehicle access and rentals/financials read.
+ */
+export async function loadVehicleHireIncomeNetGbp(vehicleId: string): Promise<
+  { ok: true; netIncomeGbp: number } | { ok: false; error: string }
+> {
+  const hireIncomeContext = await loadVehicleHireIncomeContext(vehicleId);
+  if (!hireIncomeContext.ok) return { ok: false, error: hireIncomeContext.error };
+  const hireIncome = computeVehicleHireIncomeGbp({
+    scheduleRows: hireIncomeContext.scheduleRows,
+    balancePayments: hireIncomeContext.balancePayments,
+    driverChargeLineItems: hireIncomeContext.driverChargeLineItems,
+    groupContextByGroupId: hireIncomeContext.groupContextByGroupId,
+    todayYmd: ukTodayYmd(),
+  });
+  return { ok: true, netIncomeGbp: hireIncome.netIncomeGbp };
+}
+
 export async function loadVehiclePurchaseDateAction(
   vehicleId: string,
 ): Promise<{ ok: true; occurredOn: string | null } | { ok: false; error: string }> {

@@ -2,6 +2,7 @@ import type { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { generateAccessToken, generateOtp, hashSecret, safeEqualHash } from "@/lib/esign/crypto";
 import { syncVehicleStatusForHireGroup } from "@/lib/fleet/sync-vehicle-hire-status";
 import { logHireGroupEvent } from "@/lib/fleet/hire-audit";
+import { syncCompanyDriverLinkAfterAccessChange } from "@/lib/fleet/sync-company-driver-link";
 
 type Admin = ReturnType<typeof createSupabaseAdminClient>;
 
@@ -344,7 +345,9 @@ export async function rejectHireAccessViaToken(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const { data: req } = await admin
     .from("company_driver_access_requests")
-    .select("id, status, hire_group_id, parent_company_id, response_verified_at, response_expires_at")
+    .select(
+      "id, status, hire_group_id, parent_company_id, driver_user_id, response_verified_at, response_expires_at",
+    )
     .eq("id", requestId)
     .maybeSingle();
   if (!req || req.status !== "pending") {
@@ -389,6 +392,14 @@ export async function rejectHireAccessViaToken(
       metadata: { access_request_id: requestId, via: options?.via ?? "email_token" },
     });
     await syncVehicleStatusForHireGroup(admin, req.hire_group_id as string);
+  }
+
+  if (req.parent_company_id && req.driver_user_id) {
+    await syncCompanyDriverLinkAfterAccessChange(
+      admin,
+      req.parent_company_id as string,
+      req.driver_user_id as string,
+    );
   }
 
   return { ok: true };

@@ -568,8 +568,8 @@ export function VehicleDetailsView({
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <section className="rph-card p-4 sm:p-5">
-          <div className="flex items-start justify-between gap-3">
+        <section className="rph-card overflow-hidden p-0">
+          <div className="flex items-start justify-between gap-3 border-b border-rph-border px-4 py-4 sm:px-5">
             <div>
               <SectionKicker>Vehicle record</SectionKicker>
               <h2 className="mt-1 text-lg font-semibold text-rph-fg">Specifications</h2>
@@ -582,7 +582,7 @@ export function VehicleDetailsView({
               />
             ) : null}
           </div>
-          <div className="mt-4 grid gap-x-8 sm:grid-cols-2">
+          <div className="grid gap-x-8 px-4 py-4 sm:grid-cols-2 sm:px-5 sm:py-5">
             <dl>
               <DetailRow label="Registration" value={<span className="font-mono">{vehicle.vrm}</span>} />
               <DetailRow label="Model" value={vehicle.model} />
@@ -603,8 +603,8 @@ export function VehicleDetailsView({
           </div>
         </section>
 
-        <section className="rph-card p-4 sm:p-5">
-          <div className="flex items-start justify-between gap-3">
+        <section className="rph-card overflow-hidden p-0">
+          <div className="flex items-start justify-between gap-3 border-b border-rph-border px-4 py-4 sm:px-5">
             <div>
               <SectionKicker>Registration</SectionKicker>
               <h2 className="mt-1 text-lg font-semibold text-rph-fg">Ownership</h2>
@@ -635,7 +635,7 @@ export function VehicleDetailsView({
               }
             />
           </div>
-          <dl className="mt-4">
+          <dl className="px-4 py-4 sm:px-5 sm:py-5">
             <DetailRow label="Subcompany" value={vehicle.subcompany_name ?? "—"} />
             <DetailRow
               label="Vehicle status"
@@ -712,8 +712,8 @@ export function VehicleDetailsView({
         </section>
       </div>
 
-      <section id="documents" className="rph-card scroll-mt-6 p-4 sm:p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <section id="documents" className="rph-card scroll-mt-6 overflow-hidden p-0">
+        <div className="flex flex-col gap-3 border-b border-rph-border px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5">
           <div>
             <SectionKicker>Compliance</SectionKicker>
             <h2 className="mt-1 text-lg font-semibold text-rph-fg">
@@ -750,7 +750,8 @@ export function VehicleDetailsView({
           </div>
         </div>
 
-        <dl className="mt-4 max-w-md">
+        <div className="px-4 py-4 sm:px-5 sm:py-5">
+        <dl className="max-w-md">
           <DetailRow label="First UK registration" value={formatUkDateTextLong(vehicle.first_reg_uk_date)} />
         </dl>
 
@@ -972,11 +973,12 @@ export function VehicleDetailsView({
             })}
           </ul>
         ) : null}
+        </div>
       </section>
 
       {(vehicle.notes || canManage) ? (
-        <section className="rph-card p-4 sm:p-5">
-          <div className="flex items-start justify-between gap-3">
+        <section className="rph-card overflow-hidden p-0">
+          <div className="flex items-start justify-between gap-3 border-b border-rph-border px-4 py-4 sm:px-5">
             <div>
               <SectionKicker>Internal</SectionKicker>
               <h2 className="mt-1 text-lg font-semibold text-rph-fg">Vehicle notes</h2>
@@ -989,7 +991,7 @@ export function VehicleDetailsView({
               />
             ) : null}
           </div>
-          <p className="mt-3 whitespace-pre-wrap text-sm text-rph-fg-secondary">
+          <p className="whitespace-pre-wrap px-4 py-4 text-sm text-rph-fg-secondary sm:px-5 sm:py-5">
             {vehicle.notes?.trim() ? vehicle.notes : "No notes yet."}
           </p>
         </section>

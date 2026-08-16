@@ -1,15 +1,14 @@
 "use client";
 
 import { useVehicleWorkspace } from "@/app/(main)/rental/vehicles/[id]/vehicle-workspace-provider";
-import { VehicleRentalsTableView } from "./vehicle-rentals-table-view";
+import { VehicleHiresView } from "./vehicle-hires-view";
 
 export function VehicleRentalsPageClient() {
   const { vehicleId, shell, refreshShell, invalidateOverview } = useVehicleWorkspace();
 
   return (
-    <VehicleRentalsTableView
+    <VehicleHiresView
       vehicleId={vehicleId}
-      notifyDays={shell.notifySettings.notify_contract_expiry_days_before}
       readOnlyHistoric={shell.access.kind === "historic"}
       historicSubcompanyName={
         shell.access.kind === "historic" ? shell.access.transfer.from_name ?? null : null
