@@ -344,7 +344,7 @@ function snapshotFromTrack(rec: TrackerTrackRecord): LiveTrackSnapshot {
     lastGpsAt: gpsUnix ? formatUkDateTime(new Date(gpsUnix * 1000)) : null,
     mapUrl:
       lat != null && lng != null
-        ? `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=15/${lat}/${lng}`
+        ? `https://www.google.com/maps?q=${lat},${lng}`
         : null,
   };
 }
