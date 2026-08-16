@@ -22,6 +22,10 @@ import {
   loadVehicleMaintenancePageAction,
   type VehicleMaintenancePageData,
 } from "@/app/actions/rental-maintenance";
+import {
+  loadVehicleTrackingPageAction,
+  type VehicleTrackingPageData,
+} from "@/app/actions/fleet-tracking";
 import type { VehicleWorkspaceShell } from "@/lib/fleet/vehicle-workspace-shell-types";
 
 type TabCache<T> = {
@@ -36,6 +40,7 @@ type VehicleWorkspaceContextValue = {
   financials: TabCache<VehicleFinancialsPageData>;
   maintenance: TabCache<VehicleMaintenancePageData>;
   overview: TabCache<VehicleOverviewSummary>;
+  tracking: TabCache<VehicleTrackingPageData>;
   refreshShell: () => Promise<boolean>;
   ensureFinancials: () => Promise<VehicleFinancialsPageData | null>;
   reloadFinancials: () => Promise<VehicleFinancialsPageData | null>;
@@ -46,6 +51,9 @@ type VehicleWorkspaceContextValue = {
   ensureOverview: () => Promise<VehicleOverviewSummary | null>;
   reloadOverview: () => Promise<VehicleOverviewSummary | null>;
   invalidateOverview: () => void;
+  ensureTracking: () => Promise<VehicleTrackingPageData | null>;
+  reloadTracking: () => Promise<VehicleTrackingPageData | null>;
+  invalidateTracking: () => void;
 };
 
 const VehicleWorkspaceContext = createContext<VehicleWorkspaceContextValue | null>(null);
@@ -99,10 +107,12 @@ export function VehicleWorkspaceProvider({
   const [financials, setFinancials] = useState<TabCache<VehicleFinancialsPageData>>(emptyTabCache);
   const [maintenance, setMaintenance] = useState<TabCache<VehicleMaintenancePageData>>(emptyTabCache);
   const [overview, setOverview] = useState<TabCache<VehicleOverviewSummary>>(emptyTabCache);
+  const [tracking, setTracking] = useState<TabCache<VehicleTrackingPageData>>(emptyTabCache);
 
   const financialsInflight = useRef<Promise<VehicleFinancialsPageData | null> | null>(null);
   const maintenanceInflight = useRef<Promise<VehicleMaintenancePageData | null> | null>(null);
   const overviewInflight = useRef<Promise<VehicleOverviewSummary | null> | null>(null);
+  const trackingInflight = useRef<Promise<VehicleTrackingPageData | null> | null>(null);
 
   const refreshShell = useCallback(async () => {
     const res = await loadVehicleDetailAction(vehicleId);
@@ -205,6 +215,48 @@ export function VehicleWorkspaceProvider({
     [vehicleId, overview.data],
   );
 
+  const loadTracking = useCallback(
+    async (force: boolean) => {
+      if (tracking.data && !force) return tracking.data;
+      if (trackingInflight.current && !force) return trackingInflight.current;
+
+      setTracking((prev) => ({ ...prev, loading: true, error: null }));
+      const promise = loadVehicleTrackingPageAction(vehicleId)
+        .then((res) => {
+          if (!res.ok) {
+            setTracking((prev) => ({
+              data: prev.data,
+              loading: false,
+              error: res.error,
+            }));
+            return null;
+          }
+          const data: VehicleTrackingPageData = {
+            ...res.data,
+            refreshedAtMs: Date.now(),
+          };
+          setTracking({ data, loading: false, error: null });
+          return data;
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : "Could not load tracking.";
+          setTracking((prev) => ({
+            data: prev.data,
+            loading: false,
+            error: message,
+          }));
+          return null;
+        })
+        .finally(() => {
+          trackingInflight.current = null;
+        });
+
+      trackingInflight.current = promise;
+      return promise;
+    },
+    [vehicleId, tracking.data],
+  );
+
   const value = useMemo<VehicleWorkspaceContextValue>(
     () => ({
       vehicleId,
@@ -212,6 +264,7 @@ export function VehicleWorkspaceProvider({
       financials,
       maintenance,
       overview,
+      tracking,
       refreshShell,
       ensureFinancials: () => loadFinancials(false),
       reloadFinancials: () => loadFinancials(true),
@@ -231,8 +284,26 @@ export function VehicleWorkspaceProvider({
         overviewInflight.current = null;
         setOverview(emptyTabCache());
       },
+      ensureTracking: () => loadTracking(false),
+      reloadTracking: () => loadTracking(true),
+      invalidateTracking: () => {
+        trackingInflight.current = null;
+        setTracking(emptyTabCache());
+      },
     }),
-    [vehicleId, shell, financials, maintenance, overview, refreshShell, loadFinancials, loadMaintenance, loadOverview],
+    [
+      vehicleId,
+      shell,
+      financials,
+      maintenance,
+      overview,
+      tracking,
+      refreshShell,
+      loadFinancials,
+      loadMaintenance,
+      loadOverview,
+      loadTracking,
+    ],
   );
 
   return <VehicleWorkspaceContext.Provider value={value}>{children}</VehicleWorkspaceContext.Provider>;

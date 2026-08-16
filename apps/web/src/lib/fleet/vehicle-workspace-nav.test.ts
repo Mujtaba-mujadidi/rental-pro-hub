@@ -16,11 +16,22 @@ describe("vehicleWorkspaceNav / href", () => {
     expect(nav.find((i) => i.label === "Maintenance")?.href).toBe("/rental/vehicles/v1/maintenance");
     expect(nav.find((i) => i.label === "Tracking")?.href).toBe("/rental/vehicles/v1/tracking");
     expect(nav.find((i) => i.label === "Financials")?.href).toBe("/rental/vehicles/v1/financials");
+    expect(nav.find((i) => i.label === "PCN")?.href).toBe("/rental/vehicles/v1/pcn");
     expect(nav.find((i) => i.label === "Incidents")?.href).toBe("/rental/vehicles/v1/claims");
-    expect(nav.find((i) => i.label === "PCN")).toBeUndefined();
+    expect(nav.map((i) => i.label)).toEqual([
+      "Overview",
+      "Vehicle & documents",
+      "Hires",
+      "Maintenance",
+      "Tracking",
+      "Financials",
+      "PCN",
+      "Incidents",
+    ]);
     expect(vehicleWorkspaceHref("v1")).toBe("/rental/vehicles/v1");
     expect(vehicleWorkspaceHref("v1", "maintenance")).toBe("/rental/vehicles/v1/maintenance");
     expect(vehicleWorkspaceHref("v1", "financials")).toBe("/rental/vehicles/v1/financials");
+    expect(vehicleWorkspaceHref("v1", "pcn")).toBe("/rental/vehicles/v1/pcn");
   });
 });
 
@@ -36,6 +47,8 @@ describe("parseVehicleWorkspaceSection", () => {
     expect(parseVehicleWorkspaceSection("/rental/vehicles/v1/maintenance/extra", "v1")).toBe("maintenance");
     expect(parseVehicleWorkspaceSection("/rental/vehicles/v1/tracking", "v1")).toBe("tracking");
     expect(parseVehicleWorkspaceSection("/rental/vehicles/v1/financials", "v1")).toBe("financials");
+    expect(parseVehicleWorkspaceSection("/rental/vehicles/v1/pcn", "v1")).toBe("pcn");
+    expect(parseVehicleWorkspaceSection("/rental/vehicles/v1/claims", "v1")).toBe("claims");
   });
 });
 

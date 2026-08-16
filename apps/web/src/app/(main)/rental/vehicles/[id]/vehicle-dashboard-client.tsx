@@ -261,7 +261,9 @@ export function VehicleDashboardClient() {
           : "warn"
         : (pnl.bookPositionGbp ?? 0) > 0
           ? "warn"
-          : "success";
+          : pnl.hasPurchase
+            ? "success"
+            : "neutral";
 
   return (
     <div className="space-y-4 sm:space-y-5">

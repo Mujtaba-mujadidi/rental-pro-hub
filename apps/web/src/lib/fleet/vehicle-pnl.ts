@@ -32,9 +32,14 @@ export type VehiclePnlBreakdown = {
   pcnTotalGbp: number;
   claimsNetGbp: number;
   operatingCostGbp: number;
+  /**
+   * Hire income − operating costs (excludes purchase/sale).
+   * Useful while owned without a recorded purchase, and as a trading subtotal always.
+   */
+  operatingResultGbp: number;
   /** sale − purchase − operating costs; null when not sold yet */
   netPnlGbp: number | null;
-  /** purchase + operating costs while still owned */
+  /** purchase + operating costs − hire income while still owned; null without purchase */
   bookPositionGbp: number | null;
   isSold: boolean;
   hasPurchase: boolean;
@@ -69,6 +74,7 @@ export function computeVehiclePnl(input: VehiclePnlInput): VehiclePnlBreakdown {
   const claimsNetGbp = roundGbp(nz(input.claimsNetGbp));
 
   const operatingCostGbp = roundGbp(maintenanceTotalGbp + pcnTotalGbp - claimsNetGbp);
+  const operatingResultGbp = roundGbp(rentalIncomeGbp - operatingCostGbp);
   const isSold = saleGbp != null;
   const hasPurchase = purchaseGbp != null;
 
@@ -103,6 +109,7 @@ export function computeVehiclePnl(input: VehiclePnlInput): VehiclePnlBreakdown {
     pcnTotalGbp,
     claimsNetGbp,
     operatingCostGbp,
+    operatingResultGbp,
     netPnlGbp,
     bookPositionGbp,
     isSold,

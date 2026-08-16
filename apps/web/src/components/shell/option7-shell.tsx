@@ -104,16 +104,20 @@ function buildBreadcrumbs(
         const section = parts[3];
         const sectionLabel =
           section === "details"
-            ? "Details"
+            ? "Vehicle & documents"
             : section === "rentals"
-              ? "Rentals"
+              ? "Hires"
               : section === "maintenance"
                 ? "Maintenance"
-                : section === "pcn"
-                  ? "PCN"
-                  : section === "claims"
-                    ? "Claims"
-                    : section.charAt(0).toUpperCase() + section.slice(1);
+                : section === "tracking"
+                  ? "Tracking"
+                  : section === "financials"
+                    ? "Financials"
+                    : section === "pcn"
+                      ? "PCN"
+                      : section === "claims"
+                        ? "Incidents"
+                        : section.charAt(0).toUpperCase() + section.slice(1);
         return [...base, { label: sectionLabel }];
       }
       return [{ label: "Home", href: "/rental" }, { label: "Vehicles", href: "/rental/vehicles" }];

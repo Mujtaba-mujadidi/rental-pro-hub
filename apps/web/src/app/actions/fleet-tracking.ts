@@ -389,6 +389,53 @@ export async function getVehicleLiveTrackAction(vehicleId: string): Promise<
   return { ok: true, linked: true, snapshot: snapshotFromTrack(rec), source };
 }
 
+/** Combined Tracking-tab payload for vehicle-workspace session cache. */
+export type VehicleTrackingPageData = {
+  linked: boolean;
+  snapshot: LiveTrackSnapshot | null;
+  source: TrackingDataSource | null;
+  weeklyMiles: number | null;
+  weeklyRange: string | null;
+  /** Client sets this when caching; server may leave 0. */
+  refreshedAtMs: number;
+};
+
+export async function loadVehicleTrackingPageAction(
+  vehicleId: string,
+): Promise<{ ok: true; data: VehicleTrackingPageData } | { ok: false; error: string }> {
+  const live = await getVehicleLiveTrackAction(vehicleId);
+  if (!live.ok) return live;
+
+  if (!live.linked) {
+    return {
+      ok: true,
+      data: {
+        linked: false,
+        snapshot: null,
+        source: null,
+        weeklyMiles: null,
+        weeklyRange: null,
+        refreshedAtMs: 0,
+      },
+    };
+  }
+
+  const weekly = await getVehicleWeeklyMileageAction(vehicleId);
+  const weeklyOk = weekly.ok && weekly.linked;
+
+  return {
+    ok: true,
+    data: {
+      linked: true,
+      snapshot: live.snapshot,
+      source: live.source,
+      weeklyMiles: weeklyOk ? weekly.miles : null,
+      weeklyRange: weeklyOk ? `${weekly.beginLabel} → ${weekly.endLabel}` : null,
+      refreshedAtMs: 0,
+    },
+  };
+}
+
 export async function setVehicleTrackerMileageAction(
   vehicleId: string,
   mileageMiles: number,

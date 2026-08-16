@@ -39,7 +39,6 @@ export function HireGroupAuditModal({ open, title, loading, error, events, onClo
       description="Chronological record of actions on this hire contract from creation through execution."
       allowMaximize
       showDraftActions={false}
-      pending={loading}
       maxWidthClass="max-w-2xl"
       panelHeightClass="h-[min(80vh,40rem)]"
       onRequestClose={onClose}

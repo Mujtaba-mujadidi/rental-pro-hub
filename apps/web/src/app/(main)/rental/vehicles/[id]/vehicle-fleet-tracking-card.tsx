@@ -1,20 +1,17 @@
 "use client";
 
-import { useEffect, useState, useTransition, type ReactNode } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { ManualDeviceLinkModal } from "@/app/(main)/rental/fleet-tracking/manual-device-link-modal";
 import {
   confirmVehicleMappingsAction,
-  getVehicleLiveTrackAction,
-  getVehicleWeeklyMileageAction,
   loadMappingSuggestionsAction,
   setVehicleTrackerMileageAction,
-  type LiveTrackSnapshot,
 } from "@/app/actions/fleet-tracking";
 import { useVehicleWorkspace } from "@/app/(main)/rental/vehicles/[id]/vehicle-workspace-provider";
 import { TrackerLocationMap } from "@/components/fleet/tracker-location-map";
 import { formatUkDateTime } from "@/lib/datetime/uk";
-import { describeTrackingDataSource, type DeviceGroup, type TrackingDataSource } from "@/lib/fleet-tracking/mapping";
+import { describeTrackingDataSource, type DeviceGroup } from "@/lib/fleet-tracking/mapping";
 import { SMARTCAR_TRACKER_APP_URL } from "@/lib/fleet-tracking/messaging";
 import { formatMiles } from "@/lib/fleet-tracking/units";
 
@@ -68,7 +65,7 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 }
 
 function freshnessLabel(refreshedAtMs: number | null): { label: string; tone: "success" | "neutral" | "warn" } {
-  if (refreshedAtMs == null) return { label: "Not loaded", tone: "neutral" };
+  if (refreshedAtMs == null || refreshedAtMs <= 0) return { label: "Not loaded", tone: "neutral" };
   const ageMin = (Date.now() - refreshedAtMs) / 60000;
   if (ageMin < 5) return { label: "Recently updated", tone: "success" };
   if (ageMin < 60) return { label: "Updated this hour", tone: "success" };
@@ -76,7 +73,7 @@ function freshnessLabel(refreshedAtMs: number | null): { label: string; tone: "s
 }
 
 function lastUpdatedCopy(refreshedAtMs: number | null): string {
-  if (refreshedAtMs == null) return "—";
+  if (refreshedAtMs == null || refreshedAtMs <= 0) return "—";
   const ageSec = Math.max(0, Math.round((Date.now() - refreshedAtMs) / 1000));
   if (ageSec < 45) return "Just now";
   if (ageSec < 3600) return `${Math.max(1, Math.round(ageSec / 60))} min ago`;
@@ -94,80 +91,47 @@ export function VehicleFleetTrackingCard({
   primaryImei?: string | null;
   canManageTracking: boolean;
 }) {
-  const { refreshShell } = useVehicleWorkspace();
-  const [refreshPending, startRefresh] = useTransition();
+  const { tracking, reloadTracking, refreshShell } = useVehicleWorkspace();
   const [setPending, startSet] = useTransition();
   const [linkPending, startLink] = useTransition();
-  const [snapshot, setSnapshot] = useState<LiveTrackSnapshot | null>(null);
-  const [trackingSource, setTrackingSource] = useState<TrackingDataSource | null>(null);
-  const [linked, setLinked] = useState<boolean | null>(null);
-  const [weeklyMiles, setWeeklyMiles] = useState<number | null>(null);
-  const [weeklyRange, setWeeklyRange] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [mileageInput, setMileageInput] = useState("");
+  const [localError, setLocalError] = useState<string | null>(null);
   const [setMsg, setSetMsg] = useState<string | null>(null);
-  const [refreshedAtMs, setRefreshedAtMs] = useState<number | null>(null);
 
   const [manualLinkOpen, setManualLinkOpen] = useState(false);
   const [unmatchedDevices, setUnmatchedDevices] = useState<DeviceGroup[]>([]);
   const [mappingLoading, setMappingLoading] = useState(false);
   const [linkMsg, setLinkMsg] = useState<string | null>(null);
 
+  const data = tracking.data;
+  const refreshPending = tracking.loading && !!data;
+  const error = localError ?? tracking.error;
+  const snapshot = data?.snapshot ?? null;
+  const trackingSource = data?.source ?? null;
+  const linked = data?.linked ?? false;
+  const weeklyMiles = data?.weeklyMiles ?? null;
+  const weeklyRange = data?.weeklyRange ?? null;
+  const refreshedAtMs = data?.refreshedAtMs && data.refreshedAtMs > 0 ? data.refreshedAtMs : null;
+
   function refresh() {
-    setError(null);
-    startRefresh(async () => {
-      const [live, weekly] = await Promise.all([
-        getVehicleLiveTrackAction(vehicleId),
-        getVehicleWeeklyMileageAction(vehicleId),
-      ]);
-      if (!live.ok) {
-        setError(live.error);
-        setLinked(null);
-        return;
-      }
-      if (!live.linked) {
-        setLinked(false);
-        setSnapshot(null);
-        setTrackingSource(null);
-        setWeeklyMiles(null);
-        setWeeklyRange(null);
-        setRefreshedAtMs(null);
-        return;
-      }
-      setLinked(true);
-      setSnapshot(live.snapshot);
-      setTrackingSource(live.source);
-      setRefreshedAtMs(Date.now());
-
-      if (weekly.ok && weekly.linked) {
-        setWeeklyMiles(weekly.miles);
-        setWeeklyRange(`${weekly.beginLabel} → ${weekly.endLabel}`);
-      } else {
-        setWeeklyMiles(null);
-        setWeeklyRange(null);
-      }
-    });
+    setLocalError(null);
+    void reloadTracking();
   }
-
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once when tracking tab mounts
-  }, [vehicleId]);
 
   function submitMileage() {
     const miles = Number(mileageInput);
     if (!Number.isFinite(miles) || miles < 0) {
-      setError("Enter a valid mileage in miles.");
+      setLocalError("Enter a valid mileage in miles.");
       return;
     }
     const milesInt = Math.ceil(miles);
     setMileageInput(String(milesInt));
-    setError(null);
+    setLocalError(null);
     setSetMsg(null);
     startSet(async () => {
       const res = await setVehicleTrackerMileageAction(vehicleId, milesInt);
       if (!res.ok) {
-        setError(res.error);
+        setLocalError(res.error);
         return;
       }
       const devices = res.deviceCount > 1 ? ` on ${res.deviceCount} devices` : "";
@@ -180,7 +144,7 @@ export function VehicleFleetTrackingCard({
   }
 
   function openManualLink() {
-    setError(null);
+    setLocalError(null);
     setLinkMsg(null);
     setMappingLoading(true);
     setManualLinkOpen(true);
@@ -188,7 +152,7 @@ export function VehicleFleetTrackingCard({
       try {
         const res = await loadMappingSuggestionsAction();
         if (!res.ok) {
-          setError(res.error);
+          setLocalError(res.error);
           setManualLinkOpen(false);
           return;
         }
@@ -202,11 +166,11 @@ export function VehicleFleetTrackingCard({
   function submitManualLink(input: { vehicleId: string; deviceBaseVrm: string }) {
     const group = unmatchedDevices.find((device) => device.baseVrm === input.deviceBaseVrm);
     if (!group) {
-      setError("Selected device group is no longer available. Close and try again.");
+      setLocalError("Selected device group is no longer available. Close and try again.");
       return;
     }
 
-    setError(null);
+    setLocalError(null);
     setLinkMsg(null);
     startLink(async () => {
       const res = await confirmVehicleMappingsAction([
@@ -217,7 +181,7 @@ export function VehicleFleetTrackingCard({
         },
       ]);
       if (!res.ok) {
-        setError(res.error);
+        setLocalError(res.error);
         return;
       }
       setManualLinkOpen(false);
@@ -227,7 +191,6 @@ export function VehicleFleetTrackingCard({
     });
   }
 
-  const initialLoading = linked === null && !error;
   const sourceLine = trackingSource ? describeTrackingDataSource(trackingSource) : null;
   const secondaryNote =
     trackingSource?.hasSecondaryDevice && trackingSource.secondaryDeviceLabel
@@ -237,7 +200,7 @@ export function VehicleFleetTrackingCard({
   const deviceImei = snapshot?.imei || primaryImei?.trim() || null;
   const hasFix = snapshot?.latitude != null && snapshot?.longitude != null;
 
-  if (linked === false) {
+  if (!linked) {
     return (
       <>
         <div className="rph-card space-y-4 p-5 sm:p-6">
@@ -300,7 +263,7 @@ export function VehicleFleetTrackingCard({
         <button
           type="button"
           className="rph-btn-ghost shrink-0 self-start sm:self-center"
-          disabled={refreshPending || setPending || initialLoading}
+          disabled={refreshPending || setPending}
           onClick={refresh}
         >
           Refresh location
@@ -313,9 +276,7 @@ export function VehicleFleetTrackingCard({
 
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="rph-card relative flex flex-col overflow-hidden">
-          {initialLoading || refreshPending ? (
-            <CardSectionLoader label={initialLoading ? "Loading tracker…" : "Refreshing location…"} />
-          ) : null}
+          {refreshPending ? <CardSectionLoader label="Refreshing location…" /> : null}
           <div className="flex items-start justify-between gap-3 border-b border-rph-border px-4 py-4 sm:px-5">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-rph-link">
@@ -328,7 +289,7 @@ export function VehicleFleetTrackingCard({
             <StatusPill label={freshness.label} tone={freshness.tone} />
           </div>
 
-          <div className="relative min-h-[14rem] flex-1 bg-rph-chrome/40">
+          <div className="relative min-h-[20rem] flex-1 bg-rph-chrome/40 sm:min-h-[16rem]">
             {hasFix ? (
               <TrackerLocationMap
                 latitude={snapshot!.latitude!}
@@ -336,12 +297,10 @@ export function VehicleFleetTrackingCard({
                 label={vehicleLabel.vrm}
                 className="absolute inset-0 h-full w-full"
               />
-            ) : !initialLoading ? (
-              <div className="flex h-full min-h-[14rem] items-center justify-center px-4 text-center">
+            ) : (
+              <div className="flex h-full min-h-[20rem] items-center justify-center px-4 text-center sm:min-h-[16rem]">
                 <p className="text-sm text-rph-fg-muted">No GPS fix on the last snapshot.</p>
               </div>
-            ) : (
-              <div className="min-h-[14rem]" />
             )}
             {hasFix ? (
               <div className="pointer-events-none absolute bottom-3 left-3 right-3 sm:left-4 sm:right-auto">
@@ -378,7 +337,7 @@ export function VehicleFleetTrackingCard({
             <button
               type="button"
               className="rph-btn-ghost"
-              disabled={refreshPending || setPending || initialLoading}
+              disabled={refreshPending || setPending}
               onClick={refresh}
             >
               Refresh location
@@ -387,9 +346,7 @@ export function VehicleFleetTrackingCard({
         </section>
 
         <section className="rph-card relative flex flex-col overflow-hidden">
-          {initialLoading || refreshPending ? (
-            <CardSectionLoader label={initialLoading ? "Loading tracker…" : "Refreshing…"} />
-          ) : null}
+          {refreshPending ? <CardSectionLoader label="Refreshing…" /> : null}
           <div className="flex items-start justify-between gap-3 border-b border-rph-border px-4 py-4 sm:px-5">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-rph-link">
@@ -474,7 +431,7 @@ export function VehicleFleetTrackingCard({
         </section>
       </div>
 
-      {canManageTracking && !initialLoading ? (
+      {canManageTracking ? (
         <section className="rph-card relative p-4 sm:p-5">
           {setPending ? <CardSectionLoader label="Sending mileage to tracker…" /> : null}
           <p className="text-[11px] font-semibold uppercase tracking-wider text-rph-link">Mileage</p>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition, type ReactNode } from "react";
 import {
   saveVehicleOwnershipEventAction,
   type VehicleFinancialsPageData,
@@ -10,8 +10,8 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { FormModalSelect } from "@/components/forms/form-modal-select";
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { VehiclePurchaseFormFields } from "@/components/fleet/vehicle-purchase-form-fields";
-import { formatUkDate } from "@/lib/datetime/uk";
-import { formatGbp, paymentMethodRequiresAccount, type PaymentMethodRow } from "@/lib/fleet/maintenance";
+import { formatUkDate, formatUkDateTextLong } from "@/lib/datetime/uk";
+import { formatGbp, paymentMethodRequiresAccount } from "@/lib/fleet/maintenance";
 import { OWNERSHIP_EVENT_LABELS } from "@/lib/fleet/vehicles";
 import {
   emptyPurchaseForm,
@@ -21,7 +21,7 @@ import {
   type PurchaseEventForm,
 } from "@/lib/fleet/vehicle-purchase";
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block space-y-1.5">
       <span className="block text-xs font-medium text-rph-fg-muted">{label}</span>
@@ -35,6 +35,94 @@ function pnlTone(value: number | null): string {
   if (value > 0) return "text-emerald-700 dark:text-emerald-300";
   if (value < 0) return "text-red-700 dark:text-red-300";
   return "text-rph-fg";
+}
+
+function StatusPill({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "success" | "neutral" | "warn";
+}) {
+  const cls =
+    tone === "success"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800/50 dark:bg-emerald-950/40 dark:text-emerald-200"
+      : tone === "warn"
+        ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200"
+        : "border-rph-border bg-rph-chrome text-rph-fg-secondary";
+  return (
+    <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${cls}`}>
+      {label}
+    </span>
+  );
+}
+
+function PnlRow({
+  label,
+  value,
+  hint,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  hint?: string | null;
+  tone?: "income" | "cost" | "neutral";
+}) {
+  const valueClass =
+    tone === "income"
+      ? "text-rph-fg"
+      : tone === "cost"
+        ? "text-rph-fg-secondary"
+        : "text-rph-fg";
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-rph-border py-3 last:border-0">
+      <div className="min-w-0">
+        <p className="text-sm text-rph-fg-secondary">{label}</p>
+        {hint ? <p className="mt-0.5 text-[11px] text-rph-fg-muted">{hint}</p> : null}
+      </div>
+      <p className={`shrink-0 text-sm font-semibold tabular-nums ${valueClass}`}>{value}</p>
+    </div>
+  );
+}
+
+function OwnershipRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-3 py-2.5">
+      <dt className="text-sm text-rph-fg-muted">{label}</dt>
+      <dd className="max-w-[65%] text-right text-sm font-medium text-rph-fg">{children}</dd>
+    </div>
+  );
+}
+
+function signedCostGbp(amount: number): string {
+  if (amount <= 0.005) return formatGbp(0);
+  return `−${formatGbp(amount)}`;
+}
+
+function hireIncomeHint(pnl: VehicleFinancialsPageData["pnl"]): string | null {
+  const bits: string[] = [];
+  if (pnl.rentalGrossIncomeGbp > pnl.rentalIncomeGbp + 0.005) {
+    bits.push(`Rent ${formatGbp(pnl.rentalGrossIncomeGbp)}`);
+  }
+  if (pnl.rentalCollectionsGbp > 0.005) {
+    bits.push(`${formatGbp(pnl.rentalCollectionsGbp)} settlement collected`);
+  }
+  if (pnl.rentalPrepaidExcludedGbp > 0.005) {
+    bits.push(`${formatGbp(pnl.rentalPrepaidExcludedGbp)} prepaid after end excluded`);
+  }
+  if (pnl.rentalRefundsGbp > 0.005) {
+    bits.push(`${formatGbp(pnl.rentalRefundsGbp)} refunded`);
+  }
+  if (pnl.rentalWriteOffsGbp > 0.005) {
+    bits.push(`${formatGbp(pnl.rentalWriteOffsGbp)} written off`);
+  }
+  if (pnl.rentalDepositRetentionGbp > 0.005) {
+    bits.push(`${formatGbp(pnl.rentalDepositRetentionGbp)} deposit retained`);
+  }
+  if (pnl.driverChargeIncomeGbp > 0.005) {
+    bits.push(`${formatGbp(pnl.driverChargeIncomeGbp)} driver charges`);
+  }
+  return bits.length ? bits.join(" · ") : null;
 }
 
 export function VehicleFinancialsView({
@@ -76,6 +164,25 @@ export function VehicleFinancialsView({
   const busy = pending || overlay?.phase === "pending";
   const isSold = initial.vehicle.status === "sold" || initial.sale != null;
   const { pnl } = initial;
+
+  const headlineValue = pnl.isSold ? pnl.netPnlGbp : pnl.bookPositionGbp;
+  const headlineLabel = pnl.isSold ? "Net P&L" : "Book position";
+  /** Pill: net/operating positive is good; book position negative (recovered) is good. */
+  const contributionSign = pnl.isSold
+    ? pnl.netPnlGbp
+    : pnl.hasPurchase
+      ? pnl.bookPositionGbp == null
+        ? null
+        : -pnl.bookPositionGbp
+      : pnl.operatingResultGbp;
+  const statusPill =
+    contributionSign == null
+      ? { label: "Incomplete", tone: "neutral" as const }
+      : contributionSign > 0.005
+        ? { label: "Positive", tone: "success" as const }
+        : contributionSign < -0.005
+          ? { label: "Negative", tone: "warn" as const }
+          : { label: "Break even", tone: "neutral" as const };
 
   function openPurchase() {
     setError(null);
@@ -186,192 +293,156 @@ export function VehicleFinancialsView({
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="rph-h1">Financials</h1>
-          <p className="rph-muted mt-1 text-sm">
-            Purchase and sale for capital P&L, plus operating costs and hire income from ended contracts.
-          </p>
-        </div>
-        {initial.canWrite && !isSold ? (
-          <div className="rph-btn-toolbar">
-            {!initial.purchase ? (
-              <button type="button" className="rph-btn-ghost" onClick={openPurchase} disabled={busy}>
-                Record purchase
-              </button>
-            ) : (
-              <button type="button" className="rph-btn-ghost" onClick={openPurchase} disabled={busy}>
-                Edit purchase
-              </button>
-            )}
-            <button type="button" className="rph-btn-primary" onClick={openSale} disabled={busy || !!initial.sale}>
-              Sell vehicle
-            </button>
-          </div>
-        ) : null}
-      </div>
-
+    <div className="space-y-4 sm:space-y-5">
       {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
 
-      <div className="rph-card p-4">
-        <p className="rph-meta font-semibold uppercase tracking-wide">Profit &amp; loss</p>
-        <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <div>
-            <dt className="text-xs text-rph-fg-muted">Purchase</dt>
-            <dd className="mt-0.5 font-semibold text-rph-fg">
-              {pnl.purchaseGbp != null ? formatGbp(pnl.purchaseGbp) : "—"}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs text-rph-fg-muted">Sale</dt>
-            <dd className="mt-0.5 font-semibold text-rph-fg">{pnl.saleGbp != null ? formatGbp(pnl.saleGbp) : "—"}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-rph-fg-muted">Maintenance (total)</dt>
-            <dd className="mt-0.5 font-semibold text-rph-fg">{formatGbp(pnl.maintenanceTotalGbp)}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-rph-fg-muted">Hire income (net)</dt>
-            <dd className="mt-0.5 font-semibold text-rph-fg">{formatGbp(pnl.rentalIncomeGbp)}</dd>
-            {pnl.rentalGrossIncomeGbp > pnl.rentalIncomeGbp ? (
-              <p className="rph-meta mt-1 text-[10px]">
-                Rent paid (weeks started) {formatGbp(pnl.rentalGrossIncomeGbp)}
-                {pnl.rentalCollectionsGbp > 0.005
-                  ? ` · ${formatGbp(pnl.rentalCollectionsGbp)} settlement collected`
-                  : ""}
-                {pnl.rentalPrepaidExcludedGbp > 0.005
-                  ? ` · ${formatGbp(pnl.rentalPrepaidExcludedGbp)} prepaid after contract end excluded`
-                  : ""}
-                {pnl.rentalRefundsGbp > 0.005
-                  ? ` · ${formatGbp(pnl.rentalRefundsGbp)} refunded to driver`
-                  : ""}
-                {pnl.rentalWriteOffsGbp > 0.005
-                  ? ` · ${formatGbp(pnl.rentalWriteOffsGbp)} settlement written off`
-                  : ""}
-                {pnl.rentalDepositRetentionGbp > 0.005
-                  ? ` · ${formatGbp(pnl.rentalDepositRetentionGbp)} deposit retained`
-                  : ""}
-                {pnl.driverChargeIncomeGbp > 0.005
-                  ? ` · ${formatGbp(pnl.driverChargeIncomeGbp)} driver charges`
-                  : ""}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <section className="rph-card flex flex-col overflow-hidden">
+          <div className="flex items-start justify-between gap-3 border-b border-rph-border px-4 py-4 sm:px-5">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-rph-link">
+                Profit &amp; loss
               </p>
-            ) : pnl.rentalDepositRetentionGbp > 0.005 || pnl.driverChargeIncomeGbp > 0.005 ? (
-              <p className="rph-meta mt-1 text-[10px]">
-                {pnl.rentalDepositRetentionGbp > 0.005
-                  ? `Includes ${formatGbp(pnl.rentalDepositRetentionGbp)} deposit retained after contract end`
-                  : ""}
-                {pnl.rentalDepositRetentionGbp > 0.005 && pnl.driverChargeIncomeGbp > 0.005
-                  ? " · "
-                  : ""}
-                {pnl.driverChargeIncomeGbp > 0.005
-                  ? `${formatGbp(pnl.driverChargeIncomeGbp)} driver charges`
-                  : ""}
+              <h2 className="mt-0.5 text-lg font-semibold tracking-tight text-rph-fg">Lifetime summary</h2>
+            </div>
+            <StatusPill label={statusPill.label} tone={statusPill.tone} />
+          </div>
+
+          <div className="flex-1 px-4 sm:px-5">
+            <PnlRow
+              label="Hire income"
+              value={formatGbp(pnl.rentalIncomeGbp)}
+              hint={hireIncomeHint(pnl)}
+              tone="income"
+            />
+            <PnlRow
+              label="Purchase"
+              value={pnl.purchaseGbp != null ? signedCostGbp(pnl.purchaseGbp) : "—"}
+              tone="cost"
+            />
+            <PnlRow
+              label="Maintenance"
+              value={signedCostGbp(pnl.maintenanceTotalGbp)}
+              tone="cost"
+            />
+            {pnl.isSold && pnl.saleGbp != null ? (
+              <PnlRow label="Sale proceeds" value={formatGbp(pnl.saleGbp)} tone="income" />
+            ) : null}
+            {pnl.isSold && pnl.capitalGainGbp != null ? (
+              <PnlRow
+                label="Capital gain / loss"
+                value={formatGbp(pnl.capitalGainGbp)}
+                tone={pnl.capitalGainGbp >= 0 ? "income" : "cost"}
+              />
+            ) : null}
+            <PnlRow
+              label="Operating result"
+              value={formatGbp(pnl.operatingResultGbp)}
+              hint="Hire income − costs"
+              tone={pnl.operatingResultGbp >= 0 ? "income" : "cost"}
+            />
+          </div>
+
+          <div className="mt-auto border-t border-rph-border px-4 py-4 sm:px-5">
+            <div className="flex items-end justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium text-rph-fg-muted">{headlineLabel}</p>
+                <p className="mt-0.5 text-[11px] text-rph-fg-muted">
+                  {pnl.isSold
+                    ? "Sale − purchase − costs + hire income"
+                    : pnl.hasPurchase
+                      ? "Purchase + costs − hire income"
+                      : "Record a purchase to see book position"}
+                </p>
+              </div>
+              <p className={`text-xl font-semibold tabular-nums ${pnlTone(headlineValue)}`}>
+                {headlineValue != null ? formatGbp(headlineValue) : "—"}
               </p>
+            </div>
+          </div>
+        </section>
+
+        <section className="rph-card flex flex-col overflow-hidden">
+          <div className="flex items-start justify-between gap-3 border-b border-rph-border px-4 py-4 sm:px-5">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-rph-link">Ownership</p>
+              <h2 className="mt-0.5 text-lg font-semibold tracking-tight text-rph-fg">Purchase &amp; sale</h2>
+            </div>
+            {initial.canWrite && !isSold ? (
+              <button
+                type="button"
+                className="text-sm font-medium text-rph-link hover:text-rph-link-hover"
+                disabled={busy}
+                onClick={openPurchase}
+              >
+                {initial.purchase ? "Edit purchase" : "Record purchase"}
+              </button>
             ) : null}
           </div>
-          <div>
-            <dt className="text-xs text-rph-fg-muted">{pnl.isSold ? "Net P&L" : "Book position"}</dt>
-            <dd className={`mt-0.5 text-lg font-semibold ${pnlTone(pnl.isSold ? pnl.netPnlGbp : pnl.bookPositionGbp)}`}>
-              {pnl.isSold && pnl.netPnlGbp != null
-                ? formatGbp(pnl.netPnlGbp)
-                : pnl.bookPositionGbp != null
-                  ? formatGbp(pnl.bookPositionGbp)
-                  : "—"}
-            </dd>
-          </div>
-          {pnl.isSold && pnl.capitalGainGbp != null ? (
-            <div>
-              <dt className="text-xs text-rph-fg-muted">Capital gain / loss</dt>
-              <dd className={`mt-0.5 font-semibold ${pnlTone(pnl.capitalGainGbp)}`}>{formatGbp(pnl.capitalGainGbp)}</dd>
+
+          <dl className="flex-1 px-4 py-2 sm:px-5">
+            <OwnershipRow label="Purchase date">
+              {initial.purchase ? formatUkDateTextLong(initial.purchase.occurred_on) : "—"}
+            </OwnershipRow>
+            <OwnershipRow label="Purchase price">
+              {initial.purchase ? formatGbp(initial.purchase.amount_gbp) : "—"}
+            </OwnershipRow>
+            {initial.purchase?.counterparty ? (
+              <OwnershipRow label="Seller">{initial.purchase.counterparty}</OwnershipRow>
+            ) : null}
+            {initial.purchase?.payment_method_name ? (
+              <OwnershipRow label="Payment">
+                {initial.purchase.payment_method_name}
+                {initial.purchase.payment_account_name
+                  ? ` · ${initial.purchase.payment_account_name}`
+                  : ""}
+              </OwnershipRow>
+            ) : null}
+            <OwnershipRow label="Sale status">
+              {initial.sale ? (
+                <>
+                  Sold
+                  <span className="mt-0.5 block text-xs font-normal text-rph-fg-muted">
+                    {formatUkDateTextLong(initial.sale.occurred_on)} · {formatGbp(initial.sale.amount_gbp)}
+                    {initial.sale.counterparty ? ` · ${initial.sale.counterparty}` : ""}
+                  </span>
+                </>
+              ) : (
+                "Not sold"
+              )}
+            </OwnershipRow>
+          </dl>
+
+          {initial.canWrite && !isSold ? (
+            <div className="mt-auto flex flex-wrap justify-end gap-2 border-t border-rph-border px-4 py-3 sm:px-5">
+              <button type="button" className="rph-btn-primary" disabled={busy || !!initial.sale} onClick={openSale}>
+                Sell vehicle
+              </button>
             </div>
           ) : null}
-        </dl>
-        <p className="rph-meta mt-3 text-xs">
-          Hire income is in-contract rent collected on the schedule (or earned at contract end),
-          plus settlement collections only when rent was not already on the schedule, plus deposit
-          retained after staff resolve the deposit (forfeit or partial refund), minus settlement
-          write-offs. Prepaid rent after contract end and settlement refunds are shown separately and
-          do not reduce earned rent.
-        </p>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rph-card p-4">
-          <p className="rph-meta font-semibold uppercase tracking-wide">Purchase</p>
-          {initial.purchase ? (
-            <dl className="mt-3 space-y-2 text-sm">
-              <div className="flex justify-between gap-2">
-                <dt className="text-rph-fg-muted">Date</dt>
-                <dd>{formatUkDate(initial.purchase.occurred_on)}</dd>
-              </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-rph-fg-muted">Amount</dt>
-                <dd className="font-semibold">{formatGbp(initial.purchase.amount_gbp)}</dd>
-              </div>
-              {initial.purchase.counterparty ? (
-                <div className="flex justify-between gap-2">
-                  <dt className="text-rph-fg-muted">Seller</dt>
-                  <dd>{initial.purchase.counterparty}</dd>
-                </div>
-              ) : null}
-              {initial.purchase.payment_method_name ? (
-                <div className="flex justify-between gap-2">
-                  <dt className="text-rph-fg-muted">Payment</dt>
-                  <dd>
-                    {initial.purchase.payment_method_name}
-                    {initial.purchase.payment_account_name ? ` · ${initial.purchase.payment_account_name}` : ""}
-                  </dd>
-                </div>
-              ) : null}
-            </dl>
-          ) : (
-            <p className="rph-muted mt-2 text-sm">No purchase recorded yet.</p>
-          )}
-        </div>
-
-        <div className="rph-card p-4">
-          <p className="rph-meta font-semibold uppercase tracking-wide">Sale</p>
-          {initial.sale ? (
-            <dl className="mt-3 space-y-2 text-sm">
-              <div className="flex justify-between gap-2">
-                <dt className="text-rph-fg-muted">Date</dt>
-                <dd>{formatUkDate(initial.sale.occurred_on)}</dd>
-              </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-rph-fg-muted">Amount</dt>
-                <dd className="font-semibold">{formatGbp(initial.sale.amount_gbp)}</dd>
-              </div>
-              {initial.sale.counterparty ? (
-                <div className="flex justify-between gap-2">
-                  <dt className="text-rph-fg-muted">Buyer</dt>
-                  <dd>{initial.sale.counterparty}</dd>
-                </div>
-              ) : null}
-            </dl>
-          ) : (
-            <p className="rph-muted mt-2 text-sm">{isSold ? "—" : "Not sold yet."}</p>
-          )}
-        </div>
+        </section>
       </div>
 
       {(initial.purchase || initial.sale) && (
-        <div className="rph-card overflow-hidden">
-          <p className="border-b border-rph-border px-4 py-3 text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">
+        <section className="rph-card overflow-hidden">
+          <p className="border-b border-rph-border px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-rph-link sm:px-5">
             Ownership history
           </p>
           <ul className="divide-y divide-rph-border text-sm">
             {[initial.purchase, initial.sale]
               .filter(Boolean)
               .map((ev) => (
-                <li key={ev!.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+                <li
+                  key={ev!.id}
+                  className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-5"
+                >
                   <span className="font-medium text-rph-fg">{OWNERSHIP_EVENT_LABELS[ev!.event_type]}</span>
                   <span className="text-rph-fg-muted">{formatUkDate(ev!.occurred_on)}</span>
-                  <span className="font-semibold">{formatGbp(ev!.amount_gbp)}</span>
+                  <span className="font-semibold tabular-nums">{formatGbp(ev!.amount_gbp)}</span>
                 </li>
               ))}
           </ul>
-        </div>
+        </section>
       )}
 
       <FormModalShell

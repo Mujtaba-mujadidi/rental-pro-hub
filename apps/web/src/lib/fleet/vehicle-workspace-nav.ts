@@ -15,6 +15,7 @@ export function vehicleWorkspaceNav(vehicleId: string): VehicleWorkspaceNavItem[
     { href: `${base}/maintenance`, label: "Maintenance", match: "prefix" },
     { href: `${base}/tracking`, label: "Tracking", match: "prefix" },
     { href: `${base}/financials`, label: "Financials", match: "prefix" },
+    { href: `${base}/pcn`, label: "PCN", match: "prefix" },
     { href: `${base}/claims`, label: "Incidents", match: "prefix" },
   ];
 }

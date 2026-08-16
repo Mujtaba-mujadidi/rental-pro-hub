@@ -23,8 +23,21 @@ describe("computeVehiclePnl", () => {
     });
     expect(r.netPnlGbp).toBeNull();
     expect(r.bookPositionGbp).toBe(8500);
+    expect(r.operatingResultGbp).toBe(-500);
     expect(r.isSold).toBe(false);
     expect(r.hasPurchase).toBe(true);
+  });
+
+  it("computes operating result without purchase", () => {
+    const r = computeVehiclePnl({
+      purchaseGbp: null,
+      saleGbp: null,
+      maintenanceTotalGbp: 480,
+      rentalIncomeGbp: 370,
+    });
+    expect(r.bookPositionGbp).toBeNull();
+    expect(r.operatingResultGbp).toBe(-110);
+    expect(r.hasPurchase).toBe(false);
   });
 
   it("allows sale without recorded purchase", () => {

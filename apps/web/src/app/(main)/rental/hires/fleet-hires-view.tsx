@@ -4,6 +4,11 @@ import { useHireContractsRealtime } from "@/hooks/use-hire-realtime";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { listHireContractsAction, type HireContractTableRow } from "@/app/actions/rental-hire-wizard";
+import {
+  buildHireListStats,
+  defaultHireListTab,
+  type HireListTab,
+} from "@/lib/fleet/hire-list-tabs";
 import { HireContractsTable } from "./hire-contracts-table";
 import { HireContractWizardModal } from "./hire-contract-wizard-modal";
 
@@ -28,6 +33,7 @@ export function FleetHiresView({
   const lockedId = lockedSubcompanyId?.trim() || null;
   const [subcompanyFilter] = useState<string | null>(lockedId ?? initialSubcompanyId);
   const hasInitialRows = initialRows !== undefined;
+  const [listTab, setListTab] = useState<HireListTab | null>(null);
 
   const reload = useCallback(() => {
     startTransition(async () => {
@@ -55,6 +61,14 @@ export function FleetHiresView({
     return rows.filter((r) => r.subcompany_id === subcompanyFilter);
   }, [rows, subcompanyFilter]);
 
+  const stats = useMemo(() => buildHireListStats(visibleRows), [visibleRows]);
+
+  useEffect(() => {
+    setListTab((current) => current ?? defaultHireListTab(stats));
+  }, [stats]);
+
+  const activeTab = listTab ?? defaultHireListTab(stats);
+
   function openNew() {
     setEditDraftId(null);
     setWizardOpen(true);
@@ -66,13 +80,24 @@ export function FleetHiresView({
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="rph-h1">Hires</h1>
-        <p className="rph-muted mt-1 text-sm">
-          Create and manage vehicle hire contracts. The list updates live when driver access or e-signature progress
-          changes.
-        </p>
+    <div className="space-y-4 sm:space-y-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="rph-h1">Hires</h1>
+          <p className="rph-muted mt-1 text-sm">
+            Manage agreements, driver access and payments from one focused list.
+          </p>
+        </div>
+        {canWrite ? (
+          <button
+            type="button"
+            className="rph-btn-primary shrink-0"
+            disabled={pending}
+            onClick={openNew}
+          >
+            New hire
+          </button>
+        ) : null}
       </div>
 
       {subcompanyFilter && !lockedId ? (
@@ -86,7 +111,59 @@ export function FleetHiresView({
 
       {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
 
+      <section className="rph-card overflow-hidden p-0">
+        <dl className="grid grid-cols-1 divide-y divide-rph-border sm:grid-cols-2 lg:grid-cols-4 lg:divide-x lg:divide-y-0">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left sm:px-5 hover:bg-rph-chrome/40"
+            onClick={() => setListTab("active")}
+          >
+            <dt className="text-sm text-rph-fg-muted">Active</dt>
+            <dd className="text-base font-semibold tabular-nums text-rph-fg">
+              {stats.activeCount.toLocaleString("en-GB")}
+            </dd>
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left sm:px-5 hover:bg-rph-chrome/40"
+            onClick={() => setListTab("scheduled")}
+          >
+            <dt className="text-sm text-rph-fg-muted">Scheduled</dt>
+            <dd className="text-base font-semibold tabular-nums text-rph-fg">
+              {stats.scheduledCount.toLocaleString("en-GB")}
+            </dd>
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left sm:px-5 hover:bg-rph-chrome/40"
+            onClick={() => setListTab("ended")}
+          >
+            <dt className="text-sm text-rph-fg-muted">Completed this month</dt>
+            <dd className="text-base font-semibold tabular-nums text-rph-fg">
+              {stats.completedThisMonthCount.toLocaleString("en-GB")}
+            </dd>
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left sm:px-5 hover:bg-rph-chrome/40"
+            onClick={() => setListTab("needs_action")}
+          >
+            <dt className="text-sm text-rph-fg-muted">Needs action</dt>
+            <dd
+              className={`text-base font-semibold tabular-nums ${
+                stats.needsActionCount > 0 ? "text-red-700 dark:text-red-300" : "text-rph-fg"
+              }`}
+            >
+              {stats.needsActionCount.toLocaleString("en-GB")}
+            </dd>
+          </button>
+        </dl>
+      </section>
+
       <HireContractsTable
+        variant="fleet"
+        listTab={activeTab}
+        onListTabChange={setListTab}
         rows={visibleRows}
         canWrite={canWrite}
         busy={pending && !hasInitialRows}
