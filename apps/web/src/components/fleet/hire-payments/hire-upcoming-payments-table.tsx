@@ -34,7 +34,7 @@ export function HireUpcomingPaymentsTable({
   const [rowError, setRowError] = useState<string | null>(null);
   const todayYmd = ukTodayYmd();
   const highlightSet = useMemo(() => new Set(highlightedRowIds ?? []), [highlightedRowIds]);
-  const colSpan = showActions ? 5 : 4;
+  const colSpan = showActions ? 7 : 6;
 
   return (
     <div className="space-y-3">
@@ -45,6 +45,8 @@ export function HireUpcomingPaymentsTable({
             <col className="hire-ws-payments-col-period" />
             <col className="hire-ws-payments-col-amount" />
             <col className="hire-ws-payments-col-amount" />
+            <col className="hire-ws-payments-col-amount" />
+            <col className="hire-ws-payments-col-amount" />
             <col className="hire-ws-payments-col-status" />
             {showActions ? <col className="hire-ws-payments-col-action" /> : null}
           </colgroup>
@@ -52,6 +54,8 @@ export function HireUpcomingPaymentsTable({
             <tr>
               <th scope="col">Period</th>
               <th scope="col">Due</th>
+              <th scope="col">Discount</th>
+              <th scope="col">After discount</th>
               <th scope="col">Paid</th>
               <th scope="col">Status</th>
               {showActions ? (
@@ -78,6 +82,12 @@ export function HireUpcomingPaymentsTable({
                       <span className="hire-ws-payments-period-label">{upcomingPaymentPeriodLabel(row)}</span>
                     </td>
                     <td data-label="Due" className="tabular-nums">
+                      {formatGbp(row.baseAmountGbp)}
+                    </td>
+                    <td data-label="Discount" className="tabular-nums">
+                      {row.discountTotalGbp > 0.005 ? formatGbp(row.discountTotalGbp) : "—"}
+                    </td>
+                    <td data-label="After discount" className="tabular-nums font-medium">
                       {formatGbp(row.netDueGbp)}
                     </td>
                     <td data-label="Paid" className="tabular-nums">

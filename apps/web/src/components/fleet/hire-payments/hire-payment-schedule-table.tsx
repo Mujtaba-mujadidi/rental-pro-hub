@@ -47,6 +47,12 @@ function rowDisplayStatus(
   );
 }
 
+function moneyCell(workspaceTable: boolean, value: number, emptyDash = false) {
+  const text = emptyDash && value <= 0.005 ? "—" : formatGbp(value);
+  if (workspaceTable) return text;
+  return <span className="rph-table-cell-value">{text}</span>;
+}
+
 export function HirePaymentScheduleTable({
   rows,
   canRecordOnRow,
@@ -112,6 +118,8 @@ export function HirePaymentScheduleTable({
           row.paymentStatus,
           displayStatus,
           statusMeta.label,
+          row.baseAmountGbp,
+          row.discountTotalGbp,
           row.netDueGbp,
           row.paidGbp,
           row.balanceGbp,
@@ -128,7 +136,14 @@ export function HirePaymentScheduleTable({
 
   const workspaceTable = variant === "workspace";
   const includeActions = showActions;
-  const emptyColSpan = workspaceTable ? (includeActions ? 5 : 4) : includeActions ? 6 : 5;
+  // Period, Due, Discount, After discount, Paid, [Balance], Status, [Action]
+  const emptyColSpan = workspaceTable
+    ? includeActions
+      ? 7
+      : 6
+    : includeActions
+      ? 8
+      : 7;
 
   const tableBody = (
     <table
@@ -143,6 +158,8 @@ export function HirePaymentScheduleTable({
       {workspaceTable ? (
         <colgroup>
           <col className="hire-ws-payments-col-period" />
+          <col className="hire-ws-payments-col-amount" />
+          <col className="hire-ws-payments-col-amount" />
           <col className="hire-ws-payments-col-amount" />
           <col className="hire-ws-payments-col-amount" />
           <col className="hire-ws-payments-col-status" />
@@ -162,6 +179,12 @@ export function HirePaymentScheduleTable({
           </th>
           <th scope="col" className={workspaceTable ? undefined : "px-4 py-2.5"}>
             Due
+          </th>
+          <th scope="col" className={workspaceTable ? undefined : "px-4 py-2.5"}>
+            Discount
+          </th>
+          <th scope="col" className={workspaceTable ? undefined : "px-4 py-2.5"}>
+            After discount
           </th>
           <th scope="col" className={workspaceTable ? undefined : "px-4 py-2.5"}>
             Paid
@@ -232,18 +255,6 @@ export function HirePaymentScheduleTable({
                     <>
                       <p className="font-medium text-rph-fg">{periodCell(row)}</p>
                       <p className="rph-meta text-xs capitalize">{row.rowKind}</p>
-                      {row.discountTotalGbp > 0 ? (
-                        <p className="rph-meta text-xs">Discount {formatGbp(row.discountTotalGbp)}</p>
-                      ) : null}
-                      {row.discounts.length > 0 ? (
-                        <ul className="rph-meta mt-1 space-y-0.5 text-[10px]">
-                          {row.discounts.map((d) => (
-                            <li key={d.id}>
-                              −{formatGbp(d.amountGbp)} · {d.reason}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
                       {highlighted ? (
                         <p className="mt-1 text-xs font-medium text-rph-link">Allocated in payment</p>
                       ) : null}
@@ -251,18 +262,19 @@ export function HirePaymentScheduleTable({
                   )}
                 </td>
                 <td data-label="Due" className={workspaceTable ? "tabular-nums" : "px-4 py-3 tabular-nums"}>
-                  {workspaceTable ? (
-                    formatGbp(row.netDueGbp)
-                  ) : (
-                    <span className="rph-table-cell-value">{formatGbp(row.netDueGbp)}</span>
-                  )}
+                  {moneyCell(workspaceTable, row.baseAmountGbp)}
+                </td>
+                <td data-label="Discount" className={workspaceTable ? "tabular-nums" : "px-4 py-3 tabular-nums"}>
+                  {moneyCell(workspaceTable, row.discountTotalGbp, true)}
+                </td>
+                <td
+                  data-label="After discount"
+                  className={workspaceTable ? "tabular-nums font-medium" : "px-4 py-3 tabular-nums font-medium"}
+                >
+                  {moneyCell(workspaceTable, row.netDueGbp)}
                 </td>
                 <td data-label="Paid" className={workspaceTable ? "tabular-nums" : "px-4 py-3 tabular-nums"}>
-                  {workspaceTable ? (
-                    formatGbp(row.paidGbp)
-                  ) : (
-                    <span className="rph-table-cell-value">{formatGbp(row.paidGbp)}</span>
-                  )}
+                  {moneyCell(workspaceTable, row.paidGbp)}
                 </td>
                 {!workspaceTable ? (
                   <td data-label="Balance" className="px-4 py-3 tabular-nums font-medium">

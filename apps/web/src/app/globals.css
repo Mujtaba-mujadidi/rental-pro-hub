@@ -875,25 +875,25 @@ html {
   @apply w-full table-fixed border-separate border-spacing-0 text-xs sm:text-sm;
 }
 .hire-ws-payments-col-period {
-  width: 24%;
-}
-.hire-ws-payments-col-amount {
-  width: 17%;
-}
-.hire-ws-payments-col-status {
-  width: 30%;
-}
-.hire-ws-payments-col-action {
-  width: 12%;
-}
-.hire-ws-payments-table-no-actions .hire-ws-payments-col-period {
-  width: 28%;
-}
-.hire-ws-payments-table-no-actions .hire-ws-payments-col-amount {
   width: 18%;
 }
+.hire-ws-payments-col-amount {
+  width: 12%;
+}
+.hire-ws-payments-col-status {
+  width: 22%;
+}
+.hire-ws-payments-col-action {
+  width: 10%;
+}
+.hire-ws-payments-table-no-actions .hire-ws-payments-col-period {
+  width: 20%;
+}
+.hire-ws-payments-table-no-actions .hire-ws-payments-col-amount {
+  width: 13%;
+}
 .hire-ws-payments-table-no-actions .hire-ws-payments-col-status {
-  width: 36%;
+  width: 28%;
 }
 .hire-ws-payments-table thead th {
   @apply sticky top-0 z-[1] border-b border-rph-border bg-rph-page px-1 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.06em] text-rph-fg-muted first:pl-0 last:pr-0 sm:bg-rph-page/70 sm:px-3 sm:py-2.5 sm:text-[11px] sm:tracking-[0.08em];
@@ -908,7 +908,9 @@ html {
   @apply block truncate;
 }
 .hire-ws-payments-table tbody td:nth-child(2),
-.hire-ws-payments-table tbody td:nth-child(3) {
+.hire-ws-payments-table tbody td:nth-child(3),
+.hire-ws-payments-table tbody td:nth-child(4),
+.hire-ws-payments-table tbody td:nth-child(5) {
   @apply whitespace-nowrap tabular-nums;
 }
 .hire-ws-payments-table thead th:last-child,

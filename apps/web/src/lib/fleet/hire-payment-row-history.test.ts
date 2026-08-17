@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { formatHirePaymentRowEvent } from "@/lib/fleet/hire-payment-row-history";
+import {
+  formatHirePaymentDiscountEvent,
+  formatHirePaymentRowEvent,
+  mergeHirePaymentRowHistory,
+} from "@/lib/fleet/hire-payment-row-history";
 
 const base = {
   id: "evt-1",
@@ -53,5 +57,64 @@ describe("formatHirePaymentRowEvent", () => {
     expect(display.actorLabel).toBe("Driver");
     expect(display.detailLines).toContain("Amount: £600.00");
     expect(display.detailLines).toContain("Reference: REF-123");
+  });
+
+  it("prefers resolved actor display name when provided", () => {
+    const display = formatHirePaymentRowEvent({
+      ...base,
+      eventKind: "status_change",
+      fromStatus: "pending_approval",
+      toStatus: "approved",
+      comment: null,
+      amendmentPayload: { approvedAmountGbp: 100 },
+      actorRole: "company_staff",
+      actorDisplayName: "Riddhi Joshi",
+    });
+    expect(display.actorLabel).toBe("Riddhi Joshi");
+  });
+});
+
+describe("formatHirePaymentDiscountEvent", () => {
+  it("shows amount, reason, and who applied it", () => {
+    const display = formatHirePaymentDiscountEvent({
+      id: "d1",
+      amountGbp: 25,
+      reason: "Loyalty credit",
+      appliedAt: "2026-07-19T09:00:00Z",
+      appliedByDisplayName: "Alex Ops",
+    });
+    expect(display.title).toBe("Discount applied");
+    expect(display.body).toBe("Loyalty credit");
+    expect(display.detailLines).toEqual(["Amount: −£25.00"]);
+    expect(display.actorLabel).toBe("Alex Ops");
+  });
+});
+
+describe("mergeHirePaymentRowHistory", () => {
+  it("interleaves discounts with status events by time", () => {
+    const items = mergeHirePaymentRowHistory({
+      events: [
+        {
+          id: "e1",
+          eventKind: "status_change",
+          fromStatus: "not_received",
+          toStatus: "pending_approval",
+          comment: null,
+          amendmentPayload: { submittedAmountGbp: 100 },
+          actorRole: "driver",
+          createdAt: "2026-07-20T12:00:00Z",
+        },
+      ],
+      discounts: [
+        {
+          id: "d1",
+          amountGbp: 10,
+          reason: "Promo",
+          appliedAt: "2026-07-20T10:00:00Z",
+          appliedByDisplayName: "Alex Ops",
+        },
+      ],
+    });
+    expect(items.map((i) => i.title)).toEqual(["Discount applied", "Payment submitted"]);
   });
 });

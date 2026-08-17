@@ -360,6 +360,8 @@ describe("buildCompanyDashboardPayload", () => {
     expect(payload.attention.some((a) => a.title.includes("Payment overdue"))).toBe(true);
     expect(payload.attention.some((a) => a.title.includes("Tracking device"))).toBe(true);
     expect(payload.kpis.amountDueGbp).toBe(110);
+    const overdue = payload.attention.find((a) => a.title.includes("Payment overdue"));
+    expect(overdue?.href).toBe("/rental/hires/h1/payments");
   });
 
   it("groups duplicate activity facts by day", () => {

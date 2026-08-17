@@ -425,7 +425,7 @@ async function buildDashboardPayload(query: CompanyDashboardQuery): Promise<Load
           at: event.created_at as string,
           title: toStatus === "approved" ? "Payment approved" : "Payment rejected",
           detail: vehicle ? `${vehicle.vrm} · ${vehicle.subcompanyName}` : "Hire payment update",
-          href: `/rental/balances/${hire.id}`,
+          href: `/rental/hires/${hire.id}/payments`,
           groupKey: `payment:${hire.id}:${toStatus}`,
         });
       }

@@ -45,9 +45,10 @@ import {
 import type { HireDriverChargeWorkspaceRow } from "@/app/actions/rental-hire-termination";
 import type { HirePaymentStatus } from "@/lib/fleet/hire-types";
 import {
-  formatHirePaymentRowEvents,
+  mergeHirePaymentRowHistory,
   type HirePaymentRowEventDisplay,
 } from "@/lib/fleet/hire-payment-row-history";
+import { loadHireAuditActorDisplayNames } from "@/lib/fleet/hire-audit";
 import { notifyCompanyHirePaymentReviewers, notifyHireDriver } from "@/lib/platform-notifications";
 import { revalidateVehicleFinancialsForHireGroup } from "@/app/actions/rental-vehicle-financials";
 import {
@@ -1028,8 +1029,6 @@ export async function approveHirePaymentRowAction(
 
   if (submitted == null) return { ok: false, error: "No submitted amount found for this row." };
 
-  const discounts = (row.vehicle_hire_schedule_discounts ?? []) as { amount_gbp: number }[];
-  const discountTotal = discounts.reduce((sum, d) => sum + Number(d.amount_gbp), 0);
   const priorApproved = row.approved_amount_gbp != null ? Number(row.approved_amount_gbp) : 0;
   const approvedAmount = Math.round((priorApproved + submitted) * 100) / 100;
 
@@ -1335,42 +1334,90 @@ export async function loadHirePaymentRowEventsAction(
   const supabase = await createClient();
   const { data: row, error } = await supabase
     .from("vehicle_hire_payment_schedule")
-    .select("id, vehicle_hire_groups(driver_user_id)")
+    .select("id, vehicle_hire_groups(driver_user_id, parent_company_id)")
     .eq("id", id)
     .maybeSingle();
   if (error) return { ok: false, error: error.message };
   if (!row) return { ok: false, error: "Payment row not found." };
 
   const groupRaw = row.vehicle_hire_groups as
-    | { driver_user_id: string | null }
-    | { driver_user_id: string | null }[]
+    | { driver_user_id: string | null; parent_company_id: string | null }
+    | { driver_user_id: string | null; parent_company_id: string | null }[]
     | null;
   const group = Array.isArray(groupRaw) ? (groupRaw[0] ?? null) : groupRaw;
   const isDriver = group?.driver_user_id === user.id;
   if (!isDriver) {
     const { profile } = await requireRentalCompanyArea();
     if (!canReadRentals(profile)) return { ok: false, error: "You do not have permission." };
+    const companyId = profile.company_id?.trim();
+    if (!companyId || group?.parent_company_id !== companyId) {
+      return { ok: false, error: "Payment row not found." };
+    }
   }
 
-  const { data: events, error: eventsErr } = await supabase
-    .from("vehicle_hire_payment_status_events")
-    .select("id, event_kind, from_status, to_status, comment, amendment_payload, actor_role, created_at")
-    .eq("schedule_row_id", id)
-    .order("created_at", { ascending: true });
+  const [{ data: events, error: eventsErr }, { data: discounts, error: discountErr }] = await Promise.all([
+    supabase
+      .from("vehicle_hire_payment_status_events")
+      .select(
+        "id, event_kind, from_status, to_status, comment, amendment_payload, actor_role, actor_user_id, created_at",
+      )
+      .eq("schedule_row_id", id)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("vehicle_hire_schedule_discounts")
+      .select("id, amount_gbp, reason, applied_by_user_id, applied_at")
+      .eq("schedule_row_id", id)
+      .order("applied_at", { ascending: true }),
+  ]);
   if (eventsErr) return { ok: false, error: eventsErr.message };
+  if (discountErr) return { ok: false, error: discountErr.message };
 
-  const mapped = (events ?? []).map((event) => ({
-    id: event.id as string,
-    eventKind: event.event_kind as "status_change" | "reply" | "amendment",
-    fromStatus: (event.from_status as string | null) ?? null,
-    toStatus: (event.to_status as string | null) ?? null,
-    comment: (event.comment as string | null) ?? null,
-    amendmentPayload: (event.amendment_payload as Record<string, unknown> | null) ?? null,
-    actorRole: event.actor_role as "company_staff" | "driver",
-    createdAt: event.created_at as string,
-  }));
+  const actorIds = [
+    ...(events ?? []).map((event) => (event.actor_user_id as string | null) ?? null),
+    ...(discounts ?? []).map((discount) => (discount.applied_by_user_id as string | null) ?? null),
+  ];
 
-  return { ok: true, events: formatHirePaymentRowEvents(mapped) };
+  let names: Record<string, string> = {};
+  try {
+    const admin = createSupabaseAdminClient();
+    names = await loadHireAuditActorDisplayNames(admin, actorIds);
+  } catch {
+    names = {};
+  }
+
+  const mappedEvents = (events ?? []).map((event) => {
+    const actorUserId = (event.actor_user_id as string | null)?.trim() || null;
+    return {
+      id: event.id as string,
+      eventKind: event.event_kind as "status_change" | "reply" | "amendment",
+      fromStatus: (event.from_status as string | null) ?? null,
+      toStatus: (event.to_status as string | null) ?? null,
+      comment: (event.comment as string | null) ?? null,
+      amendmentPayload: (event.amendment_payload as Record<string, unknown> | null) ?? null,
+      actorRole: event.actor_role as "company_staff" | "driver",
+      actorDisplayName: actorUserId ? names[actorUserId] ?? null : null,
+      createdAt: event.created_at as string,
+    };
+  });
+
+  const mappedDiscounts = (discounts ?? []).map((discount) => {
+    const appliedBy = (discount.applied_by_user_id as string | null)?.trim() || null;
+    return {
+      id: discount.id as string,
+      amountGbp: Number(discount.amount_gbp ?? 0),
+      reason: String(discount.reason ?? ""),
+      appliedAt: discount.applied_at as string,
+      appliedByDisplayName: appliedBy ? names[appliedBy] ?? null : null,
+    };
+  });
+
+  return {
+    ok: true,
+    events: mergeHirePaymentRowHistory({
+      events: mappedEvents,
+      discounts: mappedDiscounts,
+    }),
+  };
 }
 
 /** One-off PDF payment statement for an ended hire (not stored). Staff only. */

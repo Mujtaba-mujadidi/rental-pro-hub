@@ -9,6 +9,16 @@ export type HirePaymentRowEventInput = {
   amendmentPayload: Record<string, unknown> | null;
   actorRole: "company_staff" | "driver";
   createdAt: string;
+  /** Optional resolved name (staff/driver); falls back to role label. */
+  actorDisplayName?: string | null;
+};
+
+export type HirePaymentDiscountHistoryInput = {
+  id: string;
+  amountGbp: number;
+  reason: string;
+  appliedAt: string;
+  appliedByDisplayName: string | null;
 };
 
 export type HirePaymentRowEventDisplay = {
@@ -32,7 +42,12 @@ function statusLabel(status: string | null | undefined): string {
   return STATUS_LABELS[status] ?? status.replace(/_/g, " ");
 }
 
-function actorLabel(role: HirePaymentRowEventInput["actorRole"]): string {
+function actorLabelFromRole(
+  role: HirePaymentRowEventInput["actorRole"],
+  displayName?: string | null,
+): string {
+  const name = displayName?.trim();
+  if (name) return name;
   return role === "driver" ? "Driver" : "Staff";
 }
 
@@ -42,12 +57,28 @@ function amountFromPayload(payload: Record<string, unknown> | null, key: string)
   return Number.isFinite(amount) ? amount : null;
 }
 
+/** Discount applied on a schedule row (from vehicle_hire_schedule_discounts). */
+export function formatHirePaymentDiscountEvent(
+  discount: HirePaymentDiscountHistoryInput,
+): HirePaymentRowEventDisplay {
+  const reason = discount.reason.trim();
+  return {
+    id: `discount:${discount.id}`,
+    title: "Discount applied",
+    body: reason || null,
+    detailLines: [`Amount: −${formatGbp(discount.amountGbp)}`],
+    actorLabel: discount.appliedByDisplayName?.trim() || "Staff",
+    createdAt: discount.appliedAt,
+  };
+}
+
 /** Turn a payment audit event into user-facing copy for the row history panel. */
 export function formatHirePaymentRowEvent(event: HirePaymentRowEventInput): HirePaymentRowEventDisplay {
   const payload = event.amendmentPayload;
   const detailLines: string[] = [];
   let title = "Payment updated";
   let body: string | null = event.comment?.trim() || null;
+  const actorLabel = actorLabelFromRole(event.actorRole, event.actorDisplayName);
 
   if (event.eventKind === "reply") {
     title = "Reply";
@@ -56,7 +87,7 @@ export function formatHirePaymentRowEvent(event: HirePaymentRowEventInput): Hire
       title,
       body,
       detailLines,
-      actorLabel: actorLabel(event.actorRole),
+      actorLabel,
       createdAt: event.createdAt,
     };
   }
@@ -75,7 +106,7 @@ export function formatHirePaymentRowEvent(event: HirePaymentRowEventInput): Hire
       title,
       body,
       detailLines,
-      actorLabel: actorLabel(event.actorRole),
+      actorLabel,
       createdAt: event.createdAt,
     };
   }
@@ -107,7 +138,7 @@ export function formatHirePaymentRowEvent(event: HirePaymentRowEventInput): Hire
     title,
     body,
     detailLines,
-    actorLabel: actorLabel(event.actorRole),
+    actorLabel,
     createdAt: event.createdAt,
   };
 }
@@ -118,4 +149,16 @@ export function formatHirePaymentRowEvents(
   return [...events]
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
     .map(formatHirePaymentRowEvent);
+}
+
+/** Merge status events and discounts into one chronological history list. */
+export function mergeHirePaymentRowHistory(input: {
+  events: HirePaymentRowEventInput[];
+  discounts: HirePaymentDiscountHistoryInput[];
+}): HirePaymentRowEventDisplay[] {
+  const items = [
+    ...formatHirePaymentRowEvents(input.events),
+    ...input.discounts.map(formatHirePaymentDiscountEvent),
+  ];
+  return items.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
