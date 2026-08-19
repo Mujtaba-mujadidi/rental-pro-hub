@@ -2,7 +2,7 @@
 
 import { FormModalShell } from "@/components/forms/form-modal-shell";
 import { formatUkDateText, formatUkDateTimeText } from "@/lib/datetime/uk";
-import type { HireGroupAuditRow } from "@/lib/fleet/hire-audit";
+import { formatAuditActorLabel, type HireGroupAuditRow } from "@/lib/fleet/hire-audit";
 
 type Props = {
   open: boolean;
@@ -14,14 +14,7 @@ type Props = {
 };
 
 function actorLabel(row: HireGroupAuditRow): string {
-  const role =
-    row.actor_role === "company_staff"
-      ? "Rental staff"
-      : row.actor_role === "driver"
-        ? "Driver"
-        : "System";
-  const name = row.actor_display_name?.trim();
-  return name ? `${name} · ${role}` : role;
+  return formatAuditActorLabel(row.actor_display_name, row.actor_role);
 }
 
 function splitUkDateTimeText(value: string): { dateLabel: string; timeLabel: string } {

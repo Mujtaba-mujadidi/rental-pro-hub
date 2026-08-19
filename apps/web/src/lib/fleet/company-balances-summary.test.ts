@@ -9,6 +9,8 @@ import {
   companyBalancesPeriodLabel,
   defaultCompanyBalancesTab,
   filterCompanyBalancesAccounts,
+  hireNeedsLiveBalanceFacts,
+  parseHireBalanceSnapshotFromTermination,
   pendingApprovalAmountGbp,
   type CompanyBalancesExtraChargeFact,
   type CompanyBalancesHireFact,
@@ -305,5 +307,66 @@ describe("company balances summary", () => {
     });
     expect(kpis.pendingReviewGbp).toBe(80);
     expect(kpis.outstandingAcrossHiresGbp).toBe(30);
+  });
+
+  it("skips live facts for settled ended hires and uses the termination snapshot", () => {
+    expect(
+      hireNeedsLiveBalanceFacts({
+        status: "active",
+        settlementBalanceDirection: null,
+      }),
+    ).toBe(true);
+    expect(
+      hireNeedsLiveBalanceFacts({
+        status: "completed",
+        settlementBalanceDirection: "driver_owes_company",
+      }),
+    ).toBe(true);
+    expect(
+      hireNeedsLiveBalanceFacts({
+        status: "completed",
+        settlementBalanceDirection: "settled",
+      }),
+    ).toBe(false);
+
+    expect(
+      parseHireBalanceSnapshotFromTermination({
+        totalDueGbp: 420.4,
+        totalPaidGbp: 420.4,
+      }),
+    ).toEqual({ chargesGbp: 420.4, receivedGbp: 420.4 });
+
+    const rows = buildCompanyBalancesAccountRows({
+      hires: [
+        hire({
+          id: "ended1",
+          status: "completed",
+          terminatedAtYmd: "2026-08-01",
+          settlementBalanceDirection: "settled",
+          snapshotChargesGbp: 420.4,
+          snapshotReceivedGbp: 400,
+        }),
+      ],
+      scheduleRows: [
+        schedule({
+          scheduleRowId: "historic",
+          hireGroupId: "ended1",
+          periodStart: "2026-01-01",
+          periodEnd: "2026-01-07",
+          baseAmountGbp: 999,
+        }),
+      ],
+      extraChargesByHireId: new Map(),
+      balancePaymentsByHireId: new Map(),
+      pendingExtraByHireId: new Map(),
+      todayYmd: "2026-08-17",
+    });
+
+    expect(rows[0]).toMatchObject({
+      chargesGbp: 420.4,
+      receivedGbp: 400,
+      balanceGbp: 0,
+      accountStatus: "settled",
+    });
   });
 });

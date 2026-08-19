@@ -25,6 +25,8 @@ const PAID_STATUSES = new Set<HirePaymentDisplayStatus>([
   "cleared",
   "waived",
   "prepaid_settled",
+  "prepaid_refunded",
+  "prepaid_partially_refunded",
   "refunded",
 ]);
 

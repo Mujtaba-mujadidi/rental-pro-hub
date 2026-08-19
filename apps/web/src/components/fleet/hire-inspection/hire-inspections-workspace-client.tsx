@@ -11,6 +11,7 @@ import { HireInspectionEndedWorkspace } from "@/components/fleet/hire-inspection
 import { useEndedInspectionTabState } from "@/components/fleet/hire-inspection/hire-inspection-ended-tabs";
 import { HireInspectionTimeline } from "@/components/fleet/hire-inspection/hire-inspection-timeline";
 import { HireInspectionWizard } from "@/components/fleet/hire-inspection/hire-inspection-wizard";
+import { useHireWorkspaceCachedLoad } from "@/hooks/use-hire-workspace-cached-load";
 import { buildHireInspectionDiff } from "@/lib/fleet/hire-inspection-lifecycle";
 import {
   EMPTY_HIRE_INSPECTION_ACCESSORIES,
@@ -18,7 +19,7 @@ import {
 } from "@/lib/fleet/hire-inspection-accessories";
 import { hireInspectionEndedEmptyMessage } from "@/lib/fleet/hire-inspection-ended-display";
 import type { VehicleDamageDiagramEntry } from "@/components/fleet/hire-inspection/vehicle-damage-diagram";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
 function isContractEnded(status: string): boolean {
   return status === "terminated" || status === "completed";
@@ -63,46 +64,44 @@ export function HireInspectionsWorkspaceClient({
   focusKind?: "checkout" | "checkin";
   audience?: "staff" | "driver";
 }) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [checkoutData, setCheckoutData] = useState<HireInspectionPayload | null>(null);
-  const [checkinData, setCheckinData] = useState<HireInspectionPayload | null>(null);
-  const [trackerLinked, setTrackerLinked] = useState(false);
-
   const contractEnded = isContractEnded(hireStatus);
+  const query = useHireWorkspaceCachedLoad<{
+    checkout: HireInspectionPayload;
+    checkin: HireInspectionPayload | null;
+    trackerLinked: boolean;
+  }>({
+    key: "inspections",
+    useCache: audience === "staff",
+    load: async () => {
+      const loadInspection =
+        audience === "driver" ? loadDriverHireInspectionAction : loadHireInspectionAction;
+      const [checkoutRes, checkinRes, trackerRes] = await Promise.all([
+        loadInspection(hireGroupId, "checkout"),
+        loadInspection(hireGroupId, "checkin"),
+        audience === "staff"
+          ? loadHireInspectionTrackerOdometerAction({ hireGroupId, vehicleId })
+          : Promise.resolve({ ok: true as const, linked: false as const }),
+      ]);
+      if (!checkoutRes.ok) return checkoutRes;
+      return {
+        ok: true as const,
+        data: {
+          checkout: checkoutRes.data,
+          checkin: checkinRes.ok ? checkinRes.data : null,
+          trackerLinked: trackerRes.ok && trackerRes.linked,
+        },
+      };
+    },
+  });
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    const loadInspection =
-      audience === "driver" ? loadDriverHireInspectionAction : loadHireInspectionAction;
-    const [checkoutRes, checkinRes, trackerRes] = await Promise.all([
-      loadInspection(hireGroupId, "checkout"),
-      loadInspection(hireGroupId, "checkin"),
-      audience === "staff"
-        ? loadHireInspectionTrackerOdometerAction({ hireGroupId, vehicleId })
-        : Promise.resolve({ ok: true as const, linked: false as const }),
-    ]);
-    if (!checkoutRes.ok) {
-      setError(checkoutRes.error);
-      setCheckoutData(null);
-      setCheckinData(null);
-      setLoading(false);
-      return;
-    }
-    setCheckoutData(checkoutRes.data);
-    setCheckinData(checkinRes.ok ? checkinRes.data : null);
-    setTrackerLinked(trackerRes.ok && trackerRes.linked);
-    setError(null);
-    setLoading(false);
-  }, [audience, hireGroupId, vehicleId]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+  const loading = query.pending;
+  const error = query.error;
+  const checkoutData = query.data?.checkout ?? null;
+  const checkinData = query.data?.checkin ?? null;
+  const trackerLinked = query.data?.trackerLinked ?? false;
 
   const checkoutCompleted = checkoutData?.status === "completed";
   const checkinCompleted = checkinData?.status === "completed";
-  const recordedByLabel = audience === "driver" ? "Rental company" : "Company staff";
 
   const { activeTab, setActiveTab } = useEndedInspectionTabState(
     {
@@ -137,14 +136,16 @@ export function HireInspectionsWorkspaceClient({
         generalNotes={checkoutData.generalNotes ?? ""}
         trackerLinked={trackerLinked}
         checkinCompleted={checkinCompleted}
-        completedByLabel={recordedByLabel}
+        completedByLabel={
+          audience === "driver" ? "Rental company" : checkoutData.completedByLabel?.trim() || "Company staff"
+        }
       />
     );
   }, [
+    audience,
     checkinCompleted,
     checkoutData,
     hireGroupId,
-    recordedByLabel,
     trackerLinked,
     vehicleLabel,
   ]);
@@ -175,10 +176,12 @@ export function HireInspectionsWorkspaceClient({
         generalNotes={checkinData.generalNotes ?? ""}
         trackerLinked={trackerLinked}
         checkinCompleted
-        completedByLabel={recordedByLabel}
+        completedByLabel={
+          audience === "driver" ? "Rental company" : checkinData.completedByLabel?.trim() || "Company staff"
+        }
       />
     );
-  }, [checkinData, checkoutData, damageDiff, hireGroupId, recordedByLabel, trackerLinked, vehicleLabel]);
+  }, [audience, checkinData, checkoutData, damageDiff, hireGroupId, trackerLinked, vehicleLabel]);
 
   const introHint = useMemo(() => {
     if (contractEnded && checkinCompleted) {

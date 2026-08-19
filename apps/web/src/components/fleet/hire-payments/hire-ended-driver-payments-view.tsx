@@ -15,6 +15,7 @@ import {
   formatEndedChargeCardDisplay,
   formatEndedChargeEvidenceHref,
 } from "@/lib/fleet/hire-ended-payments-display";
+import { buildHireScheduleRefundMarksByRowId } from "@/lib/fleet/hire-ended-payment-schedule";
 import {
   buildHireEndedOutstandingBalance,
   hireEndedSettlementChipLabel,
@@ -55,12 +56,20 @@ export function HireEndedDriverPaymentsView({
     refundPaidGbp: ledger.settlementPaidGbp,
     audience: "driver",
   });
-  const rentCalc = buildHireEndedRentCalculation(data);
+  const rentCalc = buildHireEndedRentCalculation(data, { audience: "driver" });
   const depositRefund = buildHireEndedDepositRefundDisplay({
     payments: data,
     audience: "driver",
   });
-  const position = buildHireEndedPositionSnapshot(data);
+  const position = buildHireEndedPositionSnapshot(data, { audience: "driver" });
+  const refundMarkByRowId = useMemo(
+    () =>
+      buildHireScheduleRefundMarksByRowId(data.rows, data.contractEndedYmd, {
+        prepaidRentRefundedGbp: depositRefund?.advanceRentRefundedGbp ?? 0,
+        depositRefundedGbp: depositRefund?.depositRefundedGbp ?? 0,
+      }),
+    [data.contractEndedYmd, data.rows, depositRefund?.advanceRentRefundedGbp, depositRefund?.depositRefundedGbp],
+  );
   const settlementChip = hireEndedSettlementChipLabel(data);
   const charges = data.driverChargeLineItems.filter(
     (item) =>
@@ -146,7 +155,11 @@ export function HireEndedDriverPaymentsView({
           <dl className="mt-3 space-y-2.5 text-sm">
             <MoneyRow label="Rent due to end date" value={formatGbp(rentCalc.rentDueToEndGbp)} />
             <MoneyRow
-              label="You paid during hire"
+              label="Total rent received during the hire"
+              value={formatGbp(rentCalc.totalRentReceivedDuringHireGbp)}
+            />
+            <MoneyRow
+              label="Total rent applied to this hire"
               value={`-${formatGbp(rentCalc.paymentReceivedDuringHireGbp)}`}
             />
             <MoneyRow
@@ -160,6 +173,9 @@ export function HireEndedDriverPaymentsView({
               {formatGbp(rentCalc.rentOutstandingGbp)}
             </span>
           </div>
+          {rentCalc.advanceRentNote ? (
+            <p className="hire-ws-payments-next-note mt-3">{rentCalc.advanceRentNote}</p>
+          ) : null}
           {rentCalc.cancelledPeriodNote ? (
             <p className="hire-ws-payments-next-note mt-3">{rentCalc.cancelledPeriodNote}</p>
           ) : null}
@@ -167,12 +183,18 @@ export function HireEndedDriverPaymentsView({
 
         {depositRefund ? (
           <section className="hire-ws-payments-next-card">
-            <h2 className="text-sm font-semibold text-rph-fg">Deposit and refund</h2>
-            <p className="mt-0.5 text-xs text-rph-fg-secondary">
-              How your {formatGbp(depositRefund.originalDepositGbp)} deposit was settled.
-            </p>
+            <h2 className="text-sm font-semibold text-rph-fg">{depositRefund.heading}</h2>
+            <p className="mt-0.5 text-xs text-rph-fg-secondary">{depositRefund.intro}</p>
             <dl className="mt-3 space-y-2.5 text-sm">
-              <MoneyRow label="Original deposit" value={formatGbp(depositRefund.originalDepositGbp)} />
+              {depositRefund.originalDepositGbp > 0.005 ? (
+                <MoneyRow label="Original deposit" value={formatGbp(depositRefund.originalDepositGbp)} />
+              ) : null}
+              {depositRefund.advanceRentToRefundGbp > 0.005 ? (
+                <MoneyRow
+                  label="Advance rent to refund"
+                  value={formatGbp(depositRefund.advanceRentToRefundGbp)}
+                />
+              ) : null}
               <MoneyRow
                 label="Less unpaid rent"
                 value={`-${formatGbp(depositRefund.lessUnpaidRentGbp)}`}
@@ -182,12 +204,31 @@ export function HireEndedDriverPaymentsView({
                 value={`-${formatGbp(depositRefund.lessDamageGbp)}`}
               />
             </dl>
-            <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-sky-200/80 bg-sky-50/80 px-3 py-2.5 dark:border-sky-900/50 dark:bg-sky-950/25">
-              <span className="text-sm text-rph-fg-secondary">{depositRefund.refundPaidLabel}</span>
-              <span className="text-sm font-semibold tabular-nums text-rph-fg">
-                {formatGbp(depositRefund.refundPaidToDriverGbp)}
-              </span>
-            </div>
+            {depositRefund.advanceRentRefundedGbp > 0.005 ? (
+              <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-sky-200/80 bg-sky-50/80 px-3 py-2.5 dark:border-sky-900/50 dark:bg-sky-950/25">
+                <span className="text-sm text-rph-fg-secondary">Advance rent refunded</span>
+                <span className="text-sm font-semibold tabular-nums text-rph-fg">
+                  {formatGbp(depositRefund.advanceRentRefundedGbp)}
+                </span>
+              </div>
+            ) : null}
+            {depositRefund.depositRefundedGbp > 0.005 ? (
+              <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-sky-200/80 bg-sky-50/80 px-3 py-2.5 dark:border-sky-900/50 dark:bg-sky-950/25">
+                <span className="text-sm text-rph-fg-secondary">Deposit refunded</span>
+                <span className="text-sm font-semibold tabular-nums text-rph-fg">
+                  {formatGbp(depositRefund.depositRefundedGbp)}
+                </span>
+              </div>
+            ) : null}
+            {depositRefund.advanceRentRefundedGbp <= 0.005 &&
+            depositRefund.depositRefundedGbp <= 0.005 ? (
+              <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-sky-200/80 bg-sky-50/80 px-3 py-2.5 dark:border-sky-900/50 dark:bg-sky-950/25">
+                <span className="text-sm text-rph-fg-secondary">{depositRefund.refundPaidLabel}</span>
+                <span className="text-sm font-semibold tabular-nums text-rph-fg">
+                  {formatGbp(depositRefund.refundPaidToDriverGbp)}
+                </span>
+              </div>
+            ) : null}
             {depositRefund.refundNote ? (
               <p className="mt-3 rounded-lg border border-emerald-200/80 bg-emerald-50/80 px-3 py-2.5 text-xs leading-relaxed text-emerald-950 dark:border-emerald-900/50 dark:bg-emerald-950/25 dark:text-emerald-100">
                 {depositRefund.refundNote}
@@ -359,28 +400,38 @@ export function HireEndedDriverPaymentsView({
                 Position when your hire ended
               </span>
               <span className="mt-0.5 block text-xs text-rph-fg-secondary">
-                Historical snapshot before later charges and payments.
+                Rent and deposit at the end date. Later charges are not included.
               </span>
             </span>
             <ChevronIcon open={positionOpen} />
           </button>
           {positionOpen ? (
-            <div className="hire-ws-payments-schedule-body">
+            <div className="hire-ws-payments-schedule-body space-y-3">
               <dl className="grid gap-3 sm:grid-cols-2">
-                <SnapshotCell label="Rent due" value={formatGbp(position.rentDueGbp)} />
+                <SnapshotCell label="Rent due to end date" value={formatGbp(position.rentDueGbp)} />
                 <SnapshotCell
-                  label="Rent paid by you"
-                  value={formatGbp(position.rentPaidByDriverGbp)}
+                  label="Total rent received during the hire"
+                  value={formatGbp(position.totalRentReceivedDuringHireGbp)}
                 />
                 <SnapshotCell
-                  label="Deposit applied to rent"
-                  value={formatGbp(position.depositAppliedToRentGbp)}
+                  label="Total rent applied to this hire"
+                  value={formatGbp(position.rentAppliedGbp)}
                 />
-                <SnapshotCell
-                  label="Refund due before later charges"
-                  value={formatGbp(position.refundDueBeforeLaterChargesGbp)}
-                />
+                {position.advanceRentToRefundGbp > 0.005 ? (
+                  <SnapshotCell
+                    label="Advance rent to refund"
+                    value={formatGbp(position.advanceRentToRefundGbp)}
+                  />
+                ) : null}
+                <SnapshotCell label="Deposit held" value={formatGbp(position.depositHeldGbp)} />
+                {position.depositAppliedToRentGbp > 0.005 ? (
+                  <SnapshotCell
+                    label="Deposit applied to unpaid rent"
+                    value={formatGbp(position.depositAppliedToRentGbp)}
+                  />
+                ) : null}
               </dl>
+              <p className="text-xs text-rph-fg-secondary">{position.note}</p>
             </div>
           ) : null}
         </section>
@@ -396,7 +447,7 @@ export function HireEndedDriverPaymentsView({
           <span className="min-w-0 text-left">
             <span className="block text-sm font-semibold text-rph-fg">Full rent schedule</span>
             <span className="mt-0.5 block text-xs text-rph-fg-secondary">
-              Deposit and rent periods charged through the end date.
+              Deposit and rent periods through the end date. Prepaid periods the company paid back are marked Refunded.
             </span>
           </span>
           <ChevronIcon open={scheduleOpen} />
@@ -410,6 +461,7 @@ export function HireEndedDriverPaymentsView({
               canApplyDiscount={false}
               contractEndedYmd={data.contractEndedYmd}
               settlementSettled={data.settlementBalance?.settled === true}
+              refundMarkByRowId={refundMarkByRowId}
               audience="driver"
               readOnly
               showActions={false}

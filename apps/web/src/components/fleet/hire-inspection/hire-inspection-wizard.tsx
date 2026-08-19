@@ -55,6 +55,8 @@ import {
 } from "@/lib/fleet/vehicle-damage-panels";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useHireWorkspaceCache } from "@/app/(main)/rental/hires/[groupId]/hire-workspace-provider";
+import { hireWorkspaceKeysInvalidatedByInspectionChange } from "@/lib/fleet/hire-workspace-tab-cache";
 
 const STEP_LABELS = ["Vehicle", "Damage", "Photos", "Summary"];
 
@@ -198,6 +200,7 @@ export function HireInspectionWizard({
   embedded = false,
 }: Props) {
   const router = useRouter();
+  const workspaceCache = useHireWorkspaceCache();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(true);
   const [saving, startSaving] = useTransition();
@@ -604,6 +607,7 @@ export function HireInspectionWizard({
         setError(res.error);
         return;
       }
+      workspaceCache?.invalidateCache(hireWorkspaceKeysInvalidatedByInspectionChange());
       router.push(
         audience === "driver"
           ? `/driver/hires/${hireGroupId}`
@@ -694,7 +698,9 @@ export function HireInspectionWizard({
           accessories={accessories}
           generalNotes={generalNotes}
           trackerLinked={trackerLinked}
-          completedByLabel={audience === "driver" ? "Rental company" : "Company staff"}
+          completedByLabel={
+            audience === "driver" ? "Rental company" : data.completedByLabel?.trim() || "Company staff"
+          }
           checkinCompleted={data.checkinCompleted}
         />
       ) : (

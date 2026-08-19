@@ -79,8 +79,11 @@ export function formatRefundPaidHint(paymentCount: number): string {
 
 export type HireEndedRefundCalculation = {
   originalDepositGbp: number;
+  advanceRentToRefundGbp: number;
   rentFromDepositGbp: number;
   driverChargesGbp: number;
+  advanceRentRefundedGbp: number;
+  depositRefundedGbp: number;
   finalRefundPaidGbp: number;
   visible: boolean;
 };
@@ -91,18 +94,30 @@ export function buildHireEndedRefundCalculation(input: {
   settlementPaymentsToDriverGbp: number;
 }): HireEndedRefundCalculation | null {
   const summary = input.terminationSummary;
-  if (!summary || summary.depositGbp <= 0.005) return null;
+  if (!summary) return null;
+  const advanceRentToRefundGbp = roundGbp(
+    Math.max(0, summary.prepaidRentCreditGbp) + Math.max(0, summary.accruedOverpaymentGbp),
+  );
+  if (summary.depositGbp <= 0.005 && advanceRentToRefundGbp <= 0.005) return null;
 
   const rentFromDepositGbp = hireDepositAppliedToRentGbp(summary);
   const driverChargesGbp = roundGbp(input.driverChargesGbp);
   const finalRefundPaidGbp = roundGbp(input.settlementPaymentsToDriverGbp);
+  const advanceRentRefundedGbp = roundGbp(Math.min(advanceRentToRefundGbp, finalRefundPaidGbp));
+  const depositRefundedGbp = roundGbp(Math.max(0, finalRefundPaidGbp - advanceRentRefundedGbp));
   const visible =
-    rentFromDepositGbp > 0.005 || driverChargesGbp > 0.005 || finalRefundPaidGbp > 0.005;
+    rentFromDepositGbp > 0.005 ||
+    driverChargesGbp > 0.005 ||
+    finalRefundPaidGbp > 0.005 ||
+    advanceRentToRefundGbp > 0.005;
 
   return {
     originalDepositGbp: summary.depositGbp,
+    advanceRentToRefundGbp,
     rentFromDepositGbp,
     driverChargesGbp,
+    advanceRentRefundedGbp,
+    depositRefundedGbp,
     finalRefundPaidGbp,
     visible,
   };

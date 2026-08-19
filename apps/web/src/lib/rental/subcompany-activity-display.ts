@@ -4,6 +4,7 @@ import {
   ukLondonDayYmd,
   ukTodayYmd,
 } from "@/lib/datetime/uk";
+import { formatAuditActorLabel } from "@/lib/fleet/hire-audit";
 import type { SubcompanyAuditRow, SubcompanyEventType } from "@/lib/rental/subcompany-audit";
 
 export type SubcompanyActivityTone = "info" | "ok" | "warn" | "neutral";
@@ -71,23 +72,16 @@ export function splitSubcompanyActivitySummary(summary: string): { title: string
   return { title, rest };
 }
 
-function actorRoleLabel(role: string | null | undefined): string | null {
-  if (!role) return null;
-  if (role === "company_staff") return "Rental staff";
-  if (role === "driver") return "Driver";
-  if (role === "system") return "System";
-  return role.replace(/_/g, " ");
-}
-
 export function mapSubcompanyActivityItem(event: SubcompanyAuditRow): SubcompanyActivityItem {
   const { title, rest } = splitSubcompanyActivitySummary(event.summary);
   const dayKey = ukLondonDayYmd(event.created_at) ?? event.created_at.slice(0, 10);
   const today = ukTodayYmd();
   const dayLabel =
     dayKey === today ? "TODAY" : formatUkDateTextLong(event.created_at).toUpperCase();
-  const name = event.actor_display_name?.trim() || null;
-  const role = actorRoleLabel(event.actor_role);
-  const actorLabel = name ? (role ? `${name} · ${role}` : name) : role;
+  const actorLabel =
+    event.actor_role || event.actor_display_name
+      ? formatAuditActorLabel(event.actor_display_name, event.actor_role)
+      : null;
 
   return {
     id: event.id,

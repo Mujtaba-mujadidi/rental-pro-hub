@@ -241,7 +241,9 @@ export function HireEndedCompanySummary({
             <div>
               <h2 className="text-sm font-semibold text-rph-fg">How the final refund was calculated</h2>
               <p className="mt-0.5 text-xs text-rph-fg-secondary">
-                Deposit applied to rent and charges before the refund was paid.
+                {refundCalculation.advanceRentToRefundGbp > 0.005
+                  ? "Unused advance rent is refunded separately from the deposit."
+                  : "Deposit applied to rent and charges before the refund was paid."}
               </p>
             </div>
             <Link href={paymentsHref} className="rph-btn-ghost h-8 shrink-0 px-3 text-xs">
@@ -250,17 +252,47 @@ export function HireEndedCompanySummary({
           </div>
 
           <div className="hire-ws-refund-flow mt-4">
-            <RefundFlowStep label="Original deposit" value={formatGbp(refundCalculation.originalDepositGbp)} />
-            <RefundFlowOperator symbol="−" />
+            {refundCalculation.originalDepositGbp > 0.005 ? (
+              <>
+                <RefundFlowStep label="Original deposit" value={formatGbp(refundCalculation.originalDepositGbp)} />
+                <RefundFlowOperator symbol="−" />
+              </>
+            ) : null}
+            {refundCalculation.advanceRentToRefundGbp > 0.005 ? (
+              <>
+                <RefundFlowStep
+                  label="Advance rent to refund"
+                  value={formatGbp(refundCalculation.advanceRentToRefundGbp)}
+                />
+                <RefundFlowOperator symbol="−" />
+              </>
+            ) : null}
             <RefundFlowStep label="Rent from deposit" value={formatGbp(refundCalculation.rentFromDepositGbp)} />
             <RefundFlowOperator symbol="−" />
             <RefundFlowStep label="Damage charge" value={formatGbp(refundCalculation.driverChargesGbp)} />
             <RefundFlowOperator symbol="=" />
-            <RefundFlowStep
-              label="Final refund paid"
-              value={formatGbp(refundCalculation.finalRefundPaidGbp)}
-              highlight
-            />
+            {refundCalculation.advanceRentRefundedGbp > 0.005 ? (
+              <RefundFlowStep
+                label="Advance rent refunded"
+                value={formatGbp(refundCalculation.advanceRentRefundedGbp)}
+                highlight
+              />
+            ) : null}
+            {refundCalculation.depositRefundedGbp > 0.005 ? (
+              <RefundFlowStep
+                label="Deposit refunded"
+                value={formatGbp(refundCalculation.depositRefundedGbp)}
+                highlight
+              />
+            ) : null}
+            {refundCalculation.advanceRentRefundedGbp <= 0.005 &&
+            refundCalculation.depositRefundedGbp <= 0.005 ? (
+              <RefundFlowStep
+                label="Final refund paid"
+                value={formatGbp(refundCalculation.finalRefundPaidGbp)}
+                highlight
+              />
+            ) : null}
           </div>
         </section>
       ) : null}

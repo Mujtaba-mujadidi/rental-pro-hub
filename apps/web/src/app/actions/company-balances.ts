@@ -10,6 +10,8 @@ import {
   buildCompanyBalancesPage,
   companyBalancesAccountsForTab,
   companyBalancesExportFileName,
+  hireNeedsLiveBalanceFacts,
+  parseHireBalanceSnapshotFromTermination,
   type CompanyBalancesExtraChargeFact,
   type CompanyBalancesHireFact,
   type CompanyBalancesPageData,
@@ -18,6 +20,7 @@ import {
   type CompanyBalancesSubcompanyOption,
   type CompanyBalancesTab,
 } from "@/lib/fleet/company-balances-summary";
+import { resolveCompanyDashboardPeriod } from "@/lib/fleet/company-dashboard-period";
 import {
   buildPaymentRowEventStateMap,
   resolveHirePaymentWorkflowStatus,
@@ -39,7 +42,11 @@ type ExportResult =
   | { ok: true; csv: string; fileName: string }
   | { ok: false; error: string };
 
-function chunkIds<T>(ids: T[], size = 200): T[][] {
+type AdminClient = ReturnType<typeof createSupabaseAdminClient>;
+
+const BALANCE_HIRE_STATUSES = ["active", "completed", "terminated"] as const;
+
+function chunkIds<T>(ids: T[], size = 100): T[][] {
   if (!ids.length) return [];
   const out: T[][] = [];
   for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
@@ -103,10 +110,331 @@ async function fetchAllRows(
   return { ok: true, data: all };
 }
 
+async function loadDriverLabelsChunked(
+  admin: AdminClient,
+  userIds: string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  for (const ids of chunkIds(userIds, 100)) {
+    const chunk = await loadDriverLabelsMap(admin, ids);
+    for (const [id, label] of chunk) map.set(id, label);
+  }
+  return map;
+}
+
+type LiveFacts = {
+  scheduleFacts: CompanyBalancesScheduleFact[];
+  extraChargesByHireId: Map<string, CompanyBalancesExtraChargeFact[]>;
+  pendingExtraByHireId: Map<string, number>;
+  balancePaymentsByHireId: Map<string, CompanyBalancesSettlementPaymentFact[]>;
+};
+
+function emptyLiveFacts(): LiveFacts {
+  return {
+    scheduleFacts: [],
+    extraChargesByHireId: new Map(),
+    pendingExtraByHireId: new Map(),
+    balancePaymentsByHireId: new Map(),
+  };
+}
+
+async function loadEventStateForScheduleRows(
+  admin: AdminClient,
+  scheduleRows: readonly Record<string, unknown>[],
+): Promise<{ ok: true; eventState: Map<string, { latestToStatus: string | null; pendingSubmittedGbp: number | null }> } | { ok: false; error: string }> {
+  const pendingIds = scheduleRows
+    .filter((row) => String(row.payment_status ?? "") === "pending_approval")
+    .map((row) => String(row.id));
+  const eventState = new Map<string, { latestToStatus: string | null; pendingSubmittedGbp: number | null }>();
+  if (!pendingIds.length) return { ok: true, eventState };
+
+  for (const eventIds of chunkIds(pendingIds)) {
+    const eventsLoaded = await fetchAllRows((from, to) =>
+      admin
+        .from("vehicle_hire_payment_status_events")
+        .select("schedule_row_id, to_status, amendment_payload, created_at")
+        .in("schedule_row_id", eventIds)
+        .eq("event_kind", "status_change")
+        .order("created_at", { ascending: false })
+        .range(from, to),
+    );
+    if (!eventsLoaded.ok) return eventsLoaded;
+    const chunkState = buildPaymentRowEventStateMap(
+      eventsLoaded.data.map((event) => ({
+        schedule_row_id: String(event.schedule_row_id),
+        to_status: (event.to_status as string | null) ?? null,
+        amendment_payload: event.amendment_payload,
+      })),
+    );
+    for (const [key, value] of chunkState) eventState.set(key, value);
+  }
+  return { ok: true, eventState };
+}
+
+function appendScheduleFacts(input: {
+  scheduleRows: readonly Record<string, unknown>[];
+  eventState: Map<string, { latestToStatus: string | null; pendingSubmittedGbp: number | null }>;
+  hireById: Map<string, CompanyBalancesHireFact>;
+  todayYmd: string;
+  into: CompanyBalancesScheduleFact[];
+  seenIds?: Set<string>;
+}) {
+  for (const row of input.scheduleRows) {
+    const scheduleRowId = String(row.id);
+    if (input.seenIds?.has(scheduleRowId)) continue;
+    const hire = input.hireById.get(String(row.hire_group_id));
+    if (!hire) continue;
+    const discounts = row.vehicle_hire_schedule_discounts as { amount_gbp: number }[] | null;
+    const discountTotalGbp = (discounts ?? []).reduce((sum, d) => sum + Number(d.amount_gbp), 0);
+    const storedStatus = row.payment_status as HirePaymentStatus;
+    const event = input.eventState.get(scheduleRowId);
+    const paymentStatus = resolveHirePaymentWorkflowStatus(
+      storedStatus,
+      event?.latestToStatus ?? null,
+      { periodStartYmd: String(row.period_start), todayYmd: input.todayYmd },
+    );
+    input.into.push({
+      scheduleRowId,
+      hireGroupId: hire.id,
+      vehicleId: "",
+      subcompanyId: hire.subcompanyId ?? "",
+      periodStart: String(row.period_start).slice(0, 10),
+      periodEnd: String(row.period_end).slice(0, 10),
+      rowKind: String(row.row_kind),
+      paymentStatus,
+      approvedAmountGbp: row.approved_amount_gbp != null ? Number(row.approved_amount_gbp) : null,
+      baseAmountGbp: Number(row.base_amount_gbp ?? 0),
+      discountTotalGbp,
+      pendingSubmittedGbp:
+        paymentStatus === "pending_approval" ? (event?.pendingSubmittedGbp ?? null) : null,
+    });
+    input.seenIds?.add(scheduleRowId);
+  }
+}
+
+function appendBalancePayments(input: {
+  payments: readonly Record<string, unknown>[];
+  hireById: Map<string, CompanyBalancesHireFact>;
+  into: Map<string, CompanyBalancesSettlementPaymentFact[]>;
+  seenIds?: Set<string>;
+}) {
+  for (const payment of input.payments) {
+    const id = String(payment.id);
+    if (input.seenIds?.has(id)) continue;
+    const hire = input.hireById.get(String(payment.hire_group_id));
+    if (!hire) continue;
+    const direction = payment.direction as string;
+    if (direction !== "received_from_driver" && direction !== "paid_to_driver") continue;
+    const mapped: CompanyBalancesSettlementPaymentFact = {
+      id,
+      hireGroupId: hire.id,
+      amountGbp: Number(payment.amount_gbp ?? 0),
+      direction,
+      paymentCategory: String(payment.payment_category ?? "settlement"),
+      paidAt: String(payment.paid_at ?? ""),
+      vehicleVrm: hire.vehicleVrm,
+      driverLabel: hire.driverLabel,
+    };
+    const bucket = input.into.get(hire.id) ?? [];
+    bucket.push(mapped);
+    input.into.set(hire.id, bucket);
+    input.seenIds?.add(id);
+  }
+}
+
+/**
+ * Schedule, extras and settlement rows for hires that still have a live balance.
+ * Caller must pass hire IDs already scoped to the authorised parent company / subcompanies.
+ */
+async function loadLiveBalanceFacts(
+  admin: AdminClient,
+  liveHireIds: string[],
+  hireById: Map<string, CompanyBalancesHireFact>,
+  todayYmd: string,
+): Promise<{ ok: true; facts: LiveFacts } | { ok: false; error: string }> {
+  const facts = emptyLiveFacts();
+  if (!liveHireIds.length) return { ok: true, facts };
+
+  const chunkResults = await Promise.all(
+    chunkIds(liveHireIds).map(async (ids) => {
+      const [scheduleLoaded, chargeLoaded, groupEventsLoaded, balanceLoaded] = await Promise.all([
+        fetchAllRows((from, to) =>
+          admin
+            .from("vehicle_hire_payment_schedule")
+            .select(
+              "id, hire_group_id, period_start, period_end, row_kind, payment_status, approved_amount_gbp, base_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp)",
+            )
+            .in("hire_group_id", ids)
+            .lte("period_start", todayYmd)
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          admin
+            .from("vehicle_hire_driver_charge_line_items")
+            .select("hire_group_id, amount_gbp, resolution")
+            .in("hire_group_id", ids)
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          admin
+            .from("vehicle_hire_group_events")
+            .select("hire_group_id, event_type, metadata, created_at")
+            .in("hire_group_id", ids)
+            .in("event_type", [...EXTRA_CHARGE_PAYMENT_EVENT_TYPES])
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          admin
+            .from("vehicle_hire_balance_payments")
+            .select("id, hire_group_id, amount_gbp, direction, payment_category, paid_at")
+            .in("hire_group_id", ids)
+            .order("paid_at", { ascending: false })
+            .range(from, to),
+        ),
+      ]);
+      if (!scheduleLoaded.ok) return scheduleLoaded;
+      if (!chargeLoaded.ok) return chargeLoaded;
+      if (!groupEventsLoaded.ok) return groupEventsLoaded;
+      if (!balanceLoaded.ok) return balanceLoaded;
+
+      const eventsLoaded = await loadEventStateForScheduleRows(admin, scheduleLoaded.data);
+      if (!eventsLoaded.ok) return eventsLoaded;
+
+      return {
+        ok: true as const,
+        scheduleRows: scheduleLoaded.data,
+        charges: chargeLoaded.data,
+        groupEvents: groupEventsLoaded.data,
+        payments: balanceLoaded.data,
+        eventState: eventsLoaded.eventState,
+      };
+    }),
+  );
+
+  for (const chunk of chunkResults) {
+    if (!chunk.ok) return chunk;
+    appendScheduleFacts({
+      scheduleRows: chunk.scheduleRows,
+      eventState: chunk.eventState,
+      hireById,
+      todayYmd,
+      into: facts.scheduleFacts,
+    });
+    for (const charge of chunk.charges) {
+      const hireGroupId = String(charge.hire_group_id);
+      const bucket = facts.extraChargesByHireId.get(hireGroupId) ?? [];
+      bucket.push({
+        amountGbp: Number(charge.amount_gbp ?? 0),
+        resolution: String(charge.resolution ?? ""),
+      });
+      facts.extraChargesByHireId.set(hireGroupId, bucket);
+    }
+    const eventsByHire = new Map<string, { event_type: string; metadata: unknown; created_at: string }[]>();
+    for (const event of chunk.groupEvents) {
+      const hireGroupId = String(event.hire_group_id);
+      const bucket = eventsByHire.get(hireGroupId) ?? [];
+      bucket.push({
+        event_type: String(event.event_type),
+        metadata: event.metadata,
+        created_at: String(event.created_at),
+      });
+      eventsByHire.set(hireGroupId, bucket);
+    }
+    for (const [hireGroupId, events] of eventsByHire) {
+      const pending = resolveOpenExtraChargePayment(
+        events.map((event) => ({
+          eventType: event.event_type,
+          createdAt: event.created_at,
+          metadata: (event.metadata as Record<string, unknown> | null) ?? null,
+        })),
+      );
+      if (pending) facts.pendingExtraByHireId.set(hireGroupId, pending.amountGbp);
+    }
+    appendBalancePayments({
+      payments: chunk.payments,
+      hireById,
+      into: facts.balancePaymentsByHireId,
+    });
+  }
+
+  return { ok: true, facts };
+}
+
+/**
+ * Month-window receipts for settled historic hires (excluded from live schedule loads).
+ * Hire IDs must already be tenant- and subcompany-scoped.
+ */
+async function loadSettledMonthActivity(
+  admin: AdminClient,
+  settledHireIds: string[],
+  hireById: Map<string, CompanyBalancesHireFact>,
+  todayYmd: string,
+  monthStartYmd: string,
+  monthEndYmd: string,
+  into: LiveFacts,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!settledHireIds.length) return { ok: true };
+  const seenScheduleIds = new Set(into.scheduleFacts.map((row) => row.scheduleRowId));
+  const seenPaymentIds = new Set(
+    [...into.balancePaymentsByHireId.values()].flat().map((payment) => payment.id),
+  );
+
+  const chunkResults = await Promise.all(
+    chunkIds(settledHireIds).map(async (ids) => {
+      const [scheduleLoaded, balanceLoaded] = await Promise.all([
+        fetchAllRows((from, to) =>
+          admin
+            .from("vehicle_hire_payment_schedule")
+            .select(
+              "id, hire_group_id, period_start, period_end, row_kind, payment_status, approved_amount_gbp, base_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp)",
+            )
+            .in("hire_group_id", ids)
+            .gte("period_start", monthStartYmd)
+            .lte("period_start", monthEndYmd)
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          admin
+            .from("vehicle_hire_balance_payments")
+            .select("id, hire_group_id, amount_gbp, direction, payment_category, paid_at")
+            .in("hire_group_id", ids)
+            .gte("paid_at", `${monthStartYmd}T00:00:00.000+00:00`)
+            .lte("paid_at", `${monthEndYmd}T23:59:59.999+00:00`)
+            .range(from, to),
+        ),
+      ]);
+      if (!scheduleLoaded.ok) return scheduleLoaded;
+      if (!balanceLoaded.ok) return balanceLoaded;
+      return { ok: true as const, scheduleRows: scheduleLoaded.data, payments: balanceLoaded.data };
+    }),
+  );
+
+  for (const chunk of chunkResults) {
+    if (!chunk.ok) return chunk;
+    appendScheduleFacts({
+      scheduleRows: chunk.scheduleRows,
+      eventState: new Map(),
+      hireById,
+      todayYmd,
+      into: into.scheduleFacts,
+      seenIds: seenScheduleIds,
+    });
+    appendBalancePayments({
+      payments: chunk.payments,
+      hireById,
+      into: into.balancePaymentsByHireId,
+      seenIds: seenPaymentIds,
+    });
+  }
+  return { ok: true };
+}
+
 /**
  * Company Balances hub — KPIs and account rows from live schedule, extras and settlement data.
  * Authorisation: authenticated rental staff with rentals.read; queries scoped to parent company
- * and accessible subcompanies.
+ * and accessible subcompanies. Service-role reads run only after those checks, and only for
+ * hire IDs already loaded under that scope (RLS exists-joins on schedule/events are too slow
+ * for this list).
  */
 export async function loadCompanyBalancesPageAction(): Promise<LoadResult> {
   const { profile } = await requireRentalCompanyArea();
@@ -118,7 +446,12 @@ export async function loadCompanyBalancesPageAction(): Promise<LoadResult> {
 
   const todayYmd = ukTodayYmd();
   const supabase = await createClient();
+  const admin = createSupabaseAdminClient();
   const accessible = await loadUserAccessibleSubcompanyIds(profile);
+
+  if (accessible !== "all" && !accessible.length) {
+    return { ok: true, data: emptyBalancesPage(todayYmd) };
+  }
 
   let subcompanyQuery = supabase
     .from("subcompanies")
@@ -126,12 +459,29 @@ export async function loadCompanyBalancesPageAction(): Promise<LoadResult> {
     .eq("parent_company_id", parentCompanyId)
     .order("name", { ascending: true });
   if (accessible !== "all") {
-    if (!accessible.length) {
-      return { ok: true, data: emptyBalancesPage(todayYmd) };
-    }
     subcompanyQuery = subcompanyQuery.in("id", accessible);
   }
-  const { data: subcompanyRows, error: subErr } = await subcompanyQuery;
+
+  const [hireLoaded, subcompanyRes] = await Promise.all([
+    fetchAllRows((from, to) => {
+      let hireQuery = admin
+        .from("vehicle_hire_groups")
+        .select(
+          "id, subcompany_id, status, start_date, activated_at, ended_at, terminated_at, rent_cadence, settlement_balance_direction, settlement_balance_gbp, termination_settlement, driver_user_id, driver_email, driver_licence_number, vehicles(vrm, make, model), subcompanies(name, display_name)",
+        )
+        .eq("parent_company_id", parentCompanyId)
+        .in("status", [...BALANCE_HIRE_STATUSES])
+        .range(from, to);
+      if (accessible !== "all") {
+        hireQuery = hireQuery.in("subcompany_id", accessible);
+      }
+      return hireQuery;
+    }),
+    subcompanyQuery,
+  ]);
+  if (!hireLoaded.ok) return hireLoaded;
+
+  const { data: subcompanyRows, error: subErr } = subcompanyRes;
   if (subErr) return { ok: false, error: "Could not load balances." };
 
   const subcompanies: CompanyBalancesSubcompanyOption[] = (subcompanyRows ?? []).map((row) => ({
@@ -139,40 +489,25 @@ export async function loadCompanyBalancesPageAction(): Promise<LoadResult> {
     name: mapSubcompanyName(row) ?? "Subcompany",
   }));
 
-  let hireQuery = supabase
-    .from("vehicle_hire_groups")
-    .select(
-      "id, subcompany_id, status, start_date, activated_at, ended_at, terminated_at, rent_cadence, settlement_balance_direction, settlement_balance_gbp, termination_settlement, driver_user_id, driver_email, driver_licence_number, vehicles(vrm, make, model), subcompanies(name, display_name)",
-    )
-    .eq("parent_company_id", parentCompanyId)
-    .neq("status", "cancelled");
-
-  if (accessible !== "all") {
-    if (!accessible.length) {
-      return { ok: true, data: emptyBalancesPage(todayYmd, subcompanies) };
-    }
-    hireQuery = hireQuery.in("subcompany_id", accessible);
-  }
-
-  const { data: hireRows, error: hireErr } = await hireQuery;
-  if (hireErr) return { ok: false, error: "Could not load balances." };
-
-  const driverUserIds = (hireRows ?? [])
+  const driverUserIds = hireLoaded.data
     .map((row) => row.driver_user_id as string | null)
     .filter(Boolean) as string[];
-  const driverLabels =
-    driverUserIds.length > 0
-      ? await loadDriverLabelsMap(createSupabaseAdminClient(), driverUserIds)
-      : new Map<string, string>();
 
-  const hires: CompanyBalancesHireFact[] = (hireRows ?? []).map((h) => {
-    const terminationSettlement = (h.termination_settlement ?? null) as {
-      rentBillingMode?: string;
-    } | null;
+  const period = resolveCompanyDashboardPeriod({ kind: "this_month", todayYmd });
+  if ("error" in period) {
+    return { ok: false, error: "Could not load balances." };
+  }
+
+  const driverUserIdByHireId = new Map<string, string>();
+  const hires: CompanyBalancesHireFact[] = hireLoaded.data.map((h) => {
+    const terminationSettlement = h.termination_settlement ?? null;
+    const billingModeRaw =
+      terminationSettlement && typeof terminationSettlement === "object"
+        ? (terminationSettlement as { rentBillingMode?: string }).rentBillingMode
+        : null;
     const billingMode =
-      terminationSettlement?.rentBillingMode === "actual" ||
-      terminationSettlement?.rentBillingMode === "end_of_period"
-        ? (terminationSettlement.rentBillingMode as HireTerminationRentBillingMode)
+      billingModeRaw === "actual" || billingModeRaw === "end_of_period"
+        ? (billingModeRaw as HireTerminationRentBillingMode)
         : null;
     const settlementDirection = (h.settlement_balance_direction as string | null) ?? null;
     const vehicle = mapVehicleFields(
@@ -191,6 +526,8 @@ export async function loadCompanyBalancesPageAction(): Promise<LoadResult> {
       (h.driver_email as string | null)?.trim() ||
       (h.driver_licence_number as string | null)?.trim() ||
       null;
+    const snapshot = parseHireBalanceSnapshotFromTermination(terminationSettlement);
+    if (driverUserId) driverUserIdByHireId.set(h.id as string, driverUserId);
 
     return {
       id: h.id as string,
@@ -200,7 +537,7 @@ export async function loadCompanyBalancesPageAction(): Promise<LoadResult> {
       vehicleVrm: vehicle.vrm ?? mapVehicleVrm(h.vehicles as { vrm?: string | null } | null),
       vehicleMake: vehicle.make,
       vehicleModel: vehicle.model,
-      driverLabel: (driverUserId ? driverLabels.get(driverUserId) : null) ?? fallbackDriver,
+      driverLabel: fallbackDriver,
       startDateYmd: (h.start_date as string | null)?.slice(0, 10) ?? null,
       activatedAtYmd: (h.activated_at as string | null)?.slice(0, 10) ?? null,
       endedAtYmd: (h.ended_at as string | null)?.slice(0, 10) ?? null,
@@ -214,159 +551,62 @@ export async function loadCompanyBalancesPageAction(): Promise<LoadResult> {
           ? settlementDirection
           : null,
       settlementOpenBalanceGbp: Number(h.settlement_balance_gbp ?? 0),
+      snapshotChargesGbp: snapshot.chargesGbp,
+      snapshotReceivedGbp: snapshot.receivedGbp,
     };
   });
 
   const hireById = new Map(hires.map((h) => [h.id, h]));
-  const hireIds = hires.map((h) => h.id);
-  const scheduleFacts: CompanyBalancesScheduleFact[] = [];
-  const balancePaymentsByHireId = new Map<string, CompanyBalancesSettlementPaymentFact[]>();
-  const extraChargesByHireId = new Map<string, CompanyBalancesExtraChargeFact[]>();
-  const pendingExtraByHireId = new Map<string, number>();
+  const liveHireIds = hires.filter(hireNeedsLiveBalanceFacts).map((h) => h.id);
+  const settledHireIds = hires
+    .filter((h) => !hireNeedsLiveBalanceFacts(h) && (h.status === "completed" || h.status === "terminated"))
+    .map((h) => h.id);
 
-  for (const ids of chunkIds(hireIds)) {
-    const scheduleLoaded = await fetchAllRows((from, to) =>
-      supabase
-        .from("vehicle_hire_payment_schedule")
-        .select(
-          "id, hire_group_id, period_start, period_end, row_kind, payment_status, approved_amount_gbp, base_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp)",
-        )
-        .in("hire_group_id", ids)
-        .range(from, to),
-    );
-    if (!scheduleLoaded.ok) return scheduleLoaded;
-    const scheduleRows = scheduleLoaded.data;
+  const monthFacts = emptyLiveFacts();
+  const [driverLabels, liveLoaded, monthLoaded] = await Promise.all([
+    driverUserIds.length > 0
+      ? loadDriverLabelsChunked(admin, driverUserIds)
+      : Promise.resolve(new Map<string, string>()),
+    loadLiveBalanceFacts(admin, liveHireIds, hireById, todayYmd),
+    loadSettledMonthActivity(
+      admin,
+      settledHireIds,
+      hireById,
+      todayYmd,
+      period.startYmd,
+      period.endYmd,
+      monthFacts,
+    ),
+  ]);
+  if (!liveLoaded.ok) return liveLoaded;
+  if (!monthLoaded.ok) return monthLoaded;
 
-    const rowIds = scheduleRows.map((r) => String(r.id));
-    const eventState = new Map<string, { latestToStatus: string | null; pendingSubmittedGbp: number | null }>();
-    for (const eventIds of chunkIds(rowIds)) {
-      const eventsLoaded = await fetchAllRows((from, to) =>
-        supabase
-          .from("vehicle_hire_payment_status_events")
-          .select("schedule_row_id, to_status, amendment_payload, created_at")
-          .in("schedule_row_id", eventIds)
-          .eq("event_kind", "status_change")
-          .order("created_at", { ascending: false })
-          .range(from, to),
-      );
-      if (!eventsLoaded.ok) return eventsLoaded;
-      const chunkState = buildPaymentRowEventStateMap(
-        eventsLoaded.data.map((event) => ({
-          schedule_row_id: String(event.schedule_row_id),
-          to_status: (event.to_status as string | null) ?? null,
-          amendment_payload: event.amendment_payload,
-        })),
-      );
-      for (const [key, value] of chunkState) eventState.set(key, value);
+  for (const hire of hires) {
+    const userId = driverUserIdByHireId.get(hire.id);
+    if (!userId) continue;
+    hire.driverLabel = driverLabels.get(userId) ?? hire.driverLabel;
+  }
+
+  const facts = liveLoaded.facts;
+  const seenScheduleIds = new Set(facts.scheduleFacts.map((row) => row.scheduleRowId));
+  for (const row of monthFacts.scheduleFacts) {
+    if (seenScheduleIds.has(row.scheduleRowId)) continue;
+    facts.scheduleFacts.push(row);
+  }
+  const seenPaymentIds = new Set(
+    [...facts.balancePaymentsByHireId.values()].flat().map((payment) => payment.id),
+  );
+  for (const [hireId, payments] of monthFacts.balancePaymentsByHireId) {
+    const bucket = facts.balancePaymentsByHireId.get(hireId) ?? [];
+    for (const payment of payments) {
+      if (seenPaymentIds.has(payment.id)) continue;
+      bucket.push(payment);
     }
-
-    for (const row of scheduleRows) {
-      const hire = hireById.get(String(row.hire_group_id));
-      if (!hire) continue;
-      const discounts = row.vehicle_hire_schedule_discounts as { amount_gbp: number }[] | null;
-      const discountTotalGbp = (discounts ?? []).reduce((sum, d) => sum + Number(d.amount_gbp), 0);
-      const storedStatus = row.payment_status as HirePaymentStatus;
-      const event = eventState.get(String(row.id));
-      const paymentStatus = resolveHirePaymentWorkflowStatus(
-        storedStatus,
-        event?.latestToStatus ?? null,
-        { periodStartYmd: String(row.period_start), todayYmd },
-      );
-      scheduleFacts.push({
-        scheduleRowId: String(row.id),
-        hireGroupId: hire.id,
-        vehicleId: "",
-        subcompanyId: hire.subcompanyId ?? "",
-        periodStart: String(row.period_start).slice(0, 10),
-        periodEnd: String(row.period_end).slice(0, 10),
-        rowKind: String(row.row_kind),
-        paymentStatus,
-        approvedAmountGbp: row.approved_amount_gbp != null ? Number(row.approved_amount_gbp) : null,
-        baseAmountGbp: Number(row.base_amount_gbp ?? 0),
-        discountTotalGbp,
-        pendingSubmittedGbp:
-          paymentStatus === "pending_approval" ? (event?.pendingSubmittedGbp ?? null) : null,
-      });
-    }
-
-    const chargeLoaded = await fetchAllRows((from, to) =>
-      supabase
-        .from("vehicle_hire_driver_charge_line_items")
-        .select("hire_group_id, amount_gbp, resolution")
-        .in("hire_group_id", ids)
-        .range(from, to),
-    );
-    if (!chargeLoaded.ok) return chargeLoaded;
-    for (const charge of chargeLoaded.data) {
-      const hireGroupId = String(charge.hire_group_id);
-      const bucket = extraChargesByHireId.get(hireGroupId) ?? [];
-      bucket.push({
-        amountGbp: Number(charge.amount_gbp ?? 0),
-        resolution: String(charge.resolution ?? ""),
-      });
-      extraChargesByHireId.set(hireGroupId, bucket);
-    }
-
-    const groupEventsLoaded = await fetchAllRows((from, to) =>
-      supabase
-        .from("vehicle_hire_group_events")
-        .select("hire_group_id, event_type, metadata, created_at")
-        .in("hire_group_id", ids)
-        .in("event_type", [...EXTRA_CHARGE_PAYMENT_EVENT_TYPES])
-        .range(from, to),
-    );
-    if (!groupEventsLoaded.ok) return groupEventsLoaded;
-
-    const eventsByHire = new Map<string, { event_type: string; metadata: unknown; created_at: string }[]>();
-    for (const event of groupEventsLoaded.data) {
-      const hireGroupId = String(event.hire_group_id);
-      const bucket = eventsByHire.get(hireGroupId) ?? [];
-      bucket.push({
-        event_type: String(event.event_type),
-        metadata: event.metadata,
-        created_at: String(event.created_at),
-      });
-      eventsByHire.set(hireGroupId, bucket);
-    }
-    for (const [hireGroupId, events] of eventsByHire) {
-      const pending = resolveOpenExtraChargePayment(
-        events.map((event) => ({
-          eventType: event.event_type,
-          createdAt: event.created_at,
-          metadata: (event.metadata as Record<string, unknown> | null) ?? null,
-        })),
-      );
-      if (pending) pendingExtraByHireId.set(hireGroupId, pending.amountGbp);
-    }
-
-    const balanceLoaded = await fetchAllRows((from, to) =>
-      supabase
-        .from("vehicle_hire_balance_payments")
-        .select("id, hire_group_id, amount_gbp, direction, payment_category, paid_at")
-        .in("hire_group_id", ids)
-        .order("paid_at", { ascending: false })
-        .range(from, to),
-    );
-    if (!balanceLoaded.ok) return balanceLoaded;
-
-    for (const payment of balanceLoaded.data) {
-      const hire = hireById.get(String(payment.hire_group_id));
-      if (!hire) continue;
-      const direction = payment.direction as string;
-      if (direction !== "received_from_driver" && direction !== "paid_to_driver") continue;
-      const mapped: CompanyBalancesSettlementPaymentFact = {
-        id: String(payment.id),
-        hireGroupId: hire.id,
-        amountGbp: Number(payment.amount_gbp ?? 0),
-        direction,
-        paymentCategory: String(payment.payment_category ?? "settlement"),
-        paidAt: String(payment.paid_at ?? ""),
-        vehicleVrm: hire.vehicleVrm,
-        driverLabel: hire.driverLabel,
-      };
-      const bucket = balancePaymentsByHireId.get(hire.id) ?? [];
-      bucket.push(mapped);
-      balancePaymentsByHireId.set(hire.id, bucket);
+    facts.balancePaymentsByHireId.set(hireId, bucket);
+  }
+  for (const payments of facts.balancePaymentsByHireId.values()) {
+    for (const payment of payments) {
+      payment.driverLabel = hireById.get(payment.hireGroupId)?.driverLabel ?? payment.driverLabel;
     }
   }
 
@@ -374,10 +614,10 @@ export async function loadCompanyBalancesPageAction(): Promise<LoadResult> {
     ok: true,
     data: buildCompanyBalancesPage({
       hires,
-      scheduleRows: scheduleFacts,
-      extraChargesByHireId,
-      balancePaymentsByHireId,
-      pendingExtraByHireId,
+      scheduleRows: facts.scheduleFacts,
+      extraChargesByHireId: facts.extraChargesByHireId,
+      balancePaymentsByHireId: facts.balancePaymentsByHireId,
+      pendingExtraByHireId: facts.pendingExtraByHireId,
       subcompanies,
       todayYmd,
     }),

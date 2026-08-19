@@ -76,3 +76,54 @@ export function hasPostEndPrepaidRows<T extends HireEndedPaymentScheduleRow>(
         (row.pendingSubmittedGbp ?? 0) > 0.005),
   );
 }
+
+export type HireScheduleRefundMark = "refunded" | "partial";
+
+type HireScheduleRefundMarkRow = {
+  id: string;
+  rowKind: string;
+  periodStart: string;
+  paidGbp: number;
+};
+
+/**
+ * Allocate company refunds onto schedule rows: prepaid post-end rent first (period order),
+ * then remaining cash onto the deposit row.
+ */
+export function buildHireScheduleRefundMarksByRowId(
+  rows: readonly HireScheduleRefundMarkRow[],
+  contractEndedYmd: string | null | undefined,
+  refunds: { prepaidRentRefundedGbp: number; depositRefundedGbp?: number },
+): Map<string, HireScheduleRefundMark> {
+  const marks = new Map<string, HireScheduleRefundMark>();
+  const endedYmd = contractEndedYmd?.trim() || "";
+  let prepaidPool = roundGbp(Math.max(0, refunds.prepaidRentRefundedGbp));
+
+  if (endedYmd && prepaidPool > 0.005) {
+    const prepaidRows = rows
+      .filter(
+        (row) =>
+          row.rowKind !== "deposit" && row.periodStart > endedYmd && row.paidGbp > 0.005,
+      )
+      .sort((a, b) => a.periodStart.localeCompare(b.periodStart) || a.id.localeCompare(b.id));
+
+    for (const row of prepaidRows) {
+      if (prepaidPool <= 0.005) break;
+      const allocated = roundGbp(Math.min(prepaidPool, row.paidGbp));
+      prepaidPool = roundGbp(prepaidPool - allocated);
+      if (allocated >= row.paidGbp - 0.005) marks.set(row.id, "refunded");
+      else if (allocated > 0.005) marks.set(row.id, "partial");
+    }
+  }
+
+  const depositRefundedGbp = roundGbp(Math.max(0, refunds.depositRefundedGbp ?? 0));
+  if (depositRefundedGbp > 0.005) {
+    const deposit = rows.find((row) => row.rowKind === "deposit");
+    if (deposit && deposit.paidGbp > 0.005) {
+      if (depositRefundedGbp >= deposit.paidGbp - 0.005) marks.set(deposit.id, "refunded");
+      else marks.set(deposit.id, "partial");
+    }
+  }
+
+  return marks;
+}

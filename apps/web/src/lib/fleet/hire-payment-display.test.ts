@@ -130,6 +130,21 @@ describe("deriveHirePaymentDisplayStatus", () => {
       }),
     ).toBe("prepaid_settled");
   });
+
+  it("marks post-end prepaid as Refunded when the company has issued the refund", () => {
+    expect(
+      deriveHirePaymentDisplayStatus(
+        { ...postEndPrepaid, id: "r1" },
+        "2026-07-27",
+        {
+          ...endedOptions,
+          settlementSettled: true,
+          refundMarkByRowId: new Map([["r1", "refunded"]]),
+        },
+      ),
+    ).toBe("prepaid_refunded");
+    expect(hirePaymentDisplayStatusMeta("prepaid_refunded").label).toBe("Refunded");
+  });
 });
 
 describe("hirePaymentDisplayStatusMeta", () => {

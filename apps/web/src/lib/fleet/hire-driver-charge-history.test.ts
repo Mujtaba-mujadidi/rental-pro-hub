@@ -17,7 +17,7 @@ describe("formatHireDriverChargeHistoryEvent", () => {
     expect(display.title).toBe("Charge added");
     expect(display.body).toBe("Missed appointment fee");
     expect(display.detailLines).toContain("Amount: £40.00");
-    expect(display.actorLabel).toBe("Ops Staff");
+    expect(display.actorLabel).toBe("Ops Staff · Company staff");
   });
 
   it("formats amend with old to new amount and reason as body", () => {

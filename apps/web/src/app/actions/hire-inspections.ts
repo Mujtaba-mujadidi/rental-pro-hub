@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
 import { formatUkDateTime, ukTodayYmd } from "@/lib/datetime/uk";
 import { canReadRentals, canWriteRentals } from "@/lib/auth/rental-permissions";
-import { logHireGroupEvent } from "@/lib/fleet/hire-audit";
+import { loadHireAuditActorDisplayNames, logHireGroupEvent } from "@/lib/fleet/hire-audit";
 import {
   canCompleteHireCheckin,
   canCompleteHireCheckout,
@@ -76,6 +76,8 @@ export type HireInspectionPayload = {
   media: HireInspectionMediaItem[];
   checkoutCompleted: boolean;
   checkinCompleted: boolean;
+  completedByUserId: string | null;
+  completedByLabel: string | null;
 };
 
 type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -212,7 +214,7 @@ async function loadInspectionPayload(
   const { data: inspection } = await supabase
     .from("vehicle_hire_inspections")
     .select(
-      "id, hire_group_id, kind, status, odometer_reading, fuel_level, general_notes, completed_at, has_spare_tyre, has_tyre_key_locks, has_tyre_inflation_kit, has_charging_cable, has_tyre_replacement_kit",
+      "id, hire_group_id, kind, status, odometer_reading, fuel_level, general_notes, completed_at, completed_by_user_id, has_spare_tyre, has_tyre_key_locks, has_tyre_inflation_kit, has_charging_cable, has_tyre_replacement_kit",
     )
     .eq("hire_group_id", hireGroupId)
     .eq("kind", kind)
@@ -253,6 +255,8 @@ async function loadInspectionPayload(
       media: [],
       checkoutCompleted: Boolean(checkoutDone?.id),
       checkinCompleted: Boolean(checkinDone?.id),
+      completedByUserId: null,
+      completedByLabel: null,
     };
   }
 
@@ -293,7 +297,35 @@ async function loadInspectionPayload(
     media: mediaItems,
     checkoutCompleted: Boolean(checkoutDone?.id),
     checkinCompleted: Boolean(checkinDone?.id),
+    completedByUserId: (inspection.completed_by_user_id as string | null) ?? null,
+    completedByLabel: null,
   };
+}
+
+async function attachInspectionCompletedBy(
+  data: HireInspectionPayload,
+  audience: "staff" | "driver",
+): Promise<HireInspectionPayload> {
+  if (audience === "driver") {
+    data.completedByLabel = data.status === "completed" ? "Rental company" : null;
+    return data;
+  }
+  if (data.status !== "completed") {
+    data.completedByLabel = null;
+    return data;
+  }
+  const userId = data.completedByUserId?.trim() || null;
+  if (!userId) {
+    data.completedByLabel = "Company staff";
+    return data;
+  }
+  try {
+    const names = await loadHireAuditActorDisplayNames(createSupabaseAdminClient(), [userId]);
+    data.completedByLabel = names[userId] ?? "Company staff";
+  } catch {
+    data.completedByLabel = "Company staff";
+  }
+  return data;
 }
 
 async function getOrCreateDraftInspection(
@@ -423,7 +455,7 @@ export async function loadHireInspectionAction(
     }
   }
 
-  return { ok: true, data };
+  return { ok: true, data: await attachInspectionCompletedBy(data, "staff") };
 }
 
 export type HireEndedInspectionAttentionData = {
@@ -1371,7 +1403,7 @@ export async function loadDriverHireInspectionAction(
     }
   }
 
-  return { ok: true, data };
+  return { ok: true, data: await attachInspectionCompletedBy(data, "driver") };
 }
 
 async function assertHireInspectionReadAccess(
@@ -1495,6 +1527,15 @@ export async function exportHireInspectionPdfAction(
     })),
   );
 
+  const completedBy =
+    data.completedByUserId
+      ? (
+          await loadHireAuditActorDisplayNames(createSupabaseAdminClient(), [data.completedByUserId]).catch(
+            () => ({} as Record<string, string>),
+          )
+        )[data.completedByUserId] ?? "Company staff"
+      : "Company staff";
+
   const pdf = await buildHireInspectionReportPdf(
     {
       kind,
@@ -1511,7 +1552,9 @@ export async function exportHireInspectionPdfAction(
     {
       summary: {
         ...context.summary,
-        metaLine: data.completedAt ? `Completed: ${formatUkDateTime(data.completedAt)}` : null,
+        metaLine: data.completedAt
+          ? `Completed: ${formatUkDateTime(data.completedAt)} · Recorded by ${completedBy}`
+          : `Recorded by ${completedBy}`,
       },
       diagramPng,
     },

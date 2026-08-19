@@ -24,7 +24,7 @@ describe("formatHirePaymentRowEvent", () => {
     expect(display.title).toBe("Payment rejected");
     expect(display.body).toBe("Amount does not match bank transfer");
     expect(display.detailLines).toContain("Submitted amount: £250.00");
-    expect(display.actorLabel).toBe("Staff");
+    expect(display.actorLabel).toBe("Company staff");
   });
 
   it("formats amendment with amount change and reason", () => {
@@ -86,7 +86,7 @@ describe("formatHirePaymentRowEvent", () => {
       actorRole: "company_staff",
       actorDisplayName: "Riddhi Joshi",
     });
-    expect(display.actorLabel).toBe("Riddhi Joshi");
+    expect(display.actorLabel).toBe("Riddhi Joshi · Company staff");
   });
 });
 
@@ -102,7 +102,7 @@ describe("formatHirePaymentDiscountEvent", () => {
     expect(display.title).toBe("Discount applied");
     expect(display.body).toBe("Loyalty credit");
     expect(display.detailLines).toEqual(["Amount: −£25.00"]);
-    expect(display.actorLabel).toBe("Alex Ops");
+    expect(display.actorLabel).toBe("Alex Ops · Company staff");
   });
 });
 

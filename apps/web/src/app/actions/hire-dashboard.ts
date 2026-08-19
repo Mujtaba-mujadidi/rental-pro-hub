@@ -1,6 +1,6 @@
 "use server";
 
-import { loadHirePaymentsPageAction, loadDriverHirePaymentsPageAction, type HirePaymentPageRow } from "@/app/actions/hire-payments";
+import { loadHirePaymentsPageAction, loadDriverHirePaymentsPageAction, type HirePaymentPageRow, type HirePaymentsPageData } from "@/app/actions/hire-payments";
 import { loadDriverHireWorkspaceShellAction } from "@/app/actions/driver-hires";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
 import { canReadRentals } from "@/lib/auth/rental-permissions";
@@ -39,6 +39,8 @@ import { hireInspectionCompletionFromRows } from "@/lib/fleet/hire-inspection-st
 import type { HireLifecycleAttentionItem } from "@/lib/fleet/hire-lifecycle-attention";
 import type { HirePaymentSummary } from "@/lib/fleet/hire-payment-summary";
 import type { HirePaymentDisplayOptions } from "@/lib/fleet/hire-payment-display";
+import { buildHireEndedDepositRefundDisplay } from "@/lib/fleet/hire-ended-payments-display";
+import { buildHireScheduleRefundMarksByRowId } from "@/lib/fleet/hire-ended-payment-schedule";
 import type { HireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
 import {
   buildHireWorkspaceHeroMetrics,
@@ -47,6 +49,7 @@ import {
 import { driverHireStatusLabel } from "@/lib/fleet/driver-hire-nav";
 import { loadDriverLabelsMap } from "@/lib/fleet/driver-labels";
 import { hireAllowsCompanyDriverPackageAccess } from "@/lib/fleet/hire-driver-package-access";
+import { formatAuditActorLabel, loadHireAuditActorDisplayNames } from "@/lib/fleet/hire-audit";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -214,13 +217,30 @@ function toAnalyticsRows(rows: HirePaymentPageRow[]): HirePaymentAnalyticsRow[] 
 }
 
 function paymentDisplayOptions(
-  page: { contractEndedYmd: string | null; settlementBalance: HireWorkspaceSettlementBalance | null },
+  page: Pick<
+    HirePaymentsPageData,
+    | "contractEndedYmd"
+    | "settlementBalance"
+    | "rows"
+    | "terminationSummary"
+    | "depositGbp"
+    | "settlementBalancePayments"
+    | "driverChargeLineItems"
+  >,
   audience: "driver" | "staff",
 ): HirePaymentDisplayOptions {
+  const depositRefund = buildHireEndedDepositRefundDisplay({
+    payments: page,
+    audience,
+  });
   return {
     contractEndedYmd: page.contractEndedYmd,
     settlementSettled: page.settlementBalance?.settled === true,
     audience,
+    refundMarkByRowId: buildHireScheduleRefundMarksByRowId(page.rows, page.contractEndedYmd, {
+      prepaidRentRefundedGbp: depositRefund?.advanceRentRefundedGbp ?? 0,
+      depositRefundedGbp: depositRefund?.depositRefundedGbp ?? 0,
+    }),
   };
 }
 
@@ -377,6 +397,7 @@ export async function loadHireDashboardAction(
     to_status: string | null;
     amendment_payload: unknown;
     actor_role: string;
+    actor_user_id: string | null;
     event_kind: string;
     created_at: string;
   }[] = [];
@@ -384,7 +405,7 @@ export async function loadHireDashboardAction(
   if (rowIds.length) {
     const { data } = await supabase
       .from("vehicle_hire_payment_status_events")
-      .select("id, schedule_row_id, event_kind, from_status, to_status, amendment_payload, actor_role, created_at")
+      .select("id, schedule_row_id, event_kind, from_status, to_status, amendment_payload, actor_role, actor_user_id, created_at")
       .in("schedule_row_id", rowIds)
       .order("created_at", { ascending: false })
       .limit(12);
@@ -393,10 +414,20 @@ export async function loadHireDashboardAction(
 
   const { data: auditEvents } = await supabase
       .from("vehicle_hire_group_events")
-      .select("id, summary, created_at")
+      .select("id, summary, created_at, actor_user_id, actor_role")
       .eq("hire_group_id", hireGroupId.trim())
       .order("created_at", { ascending: false })
       .limit(6);
+
+  let actorNames: Record<string, string> = {};
+  try {
+    actorNames = await loadHireAuditActorDisplayNames(createSupabaseAdminClient(), [
+      ...paymentEvents.map((event) => event.actor_user_id),
+      ...(auditEvents ?? []).map((event) => event.actor_user_id as string | null),
+    ]);
+  } catch {
+    actorNames = {};
+  }
 
   const recentEvents: HireDashboardRecentEvent[] = [
     ...paymentEvents.map((event) => {
@@ -410,12 +441,14 @@ export async function loadHireDashboardAction(
           : payload.submittedAmountGbp != null
             ? Number(payload.submittedAmountGbp)
             : null;
+      const actorUserId = event.actor_user_id?.trim() || null;
       return {
         id: `payment:${event.id as string}`,
         summary: formatHirePaymentEventSummary({
           fromStatus: event.from_status as string | null,
           toStatus: event.to_status as string | null,
           actorRole: event.actor_role as string,
+          actorDisplayName: actorUserId ? actorNames[actorUserId] ?? null : null,
           periodLabel: rowLabelById.get(event.schedule_row_id as string) ?? "Period",
           submittedAmountGbp: submitted,
           eventKind: event.event_kind as string,
@@ -424,12 +457,19 @@ export async function loadHireDashboardAction(
         source: "payment" as const,
       };
     }),
-    ...(auditEvents ?? []).map((event) => ({
-      id: `audit:${event.id as string}`,
-      summary: event.summary as string,
-      createdAt: event.created_at as string,
-      source: "audit" as const,
-    })),
+    ...(auditEvents ?? []).map((event) => {
+      const actorUserId = (event.actor_user_id as string | null)?.trim() || null;
+      const actor = formatAuditActorLabel(
+        actorUserId ? actorNames[actorUserId] ?? null : null,
+        (event.actor_role as string | null) ?? "company_staff",
+      );
+      return {
+        id: `audit:${event.id as string}`,
+        summary: `${event.summary as string} · ${actor}`,
+        createdAt: event.created_at as string,
+        source: "audit" as const,
+      };
+    }),
   ]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, 8);

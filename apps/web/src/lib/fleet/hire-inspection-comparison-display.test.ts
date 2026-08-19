@@ -28,6 +28,8 @@ function basePayload(overrides: Partial<HireInspectionPayload> = {}): HireInspec
     media: [],
     checkoutCompleted: true,
     checkinCompleted: true,
+    completedByUserId: null,
+    completedByLabel: null,
     ...overrides,
   };
 }

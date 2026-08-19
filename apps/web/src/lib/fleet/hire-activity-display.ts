@@ -1,6 +1,8 @@
 import { formatUkDateText, formatUkDateTimeText } from "@/lib/datetime/uk";
 import {
   HIRE_GROUP_EVENT_TYPES,
+  formatAuditActorLabel,
+  hireAuditActorRoleLabel,
   type HireAuditActorRole,
   type HireGroupAuditRow,
   type HireGroupEventType,
@@ -121,10 +123,7 @@ export function isHireGroupEventType(value: string): value is HireGroupEventType
 }
 
 export function hireActivityActorRoleLabel(role: HireAuditActorRole | string | null | undefined): string {
-  if (role === "company_staff") return "Company staff";
-  if (role === "driver") return "Driver";
-  if (role === "system") return "System";
-  return "Unknown";
+  return hireAuditActorRoleLabel(role);
 }
 
 export function hireActivityTitle(eventType: string): string {
@@ -161,10 +160,10 @@ export function buildHireActivityItems(
     const timestampLabel = formatUkDateTimeText(event.created_at);
     const split = splitUkDateTimeText(timestampLabel);
     const dateLabel = formatUkDateText(event.created_at);
-    const roleLabel = hireActivityActorRoleLabel(event.actor_role);
-    const actorName = event.actor_user_id
-      ? options.actorNames?.[event.actor_user_id]?.trim() || null
-      : null;
+    const actorName =
+      (event.actor_user_id ? options.actorNames?.[event.actor_user_id]?.trim() || null : null) ||
+      event.actor_display_name?.trim() ||
+      null;
 
     items.push({
       id: event.id,
@@ -177,9 +176,7 @@ export function buildHireActivityItems(
       kind: hireActivityKind(event.event_type),
       recordedByLabel:
         options.audience === "staff"
-          ? actorName
-            ? `Recorded by ${actorName} - ${roleLabel}`
-            : `Recorded by ${roleLabel}`
+          ? `Recorded by ${formatAuditActorLabel(actorName, event.actor_role)}`
           : null,
     });
   }

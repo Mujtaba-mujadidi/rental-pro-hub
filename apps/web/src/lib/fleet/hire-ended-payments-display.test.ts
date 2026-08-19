@@ -73,11 +73,47 @@ describe("buildHireEndedRentCalculation", () => {
   it("shows rent due, paid, deposit applied and zero outstanding", () => {
     const calc = buildHireEndedRentCalculation(payments({}));
     expect(calc.rentDueToEndGbp).toBe(157.14);
+    expect(calc.totalRentReceivedDuringHireGbp).toBe(100);
     expect(calc.paymentReceivedDuringHireGbp).toBe(100);
     expect(calc.paidFromDepositGbp).toBe(57.14);
     expect(calc.rentOutstandingGbp).toBe(0);
+    expect(calc.advanceRentToRefundGbp).toBe(0);
+    expect(calc.advanceRentNote).toBeNull();
     expect(calc.cancelledPeriodNote).toContain("£42.86");
     expect(calc.cancelledPeriodNote).toContain("final week");
+  });
+
+  it("keeps accrued rent on the rent card and points advance rent at the refund card", () => {
+    const calc = buildHireEndedRentCalculation(
+      payments({
+        terminationSummary: termination({
+          accruedRentDueGbp: 70,
+          accruedRentPaidGbp: 70,
+          prepaidRentCreditGbp: 330,
+          totalPaidGbp: 400,
+          signedRentBalanceGbp: -330,
+          depositGbp: 300,
+        }),
+        summary: {
+          rentGrossAccruedGbp: 110,
+          totalDueGbp: 70,
+          totalPaidGbp: 400,
+          balanceGbp: 0,
+          creditGbp: 330,
+          signedAccruedBalanceGbp: 0,
+          scheduleBalanceGbp: 0,
+          totalDiscountGbp: 0,
+          contractTotalGbp: 440,
+          nextDue: null,
+        },
+      }),
+    );
+    expect(calc.rentDueToEndGbp).toBe(70);
+    expect(calc.totalRentReceivedDuringHireGbp).toBe(400);
+    expect(calc.paymentReceivedDuringHireGbp).toBe(70);
+    expect(calc.advanceRentToRefundGbp).toBe(330);
+    expect(calc.advanceRentNote).toContain("£330.00");
+    expect(calc.advanceRentNote).toContain("refund card");
   });
 });
 
@@ -132,9 +168,12 @@ describe("buildHireEndedDepositRefundDisplay", () => {
     expect(display?.originalDepositGbp).toBe(500);
     expect(display?.lessUnpaidRentGbp).toBe(57.14);
     expect(display?.lessDamageGbp).toBe(100);
+    expect(display?.advanceRentToRefundGbp).toBe(0);
+    expect(display?.advanceRentRefundedGbp).toBe(0);
+    expect(display?.depositRefundedGbp).toBe(342.86);
     expect(display?.refundPaidToDriverGbp).toBe(342.86);
-    expect(display?.refundPaidLabel).toBe("Refund paid to driver");
-    expect(display?.refundNote).toContain("2 bank transfers");
+    expect(display?.refundPaidLabel).toBe("Total refunded to driver");
+    expect(display?.refundNote).toContain("£342.86 of the deposit was refunded");
   });
 
   it("uses driver wording for refund label and note", () => {
@@ -185,18 +224,144 @@ describe("buildHireEndedDepositRefundDisplay", () => {
       }),
     });
 
-    expect(display?.refundPaidLabel).toBe("Refund paid to you");
-    expect(display?.refundNote).toContain("Your final refund was paid");
+    expect(display?.refundPaidLabel).toBe("Total refunded to you");
+    expect(display?.refundNote).toContain("£342.86 of your deposit was refunded");
+  });
+
+  it("puts unused advance rent on the refund card instead of mixing it with deposit", () => {
+    const display = buildHireEndedDepositRefundDisplay({
+      payments: payments({
+        terminationSummary: termination({
+          accruedRentDueGbp: 70,
+          accruedRentPaidGbp: 70,
+          prepaidRentCreditGbp: 330,
+          depositGbp: 300,
+          signedRentBalanceGbp: -330,
+        }),
+        driverChargeLineItems: [
+          {
+            id: "c1",
+            chargeType: "damage",
+            chargeTypeLabel: "Damage",
+            amountGbp: 100,
+            resolution: "paid_now",
+            resolutionLabel: "Paid now",
+            description: "Front Bonnet · scratch · minor",
+            createdAt: "2026-07-28T14:31:00.000Z",
+            chargedOn: "2026-07-28",
+            sourceKind: "checkin_inspection_damage",
+            canMutate: false,
+          },
+          {
+            id: "c2",
+            chargeType: "damage",
+            chargeTypeLabel: "Damage",
+            amountGbp: 200,
+            resolution: "add_to_balance",
+            resolutionLabel: "Add to balance",
+            description: "Left Side Passenger Door · scratch · minor",
+            createdAt: "2026-07-28T14:31:00.000Z",
+            chargedOn: "2026-07-28",
+            sourceKind: "checkin_inspection_damage",
+            canMutate: false,
+          },
+        ],
+        settlementBalancePayments: [
+          {
+            id: "p1",
+            amountGbp: 30,
+            paidAt: "2026-07-27T22:24:00.000Z",
+            paymentMethod: "bank_transfer",
+            paymentReference: null,
+            paymentAccountId: null,
+            paymentAccountName: null,
+            notes: null,
+            direction: "paid_to_driver",
+            paymentCategory: "settlement",
+          },
+          {
+            id: "p2",
+            amountGbp: 100,
+            paidAt: "2026-07-27T23:03:00.000Z",
+            paymentMethod: "bank_transfer",
+            paymentReference: "partial refund 2",
+            paymentAccountId: null,
+            paymentAccountName: null,
+            notes: null,
+            direction: "paid_to_driver",
+            paymentCategory: "settlement",
+          },
+          {
+            id: "p3",
+            amountGbp: 200,
+            paidAt: "2026-07-27T23:24:00.000Z",
+            paymentMethod: "bank_transfer",
+            paymentReference: null,
+            paymentAccountId: null,
+            paymentAccountName: null,
+            notes: null,
+            direction: "paid_to_driver",
+            paymentCategory: "settlement",
+          },
+        ],
+      }),
+    });
+
+    expect(display?.advanceRentToRefundGbp).toBe(330);
+    expect(display?.advanceRentRefundedGbp).toBe(330);
+    expect(display?.depositRefundedGbp).toBe(0);
+    expect(display?.refundNote).toContain("£330.00 unused advance rent was refunded");
+    expect(display?.refundNote).toContain("3 bank transfers");
+    expect(display?.intro).toContain("unused advance rent");
   });
 });
 
 describe("buildHireEndedPositionSnapshot", () => {
-  it("shows refund due before later charges", () => {
+  it("shows remaining deposit as held, not as a refund due", () => {
     const snapshot = buildHireEndedPositionSnapshot(payments({}));
     expect(snapshot?.rentDueGbp).toBe(157.14);
-    expect(snapshot?.rentPaidByDriverGbp).toBe(100);
+    expect(snapshot?.rentAppliedGbp).toBe(100);
+    expect(snapshot?.totalRentReceivedDuringHireGbp).toBe(100);
+    expect(snapshot?.advanceRentToRefundGbp).toBe(0);
     expect(snapshot?.depositAppliedToRentGbp).toBe(57.14);
-    expect(snapshot?.refundDueBeforeLaterChargesGbp).toBe(442.86);
+    expect(snapshot?.depositHeldGbp).toBe(442.86);
+    expect(snapshot?.note).toContain("deposit was still held");
+    expect(snapshot?.note).not.toContain("refund due");
+  });
+
+  it("separates unused advance rent from the held deposit", () => {
+    const snapshot = buildHireEndedPositionSnapshot(
+      payments({
+        terminationSummary: termination({
+          accruedRentDueGbp: 70,
+          accruedRentPaidGbp: 70,
+          prepaidRentCreditGbp: 330,
+          totalPaidGbp: 400,
+          signedRentBalanceGbp: -330,
+          depositGbp: 300,
+        }),
+        summary: {
+          rentGrossAccruedGbp: 110,
+          totalDueGbp: 70,
+          totalPaidGbp: 400,
+          balanceGbp: 0,
+          creditGbp: 330,
+          signedAccruedBalanceGbp: 0,
+          scheduleBalanceGbp: 0,
+          totalDiscountGbp: 0,
+          contractTotalGbp: 440,
+          nextDue: null,
+        },
+        depositGbp: 300,
+      }),
+    );
+    expect(snapshot?.rentDueGbp).toBe(70);
+    expect(snapshot?.totalRentReceivedDuringHireGbp).toBe(400);
+    expect(snapshot?.rentAppliedGbp).toBe(70);
+    expect(snapshot?.advanceRentToRefundGbp).toBe(330);
+    expect(snapshot?.depositHeldGbp).toBe(300);
+    expect(snapshot?.note).toContain("£330.00 unused advance rent");
+    expect(snapshot?.note).toContain("£300.00 deposit still held");
   });
 });
 

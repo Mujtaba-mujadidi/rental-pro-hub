@@ -6,9 +6,10 @@ import {
 } from "@/app/actions/hire-payments";
 import { HireActiveCompanyPaymentsView } from "@/components/fleet/hire-payments/hire-active-company-payments-view";
 import { HireEndedCompanyPaymentsView } from "@/components/fleet/hire-payments/hire-ended-company-payments-view";
-import { useHirePaymentsRealtime } from "@/hooks/use-hire-realtime";
+import { useHireWorkspaceCachedLoad } from "@/hooks/use-hire-workspace-cached-load";
+import { hireWorkspaceKeysInvalidatedByPaymentChange } from "@/lib/fleet/hire-workspace-tab-cache";
 import { useHireWorkspace } from "@/app/(main)/rental/hires/[groupId]/hire-workspace-provider";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useState } from "react";
 
 export function HirePaymentsView({
   hireGroupId,
@@ -17,33 +18,19 @@ export function HirePaymentsView({
   hireGroupId: string;
   onDataChange?: () => void;
 }) {
-  const { chrome } = useHireWorkspace();
-  const [pending, startTransition] = useTransition();
-  const [data, setData] = useState<HirePaymentsPageData | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { chrome, invalidateCache } = useHireWorkspace();
   const [highlightedRowIds, setHighlightedRowIds] = useState<string[]>([]);
+  const query = useHireWorkspaceCachedLoad<HirePaymentsPageData>({
+    key: "payments",
+    load: () => loadHirePaymentsPageAction(hireGroupId),
+  });
 
-  const reload = useCallback(() => {
-    startTransition(async () => {
-      const res = await loadHirePaymentsPageAction(hireGroupId);
-      if (!res.ok) {
-        setError(res.error);
-        setData(null);
-        return;
-      }
-      setData(res.data);
-      setError(null);
-      await onDataChange?.();
-    });
-  }, [hireGroupId, onDataChange]);
+  function reload() {
+    invalidateCache(hireWorkspaceKeysInvalidatedByPaymentChange());
+    void onDataChange?.();
+  }
 
-  useEffect(() => {
-    reload();
-  }, [reload]);
-
-  useHirePaymentsRealtime(hireGroupId, reload);
-
-  if (!data && pending) {
+  if (!query.data && query.pending) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-16" role="status">
         <span className="h-8 w-8 animate-spin rounded-full border-2 border-rph-rail/30 border-t-rph-rail" />
@@ -52,26 +39,26 @@ export function HirePaymentsView({
     );
   }
 
-  if (error) return <p className="rph-alert-error text-sm">{error}</p>;
-  if (!data) return null;
+  if (query.error) return <p className="rph-alert-error text-sm">{query.error}</p>;
+  if (!query.data) return null;
 
-  const contractEnded = Boolean(data.contractEndedYmd);
+  const contractEnded = Boolean(query.data.contractEndedYmd);
 
   if (!contractEnded) {
     return (
       <HireActiveCompanyPaymentsView
         hireGroupId={hireGroupId}
-        data={data}
+        data={query.data}
         chrome={chrome}
         highlightedRowIds={highlightedRowIds}
         onHighlightedRowIdsChange={setHighlightedRowIds}
         onReload={reload}
-        busy={pending}
+        busy={query.pending}
       />
     );
   }
 
   return (
-    <HireEndedCompanyPaymentsView hireGroupId={hireGroupId} data={data} onReload={reload} />
+    <HireEndedCompanyPaymentsView hireGroupId={hireGroupId} data={query.data} onReload={reload} />
   );
 }

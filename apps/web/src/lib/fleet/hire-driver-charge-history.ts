@@ -1,4 +1,5 @@
 import type { HirePaymentRowEventDisplay } from "@/lib/fleet/hire-payment-row-history";
+import { formatAuditActorLabel } from "@/lib/fleet/hire-audit";
 import { formatGbp } from "@/lib/fleet/maintenance";
 
 export type HireDriverChargeHistoryEventInput = {
@@ -59,7 +60,7 @@ export function formatHireDriverChargeHistoryEvent(
     title,
     body: event.eventType === "driver_charge_added" ? description : reason,
     detailLines,
-    actorLabel: event.actorDisplayName?.trim() || "Staff",
+    actorLabel: formatAuditActorLabel(event.actorDisplayName, "company_staff"),
     createdAt: event.createdAt,
   };
 }

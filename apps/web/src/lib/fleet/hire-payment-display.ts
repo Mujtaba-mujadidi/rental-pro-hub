@@ -13,6 +13,8 @@ export type HirePaymentDisplayStatus =
   | "cleared"
   | "waived"
   | "refunded"
+  | "prepaid_refunded"
+  | "prepaid_partially_refunded"
   | "prepaid_settled";
 
 export type HirePaymentDisplayAudience = "driver" | "staff";
@@ -33,6 +35,8 @@ export const HIRE_PAYMENT_DISPLAY_STATUSES: readonly HirePaymentDisplayStatus[] 
   "cleared",
   "waived",
   "refunded",
+  "prepaid_refunded",
+  "prepaid_partially_refunded",
   "prepaid_settled",
 ] as const;
 
@@ -49,10 +53,13 @@ const HIRE_PAYMENT_DISPLAY_STATUS_META_BASE: Record<
   upcoming: { label: "Upcoming", tone: "neutral" },
   cleared: { label: "Cleared", tone: "success" },
   waived: { label: "Waived — contract ended", tone: "neutral" },
+  prepaid_refunded: { label: "Refunded", tone: "success" },
+  prepaid_partially_refunded: { label: "Partially refunded", tone: "warning" },
   prepaid_settled: { label: "Settled", tone: "neutral" },
 };
 
 export type HirePaymentDisplayStatusInput = {
+  id?: string;
   paymentStatus: HirePaymentStatus;
   balanceGbp: number;
   paidGbp: number;
@@ -69,6 +76,8 @@ export type HirePaymentDisplayOptions = {
   /** Final settlement balance has been cleared on the hire record. */
   settlementSettled?: boolean;
   audience?: HirePaymentDisplayAudience;
+  /** Company-issued refunds allocated onto schedule row ids. */
+  refundMarkByRowId?: ReadonlyMap<string, "refunded" | "partial">;
 };
 
 function isPostEndPrepaidRow(
@@ -90,10 +99,17 @@ export function deriveHirePaymentDisplayStatus(
     if (row.paymentStatus === "pending_approval") return "pending_approval";
     if (row.pendingSubmittedGbp != null && row.pendingSubmittedGbp > 0) return "pending_approval";
     if (isPostEndPrepaidRow(row, contractEndedYmd)) {
+      const mark = row.id ? options?.refundMarkByRowId?.get(row.id) : undefined;
+      if (mark === "refunded") return "prepaid_refunded";
+      if (mark === "partial") return "prepaid_partially_refunded";
       return options?.settlementSettled ? "prepaid_settled" : "refunded";
     }
     return "waived";
   }
+
+  const depositMark = row.id ? options?.refundMarkByRowId?.get(row.id) : undefined;
+  if (depositMark === "refunded") return "prepaid_refunded";
+  if (depositMark === "partial") return "prepaid_partially_refunded";
 
   if (row.paymentStatus === "pending_approval") return "pending_approval";
   if (row.pendingSubmittedGbp != null && row.pendingSubmittedGbp > 0) return "pending_approval";

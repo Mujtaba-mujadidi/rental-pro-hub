@@ -36,8 +36,9 @@ function rowDisplayStatus(
   todayYmd: string,
   displayOptions: HirePaymentDisplayOptions,
 ): HirePaymentDisplayStatus {
-  return deriveHirePaymentDisplayStatus(
+      return deriveHirePaymentDisplayStatus(
     {
+      id: row.id,
       paymentStatus: row.paymentStatus,
       balanceGbp: row.balanceGbp,
       paidGbp: row.paidGbp,
@@ -66,6 +67,7 @@ export function HirePaymentScheduleTable({
   highlightedRowIds,
   contractEndedYmd,
   settlementSettled = false,
+  refundMarkByRowId,
   audience = "staff",
   readOnly = false,
   showActions = true,
@@ -79,6 +81,7 @@ export function HirePaymentScheduleTable({
   highlightedRowIds?: string[];
   contractEndedYmd?: string | null;
   settlementSettled?: boolean;
+  refundMarkByRowId?: ReadonlyMap<string, "refunded" | "partial">;
   audience?: HirePaymentDisplayAudience;
   readOnly?: boolean;
   showActions?: boolean;
@@ -90,8 +93,8 @@ export function HirePaymentScheduleTable({
   const [rowError, setRowError] = useState<string | null>(null);
   const todayYmd = ukTodayYmd();
   const displayOptions = useMemo(
-    () => ({ contractEndedYmd, settlementSettled, audience }),
-    [audience, contractEndedYmd, settlementSettled],
+    () => ({ contractEndedYmd, settlementSettled, audience, refundMarkByRowId }),
+    [audience, contractEndedYmd, refundMarkByRowId, settlementSettled],
   );
   const statusFilterOptions = useMemo(
     () => [
@@ -379,7 +382,7 @@ export function HirePaymentScheduleTable({
 
       {readOnly && !balanceTable ? (
         <p className="rph-muted text-sm">
-          Contract ended — schedule is read-only. Open History on a row to view payment audit.
+          Contract ended — schedule is read-only. Prepaid periods the company has paid back are marked Refunded. Open History on a row to view payment audit.
         </p>
       ) : null}
 

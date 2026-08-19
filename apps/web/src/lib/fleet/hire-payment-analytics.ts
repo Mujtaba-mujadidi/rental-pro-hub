@@ -60,6 +60,7 @@ export type HireContractProgress = {
 
 function rowInput(row: HirePaymentAnalyticsRow) {
   return {
+    id: row.id,
     paymentStatus: row.paymentStatus,
     balanceGbp: row.balanceGbp,
     paidGbp: row.paidGbp,
@@ -261,27 +262,29 @@ export function formatHirePaymentEventSummary(input: {
   periodLabel: string;
   submittedAmountGbp?: number | null;
   eventKind?: string | null;
+  actorDisplayName?: string | null;
 }): string {
   const amount =
     input.submittedAmountGbp != null && Number.isFinite(input.submittedAmountGbp)
       ? ` (£${input.submittedAmountGbp.toFixed(2)})`
       : "";
-  const actor = input.actorRole === "driver" ? "Driver" : "Staff";
+  const actor =
+    input.actorDisplayName?.trim() || (input.actorRole === "driver" ? "Driver" : "Staff");
 
   if (input.eventKind === "amendment") {
-    return `Payment amended for ${input.periodLabel}${amount}`;
+    return `Payment amended by ${actor} for ${input.periodLabel}${amount}`;
   }
   if (input.fromStatus === "approved" && input.toStatus === "not_received") {
-    return `Approval removed for ${input.periodLabel}`;
+    return `Approval removed by ${actor} for ${input.periodLabel}`;
   }
   if (input.toStatus === "pending_approval") {
     return `${actor} submitted payment for ${input.periodLabel}${amount}`;
   }
   if (input.toStatus === "approved") {
-    return `Payment approved for ${input.periodLabel}${amount}`;
+    return `Payment approved by ${actor} for ${input.periodLabel}${amount}`;
   }
   if (input.toStatus === "rejected") {
-    return `Payment rejected for ${input.periodLabel}`;
+    return `Payment rejected by ${actor} for ${input.periodLabel}`;
   }
-  return `Payment updated for ${input.periodLabel}`;
+  return `Payment updated by ${actor} for ${input.periodLabel}`;
 }

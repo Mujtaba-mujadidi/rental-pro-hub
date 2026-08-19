@@ -227,6 +227,9 @@ describe("hire-ended-summary-display", () => {
       originalDepositGbp: 500,
       rentFromDepositGbp: 57.14,
       driverChargesGbp: 100,
+      advanceRentToRefundGbp: 0,
+      advanceRentRefundedGbp: 0,
+      depositRefundedGbp: 342.86,
       finalRefundPaidGbp: 342.86,
       visible: true,
     });

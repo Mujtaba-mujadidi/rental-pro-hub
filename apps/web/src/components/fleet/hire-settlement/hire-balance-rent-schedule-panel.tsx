@@ -10,6 +10,8 @@ import {
   balanceRentScheduleFutureSummary,
   splitBalanceRentScheduleRows,
 } from "@/lib/fleet/hire-active-balance-display";
+import { buildHireEndedDepositRefundDisplay } from "@/lib/fleet/hire-ended-payments-display";
+import { buildHireScheduleRefundMarksByRowId } from "@/lib/fleet/hire-ended-payment-schedule";
 
 export function HireBalanceRentSchedulePanel({
   hireGroupId,
@@ -32,14 +34,18 @@ export function HireBalanceRentSchedulePanel({
 }) {
   const [futureOpen, setFutureOpen] = useState(false);
   const todayYmd = ukTodayYmd();
-  const displayOptions = useMemo(
-    () => ({
+  const displayOptions = useMemo(() => {
+    const depositRefund = buildHireEndedDepositRefundDisplay({ payments });
+    return {
       contractEndedYmd: payments.contractEndedYmd,
       settlementSettled: payments.settlementBalance?.settled === true,
       audience: "staff" as const,
-    }),
-    [payments.contractEndedYmd, payments.settlementBalance?.settled],
-  );
+      refundMarkByRowId: buildHireScheduleRefundMarksByRowId(payments.rows, payments.contractEndedYmd, {
+        prepaidRentRefundedGbp: depositRefund?.advanceRentRefundedGbp ?? 0,
+        depositRefundedGbp: depositRefund?.depositRefundedGbp ?? 0,
+      }),
+    };
+  }, [payments]);
   const { primaryRows, futureRows } = useMemo(
     () => splitBalanceRentScheduleRows(payments.rows, todayYmd, displayOptions),
     [displayOptions, payments.rows, todayYmd],
@@ -79,6 +85,7 @@ export function HireBalanceRentSchedulePanel({
         highlightedRowIds={highlightedRowIds}
         contractEndedYmd={payments.contractEndedYmd}
         settlementSettled={payments.settlementBalance?.settled === true}
+        refundMarkByRowId={displayOptions.refundMarkByRowId}
         audience="staff"
         readOnly={payments.scheduleReadOnly}
         variant="balance"
@@ -111,6 +118,7 @@ export function HireBalanceRentSchedulePanel({
                 highlightedRowIds={highlightedRowIds}
                 contractEndedYmd={payments.contractEndedYmd}
                 settlementSettled={payments.settlementBalance?.settled === true}
+                refundMarkByRowId={displayOptions.refundMarkByRowId}
                 audience="staff"
                 readOnly={payments.scheduleReadOnly}
                 variant="balance"

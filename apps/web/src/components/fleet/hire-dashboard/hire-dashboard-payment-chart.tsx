@@ -13,7 +13,9 @@ const BAR_COLOURS: Record<string, string> = {
   upcoming: "bg-rph-border",
   pending_approval: "bg-amber-300 dark:bg-amber-800",
   rejected: "bg-red-400 dark:bg-red-800",
-  refunded: "bg-emerald-400 dark:bg-emerald-700",
+  refunded: "bg-amber-400 dark:bg-amber-700",
+  prepaid_refunded: "bg-emerald-400 dark:bg-emerald-700",
+  prepaid_partially_refunded: "bg-emerald-300 dark:bg-emerald-800",
   prepaid_settled: "bg-rph-border",
   waived: "bg-rph-border",
 };

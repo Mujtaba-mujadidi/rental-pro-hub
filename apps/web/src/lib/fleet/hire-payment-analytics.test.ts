@@ -177,6 +177,6 @@ describe("hire-payment-analytics", () => {
         periodLabel: "12/08/2026",
         eventKind: "status_change",
       }),
-    ).toBe("Approval removed for 12/08/2026");
+    ).toBe("Approval removed by Staff for 12/08/2026");
   });
 });

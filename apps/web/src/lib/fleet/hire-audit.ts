@@ -53,6 +53,64 @@ export type HireGroupAuditRow = {
   created_at: string;
 };
 
+const GENERIC_ACTOR_NAMES = new Set(["company user", "user", "company staff", "staff"]);
+
+/** Prefer a real person name over invite placeholders like "Company user". */
+export function pickAuditActorDisplayName(input: {
+  profileDisplayName?: string | null;
+  metadataFullName?: string | null;
+  metadataFirstName?: string | null;
+  metadataLastName?: string | null;
+  email?: string | null;
+}): string | null {
+  const usable = (value: string | null | undefined): string | null => {
+    const trimmed = value?.trim() || "";
+    if (!trimmed) return null;
+    if (GENERIC_ACTOR_NAMES.has(trimmed.toLowerCase())) return null;
+    return trimmed;
+  };
+
+  const fromParts = [input.metadataFirstName, input.metadataLastName]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join(" ");
+  const email = input.email?.trim() || "";
+  const emailLocal = email.includes("@") ? email.slice(0, email.indexOf("@")).replace(/[._]+/g, " ").trim() : "";
+
+  return (
+    usable(input.profileDisplayName) ||
+    usable(input.metadataFullName) ||
+    usable(fromParts) ||
+    usable(emailLocal) ||
+    usable(email)
+  );
+}
+
+export function hireAuditActorRoleLabel(role: HireAuditActorRole | string | null | undefined): string {
+  if (role === "company_staff") return "Company staff";
+  if (role === "driver") return "Driver";
+  if (role === "system") return "System";
+  if (!role) return "Unknown";
+  return String(role).replace(/_/g, " ");
+}
+
+/** Staff name first, with role as a suffix when the name is known. */
+export function formatAuditActorLabel(
+  displayName: string | null | undefined,
+  role?: HireAuditActorRole | string | null,
+): string {
+  const roleLabel = hireAuditActorRoleLabel(role);
+  const name = displayName?.trim() || null;
+  if (name && role && role !== "system") return `${name} · ${roleLabel}`;
+  if (name) return name;
+  return roleLabel;
+}
+
+function metadataString(metadata: Record<string, unknown> | undefined, key: string): string | null {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value : null;
+}
+
 /** Load profile display names for hire audit actors (after authorisation). */
 export async function loadHireAuditActorDisplayNames(
   admin: Admin,
@@ -60,12 +118,48 @@ export async function loadHireAuditActorDisplayNames(
 ): Promise<Record<string, string>> {
   const ids = [...new Set(userIds.map((id) => id?.trim()).filter((id): id is string => Boolean(id)))];
   if (!ids.length) return {};
-  const { data } = await admin.from("profiles").select("id, display_name").in("id", ids);
   const names: Record<string, string> = {};
+
+  const { data } = await admin.from("profiles").select("id, display_name").in("id", ids);
   for (const row of data ?? []) {
-    const name = (row.display_name as string | null)?.trim();
+    const name = pickAuditActorDisplayName({
+      profileDisplayName: (row.display_name as string | null) ?? null,
+    });
     if (name) names[row.id as string] = name;
   }
+
+  const missingAfterProfiles = ids.filter((id) => !names[id]);
+  await Promise.all(
+    missingAfterProfiles.map(async (id) => {
+      const { data: authRes, error } = await admin.auth.admin.getUserById(id);
+      if (error || !authRes.user) return;
+      const metadata = (authRes.user.user_metadata ?? {}) as Record<string, unknown>;
+      const name = pickAuditActorDisplayName({
+        metadataFullName: metadataString(metadata, "full_name"),
+        metadataFirstName: metadataString(metadata, "first_name"),
+        metadataLastName: metadataString(metadata, "last_name"),
+        email: authRes.user.email ?? null,
+      });
+      if (name) names[id] = name;
+    }),
+  );
+
+  const missingAfterAuth = ids.filter((id) => !names[id]);
+  if (missingAfterAuth.length) {
+    const { data: drivers } = await admin
+      .from("driver_profiles")
+      .select("user_id, first_name, last_name, account_email")
+      .in("user_id", missingAfterAuth);
+    for (const row of drivers ?? []) {
+      const name = pickAuditActorDisplayName({
+        metadataFirstName: (row.first_name as string | null) ?? null,
+        metadataLastName: (row.last_name as string | null) ?? null,
+        email: (row.account_email as string | null) ?? null,
+      });
+      if (name) names[row.user_id as string] = name;
+    }
+  }
+
   return names;
 }
 

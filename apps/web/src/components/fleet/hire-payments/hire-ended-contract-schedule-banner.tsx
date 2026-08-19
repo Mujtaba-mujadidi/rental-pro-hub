@@ -18,9 +18,9 @@ export function HireEndedContractScheduleBanner({
 }) {
   const prepaidCopy =
     hasPostEndPrepaidPayments && settlementSettled
-      ? ", including prepaid periods that were settled at contract end."
+      ? ", including prepaid periods marked Refunded once the company paid them back."
       : hasPostEndPrepaidPayments
-        ? ", plus any periods you paid in advance that are marked refund expected."
+        ? ", plus any periods paid in advance that still show a refund due."
         : "; later periods are not shown.";
 
   return (

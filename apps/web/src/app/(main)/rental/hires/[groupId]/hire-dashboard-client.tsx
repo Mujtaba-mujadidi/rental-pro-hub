@@ -15,66 +15,34 @@ import {
 } from "@/app/actions/hire-payments";
 import { HireActiveCompanySummary } from "@/components/fleet/hire-summary/hire-active-company-summary";
 import { HireEndedCompanySummary } from "@/components/fleet/hire-summary/hire-ended-company-summary";
-import { useHirePaymentsRealtime } from "@/hooks/use-hire-realtime";
+import { useHireWorkspaceCachedLoad } from "@/hooks/use-hire-workspace-cached-load";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState, useTransition } from "react";
 import { useHireWorkspace } from "./hire-workspace-provider";
 
 export function HireDashboardClient() {
   const { shell, chrome } = useHireWorkspace();
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [data, setData] = useState<HireDashboardData | null>(null);
-  const [payments, setPayments] = useState<HirePaymentsPageData | null>(null);
-  const [paymentRows, setPaymentRows] = useState<readonly HirePaymentPageRow[]>([]);
-  const [inspectionAttention, setInspectionAttention] = useState<HireEndedInspectionAttentionData | null>(
-    null,
-  );
-  const [error, setError] = useState<string | null>(null);
-
   const base = `/rental/hires/${shell.hireGroupId}`;
 
-  const reload = useCallback(() => {
-    startTransition(async () => {
-      const [dashboardRes, paymentsRes] = await Promise.all([
-        loadHireDashboardAction(shell.hireGroupId),
-        loadHirePaymentsPageAction(shell.hireGroupId),
-      ]);
-      if (!dashboardRes.ok) {
-        setError(dashboardRes.error);
-        setData(null);
-        setPayments(null);
-        setPaymentRows([]);
-        setInspectionAttention(null);
-        return;
-      }
-      if (!paymentsRes.ok) {
-        setError(paymentsRes.error);
-        setData(null);
-        setPayments(null);
-        setPaymentRows([]);
-        setInspectionAttention(null);
-        return;
-      }
+  const dashboard = useHireWorkspaceCachedLoad<HireDashboardData>({
+    key: "dashboard",
+    load: () => loadHireDashboardAction(shell.hireGroupId),
+  });
+  const payments = useHireWorkspaceCachedLoad<HirePaymentsPageData>({
+    key: "payments",
+    load: () => loadHirePaymentsPageAction(shell.hireGroupId),
+  });
+  const inspection = useHireWorkspaceCachedLoad<HireEndedInspectionAttentionData>({
+    key: "inspectionAttention",
+    skipLoad: !chrome.contractEnded,
+    load: () => loadHireEndedInspectionAttentionAction(shell.hireGroupId),
+  });
 
-      let inspectionRes: Awaited<ReturnType<typeof loadHireEndedInspectionAttentionAction>> | null = null;
-      if (dashboardRes.data.overview.contractEnded) {
-        inspectionRes = await loadHireEndedInspectionAttentionAction(shell.hireGroupId);
-      }
-
-      setData(dashboardRes.data);
-      setPayments(paymentsRes.data);
-      setPaymentRows(paymentsRes.data.rows);
-      setInspectionAttention(inspectionRes?.ok ? inspectionRes.data : { items: [], checkinCompleted: false });
-      setError(null);
-    });
-  }, [shell.hireGroupId]);
-
-  useEffect(() => {
-    reload();
-  }, [reload]);
-
-  useHirePaymentsRealtime(shell.hireGroupId, reload);
+  const pending = dashboard.pending || payments.pending || inspection.pending;
+  const error = dashboard.error ?? payments.error ?? inspection.error;
+  const data = dashboard.data;
+  const paymentsData = payments.data;
+  const paymentRows: readonly HirePaymentPageRow[] = paymentsData?.rows ?? [];
 
   if (!data && pending) {
     return (
@@ -86,7 +54,7 @@ export function HireDashboardClient() {
   }
 
   if (error) return <p className="rph-alert-error text-sm">{error}</p>;
-  if (!data || !payments) return null;
+  if (!data || !paymentsData) return null;
 
   const contractEnded = data.overview.contractEnded;
 
@@ -97,7 +65,7 @@ export function HireDashboardClient() {
         context={data.overview}
         chrome={chrome}
         paymentRows={paymentRows}
-        extraChargesOutstandingGbp={payments.extraChargesOutstandingGbp}
+        extraChargesOutstandingGbp={paymentsData.extraChargesOutstandingGbp}
         paymentsHref={`${base}/payments`}
         detailsHref={`${base}/details`}
         onRecordPayment={
@@ -113,8 +81,8 @@ export function HireDashboardClient() {
     <HireEndedCompanySummary
       data={data}
       context={data.overview}
-      payments={payments}
-      inspectionItems={inspectionAttention?.items ?? []}
+      payments={paymentsData}
+      inspectionItems={inspection.data?.items ?? []}
       paymentsHref={`${base}/payments`}
       detailsHref={`${base}/details`}
       inspectionsHref={`${base}/checkout`}

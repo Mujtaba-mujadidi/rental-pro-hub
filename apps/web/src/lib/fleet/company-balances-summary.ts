@@ -62,6 +62,9 @@ export type CompanyBalancesHireFact = Pick<
   driverLabel: string | null;
   startDateYmd: string | null;
   activatedAtYmd: string | null;
+  /** Frozen totals from termination_settlement; used so settled hires skip live schedule loads. */
+  snapshotChargesGbp?: number | null;
+  snapshotReceivedGbp?: number | null;
 };
 
 export type CompanyBalancesScheduleFact = DashboardScheduleFact & {
@@ -210,6 +213,34 @@ export function companyBalancesPeriodLabel(
 
 export function companyBalancesAccountHref(hireGroupId: string): string {
   return `/rental/balances/${hireGroupId}`;
+}
+
+/** Live schedule / extras / events are required for active accounts and open settlements only. */
+export function hireNeedsLiveBalanceFacts(
+  hire: Pick<CompanyBalancesHireFact, "status" | "settlementBalanceDirection">,
+): boolean {
+  if (hire.status === "active") return true;
+  if (!isEndedHireStatus(hire.status)) return false;
+  return hire.settlementBalanceDirection !== "settled";
+}
+
+export function parseHireBalanceSnapshotFromTermination(raw: unknown): {
+  chargesGbp: number | null;
+  receivedGbp: number | null;
+} {
+  if (!raw || typeof raw !== "object") return { chargesGbp: null, receivedGbp: null };
+  const record = raw as {
+    totalDueGbp?: unknown;
+    totalPaidGbp?: unknown;
+    accruedRentDueGbp?: unknown;
+    accruedRentPaidGbp?: unknown;
+  };
+  const due = Number(record.totalDueGbp ?? record.accruedRentDueGbp);
+  const paid = Number(record.totalPaidGbp ?? record.accruedRentPaidGbp);
+  return {
+    chargesGbp: Number.isFinite(due) ? roundGbp(due) : null,
+    receivedGbp: Number.isFinite(paid) ? roundGbp(paid) : null,
+  };
 }
 
 export function pendingApprovalAmountGbp(row: CompanyBalancesScheduleFact): number {
@@ -412,6 +443,17 @@ export function buildCompanyBalancesAccountRows(input: {
     };
 
     if (isEndedHireStatus(hire.status)) {
+      if (hire.settlementBalanceDirection === "settled") {
+        rows.push({
+          ...common,
+          chargesGbp: roundGbp(hire.snapshotChargesGbp ?? 0),
+          receivedGbp: roundGbp(hire.snapshotReceivedGbp ?? 0),
+          balanceGbp: 0,
+          accountStatus: "settled",
+          statusLabel: "Settled",
+        });
+        continue;
+      }
       const financials = endedHireAccountFinancials({
         hire,
         scheduleRows: schedule,

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { exportHireActivityAction, loadHireActivityAction } from "@/app/actions/hire-activity";
+import { useHireWorkspaceCachedLoad } from "@/hooks/use-hire-workspace-cached-load";
 import type { HireActivityItem, HireActivityKind } from "@/lib/fleet/hire-activity-display";
 
 export function HireActivityView({
@@ -11,24 +12,20 @@ export function HireActivityView({
   hireGroupId: string;
   audience: "staff" | "driver";
 }) {
-  const [pending, startTransition] = useTransition();
   const [exporting, startExport] = useTransition();
-  const [items, setItems] = useState<HireActivityItem[]>([]);
-  const [error, setError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
-
-  useEffect(() => {
-    startTransition(async () => {
+  const query = useHireWorkspaceCachedLoad<HireActivityItem[]>({
+    key: "activity",
+    useCache: audience === "staff",
+    load: async () => {
       const res = await loadHireActivityAction(hireGroupId, audience);
-      if (!res.ok) {
-        setError(res.error);
-        setItems([]);
-        return;
-      }
-      setItems(res.items);
-      setError(null);
-    });
-  }, [audience, hireGroupId]);
+      if (!res.ok) return res;
+      return { ok: true, data: res.items };
+    },
+  });
+  const pending = query.pending;
+  const error = query.error;
+  const items = query.data ?? [];
 
   function exportActivity() {
     setExportError(null);

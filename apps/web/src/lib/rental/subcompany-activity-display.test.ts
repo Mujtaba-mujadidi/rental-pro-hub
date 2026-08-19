@@ -42,7 +42,7 @@ describe("mapSubcompanyActivityItem", () => {
     expect(item.title).toBe("Vehicle assigned");
     expect(item.detail).toBe("KE18 FSX moved into Oxus Cars Ltd");
     expect(item.timeLabel).toMatch(/^\d{2}:\d{2}$/);
-    expect(item.actorLabel).toBe("Riddhi Joshi · Rental staff");
+    expect(item.actorLabel).toBe("Riddhi Joshi · Company staff");
     expect(item.tone).toBe("neutral");
   });
 });

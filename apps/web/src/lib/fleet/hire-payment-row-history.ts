@@ -1,4 +1,5 @@
 import { formatUkDate } from "@/lib/datetime/uk";
+import { formatAuditActorLabel } from "@/lib/fleet/hire-audit";
 import { formatGbp } from "@/lib/fleet/maintenance";
 
 export type HirePaymentRowEventInput = {
@@ -47,9 +48,7 @@ function actorLabelFromRole(
   role: HirePaymentRowEventInput["actorRole"],
   displayName?: string | null,
 ): string {
-  const name = displayName?.trim();
-  if (name) return name;
-  return role === "driver" ? "Driver" : "Staff";
+  return formatAuditActorLabel(displayName, role);
 }
 
 function amountFromPayload(payload: Record<string, unknown> | null, key: string): number | null {
@@ -68,7 +67,7 @@ export function formatHirePaymentDiscountEvent(
     title: "Discount applied",
     body: reason || null,
     detailLines: [`Amount: −${formatGbp(discount.amountGbp)}`],
-    actorLabel: discount.appliedByDisplayName?.trim() || "Staff",
+    actorLabel: formatAuditActorLabel(discount.appliedByDisplayName, "company_staff"),
     createdAt: discount.appliedAt,
   };
 }

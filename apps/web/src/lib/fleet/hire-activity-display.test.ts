@@ -79,7 +79,7 @@ describe("buildHireActivityItems", () => {
       actorNames: { "staff-1": "Mujtaba Ghulamfarooq" },
     });
     const driver = buildHireActivityItems([row], { audience: "driver" });
-    expect(staff[0]?.recordedByLabel).toBe("Recorded by Mujtaba Ghulamfarooq - Company staff");
+    expect(staff[0]?.recordedByLabel).toBe("Recorded by Mujtaba Ghulamfarooq · Company staff");
     expect(driver[0]?.recordedByLabel).toBeNull();
   });
 
