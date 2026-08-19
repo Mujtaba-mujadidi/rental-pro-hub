@@ -1,9 +1,12 @@
 import { formatGbp } from "@/lib/fleet/maintenance";
-import { formatUkDate } from "@/lib/datetime/uk";
 import { rentalContractCopy } from "@/lib/rental-contract-copy";
 import type { PlatformNotificationType } from "@/lib/platform-notifications";
 
 export type PlatformNotificationPayload = Record<string, unknown>;
+
+export type PlatformNotificationTone = "success" | "warn" | "info";
+
+export type PlatformNotificationGroup = "payments" | "documents" | "compliance";
 
 export type PlatformNotificationDisplay = {
   title: string;
@@ -42,7 +45,7 @@ export function formatPlatformNotification(
     return {
       title: "Payment approved",
       body: Number.isFinite(amount)
-        ? `Your ${formatGbp(amount)} payment for ${vrm} was approved.`
+        ? `${formatGbp(amount)} was approved for the hire of ${vrm}.`
         : `A hire payment for ${vrm} was approved.`,
       href,
       actionLabel: href ? "View payments" : null,
@@ -160,4 +163,42 @@ export function formatPlatformNotification(
 
 export function isHireNotificationType(type: string): type is PlatformNotificationType {
   return type.startsWith("hire_");
+}
+
+export function platformNotificationGroups(type: string): PlatformNotificationGroup[] {
+  if (
+    type.startsWith("hire_payment_") ||
+    type === "payment_submitted" ||
+    type === "payment_validated"
+  ) {
+    return ["payments"];
+  }
+  if (
+    type === "contract_signed" ||
+    type === "contract_change_requested" ||
+    type === "contract_change_review" ||
+    type === "legal_change_applied"
+  ) {
+    return ["documents"];
+  }
+  if (type.includes("compliance") || type.startsWith("vehicle_expiry") || type.startsWith("document_expiry")) {
+    return ["compliance"];
+  }
+  return [];
+}
+
+export function platformNotificationTone(type: string): PlatformNotificationTone {
+  if (
+    type === "hire_payment_approved" ||
+    type === "payment_validated" ||
+    type === "contract_signed" ||
+    type === "legal_change_applied"
+  ) {
+    return "success";
+  }
+  if (type === "hire_payment_rejected" || type === "hire_payment_amended" || type.includes("compliance")) {
+    return "warn";
+  }
+  if (type === "contract_change_review") return "warn";
+  return "info";
 }

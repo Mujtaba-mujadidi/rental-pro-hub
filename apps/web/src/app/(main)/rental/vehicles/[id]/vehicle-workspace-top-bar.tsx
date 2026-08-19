@@ -198,9 +198,7 @@ export function VehicleWorkspaceTopBar({
                 key={item.href}
                 href={item.href}
                 className={
-                  active
-                    ? "inline-flex shrink-0 items-center border-b-2 border-sky-600 px-3 py-2.5 text-sm font-semibold text-sky-700 dark:border-sky-400 dark:text-sky-300"
-                    : "inline-flex shrink-0 items-center border-b-2 border-transparent px-3 py-2.5 text-sm font-medium text-rph-fg-muted transition-colors hover:text-rph-fg"
+                  active ? "rph-tab rph-tab-active px-3 py-2.5" : "rph-tab px-3 py-2.5"
                 }
               >
                 {item.label}

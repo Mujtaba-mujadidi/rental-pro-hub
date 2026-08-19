@@ -36,9 +36,9 @@ const btnPrimary =
   "inline-flex min-h-10 items-center justify-center rounded-lg border border-rph-rail bg-rph-rail px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rph-rail-hover disabled:opacity-50 dark:border-rph-rail-soft dark:bg-rph-rail-soft dark:hover:bg-rph-rail-softer";
 
 const tabBtn =
-  "border-b-2 px-1 pb-2 text-sm font-medium transition-colors border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200";
+  "rph-tab px-1 pb-2";
 const tabBtnActive =
-  "border-b-2 px-1 pb-2 text-sm font-semibold transition-colors border-rph-rail text-rph-rail dark:border-rph-rail-soft dark:text-rph-rail-soft";
+  "rph-tab rph-tab-active px-1 pb-2";
 
 const btnSm =
   "inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 transition-colors hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800";

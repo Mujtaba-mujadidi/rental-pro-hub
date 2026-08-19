@@ -1,16 +1,8 @@
 "use client";
 
 import { PlatformNotificationsClient } from "@/components/platform-notifications/platform-notifications-client";
-import type { PlatformNotificationDisplay } from "@/lib/platform-notification-display";
+import type { PlatformNotificationListItem } from "@/lib/platform-notification-inbox";
 
-type Item = {
-  id: string;
-  type: string;
-  readAt: string | null;
-  createdAt: string;
-  display: PlatformNotificationDisplay;
-};
-
-export function RentalNotificationsClient({ items }: { items: Item[] }) {
-  return <PlatformNotificationsClient items={items} />;
+export function RentalNotificationsClient({ items }: { items: PlatformNotificationListItem[] }) {
+  return <PlatformNotificationsClient items={items} audience="staff" />;
 }

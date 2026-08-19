@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatPlatformNotification } from "@/lib/platform-notification-display";
+import { formatPlatformNotification, platformNotificationGroups } from "@/lib/platform-notification-display";
 
 describe("formatPlatformNotification", () => {
   it("formats hire payment submitted notifications", () => {
@@ -24,7 +24,7 @@ describe("formatPlatformNotification", () => {
     });
     expect(display.title).toContain("approved");
     expect(display.body).toContain("£250.00");
-    expect(display.href).toBe("/driver/my-hire?tab=payments");
+    expect(display.body).toContain("AB12 CDE");
     expect(display.actionLabel).toBe("View payments");
   });
 
@@ -59,5 +59,11 @@ describe("formatPlatformNotification", () => {
     expect(display.title).toContain("approved");
     expect(display.body).toContain("Sign the updated platform agreement");
     expect(display.actionLabel).toBe("Review and sign");
+  });
+
+  it("maps notification types onto inbox groups", () => {
+    expect(platformNotificationGroups("hire_payment_approved")).toEqual(["payments"]);
+    expect(platformNotificationGroups("contract_signed")).toEqual(["documents"]);
+    expect(platformNotificationGroups("payment_validated")).toEqual(["payments"]);
   });
 });

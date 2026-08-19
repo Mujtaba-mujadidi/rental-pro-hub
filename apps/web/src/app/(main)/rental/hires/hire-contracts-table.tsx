@@ -552,11 +552,7 @@ export function HireContractsTable({
                     <button
                       key={tab.value}
                       type="button"
-                      className={`shrink-0 border-b-2 px-3 pb-3 pt-2 text-sm transition-colors sm:px-4 ${
-                        active
-                          ? "border-rph-rail font-semibold text-rph-rail"
-                          : "border-transparent font-medium text-rph-fg-muted hover:text-rph-fg"
-                      }`}
+                      className={active ? "rph-tab rph-tab-active" : "rph-tab"}
                       aria-current={active ? "page" : undefined}
                       onClick={() => setListTab(tab.value)}
                     >

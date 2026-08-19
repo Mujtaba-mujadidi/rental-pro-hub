@@ -22,6 +22,7 @@ Prefer semantic tokens and `.rph-*` utilities from `apps/web/src/app/globals.css
 - `.rph-input` — form fields
 - `.rph-btn-primary` / `.rph-btn-ghost`
 - `.rph-pill` / `.rph-pill-active` — section pills
+- `.rph-tab` / `.rph-tab-active` — underline section tabs (visible in light and dark)
 - `.rph-h1`, `.rph-muted`, `.rph-link`, `.rph-alert-*`
 
 ## When editing older screens

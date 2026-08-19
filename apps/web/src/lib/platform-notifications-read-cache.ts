@@ -17,7 +17,8 @@ export function getCachedUnreadNotificationCount(userId: string): Promise<number
         .from("platform_notifications")
         .select("id", { count: "exact", head: true })
         .eq("user_id", id)
-        .is("read_at", null);
+        .is("read_at", null)
+        .is("deleted_at", null);
       if (error) return 0;
       return count ?? 0;
     },

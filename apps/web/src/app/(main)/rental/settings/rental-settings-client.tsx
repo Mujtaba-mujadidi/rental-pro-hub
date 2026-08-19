@@ -101,7 +101,9 @@ export function RentalSettingsClient() {
             role="tab"
             aria-selected={tab === id}
             className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
-              tab === id ? "bg-rph-raised text-rph-fg shadow-sm" : "text-rph-fg-secondary hover:text-rph-fg"
+              tab === id
+                ? "bg-rph-raised text-rph-fg shadow-sm dark:bg-rph-rail-soft dark:text-white"
+                : "text-rph-fg-secondary hover:text-rph-fg"
             }`}
             onClick={() => {
               setError(null);

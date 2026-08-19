@@ -180,6 +180,13 @@ html {
 .rph-pill-active {
   @apply inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-full bg-rph-rail px-3 text-sm font-medium text-white shadow-sm dark:bg-rph-rail-soft;
 }
+/* Underline section tabs — selected uses fg + rail, not text-rph-rail (invisible on dark surfaces). */
+.rph-tab {
+  @apply inline-flex shrink-0 items-center border-b-2 border-transparent px-2.5 pb-3 pt-2 text-sm font-medium text-rph-fg-muted transition-colors hover:text-rph-fg;
+}
+.rph-tab-active {
+  @apply border-rph-rail font-semibold text-rph-fg dark:border-rph-rail-softer dark:text-white;
+}
 .rph-alert-error {
   @apply rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200;
 }
@@ -464,7 +471,7 @@ html {
   @apply inline-flex h-10 shrink-0 items-center gap-2 border-b-2 border-transparent px-1 pb-3 pt-1 text-sm font-medium text-rph-fg-muted transition-colors hover:text-rph-fg;
 }
 .hire-ws-tab-active {
-  @apply border-rph-rail text-rph-fg dark:border-rph-rail-soft;
+  @apply border-rph-rail font-semibold text-rph-fg dark:border-rph-rail-softer dark:text-white;
 }
 .hire-ws-progress {
   @apply h-2.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700;
@@ -769,7 +776,7 @@ html {
   @apply inline-flex h-8 items-center rounded-full px-4 text-sm font-medium text-rph-fg-muted transition-colors hover:text-rph-fg disabled:cursor-not-allowed disabled:opacity-50;
 }
 .hire-ws-inspection-ended-tab-active {
-  @apply bg-rph-raised text-rph-fg shadow-sm;
+  @apply bg-rph-raised text-rph-fg shadow-sm dark:bg-rph-rail-soft dark:text-white;
 }
 .hire-ws-inspection-ended-panel {
   @apply min-w-0;
@@ -1050,7 +1057,7 @@ html {
   @apply shrink-0 border-b-2 border-transparent px-2.5 pb-2.5 pt-1 text-sm font-medium text-rph-fg-muted transition hover:text-rph-fg sm:px-3;
 }
 .hire-balance-tab-active {
-  @apply border-rph-link font-semibold text-rph-link;
+  @apply border-rph-rail font-semibold text-rph-fg dark:border-rph-rail-softer dark:text-white;
 }
 .hire-balance-shell-body {
   @apply p-4 sm:p-5;
@@ -1176,7 +1183,7 @@ html {
   @apply border-b-2 border-transparent px-1 pb-2.5 text-sm font-medium text-rph-fg-muted transition hover:text-rph-fg;
 }
 .hire-balance-statement-filter-active {
-  @apply border-rph-link font-semibold text-rph-link;
+  @apply border-rph-rail font-semibold text-rph-fg dark:border-rph-rail-softer dark:text-white;
 }
 .hire-balance-statement-table-wrap {
   @apply min-h-0 flex-1 overflow-visible px-4 py-1 sm:px-5 lg:overflow-y-auto lg:overscroll-contain;
@@ -1840,7 +1847,7 @@ html {
   @apply inline-flex shrink-0 items-center gap-1.5 border-b-2 border-transparent px-3 py-2.5 text-sm font-medium text-rph-fg-muted transition-colors hover:text-rph-fg;
 }
 .subco-ws-tab-active {
-  @apply border-sky-600 font-semibold text-sky-700 dark:border-sky-400 dark:text-sky-300;
+  @apply border-rph-rail font-semibold text-rph-fg dark:border-rph-rail-softer dark:text-white;
 }
 .subco-ws-tab-badge {
   @apply inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-700 px-1.5 text-[10px] font-bold leading-none text-white;
@@ -1987,5 +1994,67 @@ html {
 }
 .subco-att-row-icon.subco-att-bar-ok {
   @apply bg-emerald-100 text-emerald-800 dark:bg-emerald-950/45 dark:text-emerald-100;
+}
+
+.rph-notifications-page {
+  @apply flex min-h-0 flex-col gap-4;
+}
+.rph-notifications-header {
+  @apply shrink-0;
+}
+.rph-notifications-layout {
+  @apply flex min-h-0 flex-1 flex-col gap-3 lg:grid lg:grid-cols-[16.5rem_minmax(0,1fr)] lg:items-start lg:gap-4;
+}
+.rph-notifications-options {
+  @apply flex shrink-0 flex-col gap-3 lg:self-start lg:rounded-xl lg:border lg:border-rph-border lg:bg-rph-raised lg:p-4 lg:shadow-sm;
+}
+.rph-notifications-mark-all {
+  @apply inline-flex h-11 w-full min-w-0 items-center justify-center rounded-xl border border-rph-border bg-rph-raised px-4 text-sm font-semibold text-rph-fg shadow-sm hover:bg-rph-chrome disabled:pointer-events-none disabled:opacity-50;
+}
+.rph-notifications-nav {
+  @apply flex gap-1 overflow-x-auto rounded-xl border border-rph-border bg-rph-raised p-1.5 shadow-sm lg:flex-col lg:overflow-visible lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none;
+}
+.rph-notifications-nav-item {
+  @apply shrink-0 rounded-lg px-3 py-2 text-left text-sm font-medium text-rph-fg-muted hover:bg-rph-chrome hover:text-rph-fg;
+}
+.rph-notifications-nav-item-active {
+  @apply bg-rph-rail/10 font-semibold text-rph-fg hover:bg-rph-rail/10 hover:text-rph-fg dark:bg-rph-rail-soft dark:text-white dark:hover:bg-rph-rail-soft dark:hover:text-white;
+}
+.rph-notifications-list-card {
+  @apply flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-rph-border bg-rph-raised shadow-sm lg:self-stretch;
+}
+.rph-notifications-list {
+  @apply min-h-0 divide-y divide-rph-border overflow-y-auto overscroll-contain;
+  max-height: min(calc(5 * 7.25rem), calc(100dvh - 19rem));
+}
+@media (min-width: 1024px) {
+  .rph-notifications-list {
+    max-height: none;
+    flex: 1 1 auto;
+  }
+}
+.rph-notifications-row {
+  @apply grid grid-cols-[2.25rem_minmax(0,1fr)_auto] items-start gap-3 px-4 py-4 sm:px-5;
+}
+.rph-notifications-icon {
+  @apply mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg;
+}
+.rph-notifications-icon-success {
+  @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200;
+}
+.rph-notifications-icon-warn {
+  @apply bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-200;
+}
+.rph-notifications-icon-info {
+  @apply bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200;
+}
+.rph-notifications-body {
+  @apply min-w-0 text-left;
+}
+.rph-notifications-new {
+  @apply inline-flex rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-800 dark:bg-sky-950/50 dark:text-sky-100;
+}
+.rph-notifications-time {
+  @apply mt-2 block text-xs text-rph-fg-muted;
 }
 

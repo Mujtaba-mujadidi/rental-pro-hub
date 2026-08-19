@@ -240,11 +240,7 @@ export function FleetBalancesView() {
                 <button
                   key={option.value}
                   type="button"
-                  className={`shrink-0 border-b-2 px-2.5 pb-3 pt-2 text-sm transition sm:px-3 ${
-                    active
-                      ? "border-rph-rail font-semibold text-rph-rail"
-                      : "border-transparent font-medium text-rph-fg-muted hover:text-rph-fg"
-                  }`}
+                  className={active ? "rph-tab rph-tab-active" : "rph-tab"}
                   onClick={() => setTab(option.value)}
                 >
                   {option.label}
