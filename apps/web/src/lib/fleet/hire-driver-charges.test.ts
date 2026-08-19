@@ -1,33 +1,85 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDriverChargeDraftsFromCheckinDamages,
+  isStaffManualChargeMutable,
   mapDriverChargeLineItemFromDb,
   mapDriverChargeLineItemsFromDb,
+  outstandingExtraChargesGbp,
   partitionBalancePaymentsForIncome,
+  realisedDriverChargeIncomeGbp,
   sumDriverChargeIncomeByTypeGbp,
   sumDriverChargeIncomeGbp,
 } from "./hire-driver-charges";
 
 describe("sumDriverChargeIncomeGbp", () => {
-  it("counts paid_now and add_to_balance, skips waived", () => {
+  it("counts paid_now immediately and skips waived and unpaid extras", () => {
     expect(
       sumDriverChargeIncomeGbp([
-        { amountGbp: 50, resolution: "paid_now" },
-        { amountGbp: 30, resolution: "add_to_balance" },
-        { amountGbp: 20, resolution: "waived" },
+        { chargeType: "administration", amountGbp: 50, resolution: "paid_now" },
+        { chargeType: "damage", amountGbp: 30, resolution: "add_to_balance" },
+        { chargeType: "other", amountGbp: 20, resolution: "waived" },
       ]),
-    ).toBe(80);
+    ).toBe(50);
+  });
+
+  it("counts extra-charge receipts against unpaid add_to_balance", () => {
+    expect(
+      sumDriverChargeIncomeGbp(
+        [
+          { chargeType: "administration", amountGbp: 50, resolution: "paid_now" },
+          { chargeType: "damage", amountGbp: 30, resolution: "add_to_balance" },
+        ],
+        [{ amountGbp: 70, direction: "received_from_driver", paymentCategory: "driver_charge" }],
+      ),
+    ).toBe(70);
+  });
+
+  it("counts unpaid extras once the hire is settled", () => {
+    expect(
+      sumDriverChargeIncomeGbp(
+        [{ chargeType: "damage", amountGbp: 100, resolution: "add_to_balance" }],
+        [],
+        { hireSettled: true },
+      ),
+    ).toBe(100);
   });
 });
 
 describe("sumDriverChargeIncomeByTypeGbp", () => {
-  it("groups income by charge type", () => {
+  it("groups realised income by charge type", () => {
     expect(
-      sumDriverChargeIncomeByTypeGbp([
-        { chargeType: "damage", amountGbp: 50, resolution: "paid_now" },
-        { chargeType: "damage", amountGbp: 25, resolution: "add_to_balance" },
-      ]),
-    ).toEqual({ damage: 75 });
+      sumDriverChargeIncomeByTypeGbp(
+        [
+          { chargeType: "damage", amountGbp: 50, resolution: "paid_now" },
+          { chargeType: "damage", amountGbp: 25, resolution: "add_to_balance" },
+          { chargeType: "administration", amountGbp: 15, resolution: "add_to_balance" },
+        ],
+        [{ amountGbp: 70, direction: "received_from_driver", paymentCategory: "driver_charge" }],
+      ),
+    ).toEqual({ damage: 62.5, administration: 7.5 });
+  });
+});
+
+describe("realisedDriverChargeIncomeGbp", () => {
+  it("does not let paid_now receipts realise add_to_balance extras", () => {
+    expect(
+      realisedDriverChargeIncomeGbp({
+        charges: [
+          { chargeType: "damage", amountGbp: 40, resolution: "paid_now" },
+          { chargeType: "administration", amountGbp: 50, resolution: "add_to_balance" },
+        ],
+        receipts: [{ amountGbp: 40, direction: "received_from_driver", paymentCategory: "driver_charge" }],
+      }).totalGbp,
+    ).toBe(40);
+  });
+
+  it("caps extra-charge receipts at billed add_to_balance", () => {
+    expect(
+      realisedDriverChargeIncomeGbp({
+        charges: [{ chargeType: "other", amountGbp: 25, resolution: "add_to_balance" }],
+        receipts: [{ amountGbp: 40, direction: "received_from_driver", paymentCategory: "driver_charge" }],
+      }).totalGbp,
+    ).toBe(25);
   });
 });
 
@@ -132,5 +184,66 @@ describe("mapDriverChargeLineItemFromDb", () => {
       },
     ]);
     expect(items).toHaveLength(1);
+  });
+});
+
+describe("outstandingExtraChargesGbp", () => {
+  it("nets add_to_balance charges against extra-charge receipts", () => {
+    expect(
+      outstandingExtraChargesGbp(
+        [
+          {
+            amountGbp: 80,
+            resolution: "add_to_balance",
+          },
+          {
+            amountGbp: 20,
+            resolution: "add_to_balance",
+          },
+        ],
+        [{ amountGbp: 30, direction: "received_from_driver", paymentCategory: "driver_charge" }],
+      ),
+    ).toBe(70);
+  });
+
+  it("does not let check-in paid_now receipts reduce extra charges", () => {
+    expect(
+      outstandingExtraChargesGbp(
+        [
+          { amountGbp: 50, resolution: "add_to_balance" },
+          { amountGbp: 40, resolution: "paid_now" },
+        ],
+        [
+          { amountGbp: 40, direction: "received_from_driver", paymentCategory: "driver_charge" },
+          { amountGbp: 10, direction: "received_from_driver", paymentCategory: "driver_charge" },
+        ],
+      ),
+    ).toBe(40);
+  });
+
+  it("ignores settlement receipts when computing extra-charge outstanding", () => {
+    expect(
+      outstandingExtraChargesGbp(
+        [{ amountGbp: 25, resolution: "add_to_balance" }],
+        [{ amountGbp: 25, direction: "received_from_driver", paymentCategory: "settlement" }],
+      ),
+    ).toBe(25);
+  });
+});
+
+describe("isStaffManualChargeMutable", () => {
+  it("allows staff-manual lines without a linked payment", () => {
+    expect(isStaffManualChargeMutable({ sourceKind: "staff_manual", balancePaymentId: null })).toBe(
+      true,
+    );
+    expect(
+      isStaffManualChargeMutable({
+        sourceKind: "checkin_inspection_damage",
+        balancePaymentId: null,
+      }),
+    ).toBe(false);
+    expect(
+      isStaffManualChargeMutable({ sourceKind: "staff_manual", balancePaymentId: "pay-1" }),
+    ).toBe(false);
   });
 });

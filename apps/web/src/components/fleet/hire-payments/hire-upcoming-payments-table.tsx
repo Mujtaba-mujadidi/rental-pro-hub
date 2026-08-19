@@ -34,7 +34,7 @@ export function HireUpcomingPaymentsTable({
   const [rowError, setRowError] = useState<string | null>(null);
   const todayYmd = ukTodayYmd();
   const highlightSet = useMemo(() => new Set(highlightedRowIds ?? []), [highlightedRowIds]);
-  const colSpan = showActions ? 7 : 6;
+  const colSpan = showActions ? 8 : 7;
 
   return (
     <div className="space-y-3">
@@ -43,6 +43,7 @@ export function HireUpcomingPaymentsTable({
         <table className={showActions ? "hire-ws-payments-table" : "hire-ws-payments-table hire-ws-payments-table-no-actions"}>
           <colgroup>
             <col className="hire-ws-payments-col-period" />
+            <col className="hire-ws-payments-col-amount" />
             <col className="hire-ws-payments-col-amount" />
             <col className="hire-ws-payments-col-amount" />
             <col className="hire-ws-payments-col-amount" />
@@ -57,6 +58,7 @@ export function HireUpcomingPaymentsTable({
               <th scope="col">Discount</th>
               <th scope="col">After discount</th>
               <th scope="col">Paid</th>
+              <th scope="col">Balance</th>
               <th scope="col">Status</th>
               {showActions ? (
                 <th scope="col" className="text-right">
@@ -92,6 +94,9 @@ export function HireUpcomingPaymentsTable({
                     </td>
                     <td data-label="Paid" className="tabular-nums">
                       {formatGbp(row.paidGbp)}
+                    </td>
+                    <td data-label="Balance" className="tabular-nums font-medium">
+                      {formatGbp(row.balanceGbp)}
                     </td>
                     <td data-label="Status">
                       <span

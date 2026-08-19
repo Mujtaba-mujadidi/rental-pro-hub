@@ -2,9 +2,14 @@
 
 import { RphSelect, rphSelectTriggerClass } from "@/components/forms/rph-select";
 
+const modalSelectContentBase =
+  "max-h-[min(16rem,50vh)] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border border-rph-border bg-rph-elevated py-1 shadow-lg";
+
 /** z-[320] — above FormModalShell (310). */
-const modalContentClass =
-  "z-[320] max-h-[min(16rem,50vh)] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border border-rph-border bg-rph-elevated py-1 shadow-lg";
+export const formModalSelectContentClass = `z-[320] ${modalSelectContentBase}`;
+
+/** z-[420] — above custom overlays that sit above FormModalShell. */
+export const elevatedModalSelectContentClass = `z-[420] ${modalSelectContentBase}`;
 
 export function FormModalSelect({
   value,
@@ -34,7 +39,7 @@ export function FormModalSelect({
       options={options}
       aria-label={ariaLabel}
       triggerClassName={triggerClassName ?? rphSelectTriggerClass}
-      contentClassName={contentClassName ?? modalContentClass}
+      contentClassName={contentClassName ?? formModalSelectContentClass}
     />
   );
 }

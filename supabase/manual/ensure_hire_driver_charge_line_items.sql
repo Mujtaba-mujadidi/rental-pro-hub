@@ -11,6 +11,7 @@ create table if not exists public.vehicle_hire_driver_charge_line_items (
   source_id uuid,
   description text,
   balance_payment_id uuid,
+  charged_on date not null default (timezone('Europe/London', now()))::date,
   created_at timestamptz not null default now(),
   created_by_user_id uuid references auth.users (id) on delete set null
 );
@@ -55,5 +56,18 @@ create policy vehicle_hire_driver_charge_line_items_mutate on public.vehicle_hir
   with check (
     public.user_can_write_rentals_for_company(parent_company_id)
   );
+
+alter table public.vehicle_hire_driver_charge_line_items
+  add column if not exists charged_on date;
+
+update public.vehicle_hire_driver_charge_line_items
+set charged_on = (created_at at time zone 'Europe/London')::date
+where charged_on is null;
+
+alter table public.vehicle_hire_driver_charge_line_items
+  alter column charged_on set default (timezone('Europe/London', now()))::date;
+
+alter table public.vehicle_hire_driver_charge_line_items
+  alter column charged_on set not null;
 
 alter table public.vehicle_hire_driver_charge_line_items replica identity full;

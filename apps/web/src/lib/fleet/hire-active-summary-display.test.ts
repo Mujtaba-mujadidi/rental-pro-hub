@@ -85,6 +85,19 @@ describe("buildActiveHirePaymentPosition", () => {
     expect(position.depositOutstandingGbp).toBe(0);
     expect(position.currentlyDueGbp).toBe(10);
   });
+
+  it("includes outstanding extra charges in currently due", () => {
+    const d = dashboard({ includeDeposit: false });
+    const position = buildActiveHirePaymentPosition({
+      includeDeposit: d.includeDeposit,
+      summary: d.summary,
+      paymentRows: [{ rowKind: "deposit", balanceGbp: 100, netDueGbp: 100 }],
+      extraChargesOutstandingGbp: 40,
+    });
+    expect(position.extraChargesOutstandingGbp).toBe(40);
+    expect(position.currentlyDueGbp).toBe(50);
+    expect(position.dueBreakdownLabel).toMatch(/extra charges/);
+  });
 });
 
 describe("depositRowFromPayments", () => {
@@ -150,6 +163,7 @@ describe("buildActiveHirePaymentRatingDisplay", () => {
         rentOutstandingGbp: 0,
         rentPaidGbp: 20,
         currentlyDueGbp: 0,
+        extraChargesOutstandingGbp: 0,
         dueBreakdownLabel: null,
       },
       attentionItems: [],
@@ -169,6 +183,7 @@ describe("buildActiveHirePaymentRatingDisplay", () => {
           rentOutstandingGbp: 10,
           rentPaidGbp: 0,
           currentlyDueGbp: 10,
+          extraChargesOutstandingGbp: 0,
           dueBreakdownLabel: null,
         },
       ),

@@ -28,6 +28,12 @@ export const HIRE_GROUP_EVENT_TYPES = [
   "deposit_refund_recorded",
   "settlement_refund_recorded",
   "settlement_discount_recorded",
+  "driver_charge_added",
+  "driver_charge_amended",
+  "driver_charge_removed",
+  "driver_charge_payment_submitted",
+  "driver_charge_payment_approved",
+  "driver_charge_payment_rejected",
 ] as const;
 
 export type HireGroupEventType = (typeof HIRE_GROUP_EVENT_TYPES)[number];
@@ -73,7 +79,7 @@ export async function logHireGroupEvent(
     actorUserId?: string | null;
     metadata?: Record<string, unknown>;
   },
-): Promise<void> {
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const { error } = await admin.from("vehicle_hire_group_events").insert({
     hire_group_id: input.hireGroupId,
     event_type: input.eventType,
@@ -84,7 +90,9 @@ export async function logHireGroupEvent(
   });
   if (error) {
     console.error("logHireGroupEvent failed", input.eventType, error.message);
+    return { ok: false, error: error.message };
   }
+  return { ok: true };
 }
 
 export function hireAccessApproveConfirmCopy(companyName: string): string {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   resolveEffectiveHireLessorSubcompanyId,
+  resolveHireBalanceLessorSubcompanyId,
   resolveHireLessorDisplayName,
   resolveHireLessorMailIdentity,
   shouldUseFrozenLessorSnapshot,
@@ -23,6 +24,28 @@ describe("resolveEffectiveHireLessorSubcompanyId", () => {
         vehicleSubcompanyId: null,
       }),
     ).toBe("primary-sub");
+  });
+});
+
+describe("resolveHireBalanceLessorSubcompanyId", () => {
+  it("keeps an ended hire on the hire subcompany after the vehicle moves", () => {
+    expect(
+      resolveHireBalanceLessorSubcompanyId({
+        hireEnded: true,
+        hireGroupSubcompanyId: "oxus-sub",
+        vehicleSubcompanyId: "select-me-sub",
+      }),
+    ).toBe("oxus-sub");
+  });
+
+  it("uses the live vehicle subcompany for an active hire", () => {
+    expect(
+      resolveHireBalanceLessorSubcompanyId({
+        hireEnded: false,
+        hireGroupSubcompanyId: "oxus-sub",
+        vehicleSubcompanyId: "select-me-sub",
+      }),
+    ).toBe("select-me-sub");
   });
 });
 

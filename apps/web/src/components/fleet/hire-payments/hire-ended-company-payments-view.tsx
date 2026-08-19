@@ -39,12 +39,14 @@ type HireEndedCompanyPaymentsViewProps = {
   hireGroupId: string;
   data: HirePaymentsPageData;
   onReload: () => void;
+  hideIntro?: boolean;
 };
 
 export function HireEndedCompanyPaymentsView({
   hireGroupId,
   data,
   onReload,
+  hideIntro = false,
 }: HireEndedCompanyPaymentsViewProps) {
   const [positionOpen, setPositionOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -69,10 +71,12 @@ export function HireEndedCompanyPaymentsView({
 
   return (
     <div className="hire-ws-payments-layout space-y-4">
-      <header className="hire-ws-payments-intro">
-        <p className="hire-ws-section-kicker">Ended hire</p>
-        <h1 className="text-2xl font-semibold tracking-tight text-rph-fg">Payments</h1>
-      </header>
+      {hideIntro ? null : (
+        <header className="hire-ws-payments-intro">
+          <p className="hire-ws-section-kicker">Ended hire</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-rph-fg">Payments</h1>
+        </header>
+      )}
 
       {outstanding.settled ? (
         <section className="hire-ws-banner">

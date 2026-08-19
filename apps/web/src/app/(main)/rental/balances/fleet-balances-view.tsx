@@ -4,39 +4,105 @@ import {
   exportCompanyBalancesAction,
   loadCompanyBalancesPageAction,
 } from "@/app/actions/company-balances";
+import { RphSelect, rphSelectTriggerClass } from "@/components/forms/rph-select";
 import {
   COMPANY_BALANCES_TAB_OPTIONS,
+  companyBalancesAccountsForTab,
   companyBalancesKpiSubtext,
-  companyBalancesOpenRowsForTab,
-  type CompanyBalancesOpenKind,
-  type CompanyBalancesOpenRow,
+  companyBalancesTabFooterHint,
+  filterCompanyBalancesAccounts,
+  type CompanyBalancesAccountRow,
   type CompanyBalancesPageData,
   type CompanyBalancesTab,
 } from "@/lib/fleet/company-balances-summary";
-import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
 import { formatGbp } from "@/lib/fleet/maintenance";
+import { responsiveTableCellProps } from "@/lib/ui/responsive-table";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 
-type KpiFocus = "open_balance" | "driver_due" | "pending" | "collected" | null;
-
-function kindToneClass(kind: CompanyBalancesOpenKind): string {
-  if (kind === "pending_approval") return "bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-100";
-  if (kind === "refund_owed") return "bg-sky-50 text-sky-900 dark:bg-sky-950/40 dark:text-sky-100";
-  if (kind === "settlement") return "bg-orange-50 text-orange-950 dark:bg-orange-950/40 dark:text-orange-100";
-  return "bg-rph-chrome text-rph-fg-secondary";
+function StatusDot({
+  tone,
+  className = "",
+}: {
+  tone: "warn" | "info" | "ok" | "muted";
+  className?: string;
+}) {
+  const toneClass =
+    tone === "warn"
+      ? "bg-amber-500"
+      : tone === "info"
+        ? "bg-sky-500"
+        : tone === "ok"
+          ? "bg-emerald-500"
+          : "bg-rph-fg-muted/40";
+  return <span className={`h-2 w-2 shrink-0 rounded-full ${toneClass} ${className}`} aria-hidden />;
 }
 
-function StatusDot({ tone }: { tone: "ok" | "warn" | "muted" | "due" }) {
-  const className =
-    tone === "ok"
-      ? "bg-emerald-500"
-      : tone === "warn"
-        ? "bg-amber-500"
-        : tone === "due"
-          ? "bg-amber-700"
-          : "bg-rph-fg-muted/40";
-  return <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${className}`} aria-hidden />;
+function KpiCard({
+  label,
+  value,
+  hint,
+  tone,
+  active,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  tone: "warn" | "info" | "ok" | "muted";
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  const className = `rph-card relative p-3.5 text-left transition hover:bg-rph-chrome/40 sm:flex sm:gap-3 sm:p-4 ${
+    active ? "ring-1 ring-rph-rail/40" : ""
+  }`;
+  const body = (
+    <>
+      <StatusDot tone={tone} className="absolute right-3 top-3 sm:static sm:mt-1.5" />
+      <div className="min-w-0 pr-4 sm:pr-0">
+        <p className="text-xs text-rph-fg-muted sm:text-sm">{label}</p>
+        <p className="mt-1 text-xl font-semibold tabular-nums tracking-tight text-rph-fg sm:text-2xl">{value}</p>
+        <p className="mt-1 text-[11px] text-rph-fg-muted sm:text-xs">{hint}</p>
+      </div>
+    </>
+  );
+  if (onClick) {
+    return (
+      <button type="button" className={className} onClick={onClick}>
+        {body}
+      </button>
+    );
+  }
+  return <section className={className}>{body}</section>;
+}
+
+function BalancesSearchInput({
+  value,
+  onChange,
+  className = "",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+}) {
+  return (
+    <div className={`relative w-full min-w-0 ${className}`}>
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-rph-fg-muted" aria-hidden>
+        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3-3" strokeLinecap="round" />
+        </svg>
+      </span>
+      <input
+        type="search"
+        className="rph-input h-10 w-full !pl-10 pr-3"
+        placeholder="Search vehicle, driver or company"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label="Search vehicle, driver or company"
+      />
+    </div>
+  );
 }
 
 export function FleetBalancesView() {
@@ -45,7 +111,8 @@ export function FleetBalancesView() {
   const [pending, startTransition] = useTransition();
   const [exportPending, startExport] = useTransition();
   const [tab, setTab] = useState<CompanyBalancesTab | null>(null);
-  const [kpiFocus, setKpiFocus] = useState<KpiFocus>(null);
+  const [search, setSearch] = useState("");
+  const [subcompanyId, setSubcompanyId] = useState<string | null>(null);
 
   const reload = useCallback(() => {
     startTransition(async () => {
@@ -65,134 +132,100 @@ export function FleetBalancesView() {
     reload();
   }, [reload]);
 
-  const activeTab = tab ?? data?.defaultTab ?? "open";
+  const activeTab = tab ?? data?.defaultTab ?? "active";
   const kpis = data?.kpis;
   const subtext = kpis ? companyBalancesKpiSubtext(kpis) : null;
 
-  const visibleOpenRows = useMemo(() => {
+  const visibleRows = useMemo(() => {
     if (!data) return [];
-    const focus =
-      activeTab === "open" && kpiFocus && kpiFocus !== "collected" ? kpiFocus : null;
-    return companyBalancesOpenRowsForTab(data.openRows, "open", focus);
-  }, [data, activeTab, kpiFocus]);
+    const tabRows = companyBalancesAccountsForTab(data.accountRows, activeTab);
+    return filterCompanyBalancesAccounts({
+      rows: tabRows,
+      search,
+      subcompanyId,
+    });
+  }, [activeTab, data, search, subcompanyId]);
 
-  function selectKpi(focus: KpiFocus, nextTab: CompanyBalancesTab = "open") {
-    setTab(nextTab);
-    setKpiFocus(focus);
-  }
+  const subcompanyOptions = useMemo(
+    () => [
+      { value: "all", label: "All subcompanies" },
+      ...(data?.subcompanies ?? []).map((subcompany) => ({
+        value: subcompany.id,
+        label: subcompany.name,
+      })),
+    ],
+    [data?.subcompanies],
+  );
 
   function onExport() {
     startExport(async () => {
-      const res = await exportCompanyBalancesAction(activeTab);
+      const res = await exportCompanyBalancesAction(activeTab, search, subcompanyId);
       if (!res.ok) {
         setError(res.error);
         return;
       }
       const blob = new Blob([res.csv], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = res.fileName;
-      a.click();
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = res.fileName;
+      anchor.click();
       URL.revokeObjectURL(url);
     });
   }
 
   return (
     <div className="space-y-4 sm:space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="space-y-3">
         <div className="min-w-0">
           <h1 className="rph-h1">Balances</h1>
-          <p className="rph-muted mt-1 text-sm">
-            See what is due across the business, then trace every figure back to its hire.
+          <p className="rph-muted mt-1 max-w-3xl text-sm">
+            Monitor active hire accounts, review submitted payments and keep final settlements available for audit.
           </p>
         </div>
         <button
           type="button"
-          className="rph-btn-ghost shrink-0"
+          className="rph-btn-ghost h-10 w-full sm:w-auto"
           disabled={exportPending || pending || !data}
           onClick={onExport}
         >
-          Export
+          Export balances
         </button>
       </div>
 
       {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
 
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <button
-          type="button"
-          className={`rph-card flex gap-3 p-4 text-left transition hover:bg-rph-chrome/40 ${
-            kpiFocus === "open_balance" && activeTab === "open" ? "ring-1 ring-rph-rail/40" : ""
-          }`}
-          onClick={() => selectKpi("open_balance")}
-        >
-          <StatusDot tone={kpis && kpis.openBalanceGbp > 0.005 ? "warn" : "ok"} />
-          <div className="min-w-0">
-            <p className="text-sm text-rph-fg-muted">Open balance</p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums text-rph-fg">
-              {kpis ? formatGbp(kpis.openBalanceGbp) : "—"}
-            </p>
-            <p className="mt-1 text-xs text-rph-fg-muted">{subtext?.openBalance ?? "…"}</p>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          className={`rph-card flex gap-3 p-4 text-left transition hover:bg-rph-chrome/40 ${
-            kpiFocus === "driver_due" && activeTab === "open" ? "ring-1 ring-rph-rail/40" : ""
-          }`}
-          onClick={() => selectKpi("driver_due")}
-        >
-          <StatusDot tone={kpis && kpis.driverPaymentsDueGbp > 0.005 ? "due" : "ok"} />
-          <div className="min-w-0">
-            <p className="text-sm text-rph-fg-muted">Driver payments due</p>
-            <p
-              className={`mt-1 text-2xl font-semibold tabular-nums ${
-                kpis && kpis.driverPaymentsDueGbp > 0.005
-                  ? "text-amber-800 dark:text-amber-200"
-                  : "text-rph-fg"
-              }`}
-            >
-              {kpis ? formatGbp(kpis.driverPaymentsDueGbp) : "—"}
-            </p>
-            <p className="mt-1 text-xs text-rph-fg-muted">{subtext?.driverPaymentsDue ?? "…"}</p>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          className={`rph-card flex gap-3 p-4 text-left transition hover:bg-rph-chrome/40 ${
-            kpiFocus === "collected" && activeTab === "activity" ? "ring-1 ring-rph-rail/40" : ""
-          }`}
-          onClick={() => selectKpi("collected", "activity")}
-        >
-          <StatusDot tone="ok" />
-          <div className="min-w-0">
-            <p className="text-sm text-rph-fg-muted">Collected this month</p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums text-rph-fg">
-              {kpis ? formatGbp(kpis.collectedThisMonthGbp) : "—"}
-            </p>
-            <p className="mt-1 text-xs text-rph-fg-muted">{subtext?.collectedThisMonth ?? "…"}</p>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          className={`rph-card flex gap-3 p-4 text-left transition hover:bg-rph-chrome/40 ${
-            kpiFocus === "pending" && activeTab === "open" ? "ring-1 ring-rph-rail/40" : ""
-          }`}
-          onClick={() => selectKpi("pending")}
-        >
-          <StatusDot tone={kpis && kpis.pendingApprovalGbp > 0.005 ? "warn" : "muted"} />
-          <div className="min-w-0">
-            <p className="text-sm text-rph-fg-muted">Pending approval</p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums text-rph-fg">
-              {kpis ? formatGbp(kpis.pendingApprovalGbp) : "—"}
-            </p>
-            <p className="mt-1 text-xs text-rph-fg-muted">{subtext?.pendingApproval ?? "…"}</p>
-          </div>
-        </button>
+      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <KpiCard
+          label="Outstanding across hires"
+          value={kpis ? formatGbp(kpis.outstandingAcrossHiresGbp) : "—"}
+          hint={subtext?.outstandingAcrossHires ?? "…"}
+          tone={kpis && kpis.outstandingAcrossHiresGbp > 0.005 ? "warn" : "ok"}
+          active={activeTab === "active"}
+          onClick={() => setTab("active")}
+        />
+        <KpiCard
+          label="Payments under review"
+          value={kpis ? formatGbp(kpis.pendingReviewGbp) : "—"}
+          hint={subtext?.pendingReview ?? "…"}
+          tone={kpis && kpis.pendingReviewGbp > 0.005 ? "info" : "muted"}
+          active={activeTab === "payment_review"}
+          onClick={() => setTab("payment_review")}
+        />
+        <KpiCard
+          label="Received this month"
+          value={kpis ? formatGbp(kpis.receivedThisMonthGbp) : "—"}
+          hint={subtext?.receivedThisMonth ?? "…"}
+          tone="ok"
+        />
+        <KpiCard
+          label="Final settlements"
+          value={kpis ? String(kpis.finalSettlementsCount) : "—"}
+          hint={subtext?.finalSettlements ?? "…"}
+          tone="ok"
+          active={activeTab === "final_settlements"}
+          onClick={() => setTab("final_settlements")}
+        />
       </section>
 
       <section className="rph-card overflow-hidden p-0">
@@ -207,16 +240,12 @@ export function FleetBalancesView() {
                 <button
                   key={option.value}
                   type="button"
-                  className={`shrink-0 border-b-2 px-3 pb-3 pt-2 text-sm transition ${
+                  className={`shrink-0 border-b-2 px-2.5 pb-3 pt-2 text-sm transition sm:px-3 ${
                     active
                       ? "border-rph-rail font-semibold text-rph-rail"
                       : "border-transparent font-medium text-rph-fg-muted hover:text-rph-fg"
                   }`}
-                  onClick={() => {
-                    setTab(option.value);
-                    if (option.value !== "open") setKpiFocus(null);
-                    if (option.value === "activity") setKpiFocus("collected");
-                  }}
+                  onClick={() => setTab(option.value)}
                 >
                   {option.label}
                 </button>
@@ -225,122 +254,69 @@ export function FleetBalancesView() {
           </nav>
         </div>
 
-        <div className="p-4 sm:p-5">
-          {pending && !data ? (
-            <p className="rph-muted text-sm">Loading balances…</p>
-          ) : activeTab === "open" ? (
-            visibleOpenRows.length === 0 ? (
-              <BalancesEmptyState
-                title={
-                  kpiFocus === "driver_due"
-                    ? "No driver payments are due"
-                    : kpiFocus === "pending"
-                      ? "Nothing waiting for approval"
-                      : kpiFocus === "open_balance"
-                        ? "No company balances are open"
-                        : "Nothing outstanding"
-                }
-                detail={
-                  kpiFocus === "open_balance"
-                    ? "Refunds owed to drivers will appear here. Driver rent and settlement due stay under Driver payments due."
-                    : kpis && kpis.pendingApprovalGbp > 0.005 && kpiFocus == null
-                      ? "No rent arrears or open settlements. Check Pending approval for submissions waiting for finance."
-                      : "You are fully up to date for this view."
-                }
+        <div className="flex flex-col gap-3 border-b border-rph-border px-4 py-4 sm:flex-row sm:items-center sm:px-5">
+          <BalancesSearchInput
+            className="sm:flex-1"
+            value={search}
+            onChange={setSearch}
+          />
+          {subcompanyOptions.length > 1 ? (
+            <div className="w-full shrink-0 sm:w-56">
+              <RphSelect
+                value={subcompanyId ?? "all"}
+                aria-label="Filter by subcompany"
+                options={subcompanyOptions}
+                triggerClassName={`${rphSelectTriggerClass} h-10`}
+                onValueChange={(value) => setSubcompanyId(value === "all" ? null : value)}
               />
-            ) : (
-              <BalancesOpenTable rows={visibleOpenRows} />
-            )
-          ) : activeTab === "settled" ? (
-            !data || data.settledRows.length === 0 ? (
-              <BalancesEmptyState
-                title="No settled balances yet"
-                detail="Ended hires with a cleared settlement balance will appear here."
-              />
-            ) : (
-              <div className="rph-table-responsive">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-rph-chrome text-left text-xs uppercase tracking-wide text-rph-fg-muted">
-                    <tr>
-                      <th className="px-4 py-3">Vehicle</th>
-                      <th className="px-4 py-3">Driver</th>
-                      <th className="px-4 py-3">Settled</th>
-                      <th className="px-4 py-3 text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.settledRows.map((row) => (
-                      <tr key={row.hireGroupId} className="border-t border-rph-border hover:bg-rph-chrome/40">
-                        <td data-label="Vehicle" className="rph-table-primary px-4 py-3 font-medium text-rph-fg">
-                          {row.vehicleVrm ?? "—"}
-                        </td>
-                        <td data-label="Driver" className="px-4 py-3 text-rph-fg-secondary">
-                          {row.driverLabel ?? "—"}
-                        </td>
-                        <td data-label="Settled" className="px-4 py-3 text-rph-fg-secondary">
-                          {row.settledAt ? formatUkDate(row.settledAt) : "—"}
-                        </td>
-                        <td data-label="" className="rph-table-actions px-4 py-3 text-right">
-                          <Link href={row.href} className="rph-btn-ghost h-9 px-3 text-xs">
-                            Open
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )
-          ) : !data || data.activityRows.length === 0 ? (
-            <BalancesEmptyState
-              title="No collections this month"
-              detail="Approved rent and settlement receipts in the current UK month will appear here."
-            />
-          ) : (
-            <div className="rph-table-responsive">
-              <table className="min-w-full text-sm">
-                <thead className="bg-rph-chrome text-left text-xs uppercase tracking-wide text-rph-fg-muted">
-                  <tr>
-                    <th className="px-4 py-3">When</th>
-                    <th className="px-4 py-3">Activity</th>
-                    <th className="px-4 py-3">Detail</th>
-                    <th className="px-4 py-3 text-right">Amount</th>
-                    <th className="px-4 py-3 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.activityRows.map((row) => (
-                    <tr key={row.id} className="border-t border-rph-border hover:bg-rph-chrome/40">
-                      <td data-label="When" className="px-4 py-3 text-rph-fg-secondary">
-                        {formatUkDateTime(row.at)}
-                      </td>
-                      <td data-label="Activity" className="rph-table-primary px-4 py-3 font-medium text-rph-fg">
-                        {row.title}
-                      </td>
-                      <td data-label="Detail" className="px-4 py-3 text-rph-fg-secondary">
-                        {row.detail}
-                      </td>
-                      <td data-label="Amount" className="px-4 py-3 text-right font-semibold tabular-nums text-rph-fg">
-                        {formatGbp(row.amountGbp)}
-                      </td>
-                      <td data-label="" className="rph-table-actions px-4 py-3 text-right">
-                        <Link href={row.href} className="rph-btn-ghost h-9 px-3 text-xs">
-                          Open
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
+          ) : null}
+        </div>
+
+        <div className="min-h-0 px-4 sm:px-5">
+          {pending && !data ? (
+            <p className="rph-muted py-4 text-sm">Loading balances…</p>
+          ) : visibleRows.length === 0 ? (
+            <BalancesEmptyState tab={activeTab} />
+          ) : (
+            <BalancesAccountsList rows={visibleRows} tab={activeTab} />
           )}
         </div>
+
+        <footer className="flex flex-col gap-2 border-t border-rph-border px-4 py-3 text-xs text-rph-fg-muted sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <p>
+            Showing {visibleRows.length.toLocaleString("en-GB")}{" "}
+            {visibleRows.length === 1 ? "balance" : "balances"}
+          </p>
+          <p>{companyBalancesTabFooterHint(activeTab)}</p>
+        </footer>
       </section>
     </div>
   );
 }
 
-function BalancesEmptyState({ title, detail }: { title: string; detail: string }) {
+function BalancesEmptyState({ tab }: { tab: CompanyBalancesTab }) {
+  const copy =
+    tab === "payment_review"
+      ? {
+          title: "No payments waiting for review",
+          detail: "Driver and staff submissions will appear here until finance approves or rejects them.",
+        }
+      : tab === "final_settlements"
+        ? {
+            title: "No final settlements yet",
+            detail: "Ended hires with a cleared settlement balance will appear here.",
+          }
+        : tab === "all"
+          ? {
+              title: "No hire balances yet",
+              detail: "Active and ended hire accounts will appear here once charges or payments are posted.",
+            }
+          : {
+              title: "No active balances",
+              detail: "Active hire accounts with charges, receipts or an outstanding balance will appear here.",
+            };
+
   return (
     <div className="flex flex-col items-center justify-center px-4 py-14 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-50 text-sky-600 dark:bg-sky-950/50 dark:text-sky-300">
@@ -354,49 +330,99 @@ function BalancesEmptyState({ title, detail }: { title: string; detail: string }
           />
         </svg>
       </div>
-      <p className="mt-4 text-base font-semibold text-rph-fg">{title}</p>
-      <p className="rph-muted mt-1 max-w-md text-sm">{detail}</p>
+      <p className="mt-4 text-base font-semibold text-rph-fg">{copy.title}</p>
+      <p className="rph-muted mt-1 max-w-md text-sm">{copy.detail}</p>
     </div>
   );
 }
 
-function BalancesOpenTable({ rows }: { rows: CompanyBalancesOpenRow[] }) {
+function BalancesAccountsList({
+  rows,
+  tab,
+}: {
+  rows: CompanyBalancesAccountRow[];
+  tab: CompanyBalancesTab;
+}) {
   return (
-    <div className="rph-table-responsive">
+    <div className="max-h-[min(60vh,32rem)] overflow-y-auto overscroll-y-contain py-4">
+      <BalancesAccountsTable rows={rows} tab={tab} />
+    </div>
+  );
+}
+
+function BalancesAccountsTable({
+  rows,
+  tab,
+}: {
+  rows: CompanyBalancesAccountRow[];
+  tab: CompanyBalancesTab;
+}) {
+  const showPendingAsBalance = tab === "payment_review";
+  const vehicleCol = { header: "Vehicle & hire", meta: { tablePrimary: true } };
+  const subcompanyCol = { header: "Subcompany" };
+  const chargesCol = { header: "Charges" };
+  const receivedCol = { header: "Received" };
+  const balanceCol = { header: showPendingAsBalance ? "Pending" : "Balance" };
+  const statusCol = { header: "Status" };
+  const actionCol = { header: "Action", meta: { tableActions: true } };
+
+  return (
+    <div className="rph-table-responsive rounded-xl border border-rph-border">
       <table className="min-w-full text-sm">
-        <thead className="bg-rph-chrome text-left text-xs uppercase tracking-wide text-rph-fg-muted">
+        <thead className="text-left text-[11px] font-semibold uppercase tracking-wide text-rph-fg-muted">
           <tr>
-            <th className="px-4 py-3">Type</th>
-            <th className="px-4 py-3">Vehicle</th>
-            <th className="px-4 py-3">Driver</th>
-            <th className="px-4 py-3">Date</th>
-            <th className="px-4 py-3 text-right">Amount</th>
-            <th className="px-4 py-3 text-right">Action</th>
+            <th className="border-b border-rph-border px-5 py-3">Vehicle &amp; hire</th>
+            <th className="border-b border-rph-border px-5 py-3">Subcompany</th>
+            <th className="border-b border-rph-border px-5 py-3 text-right">Charges</th>
+            <th className="border-b border-rph-border px-5 py-3 text-right">Received</th>
+            <th className="border-b border-rph-border px-5 py-3 text-right">
+              {showPendingAsBalance ? "Pending" : "Balance"}
+            </th>
+            <th className="border-b border-rph-border px-5 py-3">Status</th>
+            <th className="border-b border-rph-border px-5 py-3 text-right">
+              <span className="sr-only">Action</span>
+            </th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.id} className="border-t border-rph-border hover:bg-rph-chrome/40">
-              <td data-label="Type" className="px-4 py-3">
-                <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${kindToneClass(row.kind)}`}>
-                  {row.kindLabel}
-                </span>
+            <tr key={row.hireGroupId} className="border-t border-rph-border hover:bg-rph-chrome/30">
+              <td {...responsiveTableCellProps(vehicleCol, "px-5 py-4")}>
+                <p className="font-semibold tracking-wide text-rph-fg">{row.vehicleVrm}</p>
+                <p className="mt-0.5 text-sm text-rph-fg-secondary">
+                  {row.driverLabel}
+                  {row.vehicleLabel ? ` · ${row.vehicleLabel}` : ""}
+                </p>
+                <p className="rph-muted mt-1 text-xs">{row.periodLabel}</p>
               </td>
-              <td data-label="Vehicle" className="rph-table-primary px-4 py-3 font-medium text-rph-fg">
-                {row.vehicleVrm ?? "—"}
+              <td {...responsiveTableCellProps(subcompanyCol, "px-5 py-4 text-rph-fg-secondary")}>
+                {row.subcompanyName ?? "—"}
               </td>
-              <td data-label="Driver" className="px-4 py-3 text-rph-fg-secondary">
-                {row.driverLabel ?? "—"}
+              <td {...responsiveTableCellProps(chargesCol, "px-5 py-4 text-right tabular-nums text-rph-fg")}>
+                {formatGbp(row.chargesGbp)}
               </td>
-              <td data-label="Date" className="px-4 py-3 text-rph-fg-secondary">
-                {row.at ? (/^\d{4}-\d{2}-\d{2}$/.test(row.at) ? formatUkDate(row.at) : formatUkDateTime(row.at)) : "—"}
+              <td
+                {...responsiveTableCellProps(
+                  receivedCol,
+                  "px-5 py-4 text-right font-semibold tabular-nums hire-balance-kpi-value-paid",
+                )}
+              >
+                {formatGbp(row.receivedGbp)}
               </td>
-              <td data-label="Amount" className="px-4 py-3 text-right font-semibold tabular-nums text-rph-fg">
-                {formatGbp(row.amountGbp)}
+              <td
+                {...responsiveTableCellProps(
+                  balanceCol,
+                  "px-5 py-4 text-right font-semibold tabular-nums text-rph-fg",
+                )}
+              >
+                {formatGbp(showPendingAsBalance ? row.pendingReviewGbp : row.balanceGbp)}
               </td>
-              <td data-label="" className="rph-table-actions px-4 py-3 text-right">
+              <td {...responsiveTableCellProps(statusCol, "px-5 py-4")}>
+                <AccountStatusPill row={row} tab={tab} />
+              </td>
+              <td {...responsiveTableCellProps(actionCol, "px-5 py-4 text-right")}>
                 <Link href={row.href} className="rph-btn-ghost h-9 px-3 text-xs">
-                  Open
+                  {showPendingAsBalance && row.pendingReviewGbp > 0.005 ? "Review" : "Open account"}
                 </Link>
               </td>
             </tr>
@@ -404,5 +430,34 @@ function BalancesOpenTable({ rows }: { rows: CompanyBalancesOpenRow[] }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+function AccountStatusPill({
+  row,
+  tab,
+}: {
+  row: CompanyBalancesAccountRow;
+  tab: CompanyBalancesTab;
+}) {
+  const label =
+    tab === "payment_review" && row.pendingReviewGbp > 0.005
+      ? "Review payment"
+      : tab === "payment_review"
+        ? "Pending review"
+        : row.statusLabel;
+  const tone =
+    label === "Review payment" || label === "Pending review"
+      ? "bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
+      : label === "Active account"
+        ? "bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-100"
+        : label === "Settled"
+          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100"
+          : "bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-100";
+
+  return (
+    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${tone}`}>
+      {label}
+    </span>
   );
 }

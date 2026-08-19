@@ -35,6 +35,7 @@ export function HireActiveCompanySummary({
   context,
   chrome,
   paymentRows,
+  extraChargesOutstandingGbp,
   paymentsHref,
   detailsHref,
   onRecordPayment,
@@ -43,6 +44,7 @@ export function HireActiveCompanySummary({
   context: HireOverviewContext;
   chrome: HireWorkspaceChromeData;
   paymentRows: readonly HirePaymentPageRow[];
+  extraChargesOutstandingGbp?: number;
   paymentsHref: string;
   detailsHref: string;
   onRecordPayment?: () => void;
@@ -51,6 +53,7 @@ export function HireActiveCompanySummary({
     includeDeposit: data.includeDeposit,
     summary: data.summary,
     paymentRows,
+    extraChargesOutstandingGbp,
   });
   const rating = buildActiveHirePaymentRatingDisplay({
     health: data.health,

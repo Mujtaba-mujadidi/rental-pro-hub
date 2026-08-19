@@ -43,6 +43,22 @@ describe("formatHirePaymentRowEvent", () => {
     expect(display.detailLines[0]).toContain("£245.00");
   });
 
+  it("formats clearing an approved amount back to unpaid", () => {
+    const display = formatHirePaymentRowEvent({
+      ...base,
+      eventKind: "status_change",
+      fromStatus: "approved",
+      toStatus: "not_received",
+      comment: "Payment was not received",
+      amendmentPayload: { previousApprovedAmountGbp: 7, newApprovedAmountGbp: 0 },
+      actorRole: "company_staff",
+    });
+    expect(display.title).toBe("Approval removed");
+    expect(display.body).toBe("Payment was not received");
+    expect(display.detailLines[0]).toContain("£7.00");
+    expect(display.detailLines[0]).toContain("£0.00");
+  });
+
   it("formats driver submission with reference", () => {
     const display = formatHirePaymentRowEvent({
       ...base,

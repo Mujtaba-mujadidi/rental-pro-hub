@@ -1,9 +1,9 @@
 /**
- * Company Balances page — pure summary over hire schedule + settlement facts.
+ * Company Balances page — pure summary over hire schedule, extras and settlement facts.
  * UI and server action must both use these helpers so KPI cards match table rows.
  */
 
-import { ukTodayYmd } from "@/lib/datetime/uk";
+import { formatUkDateRangeText, formatUkDateText, ukTodayYmd } from "@/lib/datetime/uk";
 import {
   endedHireDriverOwesCompanyGbp,
   isEndedHireStatus,
@@ -12,24 +12,36 @@ import {
   type DashboardScheduleFact,
 } from "@/lib/fleet/company-dashboard-display";
 import { resolveCompanyDashboardPeriod } from "@/lib/fleet/company-dashboard-period";
+import { outstandingExtraChargesGbp } from "@/lib/fleet/hire-driver-charges";
+import type { HireInspectionDamageChargeResolution } from "@/lib/fleet/hire-inspection-damage-charges";
 import {
   hirePaymentRowBalanceGbp,
   isHirePaymentRowAccrued,
+  summarizeHirePayments,
   type HirePaymentScheduleRowInput,
 } from "@/lib/fleet/hire-payment-summary";
 import { computeHireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
 import type { HirePaymentStatus } from "@/lib/fleet/hire-types";
 
-export const COMPANY_BALANCES_TABS = ["open", "settled", "activity"] as const;
+export const COMPANY_BALANCES_TABS = [
+  "active",
+  "payment_review",
+  "final_settlements",
+  "all",
+] as const;
 export type CompanyBalancesTab = (typeof COMPANY_BALANCES_TABS)[number];
 
 export const COMPANY_BALANCES_TAB_OPTIONS: { value: CompanyBalancesTab; label: string }[] = [
-  { value: "open", label: "Open balances" },
-  { value: "settled", label: "Settled" },
-  { value: "activity", label: "All activity" },
+  { value: "active", label: "Active balances" },
+  { value: "payment_review", label: "Payment review" },
+  { value: "final_settlements", label: "Final settlements" },
+  { value: "all", label: "All balances" },
 ];
 
-export type CompanyBalancesOpenKind = "rent_due" | "settlement" | "refund_owed" | "pending_approval";
+export type CompanyBalancesSubcompanyOption = {
+  id: string;
+  name: string;
+};
 
 export type CompanyBalancesHireFact = Pick<
   DashboardHireFact,
@@ -42,13 +54,24 @@ export type CompanyBalancesHireFact = Pick<
   | "terminatedAtYmd"
   | "endedAtYmd"
 > & {
+  subcompanyId: string | null;
+  subcompanyName: string | null;
   vehicleVrm: string | null;
+  vehicleMake: string | null;
+  vehicleModel: string | null;
   driverLabel: string | null;
+  startDateYmd: string | null;
+  activatedAtYmd: string | null;
 };
 
 export type CompanyBalancesScheduleFact = DashboardScheduleFact & {
   scheduleRowId: string;
   pendingSubmittedGbp: number | null;
+};
+
+export type CompanyBalancesExtraChargeFact = {
+  amountGbp: number;
+  resolution: HireInspectionDamageChargeResolution | string;
 };
 
 export type CompanyBalancesSettlementPaymentFact = {
@@ -62,24 +85,22 @@ export type CompanyBalancesSettlementPaymentFact = {
   driverLabel: string | null;
 };
 
-export type CompanyBalancesOpenRow = {
-  id: string;
-  hireGroupId: string;
-  kind: CompanyBalancesOpenKind;
-  kindLabel: string;
-  vehicleVrm: string | null;
-  driverLabel: string | null;
-  amountGbp: number;
-  /** ISO timestamp or calendar YMD for display sorting. */
-  at: string | null;
-  href: string;
-};
+export type CompanyBalancesAccountStatus = "active" | "payment_review" | "open_settlement" | "settled";
 
-export type CompanyBalancesSettledRow = {
+export type CompanyBalancesAccountRow = {
   hireGroupId: string;
-  vehicleVrm: string | null;
-  driverLabel: string | null;
-  settledAt: string | null;
+  vehicleVrm: string;
+  vehicleLabel: string | null;
+  driverLabel: string;
+  subcompanyId: string | null;
+  subcompanyName: string | null;
+  periodLabel: string;
+  chargesGbp: number;
+  receivedGbp: number;
+  balanceGbp: number;
+  pendingReviewGbp: number;
+  accountStatus: CompanyBalancesAccountStatus;
+  statusLabel: string;
   href: string;
 };
 
@@ -94,23 +115,19 @@ export type CompanyBalancesActivityRow = {
 };
 
 export type CompanyBalancesKpis = {
-  /** Company owes drivers (open settlement refunds). */
-  openBalanceGbp: number;
-  openBalanceHireCount: number;
-  /** Drivers owe company (active rent arrears + ended settlement). */
-  driverPaymentsDueGbp: number;
-  driverPaymentsDueHireCount: number;
-  collectedThisMonthGbp: number;
-  collectedThisMonthPaymentCount: number;
-  pendingApprovalGbp: number;
-  pendingApprovalCount: number;
+  outstandingAcrossHiresGbp: number;
+  activeHireAccountCount: number;
+  pendingReviewGbp: number;
+  pendingReviewSubmissionCount: number;
+  receivedThisMonthGbp: number;
+  finalSettlementsCount: number;
+  finalSettlementsPaidInFullCount: number;
 };
 
 export type CompanyBalancesPageData = {
   kpis: CompanyBalancesKpis;
-  openRows: CompanyBalancesOpenRow[];
-  settledRows: CompanyBalancesSettledRow[];
-  activityRows: CompanyBalancesActivityRow[];
+  accountRows: CompanyBalancesAccountRow[];
+  subcompanies: CompanyBalancesSubcompanyOption[];
   defaultTab: CompanyBalancesTab;
   monthStartYmd: string;
   monthEndYmd: string;
@@ -139,10 +156,10 @@ function toDashboardHire(hire: CompanyBalancesHireFact): DashboardHireFact {
   return {
     id: hire.id,
     vehicleId: "",
-    subcompanyId: "",
+    subcompanyId: hire.subcompanyId ?? "",
     status: hire.status,
-    startDateYmd: null,
-    activatedAtYmd: null,
+    startDateYmd: hire.startDateYmd,
+    activatedAtYmd: hire.activatedAtYmd,
     endedAtYmd: hire.endedAtYmd,
     terminatedAtYmd: hire.terminatedAtYmd,
     rentAmountGbp: 0,
@@ -170,78 +187,50 @@ function toDashboardSchedule(row: CompanyBalancesScheduleFact): DashboardSchedul
   };
 }
 
-export function companyBalancesKindLabel(kind: CompanyBalancesOpenKind): string {
-  if (kind === "rent_due") return "Rent due";
-  if (kind === "settlement") return "Settlement";
-  if (kind === "refund_owed") return "Refund owed";
-  return "Pending approval";
+export function companyBalancesVehicleLabel(
+  hire: Pick<CompanyBalancesHireFact, "vehicleMake" | "vehicleModel">,
+): string | null {
+  const label = [hire.vehicleMake, hire.vehicleModel].filter(Boolean).join(" ").trim();
+  return label || null;
 }
 
-export function companyBalancesOpenHref(kind: CompanyBalancesOpenKind, hireGroupId: string): string {
-  if (kind === "settlement" || kind === "refund_owed") {
-    return `/rental/balances/${hireGroupId}`;
+export function companyBalancesPeriodLabel(
+  hire: Pick<
+    CompanyBalancesHireFact,
+    "startDateYmd" | "activatedAtYmd" | "terminatedAtYmd" | "endedAtYmd" | "status"
+  >,
+): string {
+  const start = hire.startDateYmd ?? hire.activatedAtYmd;
+  if (isEndedHireStatus(hire.status)) {
+    return formatUkDateRangeText(start, hire.terminatedAtYmd ?? hire.endedAtYmd);
   }
-  return `/rental/hires/${hireGroupId}/payments`;
+  if (!start) return "Ongoing";
+  return `${formatUkDateText(start)} — ongoing`;
 }
 
-export function companyBalancesKpiSubtext(kpis: CompanyBalancesKpis): {
-  openBalance: string;
-  driverPaymentsDue: string;
-  collectedThisMonth: string;
-  pendingApproval: string;
-} {
-  return {
-    openBalance:
-      kpis.openBalanceHireCount === 0
-        ? "Company-level balance"
-        : `${kpis.openBalanceHireCount.toLocaleString("en-GB")} ${
-            kpis.openBalanceHireCount === 1 ? "refund" : "refunds"
-          }`,
-    driverPaymentsDue:
-      kpis.driverPaymentsDueHireCount === 0
-        ? "No hires due"
-        : `${kpis.driverPaymentsDueHireCount.toLocaleString("en-GB")} ${
-            kpis.driverPaymentsDueHireCount === 1 ? "hire" : "hires"
-          }`,
-    collectedThisMonth:
-      kpis.collectedThisMonthPaymentCount === 0
-        ? "No collections yet"
-        : `${kpis.collectedThisMonthPaymentCount.toLocaleString("en-GB")} ${
-            kpis.collectedThisMonthPaymentCount === 1 ? "payment" : "payments"
-          }`,
-    pendingApproval:
-      kpis.pendingApprovalCount === 0
-        ? "No submissions waiting"
-        : `${kpis.pendingApprovalCount.toLocaleString("en-GB")} ${
-            kpis.pendingApprovalCount === 1 ? "submission" : "submissions"
-          }`,
-  };
+export function companyBalancesAccountHref(hireGroupId: string): string {
+  return `/rental/balances/${hireGroupId}`;
 }
 
-export function defaultCompanyBalancesTab(kpis: CompanyBalancesKpis): CompanyBalancesTab {
-  if (kpis.driverPaymentsDueGbp > 0.005 || kpis.openBalanceGbp > 0.005 || kpis.pendingApprovalGbp > 0.005) {
-    return "open";
+export function pendingApprovalAmountGbp(row: CompanyBalancesScheduleFact): number {
+  if (row.paymentStatus !== ("pending_approval" as HirePaymentStatus)) return 0;
+  const schedule = toScheduleInput(row);
+  const balance = Math.max(0, hirePaymentRowBalanceGbp(schedule));
+  const submitted = row.pendingSubmittedGbp;
+  if (submitted != null && Number.isFinite(submitted) && submitted > 0.005) {
+    return roundGbp(submitted);
   }
-  return "settled";
-}
-
-/** Open settlement where the company owes the driver. */
-export function endedHireCompanyOwesDriverGbp(hire: CompanyBalancesHireFact): number {
-  if (!isEndedHireStatus(hire.status)) return 0;
-  const balance = computeHireWorkspaceSettlementBalance({
-    settlementBalanceDirection: hire.settlementBalanceDirection,
-    settlementBalanceGbp: hire.settlementOpenBalanceGbp,
-  });
-  if (!balance || balance.settlementDirection !== "company_owes_driver") return 0;
-  if (balance.openBalanceGbp <= 0.005) return 0;
-  return balance.openBalanceGbp;
+  return roundGbp(balance);
 }
 
 /**
  * Accrued rent still chaseable on a schedule row.
  * Pending submissions are not chased again; any shortfall after a partial submit stays due.
  */
-export function chaseableScheduleRentGbp(row: CompanyBalancesScheduleFact, todayYmd: string): number {
+export function chaseableScheduleRentGbp(
+  row: CompanyBalancesScheduleFact,
+  todayYmd: string,
+): number {
   if (row.rowKind !== "rent") return 0;
   const schedule = toScheduleInput(row);
   if (!isHirePaymentRowAccrued(schedule, todayYmd)) return 0;
@@ -260,127 +249,210 @@ export function chaseableScheduleRentGbp(row: CompanyBalancesScheduleFact, today
   return roundGbp(Math.max(0, balance - submitted));
 }
 
-export function pendingApprovalAmountGbp(row: CompanyBalancesScheduleFact): number {
-  if (row.paymentStatus !== ("pending_approval" as HirePaymentStatus)) return 0;
-  const schedule = toScheduleInput(row);
-  const balance = Math.max(0, hirePaymentRowBalanceGbp(schedule));
-  const submitted = row.pendingSubmittedGbp;
-  if (submitted != null && Number.isFinite(submitted) && submitted > 0.005) {
-    return roundGbp(submitted);
+function sumExtraChargesGbp(charges: readonly CompanyBalancesExtraChargeFact[]): number {
+  let total = 0;
+  for (const item of charges) {
+    if (item.resolution === "waived") continue;
+    if (item.resolution === "add_to_balance" || item.resolution === "paid_now") {
+      total += item.amountGbp;
+    }
   }
-  return roundGbp(balance);
+  return roundGbp(total);
 }
 
-export function buildCompanyBalancesOpenRows(input: {
-  hires: readonly CompanyBalancesHireFact[];
+function sumReceivedFromDriverGbp(
+  payments: readonly CompanyBalancesSettlementPaymentFact[],
+): number {
+  let total = 0;
+  for (const payment of payments) {
+    if (payment.direction !== "received_from_driver") continue;
+    const amount = Number(payment.amountGbp);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    total += amount;
+  }
+  return roundGbp(total);
+}
+
+/** Active hire account totals: accrued rent due + extras charged vs approved receipts. */
+export function activeHireAccountFinancials(input: {
   scheduleRows: readonly CompanyBalancesScheduleFact[];
+  extraCharges: readonly CompanyBalancesExtraChargeFact[];
+  balancePayments: readonly CompanyBalancesSettlementPaymentFact[];
   todayYmd: string;
-}): CompanyBalancesOpenRow[] {
-  const rows: CompanyBalancesOpenRow[] = [];
-  const hireById = new Map(input.hires.map((h) => [h.id, h]));
-  const dueByHireId = new Map<string, number>();
-
-  for (const hire of input.hires) {
-    if (!isEndedHireStatus(hire.status)) continue;
-    const owed = endedHireDriverOwesCompanyGbp(toDashboardHire(hire), input.scheduleRows.map(toDashboardSchedule));
-    if (owed <= 0.005) continue;
-    dueByHireId.set(hire.id, owed);
-  }
-
+}): { chargesGbp: number; receivedGbp: number; balanceGbp: number } {
+  const scheduleInputs = input.scheduleRows.map(toScheduleInput);
+  const summary = summarizeHirePayments(scheduleInputs, input.todayYmd);
+  const extrasGbp = sumExtraChargesGbp(input.extraCharges);
+  const extraOutstanding = outstandingExtraChargesGbp(
+    input.extraCharges.map((item) => ({
+      amountGbp: item.amountGbp,
+      resolution: item.resolution as HireInspectionDamageChargeResolution,
+    })),
+    input.balancePayments.map((payment) => ({
+      amountGbp: payment.amountGbp,
+      direction: payment.direction,
+      paymentCategory: payment.paymentCategory,
+    })),
+  );
+  const extraReceivedGbp = roundGbp(Math.max(0, extrasGbp - extraOutstanding));
+  const settlementReceivedGbp = sumReceivedFromDriverGbp(
+    input.balancePayments.filter((payment) => payment.paymentCategory !== "driver_charge"),
+  );
+  let rentOutstandingGbp = 0;
   for (const row of input.scheduleRows) {
-    const hire = hireById.get(row.hireGroupId);
-    if (!hire || isEndedHireStatus(hire.status) || hire.status === "cancelled" || hire.status === "draft") {
-      continue;
-    }
-    const chaseable = chaseableScheduleRentGbp(row, input.todayYmd);
-    if (chaseable <= 0.005) continue;
-    dueByHireId.set(row.hireGroupId, roundGbp((dueByHireId.get(row.hireGroupId) ?? 0) + chaseable));
+    rentOutstandingGbp = roundGbp(rentOutstandingGbp + chaseableScheduleRentGbp(row, input.todayYmd));
   }
 
-  for (const [hireId, amountGbp] of dueByHireId) {
-    const hire = hireById.get(hireId);
-    if (!hire || amountGbp <= 0.005) continue;
-    const ended = isEndedHireStatus(hire.status);
-    const kind: CompanyBalancesOpenKind = ended ? "settlement" : "rent_due";
-    rows.push({
-      id: `${kind}:${hireId}`,
-      hireGroupId: hireId,
-      kind,
-      kindLabel: companyBalancesKindLabel(kind),
-      vehicleVrm: hire.vehicleVrm,
-      driverLabel: hire.driverLabel,
-      amountGbp: roundGbp(amountGbp),
-      at: ended ? hire.terminatedAtYmd ?? hire.endedAtYmd : null,
-      href: companyBalancesOpenHref(kind, hireId),
-    });
-  }
+  return {
+    chargesGbp: roundGbp(summary.totalDueGbp + extrasGbp),
+    receivedGbp: roundGbp(summary.totalPaidGbp + extraReceivedGbp + settlementReceivedGbp),
+    balanceGbp: roundGbp(rentOutstandingGbp + extraOutstanding),
+  };
+}
 
-  for (const hire of input.hires) {
-    const amountGbp = endedHireCompanyOwesDriverGbp(hire);
-    if (amountGbp <= 0.005) continue;
-    rows.push({
-      id: `refund_owed:${hire.id}`,
-      hireGroupId: hire.id,
-      kind: "refund_owed",
-      kindLabel: companyBalancesKindLabel("refund_owed"),
-      vehicleVrm: hire.vehicleVrm,
-      driverLabel: hire.driverLabel,
-      amountGbp,
-      at: hire.terminatedAtYmd ?? hire.endedAtYmd,
-      href: companyBalancesOpenHref("refund_owed", hire.id),
-    });
-  }
+/** Ended hire account totals for balances list and final settlement tab. */
+export function endedHireAccountFinancials(input: {
+  hire: CompanyBalancesHireFact;
+  scheduleRows: readonly CompanyBalancesScheduleFact[];
+  extraCharges: readonly CompanyBalancesExtraChargeFact[];
+  balancePayments: readonly CompanyBalancesSettlementPaymentFact[];
+  todayYmd: string;
+}): { chargesGbp: number; receivedGbp: number; balanceGbp: number; settled: boolean } {
+  const endedYmd = input.hire.terminatedAtYmd ?? input.hire.endedAtYmd ?? input.todayYmd;
+  const scheduleInputs = input.scheduleRows.map(toScheduleInput);
+  const summary = summarizeHirePayments(scheduleInputs, endedYmd);
+  const extrasGbp = sumExtraChargesGbp(input.extraCharges);
+  const extraOutstanding = outstandingExtraChargesGbp(
+    input.extraCharges.map((item) => ({
+      amountGbp: item.amountGbp,
+      resolution: item.resolution as HireInspectionDamageChargeResolution,
+    })),
+    input.balancePayments.map((payment) => ({
+      amountGbp: payment.amountGbp,
+      direction: payment.direction,
+      paymentCategory: payment.paymentCategory,
+    })),
+  );
+  const extraReceivedGbp = roundGbp(Math.max(0, extrasGbp - extraOutstanding));
+  const settlementReceivedGbp = sumReceivedFromDriverGbp(input.balancePayments);
+  const settled = input.hire.settlementBalanceDirection === "settled";
+  const openSettlement = computeHireWorkspaceSettlementBalance({
+    settlementBalanceDirection: input.hire.settlementBalanceDirection,
+    settlementBalanceGbp: input.hire.settlementOpenBalanceGbp,
+    balancePayments: input.balancePayments.map((payment) => ({
+      amountGbp: payment.amountGbp,
+      direction: payment.direction,
+    })),
+  });
+  const driverOwesGbp =
+    openSettlement?.settlementDirection === "driver_owes_company"
+      ? openSettlement.openBalanceGbp
+      : endedHireDriverOwesCompanyGbp(
+          toDashboardHire(input.hire),
+          input.scheduleRows.map(toDashboardSchedule),
+        );
 
+  return {
+    chargesGbp: roundGbp(summary.totalDueGbp + extrasGbp),
+    receivedGbp: roundGbp(summary.totalPaidGbp + extraReceivedGbp + settlementReceivedGbp),
+    balanceGbp: settled ? 0 : roundGbp(Math.max(0, driverOwesGbp, extraOutstanding)),
+    settled,
+  };
+}
+
+function pendingReviewForHire(input: {
+  scheduleRows: readonly CompanyBalancesScheduleFact[];
+  pendingExtraGbp: number;
+}): { pendingGbp: number; submissionCount: number } {
+  let pendingGbp = roundGbp(Math.max(0, input.pendingExtraGbp));
+  let submissionCount = input.pendingExtraGbp > 0.005 ? 1 : 0;
   for (const row of input.scheduleRows) {
     const amountGbp = pendingApprovalAmountGbp(row);
     if (amountGbp <= 0.005) continue;
-    const hire = hireById.get(row.hireGroupId);
-    if (!hire || hire.status === "cancelled" || hire.status === "draft") continue;
+    pendingGbp = roundGbp(pendingGbp + amountGbp);
+    submissionCount += 1;
+  }
+  return { pendingGbp, submissionCount };
+}
+
+export function buildCompanyBalancesAccountRows(input: {
+  hires: readonly CompanyBalancesHireFact[];
+  scheduleRows: readonly CompanyBalancesScheduleFact[];
+  extraChargesByHireId: ReadonlyMap<string, readonly CompanyBalancesExtraChargeFact[]>;
+  balancePaymentsByHireId: ReadonlyMap<string, readonly CompanyBalancesSettlementPaymentFact[]>;
+  pendingExtraByHireId: ReadonlyMap<string, number>;
+  todayYmd: string;
+}): CompanyBalancesAccountRow[] {
+  const scheduleByHire = new Map<string, CompanyBalancesScheduleFact[]>();
+  for (const row of input.scheduleRows) {
+    const bucket = scheduleByHire.get(row.hireGroupId) ?? [];
+    bucket.push(row);
+    scheduleByHire.set(row.hireGroupId, bucket);
+  }
+
+  const rows: CompanyBalancesAccountRow[] = [];
+  for (const hire of input.hires) {
+    if (hire.status === "cancelled" || hire.status === "draft") continue;
+
+    const schedule = scheduleByHire.get(hire.id) ?? [];
+    const extraCharges = input.extraChargesByHireId.get(hire.id) ?? [];
+    const balancePayments = input.balancePaymentsByHireId.get(hire.id) ?? [];
+    const pendingExtraGbp = input.pendingExtraByHireId.get(hire.id) ?? 0;
+    const pendingReview = pendingReviewForHire({ scheduleRows: schedule, pendingExtraGbp });
+    const common = {
+      hireGroupId: hire.id,
+      vehicleVrm: hire.vehicleVrm?.trim() || "—",
+      vehicleLabel: companyBalancesVehicleLabel(hire),
+      driverLabel: hire.driverLabel?.trim() || "Driver",
+      subcompanyId: hire.subcompanyId,
+      subcompanyName: hire.subcompanyName,
+      periodLabel: companyBalancesPeriodLabel(hire),
+      pendingReviewGbp: pendingReview.pendingGbp,
+      href: companyBalancesAccountHref(hire.id),
+    };
+
+    if (isEndedHireStatus(hire.status)) {
+      const financials = endedHireAccountFinancials({
+        hire,
+        scheduleRows: schedule,
+        extraCharges,
+        balancePayments,
+        todayYmd: input.todayYmd,
+      });
+      rows.push({
+        ...common,
+        chargesGbp: financials.chargesGbp,
+        receivedGbp: financials.receivedGbp,
+        balanceGbp: financials.balanceGbp,
+        accountStatus: financials.settled ? "settled" : "open_settlement",
+        statusLabel: financials.settled ? "Settled" : "Open settlement",
+      });
+      continue;
+    }
+
+    if (hire.status !== "active") continue;
+
+    const financials = activeHireAccountFinancials({
+      scheduleRows: schedule,
+      extraCharges,
+      balancePayments,
+      todayYmd: input.todayYmd,
+    });
     rows.push({
-      id: `pending_approval:${row.scheduleRowId}`,
-      hireGroupId: row.hireGroupId,
-      kind: "pending_approval",
-      kindLabel: companyBalancesKindLabel("pending_approval"),
-      vehicleVrm: hire.vehicleVrm,
-      driverLabel: hire.driverLabel,
-      amountGbp,
-      at: row.periodStart,
-      href: companyBalancesOpenHref("pending_approval", row.hireGroupId),
+      ...common,
+      chargesGbp: financials.chargesGbp,
+      receivedGbp: financials.receivedGbp,
+      balanceGbp: financials.balanceGbp,
+      accountStatus: pendingReview.pendingGbp > 0.005 ? "payment_review" : "active",
+      statusLabel: "Active account",
     });
   }
 
   rows.sort((a, b) => {
-    if (b.amountGbp !== a.amountGbp) return b.amountGbp - a.amountGbp;
-    return (b.at ?? "").localeCompare(a.at ?? "");
+    if (b.balanceGbp !== a.balanceGbp) return b.balanceGbp - a.balanceGbp;
+    return b.chargesGbp - a.chargesGbp;
   });
   return rows;
-}
-
-export function buildCompanyBalancesSettledRows(
-  hires: readonly CompanyBalancesHireFact[],
-): CompanyBalancesSettledRow[] {
-  const rows: CompanyBalancesSettledRow[] = [];
-  for (const hire of hires) {
-    if (!isEndedHireStatus(hire.status)) continue;
-    if (hire.settlementBalanceDirection !== "settled") continue;
-    rows.push({
-      hireGroupId: hire.id,
-      vehicleVrm: hire.vehicleVrm,
-      driverLabel: hire.driverLabel,
-      settledAt: hire.terminatedAtYmd ?? hire.endedAtYmd,
-      href: `/rental/balances/${hire.id}`,
-    });
-  }
-  rows.sort((a, b) => (b.settledAt ?? "").localeCompare(a.settledAt ?? ""));
-  return rows;
-}
-
-function paidAtYmd(paidAt: string): string | null {
-  const raw = paidAt.trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 }
 
 export function buildCompanyBalancesActivityRows(input: {
@@ -405,7 +477,7 @@ export function buildCompanyBalancesActivityRows(input: {
       detail: [hire?.vehicleVrm, hire?.driverLabel].filter(Boolean).join(" · ") || "Hire payment",
       amountGbp: roundGbp(paid),
       at: `${row.periodStart}T00:00:00.000Z`,
-      href: `/rental/hires/${row.hireGroupId}/payments`,
+      href: companyBalancesAccountHref(row.hireGroupId),
     });
   }
 
@@ -422,7 +494,7 @@ export function buildCompanyBalancesActivityRows(input: {
       detail: [payment.vehicleVrm, payment.driverLabel].filter(Boolean).join(" · ") || "Settlement payment",
       amountGbp: amount,
       at: payment.paidAt,
-      href: `/rental/balances/${payment.hireGroupId}`,
+      href: companyBalancesAccountHref(payment.hireGroupId),
     });
   }
 
@@ -430,53 +502,143 @@ export function buildCompanyBalancesActivityRows(input: {
   return rows;
 }
 
-export function sumCompanyBalancesOpenByKinds(
-  rows: readonly CompanyBalancesOpenRow[],
-  kinds: readonly CompanyBalancesOpenKind[],
-): { gbp: number; hireCount: number } {
-  const kindSet = new Set(kinds);
-  const hireIds = new Set<string>();
-  let gbp = 0;
-  for (const row of rows) {
-    if (!kindSet.has(row.kind)) continue;
-    gbp = roundGbp(gbp + row.amountGbp);
-    hireIds.add(row.hireGroupId);
-  }
-  return { gbp, hireCount: hireIds.size };
+function paidAtYmd(paidAt: string): string | null {
+  const raw = paidAt.trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 }
 
-/** KPIs are derived only from row lists so UI cards always match table totals. */
 export function buildCompanyBalancesKpis(input: {
-  openRows: readonly CompanyBalancesOpenRow[];
+  accountRows: readonly CompanyBalancesAccountRow[];
   activityRows: readonly CompanyBalancesActivityRow[];
+  pendingReviewSubmissionCount: number;
 }): CompanyBalancesKpis {
-  const openBalance = sumCompanyBalancesOpenByKinds(input.openRows, ["refund_owed"]);
-  const driverDue = sumCompanyBalancesOpenByKinds(input.openRows, ["rent_due", "settlement"]);
-  const pendingRows = input.openRows.filter((r) => r.kind === "pending_approval");
-  let pendingGbp = 0;
-  for (const row of pendingRows) pendingGbp = roundGbp(pendingGbp + row.amountGbp);
+  let outstandingAcrossHiresGbp = 0;
+  let activeHireAccountCount = 0;
+  let pendingReviewGbp = 0;
+  let finalSettlementsCount = 0;
+  let finalSettlementsPaidInFullCount = 0;
 
-  let collectedGbp = 0;
+  for (const row of input.accountRows) {
+    if (row.accountStatus === "active" || row.accountStatus === "payment_review") {
+      activeHireAccountCount += 1;
+      outstandingAcrossHiresGbp = roundGbp(outstandingAcrossHiresGbp + row.balanceGbp);
+    }
+    pendingReviewGbp = roundGbp(pendingReviewGbp + row.pendingReviewGbp);
+    if (row.accountStatus === "settled") {
+      finalSettlementsCount += 1;
+      if (row.balanceGbp <= 0.005) finalSettlementsPaidInFullCount += 1;
+    }
+  }
+
+  let receivedThisMonthGbp = 0;
   for (const row of input.activityRows) {
-    collectedGbp = roundGbp(collectedGbp + row.amountGbp);
+    receivedThisMonthGbp = roundGbp(receivedThisMonthGbp + row.amountGbp);
   }
 
   return {
-    openBalanceGbp: openBalance.gbp,
-    openBalanceHireCount: openBalance.hireCount,
-    driverPaymentsDueGbp: driverDue.gbp,
-    driverPaymentsDueHireCount: driverDue.hireCount,
-    collectedThisMonthGbp: collectedGbp,
-    collectedThisMonthPaymentCount: input.activityRows.length,
-    pendingApprovalGbp: pendingGbp,
-    pendingApprovalCount: pendingRows.length,
+    outstandingAcrossHiresGbp,
+    activeHireAccountCount,
+    pendingReviewGbp,
+    pendingReviewSubmissionCount: input.pendingReviewSubmissionCount,
+    receivedThisMonthGbp,
+    finalSettlementsCount,
+    finalSettlementsPaidInFullCount,
   };
+}
+
+export function companyBalancesKpiSubtext(kpis: CompanyBalancesKpis): {
+  outstandingAcrossHires: string;
+  pendingReview: string;
+  receivedThisMonth: string;
+  finalSettlements: string;
+} {
+  return {
+    outstandingAcrossHires:
+      kpis.activeHireAccountCount === 0
+        ? "No active hire accounts"
+        : `${kpis.activeHireAccountCount.toLocaleString("en-GB")} active hire ${
+            kpis.activeHireAccountCount === 1 ? "account" : "accounts"
+          }`,
+    pendingReview:
+      kpis.pendingReviewSubmissionCount === 0
+        ? "No submissions waiting"
+        : `${kpis.pendingReviewSubmissionCount.toLocaleString("en-GB")} ${
+            kpis.pendingReviewSubmissionCount === 1 ? "submission needs approval" : "submissions need approval"
+          }`,
+    receivedThisMonth: "Approved payments",
+    finalSettlements:
+      kpis.finalSettlementsCount === 0
+        ? "No ended hires settled yet"
+        : kpis.finalSettlementsPaidInFullCount === kpis.finalSettlementsCount
+          ? "All paid in full"
+          : `${kpis.finalSettlementsPaidInFullCount.toLocaleString("en-GB")} of ${kpis.finalSettlementsCount.toLocaleString("en-GB")} paid in full`,
+  };
+}
+
+export function defaultCompanyBalancesTab(kpis: CompanyBalancesKpis): CompanyBalancesTab {
+  if (kpis.pendingReviewGbp > 0.005) return "payment_review";
+  if (kpis.outstandingAcrossHiresGbp > 0.005 || kpis.activeHireAccountCount > 0) return "active";
+  if (kpis.finalSettlementsCount > 0) return "final_settlements";
+  return "all";
+}
+
+export function companyBalancesAccountsForTab(
+  rows: readonly CompanyBalancesAccountRow[],
+  tab: CompanyBalancesTab,
+): CompanyBalancesAccountRow[] {
+  if (tab === "active") {
+    return rows.filter(
+      (row) =>
+        (row.accountStatus === "active" || row.accountStatus === "payment_review") &&
+        (row.chargesGbp > 0.005 ||
+          row.receivedGbp > 0.005 ||
+          row.balanceGbp > 0.005 ||
+          row.pendingReviewGbp > 0.005),
+    );
+  }
+  if (tab === "payment_review") {
+    return rows.filter((row) => row.pendingReviewGbp > 0.005);
+  }
+  if (tab === "final_settlements") {
+    return rows.filter((row) => row.accountStatus === "settled");
+  }
+  return [...rows];
+}
+
+export function filterCompanyBalancesAccounts(input: {
+  rows: readonly CompanyBalancesAccountRow[];
+  search: string;
+  subcompanyId: string | null;
+}): CompanyBalancesAccountRow[] {
+  const query = input.search.trim().toLowerCase();
+  return input.rows.filter((row) => {
+    if (input.subcompanyId && row.subcompanyId !== input.subcompanyId) return false;
+    if (!query) return true;
+    const haystack = [
+      row.vehicleVrm,
+      row.vehicleLabel,
+      row.driverLabel,
+      row.subcompanyName,
+      row.periodLabel,
+      row.statusLabel,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(query);
+  });
 }
 
 export function buildCompanyBalancesPage(input: {
   hires: readonly CompanyBalancesHireFact[];
   scheduleRows: readonly CompanyBalancesScheduleFact[];
-  settlementPayments: readonly CompanyBalancesSettlementPaymentFact[];
+  extraChargesByHireId: ReadonlyMap<string, readonly CompanyBalancesExtraChargeFact[]>;
+  balancePaymentsByHireId: ReadonlyMap<string, readonly CompanyBalancesSettlementPaymentFact[]>;
+  pendingExtraByHireId: ReadonlyMap<string, number>;
+  subcompanies: readonly CompanyBalancesSubcompanyOption[];
   todayYmd?: string;
 }): CompanyBalancesPageData {
   const todayYmd = input.todayYmd ?? ukTodayYmd();
@@ -485,48 +647,53 @@ export function buildCompanyBalancesPage(input: {
     throw new Error(period.error);
   }
 
-  const openRows = buildCompanyBalancesOpenRows({
+  const accountRows = buildCompanyBalancesAccountRows({
     hires: input.hires,
     scheduleRows: input.scheduleRows,
+    extraChargesByHireId: input.extraChargesByHireId,
+    balancePaymentsByHireId: input.balancePaymentsByHireId,
+    pendingExtraByHireId: input.pendingExtraByHireId,
     todayYmd,
   });
-  const settledRows = buildCompanyBalancesSettledRows(input.hires);
+
+  const settlementPayments = [...input.balancePaymentsByHireId.values()].flat();
   const activityRows = buildCompanyBalancesActivityRows({
     hires: input.hires,
     scheduleRows: input.scheduleRows,
-    settlementPayments: input.settlementPayments,
+    settlementPayments,
     monthStartYmd: period.startYmd,
     monthEndYmd: period.endYmd,
   });
-  const kpis = buildCompanyBalancesKpis({ openRows, activityRows });
+
+  let pendingReviewSubmissionCount = 0;
+  for (const pendingExtraGbp of input.pendingExtraByHireId.values()) {
+    if (pendingExtraGbp > 0.005) pendingReviewSubmissionCount += 1;
+  }
+  for (const row of input.scheduleRows) {
+    if (pendingApprovalAmountGbp(row) > 0.005) pendingReviewSubmissionCount += 1;
+  }
+
+  const kpis = buildCompanyBalancesKpis({
+    accountRows,
+    activityRows,
+    pendingReviewSubmissionCount,
+  });
 
   return {
     kpis,
-    openRows,
-    settledRows,
-    activityRows,
+    accountRows,
+    subcompanies: [...input.subcompanies],
     defaultTab: defaultCompanyBalancesTab(kpis),
     monthStartYmd: period.startYmd,
     monthEndYmd: period.endYmd,
   };
 }
 
-export function companyBalancesOpenRowsForTab(
-  openRows: readonly CompanyBalancesOpenRow[],
+export function buildCompanyBalancesExportCsv(
+  data: CompanyBalancesPageData,
   tab: CompanyBalancesTab,
-  kpiFocus: "open_balance" | "driver_due" | "pending" | null = null,
-): CompanyBalancesOpenRow[] {
-  if (tab !== "open") return [];
-  if (kpiFocus === "open_balance") return openRows.filter((r) => r.kind === "refund_owed");
-  if (kpiFocus === "driver_due") {
-    return openRows.filter((r) => r.kind === "rent_due" || r.kind === "settlement");
-  }
-  if (kpiFocus === "pending") return openRows.filter((r) => r.kind === "pending_approval");
-  // Default Open tab: everything still outstanding or awaiting approval.
-  return [...openRows];
-}
-
-export function buildCompanyBalancesExportCsv(data: CompanyBalancesPageData, tab: CompanyBalancesTab): string {
+  rows: readonly CompanyBalancesAccountRow[],
+): string {
   const lines: string[] = ["\uFEFFSection,Item,Value"];
   const cell = (v: string | number) => {
     const s = String(v);
@@ -534,29 +701,21 @@ export function buildCompanyBalancesExportCsv(data: CompanyBalancesPageData, tab
     return s;
   };
 
-  lines.push(["KPI", "Open balance GBP", data.kpis.openBalanceGbp].map(cell).join(","));
-  lines.push(["KPI", "Driver payments due GBP", data.kpis.driverPaymentsDueGbp].map(cell).join(","));
-  lines.push(["KPI", "Collected this month GBP", data.kpis.collectedThisMonthGbp].map(cell).join(","));
-  lines.push(["KPI", "Pending approval GBP", data.kpis.pendingApprovalGbp].map(cell).join(","));
+  lines.push(["KPI", "Outstanding across hires GBP", data.kpis.outstandingAcrossHiresGbp].map(cell).join(","));
+  lines.push(["KPI", "Payments under review GBP", data.kpis.pendingReviewGbp].map(cell).join(","));
+  lines.push(["KPI", "Received this month GBP", data.kpis.receivedThisMonthGbp].map(cell).join(","));
+  lines.push(["KPI", "Final settlements", data.kpis.finalSettlementsCount].map(cell).join(","));
 
-  if (tab === "open") {
-    for (const row of data.openRows) {
-      lines.push(
-        ["Open", `${row.kindLabel} · ${row.vehicleVrm ?? row.hireGroupId}`, row.amountGbp]
-          .map(cell)
-          .join(","),
-      );
-    }
-  } else if (tab === "settled") {
-    for (const row of data.settledRows) {
-      lines.push(
-        ["Settled", row.vehicleVrm ?? row.hireGroupId, row.settledAt ?? ""].map(cell).join(","),
-      );
-    }
-  } else {
-    for (const row of data.activityRows) {
-      lines.push(["Activity", `${row.title} · ${row.detail}`, row.amountGbp].map(cell).join(","));
-    }
+  for (const row of rows) {
+    lines.push(
+      [
+        tab,
+        `${row.vehicleVrm} · ${row.driverLabel}`,
+        `Charges ${row.chargesGbp}; Received ${row.receivedGbp}; Balance ${row.balanceGbp}`,
+      ]
+        .map(cell)
+        .join(","),
+    );
   }
 
   return lines.join("\n");
@@ -564,4 +723,17 @@ export function buildCompanyBalancesExportCsv(data: CompanyBalancesPageData, tab
 
 export function companyBalancesExportFileName(todayYmd = ukTodayYmd()): string {
   return `balances-export-${todayYmd}.csv`;
+}
+
+export function companyBalancesTabFooterHint(tab: CompanyBalancesTab): string {
+  if (tab === "active") {
+    return "Active accounts update as charges and approved payments are posted";
+  }
+  if (tab === "payment_review") {
+    return "Submitted payments stay here until finance approves or rejects them";
+  }
+  if (tab === "final_settlements") {
+    return "Ended hires with a cleared settlement balance";
+  }
+  return "Every hire account in your accessible subcompanies";
 }

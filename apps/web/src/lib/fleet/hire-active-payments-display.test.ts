@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { HirePaymentPageRow } from "@/app/actions/hire-payments";
 import {
   buildFullPaymentScheduleSummary,
+  extraChargesOutstandingHint,
   formatNextPaymentHeading,
+  accruedRentOutstandingGbp,
   payBalanceToDateGbp,
   rentPaidStatHint,
   selectUpcomingPaymentRows,
@@ -92,6 +94,13 @@ describe("rentPaidStatHint", () => {
   });
 });
 
+describe("extraChargesOutstandingHint", () => {
+  it("labels cleared extras and outstanding extras", () => {
+    expect(extraChargesOutstandingHint(0)).toBe("No extra charges due");
+    expect(extraChargesOutstandingHint(40)).toBe("Damage, admin and other charges");
+  });
+});
+
 describe("payBalanceToDateGbp", () => {
   it("adds unpaid deposit to accrued rent balance", () => {
     expect(
@@ -164,6 +173,52 @@ describe("payBalanceToDateGbp", () => {
           balanceGbp: 10,
           paymentStatus: "not_received",
           accrued: false,
+        },
+      ]),
+    ).toBe(10);
+  });
+});
+
+describe("accruedRentOutstandingGbp", () => {
+  it("sums due rent after discounts and ignores future periods and deposit", () => {
+    expect(
+      accruedRentOutstandingGbp([
+        {
+          rowKind: "deposit",
+          balanceGbp: 200,
+          paymentStatus: "not_received",
+          accrued: true,
+        },
+        {
+          rowKind: "rent",
+          balanceGbp: 35,
+          paymentStatus: "not_received",
+          accrued: true,
+        },
+        {
+          rowKind: "rent",
+          balanceGbp: 40,
+          paymentStatus: "not_received",
+          accrued: false,
+        },
+      ]),
+    ).toBe(35);
+  });
+
+  it("ignores rent awaiting approval", () => {
+    expect(
+      accruedRentOutstandingGbp([
+        {
+          rowKind: "rent",
+          balanceGbp: 35,
+          paymentStatus: "pending_approval",
+          accrued: true,
+        },
+        {
+          rowKind: "rent",
+          balanceGbp: 10,
+          paymentStatus: "not_received",
+          accrued: true,
         },
       ]),
     ).toBe(10);

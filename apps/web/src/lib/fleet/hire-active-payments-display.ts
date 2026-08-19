@@ -39,12 +39,14 @@ export function buildActiveHirePaymentPositionFromPage(input: {
   summary: HirePaymentSummary;
   paymentRows: readonly Pick<HirePaymentPageRow, "rowKind" | "balanceGbp" | "netDueGbp">[];
   includeDeposit: boolean;
+  extraChargesOutstandingGbp?: number;
   audience?: "staff" | "driver";
 }): ActiveHirePaymentPosition {
   return buildActiveHirePaymentPosition({
     includeDeposit: input.includeDeposit,
     summary: input.summary,
     paymentRows: input.paymentRows,
+    extraChargesOutstandingGbp: input.extraChargesOutstandingGbp,
     audience: input.audience,
   });
 }
@@ -138,6 +140,11 @@ export function rentPaidStatHint(rentPaidGbp: number, rentOutstandingGbp: number
   return "Recorded on this hire";
 }
 
+export function extraChargesOutstandingHint(outstandingGbp: number): string {
+  if (outstandingGbp <= 0.005) return "No extra charges due";
+  return "Damage, admin and other charges";
+}
+
 /**
  * Shortcut amount for “pay balance to date”: accrued rent still owed plus any
  * outstanding deposit that can still take a payment. Rows awaiting approval are
@@ -156,6 +163,24 @@ export function payBalanceToDateGbp(
     if (row.rowKind === "deposit" || row.accrued) {
       total += row.balanceGbp;
     }
+  }
+  return Math.round(total * 100) / 100;
+}
+
+/** Accrued rent still owed after discounts. Excludes deposit, future periods, and pending rows. */
+export function accruedRentOutstandingGbp(
+  rows: readonly Pick<
+    HirePaymentPageRow,
+    "rowKind" | "balanceGbp" | "paymentStatus" | "accrued"
+  >[],
+): number {
+  let total = 0;
+  for (const row of rows) {
+    if (row.rowKind !== "rent") continue;
+    if (!row.accrued) continue;
+    if (row.balanceGbp <= 0.005) continue;
+    if (row.paymentStatus === "pending_approval") continue;
+    total += row.balanceGbp;
   }
   return Math.round(total * 100) / 100;
 }

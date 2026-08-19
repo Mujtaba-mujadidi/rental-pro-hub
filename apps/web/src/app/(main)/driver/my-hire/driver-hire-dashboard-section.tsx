@@ -83,6 +83,7 @@ export function DriverHireDashboardSection({
         data={data}
         context={data.overview}
         paymentRows={paymentRows}
+        extraChargesOutstandingGbp={payments?.extraChargesOutstandingGbp}
         checkout={checkout}
         hireStatus={hireStatus}
         paymentsHref={driverHireWorkspaceHref(hireGroupId, "payments")}

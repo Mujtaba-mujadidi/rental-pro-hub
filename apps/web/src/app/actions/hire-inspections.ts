@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
-import { formatUkDateTime } from "@/lib/datetime/uk";
+import { formatUkDateTime, ukTodayYmd } from "@/lib/datetime/uk";
 import { canReadRentals, canWriteRentals } from "@/lib/auth/rental-permissions";
 import { logHireGroupEvent } from "@/lib/fleet/hire-audit";
 import {
@@ -1230,6 +1230,7 @@ export async function completeHireCheckinAction(
             source_id: draft.sourceId ?? null,
             description: draft.description ?? null,
             balance_payment_id: draft.resolution === "paid_now" ? damagePaymentId : null,
+            charged_on: ukTodayYmd(),
             created_by_user_id: userId,
           })),
         );

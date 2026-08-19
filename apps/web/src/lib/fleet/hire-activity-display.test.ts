@@ -24,6 +24,11 @@ function event(partial: Partial<HireGroupAuditRow> & Pick<HireGroupAuditRow, "id
 describe("hireActivityTitle", () => {
   it("maps known event types to workspace titles", () => {
     expect(hireActivityTitle("hire_terminated")).toBe("Hire ended");
+    expect(hireActivityTitle("driver_charge_added")).toBe("Extra charge added");
+    expect(hireActivityTitle("driver_charge_payment_submitted")).toBe("Extra charge payment submitted");
+    expect(hireActivityTitle("driver_charge_payment_approved")).toBe("Extra charge payment approved");
+    expect(hireActivityTitle("driver_charge_payment_rejected")).toBe("Extra charge payment rejected");
+    expect(hireActivityKind("driver_charge_amended")).toBe("charge");
     expect(hireActivityTitle("checkout_completed")).toBe("Vehicle checked out");
     expect(hireActivityTitle("settlement_refund_recorded")).toBe("Refund recorded");
   });
@@ -32,6 +37,8 @@ describe("hireActivityTitle", () => {
 describe("hireActivityKind", () => {
   it("groups events for timeline icons", () => {
     expect(hireActivityKind("deposit_refund_recorded")).toBe("payment");
+    expect(hireActivityKind("driver_charge_payment_submitted")).toBe("payment");
+    expect(hireActivityKind("driver_charge_payment_rejected")).toBe("warn");
     expect(hireActivityKind("checkin_completed")).toBe("inspection");
     expect(hireActivityKind("hire_cancelled")).toBe("warn");
     expect(hireActivityKind("hire_terminated")).toBe("status");

@@ -21,7 +21,7 @@ export function canTransitionPaymentStatus(input: PaymentTransitionInput): boole
   }
 
   // company_staff
-  if (from === "approved" && to === "approved") {
+  if (from === "approved" && (to === "approved" || to === "not_received")) {
     return Boolean(comment?.trim());
   }
   if (from === to) return false;
@@ -35,7 +35,19 @@ export function canTransitionPaymentStatus(input: PaymentTransitionInput): boole
 }
 
 export function requiresAmendmentReason(from: HirePaymentStatus, to: HirePaymentStatus): boolean {
-  return from === "approved" && to === "approved";
+  return from === "approved" && (to === "approved" || to === "not_received");
+}
+
+/** Treat sub-penny amounts as unpaid when amending an approved row. */
+export function isZeroApprovedAmountGbp(amountGbp: number): boolean {
+  return Number.isFinite(amountGbp) && amountGbp < 0.005;
+}
+
+/** Amending an approved payment to £0 removes the approval. */
+export function nextStatusAfterApprovedAmountAmendment(
+  newApprovedAmountGbp: number,
+): HirePaymentStatus {
+  return isZeroApprovedAmountGbp(newApprovedAmountGbp) ? "not_received" : "approved";
 }
 
 export type HirePaymentWorkflowContext = {

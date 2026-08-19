@@ -4,6 +4,11 @@ import type { HirePaymentPageRow } from "@/app/actions/hire-payments";
 import { HirePaymentRowActions } from "@/components/fleet/hire-payments/hire-payment-row-actions";
 import { RphSelect } from "@/components/forms/rph-select";
 import { formatUkDate, ukTodayYmd } from "@/lib/datetime/uk";
+import {
+  balanceRentScheduleAdjustmentLabel,
+  balanceRentScheduleBalanceTone,
+  balanceRentSchedulePeriodLabel,
+} from "@/lib/fleet/hire-active-balance-display";
 import { hireTableStatusToneClass } from "@/lib/fleet/hire-contract-table-display";
 import {
   deriveHirePaymentDisplayStatus,
@@ -77,7 +82,7 @@ export function HirePaymentScheduleTable({
   audience?: HirePaymentDisplayAudience;
   readOnly?: boolean;
   showActions?: boolean;
-  variant?: "default" | "workspace";
+  variant?: "default" | "workspace" | "balance";
   onRefresh: () => void;
 }) {
   const [search, setSearch] = useState("");
@@ -134,16 +139,15 @@ export function HirePaymentScheduleTable({
       });
   }, [audience, displayOptions, rows, search, statusFilter, todayYmd]);
 
-  const workspaceTable = variant === "workspace";
+  const workspaceTable = variant === "workspace" || variant === "balance";
+  const balanceTable = variant === "balance";
   const includeActions = showActions;
-  // Period, Due, Discount, After discount, Paid, [Balance], Status, [Action]
-  const emptyColSpan = workspaceTable
-    ? includeActions
-      ? 7
-      : 6
-    : includeActions
-      ? 8
-      : 7;
+  const emptyColSpan = includeActions ? 8 : 7;
+
+  const periodLabel = (row: HirePaymentPageRow, compact = false) => {
+    if (balanceTable) return balanceRentSchedulePeriodLabel(row);
+    return periodCell(row, compact);
+  };
 
   const tableBody = (
     <table
@@ -162,6 +166,7 @@ export function HirePaymentScheduleTable({
           <col className="hire-ws-payments-col-amount" />
           <col className="hire-ws-payments-col-amount" />
           <col className="hire-ws-payments-col-amount" />
+          <col className="hire-ws-payments-col-amount" />
           <col className="hire-ws-payments-col-status" />
           {includeActions ? <col className="hire-ws-payments-col-action" /> : null}
         </colgroup>
@@ -175,25 +180,23 @@ export function HirePaymentScheduleTable({
           }
         >
           <th scope="col" className={workspaceTable ? undefined : "px-4 py-2.5"}>
-            Period
+            {balanceTable ? "Rent date" : "Period"}
           </th>
           <th scope="col" className={workspaceTable ? undefined : "px-4 py-2.5"}>
-            Due
+            {balanceTable ? "Scheduled" : "Due"}
           </th>
           <th scope="col" className={workspaceTable ? undefined : "px-4 py-2.5"}>
-            Discount
+            {balanceTable ? "Adjustment" : "Discount"}
           </th>
           <th scope="col" className={workspaceTable ? undefined : "px-4 py-2.5"}>
-            After discount
+            {balanceTable ? "Charged" : "After discount"}
           </th>
           <th scope="col" className={workspaceTable ? undefined : "px-4 py-2.5"}>
             Paid
           </th>
-          {!workspaceTable ? (
-            <th scope="col" className="px-4 py-2.5">
-              Balance
-            </th>
-          ) : null}
+          <th scope="col" className={workspaceTable ? undefined : "px-4 py-2.5"}>
+            Balance
+          </th>
           <th scope="col" className={workspaceTable ? undefined : "px-4 py-2.5"}>
             Status
           </th>
@@ -224,6 +227,9 @@ export function HirePaymentScheduleTable({
             const displayStatus = rowDisplayStatus(row, todayYmd, displayOptions);
             const statusMeta = hirePaymentDisplayStatusMeta(displayStatus, { audience });
             const workspaceStatus = upcomingPaymentStatusLabel(row, todayYmd, displayOptions);
+            const balanceTone = balanceTable
+              ? balanceRentScheduleBalanceTone(displayStatus, row.balanceGbp)
+              : null;
             const rowClass = workspaceTable
               ? highlighted
                 ? "hire-ws-payments-table-row-highlight"
@@ -244,7 +250,7 @@ export function HirePaymentScheduleTable({
                 >
                   {workspaceTable ? (
                     <>
-                      <span className="hire-ws-payments-period-label">{periodCell(row, true)}</span>
+                      <span className="hire-ws-payments-period-label">{periodLabel(row, true)}</span>
                       {highlighted ? (
                         <p className="mt-0.5 hidden text-[10px] font-medium text-rph-link sm:mt-1 sm:block sm:text-xs">
                           Allocated in payment
@@ -253,7 +259,7 @@ export function HirePaymentScheduleTable({
                     </>
                   ) : (
                     <>
-                      <p className="font-medium text-rph-fg">{periodCell(row)}</p>
+                      <p className="font-medium text-rph-fg">{periodLabel(row)}</p>
                       <p className="rph-meta text-xs capitalize">{row.rowKind}</p>
                       {highlighted ? (
                         <p className="mt-1 text-xs font-medium text-rph-link">Allocated in payment</p>
@@ -265,7 +271,9 @@ export function HirePaymentScheduleTable({
                   {moneyCell(workspaceTable, row.baseAmountGbp)}
                 </td>
                 <td data-label="Discount" className={workspaceTable ? "tabular-nums" : "px-4 py-3 tabular-nums"}>
-                  {moneyCell(workspaceTable, row.discountTotalGbp, true)}
+                  {balanceTable
+                    ? balanceRentScheduleAdjustmentLabel(row.discountTotalGbp)
+                    : moneyCell(workspaceTable, row.discountTotalGbp, true)}
                 </td>
                 <td
                   data-label="After discount"
@@ -276,11 +284,24 @@ export function HirePaymentScheduleTable({
                 <td data-label="Paid" className={workspaceTable ? "tabular-nums" : "px-4 py-3 tabular-nums"}>
                   {moneyCell(workspaceTable, row.paidGbp)}
                 </td>
-                {!workspaceTable ? (
-                  <td data-label="Balance" className="px-4 py-3 tabular-nums font-medium">
-                    <span className="rph-table-cell-value">{formatGbp(row.balanceGbp)}</span>
-                  </td>
-                ) : null}
+                <td
+                  data-label="Balance"
+                  className={
+                    balanceTable
+                      ? `tabular-nums font-semibold ${
+                          balanceTone === "paid"
+                            ? "text-emerald-700 dark:text-emerald-300"
+                            : balanceTone === "upcoming"
+                              ? "text-rph-fg-muted"
+                              : "text-amber-800 dark:text-amber-200"
+                        }`
+                      : workspaceTable
+                        ? "tabular-nums font-medium"
+                        : "px-4 py-3 tabular-nums font-medium"
+                  }
+                >
+                  {moneyCell(workspaceTable, row.balanceGbp)}
+                </td>
                 <td data-label="Status" className={workspaceTable ? undefined : "px-4 py-3"}>
                   {workspaceTable ? (
                     <span
@@ -332,29 +353,31 @@ export function HirePaymentScheduleTable({
   );
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="min-w-[12rem] flex-1 space-y-1">
-          <span className="text-xs font-medium text-rph-fg-muted">Search</span>
-          <input
-            className="rph-input w-full"
-            placeholder="Period, status, amount…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </label>
-        <div className="min-w-[10rem] space-y-1">
-          <span className="text-xs font-medium text-rph-fg-muted">Status</span>
-          <RphSelect
-            value={statusFilter}
-            aria-label="Filter by status"
-            options={statusFilterOptions}
-            onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}
-          />
+    <div className={balanceTable ? "hire-balance-rent-schedule-table" : "space-y-3"}>
+      {!balanceTable ? (
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="min-w-[12rem] flex-1 space-y-1">
+            <span className="text-xs font-medium text-rph-fg-muted">Search</span>
+            <input
+              className="rph-input w-full"
+              placeholder="Period, status, amount…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </label>
+          <div className="min-w-[10rem] space-y-1">
+            <span className="text-xs font-medium text-rph-fg-muted">Status</span>
+            <RphSelect
+              value={statusFilter}
+              aria-label="Filter by status"
+              options={statusFilterOptions}
+              onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}
+            />
+          </div>
         </div>
-      </div>
+      ) : null}
 
-      {readOnly ? (
+      {readOnly && !balanceTable ? (
         <p className="rph-muted text-sm">
           Contract ended — schedule is read-only. Open History on a row to view payment audit.
         </p>
@@ -363,7 +386,7 @@ export function HirePaymentScheduleTable({
       {rowError ? <p className="rph-alert-error text-sm">{rowError}</p> : null}
 
       {workspaceTable ? (
-        <div className="hire-ws-payments-table-wrap !px-0 !pb-0">
+        <div className={`hire-ws-payments-table-wrap ${balanceTable ? "hire-balance-rent-schedule-table-wrap" : "!px-0 !pb-0"}`}>
           <div className="max-h-[min(60vh,28rem)] overflow-y-auto overscroll-y-contain">{tableBody}</div>
         </div>
       ) : (

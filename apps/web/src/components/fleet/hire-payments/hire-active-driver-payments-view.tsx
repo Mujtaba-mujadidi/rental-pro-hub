@@ -1,11 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import {
-  submitDriverHirePaymentAction,
-  type HirePaymentsPageData,
-} from "@/app/actions/hire-payments";
-import { HirePaymentComposer } from "@/components/fleet/hire-payments/hire-payment-composer";
+import type { HirePaymentsPageData } from "@/app/actions/hire-payments";
+import { HireExtraChargesPanel } from "@/components/fleet/hire-charges/hire-extra-charges-panel";
+import { HireAllocatedPaymentComposer } from "@/components/fleet/hire-payments/hire-allocated-payment-composer";
 import { HirePaymentScheduleTable } from "@/components/fleet/hire-payments/hire-payment-schedule-table";
 import { HireUpcomingPaymentsTable } from "@/components/fleet/hire-payments/hire-upcoming-payments-table";
 import { HireDepositPendingBanner } from "@/components/fleet/hire-dashboard/hire-deposit-pending-banner";
@@ -15,6 +13,7 @@ import {
   buildActiveHirePaymentPositionFromPage,
   buildFullPaymentScheduleSummary,
   depositOutstandingHint,
+  extraChargesOutstandingHint,
   formatNextPaymentHeading,
   rentDueToDateHint,
   rentPaidStatHint,
@@ -49,6 +48,7 @@ export function HireActiveDriverPaymentsView({
     summary: data.summary,
     paymentRows: data.rows,
     includeDeposit: chrome.includeDeposit,
+    extraChargesOutstandingGbp: data.extraChargesOutstandingGbp,
     audience: "driver",
   });
   const depositRow = data.rows.find((row) => row.rowKind === "deposit") ?? null;
@@ -93,7 +93,7 @@ export function HireActiveDriverPaymentsView({
         </section>
       ) : null}
 
-      <div className="grid gap-2.5 sm:grid-cols-3">
+      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
         <HireWorkspaceStatCard
           label="Deposit outstanding"
           value={formatGbp(position.depositOutstandingGbp)}
@@ -110,6 +110,12 @@ export function HireActiveDriverPaymentsView({
           value={formatGbp(position.rentPaidGbp)}
           hint={rentPaidStatHint(position.rentPaidGbp, position.rentOutstandingGbp)}
         />
+        <HireWorkspaceStatCard
+          label="Outstanding extras"
+          value={formatGbp(position.extraChargesOutstandingGbp)}
+          hint={extraChargesOutstandingHint(position.extraChargesOutstandingGbp)}
+          warn={position.extraChargesOutstandingGbp > 0.005}
+        />
       </div>
 
       <HireDepositPendingBanner
@@ -122,6 +128,20 @@ export function HireActiveDriverPaymentsView({
         audience="driver"
       />
 
+      <HireExtraChargesPanel
+        hireGroupId={hireGroupId}
+        items={data.driverChargeLineItems}
+        outstandingGbp={data.extraChargesOutstandingGbp}
+        pendingPayment={data.extraChargePendingPayment}
+        canMutate={false}
+        payments={data}
+        audience="driver"
+        canSubmitDriverPayment={data.canSubmitPayment}
+        onReload={onReload}
+        onAllocationChange={onHighlightedRowIdsChange}
+        busy={busy}
+      />
+
       <section className="hire-ws-payments-panel">
         <header className="hire-ws-payments-panel-header flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
@@ -131,27 +151,15 @@ export function HireActiveDriverPaymentsView({
             </p>
           </div>
           {data.canSubmitPayment ? (
-            <HirePaymentComposer
+            <HireAllocatedPaymentComposer
               hireGroupId={hireGroupId}
-              scheduleRows={data.rows}
-              scheduleBalanceGbp={data.summary.scheduleBalanceGbp}
-              paymentAccount={data.paymentAccount}
-              canSubmit
+              payments={data}
               asDriver
               submitLabel="Submit payment"
               triggerLabel="Submit payment"
               onAllocationChange={onHighlightedRowIdsChange}
               onSuccess={onReload}
               busy={busy}
-              onSubmit={async (input) => {
-                const res = await submitDriverHirePaymentAction({
-                  hireGroupId,
-                  amountGbp: input.amountGbp,
-                  paymentReference: input.paymentReference,
-                });
-                if (res.ok) onReload();
-                return res;
-              }}
             />
           ) : null}
         </header>

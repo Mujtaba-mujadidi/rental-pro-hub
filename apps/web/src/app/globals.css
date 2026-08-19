@@ -997,6 +997,349 @@ html {
   @apply text-[11px] font-medium text-amber-800 dark:text-amber-200;
 }
 
+/* Active hire balance workspace — matches balances overview mockup */
+.hire-balance-workspace {
+  @apply space-y-3;
+}
+.hire-balance-page-header {
+  @apply space-y-1;
+}
+.hire-balance-page-header-top {
+  @apply flex flex-wrap items-center justify-between gap-2;
+}
+.hire-balance-page-header-tools-desktop {
+  @apply hidden lg:block;
+}
+.hire-balance-page-header-tools-mobile {
+  @apply space-y-2 pt-3 lg:hidden;
+}
+.hire-balance-page-header-tools-row {
+  @apply grid grid-cols-2 gap-2;
+}
+.hire-balance-page-header-tools-row .hire-ws-inspection-download-btn {
+  @apply h-9 w-full justify-center px-2 text-center;
+}
+.hire-balance-page-header-meta {
+  @apply flex flex-wrap items-center gap-2 pt-1;
+}
+.hire-balance-page-badge {
+  @apply inline-flex rounded-full bg-sky-100 px-2 py-0.5 text-xs font-semibold text-sky-800 dark:bg-sky-950/40 dark:text-sky-100;
+}
+.hire-balance-page-reference {
+  @apply inline-flex rounded-full bg-rph-chrome px-2 py-0.5 font-mono text-[11px] font-medium uppercase tracking-wide text-rph-fg-secondary;
+}
+.hire-balance-page-header-top .rph-btn-primary {
+  @apply h-9 px-3 text-sm;
+}
+.hire-balance-page-title {
+  @apply text-xl font-semibold tracking-tight text-rph-fg sm:text-2xl;
+}
+.hire-balance-page-line {
+  @apply text-sm text-rph-fg-secondary;
+}
+.hire-balance-chrome {
+  @apply flex flex-wrap items-center justify-between gap-3;
+}
+.hire-balance-shell {
+  @apply overflow-hidden rounded-2xl border border-rph-border bg-rph-raised shadow-sm;
+}
+.hire-balance-tabs {
+  @apply -mb-px flex gap-1 overflow-x-auto border-b border-rph-border bg-rph-page/40 px-4 pt-2 [scrollbar-width:thin] sm:gap-2 sm:px-5;
+}
+.hire-balance-tab {
+  @apply shrink-0 border-b-2 border-transparent px-2.5 pb-2.5 pt-1 text-sm font-medium text-rph-fg-muted transition hover:text-rph-fg sm:px-3;
+}
+.hire-balance-tab-active {
+  @apply border-rph-link font-semibold text-rph-link;
+}
+.hire-balance-shell-body {
+  @apply p-4 sm:p-5;
+}
+.hire-balance-shell-statement {
+  @apply flex min-h-0 flex-col gap-3 overflow-visible rounded-none border-0 bg-transparent shadow-none lg:h-[min(72vh,42rem)];
+}
+.hire-balance-shell-statement .hire-balance-tabs {
+  @apply rounded-2xl border border-rph-border bg-rph-raised px-4 pt-2 shadow-sm sm:px-5;
+}
+.hire-balance-shell-body-statement {
+  @apply flex min-h-0 flex-1 flex-col overflow-visible p-0 lg:overflow-hidden;
+}
+.hire-balance-overview {
+  @apply space-y-3;
+}
+.hire-balance-hero {
+  @apply rounded-xl bg-rph-rail px-4 py-3 text-white shadow-sm sm:px-5 sm:py-3.5 dark:bg-rph-rail-soft;
+}
+.hire-balance-hero-inner {
+  @apply flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between;
+}
+.hire-balance-hero-badge {
+  @apply inline-flex rounded-full bg-amber-300/95 px-2 py-px text-[10px] font-semibold leading-tight text-amber-950;
+}
+.hire-balance-hero-label {
+  @apply mt-1.5 text-xs font-medium text-white/80;
+}
+.hire-balance-hero-amount {
+  @apply mt-0.5 text-2xl font-semibold tabular-nums tracking-tight sm:text-[1.75rem] sm:leading-tight;
+}
+.hire-balance-hero-breakdown {
+  @apply mt-1 text-xs text-white/70;
+}
+.hire-balance-hero .rph-btn-primary {
+  @apply h-9 shrink-0 rounded-lg bg-white px-3.5 text-xs font-semibold text-rph-rail shadow-sm hover:bg-white/90;
+}
+.hire-balance-kpi-grid {
+  @apply grid gap-3 sm:grid-cols-2 xl:grid-cols-4;
+}
+.hire-balance-kpi {
+  @apply rounded-xl border border-rph-border bg-rph-raised p-4 shadow-sm;
+}
+.hire-balance-kpi-warn {
+  @apply border-amber-200/80 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/20;
+}
+.hire-balance-kpi-label {
+  @apply text-xs font-medium text-rph-fg-muted;
+}
+.hire-balance-kpi-value {
+  @apply mt-1.5 text-2xl font-semibold tabular-nums tracking-tight text-rph-fg;
+}
+.hire-balance-kpi-value-paid {
+  @apply text-emerald-700 dark:text-emerald-300;
+}
+.hire-balance-kpi-hint {
+  @apply mt-1 text-xs leading-relaxed text-rph-fg-muted;
+}
+.hire-balance-detail-grid {
+  @apply grid gap-3 lg:grid-cols-2;
+}
+.hire-balance-panel {
+  @apply rounded-xl border border-rph-border bg-rph-raised p-4 shadow-sm sm:p-5;
+}
+.hire-balance-panel-head {
+  @apply flex items-start justify-between gap-3;
+}
+.hire-balance-panel-title {
+  @apply mt-1 text-base font-semibold text-rph-fg;
+}
+.hire-balance-panel-link {
+  @apply shrink-0 text-sm font-medium text-rph-link hover:text-rph-link-hover;
+}
+.hire-balance-rent-schedule {
+  @apply -mx-4 -mb-4 sm:-mx-5 sm:-mb-5;
+}
+.hire-balance-rent-schedule-header {
+  @apply flex flex-wrap items-start justify-between gap-3 border-b border-rph-border px-4 py-4 sm:px-5;
+}
+.hire-balance-rent-schedule-title {
+  @apply mt-1 text-base font-semibold text-rph-fg;
+}
+.hire-balance-rent-schedule-desc {
+  @apply mt-1 text-xs leading-relaxed text-rph-fg-secondary;
+}
+.hire-balance-rent-schedule-table-wrap {
+  @apply !px-4 !pb-0 sm:!px-5;
+}
+.hire-balance-rent-schedule-future {
+  @apply border-t border-rph-border;
+}
+.hire-balance-rent-schedule-future-toggle {
+  @apply flex w-full items-center justify-between gap-3 px-4 py-4 text-left transition-colors hover:bg-rph-page/40 sm:px-5;
+}
+.hire-balance-rent-schedule-future-link {
+  @apply shrink-0 text-sm font-medium text-rph-link hover:text-rph-link-hover;
+}
+.hire-balance-rent-schedule-future-body {
+  @apply border-t border-rph-border px-4 pb-4 sm:px-5 sm:pb-5;
+}
+.hire-balance-statement {
+  @apply grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_20rem];
+}
+.hire-balance-statement-ledger {
+  @apply flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-rph-border bg-rph-raised shadow-sm;
+}
+.hire-balance-statement-ledger-header {
+  @apply flex shrink-0 flex-col gap-3 border-b border-rph-border px-4 pt-4 sm:px-5;
+}
+.hire-balance-statement-ledger-actions {
+  @apply hidden flex-wrap items-center gap-2 lg:flex;
+}
+.hire-balance-statement-title {
+  @apply mt-1 text-base font-semibold text-rph-fg;
+}
+.hire-balance-statement-help {
+  @apply mt-1 text-xs leading-relaxed text-rph-fg-secondary;
+}
+.hire-balance-statement-filters {
+  @apply flex shrink-0 items-end gap-1;
+}
+.hire-balance-statement-filter {
+  @apply border-b-2 border-transparent px-1 pb-2.5 text-sm font-medium text-rph-fg-muted transition hover:text-rph-fg;
+}
+.hire-balance-statement-filter-active {
+  @apply border-rph-link font-semibold text-rph-link;
+}
+.hire-balance-statement-table-wrap {
+  @apply min-h-0 flex-1 overflow-visible px-4 py-1 sm:px-5 lg:overflow-y-auto lg:overscroll-contain;
+}
+.hire-balance-statement-table {
+  @apply w-full text-sm lg:min-w-[36rem];
+}
+.hire-balance-statement-table thead th {
+  @apply sticky top-0 z-[1] border-b border-rph-border bg-rph-raised py-2.5 pr-3 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-rph-fg-muted last:pr-0;
+}
+.hire-balance-statement-table tbody td {
+  @apply border-b border-rph-border/70 py-3 pr-3 align-top last:pr-0;
+}
+.hire-balance-statement-empty {
+  @apply py-8 text-center text-rph-fg-secondary;
+}
+.hire-balance-statement-date {
+  @apply whitespace-nowrap text-xs text-rph-fg-muted;
+}
+.hire-balance-statement-kind-label {
+  @apply mt-1 text-xs text-rph-fg-muted;
+}
+@media (max-width: 1023px) {
+  .hire-balance-statement-table-wrap {
+    max-height: 24.75rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .hire-balance-statement-table thead {
+    display: none;
+  }
+  .hire-balance-statement-table tbody {
+    display: block;
+  }
+  .hire-balance-statement-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "date date"
+      "activity amount"
+      "kind kind";
+    column-gap: 0.75rem;
+    padding: 0.85rem 0;
+    border-bottom: 1px solid var(--rph-border);
+  }
+  .hire-balance-statement-row td {
+    border-bottom: 0;
+    padding: 0;
+  }
+  .hire-balance-statement-date {
+    grid-area: date;
+    padding-bottom: 0.2rem;
+  }
+  .hire-balance-statement-activity {
+    grid-area: activity;
+    min-width: 0;
+  }
+  .hire-balance-statement-kind {
+    grid-area: kind;
+    padding-top: 0.45rem;
+  }
+  .hire-balance-statement-amount {
+    grid-area: amount;
+    align-self: start;
+    text-align: right;
+  }
+  .hire-balance-statement-row:last-child {
+    border-bottom: 0;
+  }
+  .hire-balance-statement-balance {
+    display: none;
+  }
+  .hire-balance-statement-empty {
+    display: block;
+    grid-column: 1 / -1;
+  }
+}
+.hire-balance-statement-type {
+  @apply inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold;
+}
+.hire-balance-statement-type-approved {
+  @apply bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100;
+}
+.hire-balance-statement-type-posted {
+  @apply bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-100;
+}
+.hire-balance-statement-side {
+  @apply min-w-0 shrink-0 lg:self-start;
+}
+.hire-balance-statement-calc {
+  @apply rounded-2xl border border-rph-border bg-rph-raised p-4 shadow-sm sm:p-5;
+}
+.hire-balance-statement-calc-list {
+  @apply mt-4 space-y-3;
+}
+.hire-balance-statement-calc-row {
+  @apply flex items-start justify-between gap-3 text-sm text-rph-fg-secondary;
+}
+.hire-balance-statement-calc-row-strong {
+  @apply border-t border-rph-border pt-3 text-rph-fg;
+}
+.hire-balance-statement-calc-note {
+  @apply mt-4 text-xs leading-relaxed text-rph-fg-muted;
+}
+.hire-balance-status-pill {
+  @apply inline-flex shrink-0 rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-semibold text-sky-800 dark:bg-sky-950/40 dark:text-sky-100;
+}
+.hire-balance-ledger {
+  @apply mt-4 divide-y divide-rph-border border-t border-rph-border;
+}
+.hire-balance-ledger-row {
+  @apply flex items-center justify-between gap-4 py-3 text-sm;
+}
+.hire-balance-ledger-label {
+  @apply text-rph-fg-secondary;
+}
+.hire-balance-ledger-value {
+  @apply font-medium tabular-nums text-rph-fg;
+}
+.hire-balance-ledger-footer {
+  @apply mt-4 flex items-center justify-between gap-3 rounded-lg border border-sky-200/80 bg-sky-50/80 px-3 py-2.5 dark:border-sky-900/50 dark:bg-sky-950/25;
+}
+.hire-balance-future-date {
+  @apply mt-4 text-sm text-rph-fg-secondary;
+}
+.hire-balance-future-amount {
+  @apply mt-1 text-3xl font-semibold tabular-nums tracking-tight text-rph-fg;
+}
+.hire-balance-future-note {
+  @apply mt-4 rounded-lg border border-amber-200/80 bg-amber-50/80 px-3 py-2.5 text-xs leading-relaxed text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-100;
+}
+.hire-balance-charge-row {
+  @apply mt-4 flex flex-col gap-4 border-t border-rph-border pt-4 xl:flex-row xl:items-center xl:justify-between;
+}
+.hire-balance-charge-main {
+  @apply flex min-w-0 items-start gap-3;
+}
+.hire-balance-charge-icon {
+  @apply inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-sm font-bold text-amber-800 dark:bg-amber-950/40 dark:text-amber-100;
+}
+.hire-balance-charge-title {
+  @apply text-sm font-semibold text-rph-fg;
+}
+.hire-balance-charge-meta {
+  @apply mt-1 text-xs leading-relaxed text-rph-fg-secondary;
+}
+.hire-balance-charge-actions {
+  @apply flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-end xl:shrink-0;
+}
+.hire-balance-charge-metrics {
+  @apply flex flex-wrap items-end gap-5 sm:gap-6;
+}
+.hire-balance-charge-metric-label {
+  @apply text-[10px] font-semibold uppercase tracking-wide text-rph-fg-muted;
+}
+.hire-balance-charge-metric-value {
+  @apply mt-0.5 text-sm tabular-nums text-rph-fg;
+}
+.hire-balance-charge-metric-value-strong {
+  @apply text-base font-semibold;
+}
+
 .hire-ws-details-layout {
   @apply pb-2;
 }

@@ -97,6 +97,7 @@ export function HireDashboardClient() {
         context={data.overview}
         chrome={chrome}
         paymentRows={paymentRows}
+        extraChargesOutstandingGbp={payments.extraChargesOutstandingGbp}
         paymentsHref={`${base}/payments`}
         detailsHref={`${base}/details`}
         onRecordPayment={

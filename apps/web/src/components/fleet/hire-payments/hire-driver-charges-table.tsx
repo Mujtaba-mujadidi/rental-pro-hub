@@ -1,7 +1,7 @@
 "use client";
 
 import type { HireDriverChargeWorkspaceRow } from "@/app/actions/rental-hire-termination";
-import { formatUkDateTime } from "@/lib/datetime/uk";
+import { formatUkDate } from "@/lib/datetime/uk";
 import { formatGbp } from "@/lib/fleet/maintenance";
 
 export function HireDriverChargesTable({
@@ -23,7 +23,7 @@ export function HireDriverChargesTable({
         </h2>
         <p className="rph-muted mt-0.5 text-xs">{description}</p>
       </div>
-      <div className="overflow-x-auto">
+      <div className="max-h-[min(60vh,28rem)] overflow-x-auto overflow-y-auto overscroll-y-contain">
         <table className="min-w-full text-sm">
           <thead className="bg-rph-chrome/60 text-left text-xs uppercase tracking-wide text-rph-fg-muted">
             <tr>
@@ -44,7 +44,7 @@ export function HireDriverChargesTable({
                 </td>
                 <td className="px-4 py-3 text-rph-fg-secondary sm:px-5">{item.resolutionLabel}</td>
                 <td className="px-4 py-3 text-rph-fg-secondary sm:px-5">
-                  {item.createdAt ? formatUkDateTime(item.createdAt) : "—"}
+                  {formatUkDate(item.chargedOn || item.createdAt)}
                 </td>
               </tr>
             ))}

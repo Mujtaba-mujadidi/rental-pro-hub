@@ -4,16 +4,21 @@ import {
   exportDriverHirePaymentStatementAction,
   exportHirePaymentStatementAction,
 } from "@/app/actions/hire-payments";
+import { exportHireBalanceAccountStatementAction } from "@/app/actions/rental-hire-termination";
 import { useState, useTransition } from "react";
 
 export function HirePaymentStatementDownloadButton({
   hireGroupId,
   variant = "banner",
   asDriver = false,
+  source = "hire-payments",
+  className,
 }: {
   hireGroupId: string;
   variant?: "banner" | "default";
   asDriver?: boolean;
+  source?: "hire-payments" | "balance-account";
+  className?: string;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -22,9 +27,12 @@ export function HirePaymentStatementDownloadButton({
     setError(null);
     startTransition(() => {
       void (async () => {
-        const res = asDriver
-          ? await exportDriverHirePaymentStatementAction(hireGroupId)
-          : await exportHirePaymentStatementAction(hireGroupId);
+        const res =
+          source === "balance-account"
+            ? await exportHireBalanceAccountStatementAction(hireGroupId)
+            : asDriver
+              ? await exportDriverHirePaymentStatementAction(hireGroupId)
+              : await exportHirePaymentStatementAction(hireGroupId);
         if (!res.ok) {
           setError(res.error);
           return;
@@ -42,7 +50,7 @@ export function HirePaymentStatementDownloadButton({
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className={`flex flex-col gap-1 ${className ?? "items-end"}`}>
       <button
         type="button"
         className={
@@ -53,7 +61,7 @@ export function HirePaymentStatementDownloadButton({
         onClick={download}
       >
         <DownloadIcon />
-        {pending ? "Preparing…" : "Download statement"}
+        {pending ? "Preparing…" : variant === "banner" ? "Download statement" : "Download account statement"}
       </button>
       {error ? (
         <p className={`text-xs ${variant === "banner" ? "text-red-200" : "text-red-600"}`}>{error}</p>

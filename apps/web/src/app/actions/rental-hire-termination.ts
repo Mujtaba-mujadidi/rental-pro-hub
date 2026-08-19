@@ -5,11 +5,16 @@
  * Transaction side effects: see @/lib/fleet/hire-payment-transactions.ts
  */
 
-import { loadHirePaymentsPageAction, type HirePaymentPageRow } from "@/app/actions/hire-payments";
+import { loadHirePaymentsPageAction, type HirePaymentPageRow, type HirePaymentsPageData } from "@/app/actions/hire-payments";
 import { revalidatePath } from "next/cache";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
 import { canReadRentals, canWriteRentals } from "@/lib/auth/rental-permissions";
+import {
+  assertStaffHireSubcompanyAccess,
+  loadUserAccessibleSubcompanyIds,
+  staffCanAccessHireSubcompany,
+} from "@/lib/auth/rental-subcompany-access";
 import { formatUkDate, ukTodayYmd } from "@/lib/datetime/uk";
 import { logHireGroupEvent } from "@/lib/fleet/hire-audit";
 import { driverDocumentsRetainUntilYmd } from "@/lib/fleet/hire-document-retention";
@@ -45,14 +50,27 @@ import {
   type HireSettlementResolution,
 } from "@/lib/fleet/hire-settlement-resolution";
 import {
-  hireDriverChargeResolutionLabel,
-  hireDriverChargeTypeLabel,
   mapDriverChargeLineItemsFromDb,
+  outstandingExtraChargesGbp,
+  toHireDriverChargeWorkspaceView,
   type DriverChargeLineItemDbRow,
 } from "@/lib/fleet/hire-driver-charges";
 import type { HireTerminationRentBillingMode } from "@/lib/fleet/hire-termination-billing";
 import { HIRE_TERMINATION_RENT_BILLING_MODES } from "@/lib/fleet/hire-termination-billing";
-import { buildHireSettlementBreakdown, type HireSettlementBreakdown } from "@/lib/fleet/hire-settlement-breakdown";
+import { applySignedChargeDeltaToSettlementBalance } from "@/lib/fleet/hire-inspection-damage-charges";
+import {
+  buildActiveHireSettlementBreakdown,
+  buildHireSettlementBreakdown,
+  type HireSettlementBreakdown,
+} from "@/lib/fleet/hire-settlement-breakdown";
+import { hireBalanceReference, hireSettlementOpeningDetail, buildHireBalanceAccountStatementContent } from "@/lib/fleet/hire-settlement-balance-display";
+import {
+  activeHireSettlementOpenBalance,
+  buildHireSettlementStatement,
+  hireActiveRentToSettlementEntries,
+  type HireSettlementStatement,
+} from "@/lib/fleet/hire-settlement-statement";
+import { calendarYmdToUtcNoonIso, parseStaffManualChargeDateYmd } from "@/lib/fleet/hire-driver-charge-mutation";
 import { computeHireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
 import { settlementPaymentMethodRequiresAccount } from "@/lib/fleet/hire-settlement-payment-method";
 import { syncVehicleStatusForHireGroup } from "@/lib/fleet/sync-vehicle-hire-status";
@@ -76,6 +94,12 @@ import {
 } from "@/lib/fleet/hire-termination-summary";
 import { loadDriverLabelsMap } from "@/lib/fleet/driver-labels";
 import type { RentCadence } from "@/lib/fleet/hire-types";
+import {
+  resolveHireBalanceLessorSubcompanyId,
+  resolveHireLessorDisplayName,
+  shouldUseFrozenLessorSnapshot,
+  snapshotHasLessorIdentity,
+} from "@/lib/rental/subcompany-legal-snapshot";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -134,6 +158,9 @@ export type HireDriverChargeWorkspaceRow = {
   resolutionLabel: string;
   description: string | null;
   createdAt: string;
+  chargedOn: string | null;
+  sourceKind: string;
+  canMutate: boolean;
 };
 
 export type HireBalancePaymentAccountOption = {
@@ -398,6 +425,38 @@ export async function terminateHireGroupAction(input: {
       ? input.depositDispositionReason?.trim() || null
       : null;
 
+  const extraChargesRes = await admin
+    .from("vehicle_hire_driver_charge_line_items")
+    .select(
+      "id, hire_group_id, charge_type, amount_gbp, resolution, source_kind, source_id, description, balance_payment_id, charged_on, created_at",
+    )
+    .eq("hire_group_id", input.hireGroupId.trim());
+  const extraReceiptsRes = await admin
+    .from("vehicle_hire_balance_payments")
+    .select("amount_gbp, direction, payment_category")
+    .eq("hire_group_id", input.hireGroupId.trim());
+  const outstandingExtrasGbp = outstandingExtraChargesGbp(
+    mapDriverChargeLineItemsFromDb((extraChargesRes.data ?? []) as DriverChargeLineItemDbRow[]),
+    (extraReceiptsRes.data ?? []).map((payment) => ({
+      amountGbp: Number(payment.amount_gbp ?? 0),
+      direction: (payment.direction as string | null) ?? null,
+      paymentCategory: (payment.payment_category as string | null) ?? "settlement",
+    })),
+  );
+  const settlementDiscountGbp = balanceState.settlementDiscountGbp;
+  if (outstandingExtrasGbp > 0.005) {
+    const nextBalance = applySignedChargeDeltaToSettlementBalance({
+      settlementBalanceDirection: balanceState.settlementBalanceDirection,
+      settlementBalanceGbp: balanceState.settlementBalanceGbp,
+      deltaGbp: outstandingExtrasGbp,
+    });
+    balanceState = {
+      ...balanceState,
+      settlementBalanceDirection: nextBalance.settlementBalanceDirection,
+      settlementBalanceGbp: nextBalance.settlementBalanceGbp,
+    };
+  }
+
   const { error: updateError } = await admin
     .from("vehicle_hire_groups")
     .update({
@@ -410,7 +469,7 @@ export async function terminateHireGroupAction(input: {
         disposition === "refund_partial" ? Number(input.depositRefundAmountGbp ?? 0) : null,
       termination_settlement: accounts,
       settlement_resolution: resolution,
-      settlement_discount_gbp: balanceState.settlementDiscountGbp,
+      settlement_discount_gbp: settlementDiscountGbp,
       settlement_balance_gbp: balanceState.settlementBalanceGbp,
       settlement_balance_direction: balanceState.settlementBalanceDirection,
       driver_documents_retain_until: retainUntil,
@@ -462,7 +521,7 @@ export async function terminateHireGroupAction(input: {
       depositDispositionReason: depositReason,
       rentBillingMode: preview.data.accounts.rentBillingMode,
       settlementResolution: resolution,
-      settlementDiscountGbp: balanceState.settlementDiscountGbp,
+      settlementDiscountGbp,
       driverDocumentsRetainUntil: retainUntil,
     },
   });
@@ -483,7 +542,7 @@ export async function listHireOpenBalancesAction(): Promise<
   const { data: groups, error } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, terminated_at, settlement_balance_gbp, settlement_balance_direction, driver_documents_retain_until, driver_email, driver_licence_number, vehicles(vrm)",
+      "id, terminated_at, settlement_balance_gbp, settlement_balance_direction, driver_documents_retain_until, driver_email, driver_licence_number, subcompany_id, vehicles(vrm)",
     )
     .eq("parent_company_id", companyId)
     .in("status", ["terminated", "completed"])
@@ -491,10 +550,12 @@ export async function listHireOpenBalancesAction(): Promise<
     .neq("settlement_balance_direction", "settled")
     .order("terminated_at", { ascending: false })
     .limit(200);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: "Could not load open balances." };
 
+  const accessible = await loadUserAccessibleSubcompanyIds(profile);
   const rows: HireOpenBalanceRow[] = [];
   for (const group of groups ?? []) {
+    if (!staffCanAccessHireSubcompany(accessible, (group.subcompany_id as string | null) ?? null)) continue;
     const direction = group.settlement_balance_direction as
       | "driver_owes_company"
       | "company_owes_driver"
@@ -633,14 +694,31 @@ export async function addHireBalanceNoteAction(input: {
   const body = input.body.trim();
   if (!body) return { ok: false, error: "Enter a note." };
 
+  const companyId = profile.company_id?.trim();
+  if (!companyId) return { ok: false, error: "No active company." };
+
   const supabase = await createClient();
+  const { data: group, error: groupError } = await supabase
+    .from("vehicle_hire_groups")
+    .select("id, subcompany_id")
+    .eq("id", input.hireGroupId.trim())
+    .eq("parent_company_id", companyId)
+    .maybeSingle();
+  if (groupError) return { ok: false, error: "Could not save note." };
+  if (!group) return { ok: false, error: "Hire not found." };
+  const scope = await assertStaffHireSubcompanyAccess(
+    profile,
+    (group.subcompany_id as string | null) ?? null,
+  );
+  if (!scope.ok) return scope;
+
   const { error } = await supabase.from("vehicle_hire_balance_notes").insert({
     hire_group_id: input.hireGroupId.trim(),
     body,
     follow_up_at: input.followUpAt?.trim() || null,
     created_by_user_id: user.id,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: "Could not save note." };
 
   await revalidateHireTermination(input.hireGroupId.trim());
   return { ok: true };
@@ -653,23 +731,40 @@ export async function recordHireBalancePaymentAction(input: {
   paymentAccountId?: string | null;
   paymentReference?: string;
   notes?: string;
+  paidOnYmd?: string | null;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const { profile, user } = await requireRentalCompanyArea();
+  const writable = await assertRentalCompanyWritable(profile);
+  if (!writable.ok) return writable;
   if (!canWriteRentals(profile)) return { ok: false, error: "You do not have permission." };
+  const companyId = profile.company_id?.trim();
+  if (!companyId) return { ok: false, error: "No active company." };
 
   const method = parseRefundMethod(input.paymentMethod.trim());
   if (!method) return { ok: false, error: "Select a payment method." };
   const amount = Number(input.amountGbp);
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "Enter a valid amount." };
+  const paidOnYmd = input.paidOnYmd?.trim()
+    ? parseStaffManualChargeDateYmd(input.paidOnYmd)
+    : null;
+  if (input.paidOnYmd?.trim() && !paidOnYmd) {
+    return { ok: false, error: "Enter a valid payment date." };
+  }
 
   const supabase = await createClient();
   const { data: group, error: groupError } = await supabase
     .from("vehicle_hire_groups")
-    .select("parent_company_id, default_payment_account_id, settlement_balance_gbp, settlement_balance_direction")
+    .select("parent_company_id, subcompany_id, default_payment_account_id, settlement_balance_gbp, settlement_balance_direction")
     .eq("id", input.hireGroupId.trim())
+    .eq("parent_company_id", companyId)
     .maybeSingle();
-  if (groupError) return { ok: false, error: groupError.message };
+  if (groupError) return { ok: false, error: "Could not record payment." };
   if (!group) return { ok: false, error: "Hire not found." };
+  const paymentScope = await assertStaffHireSubcompanyAccess(
+    profile,
+    (group.subcompany_id as string | null) ?? null,
+  );
+  if (!paymentScope.ok) return paymentScope;
 
   const checkinCompleted = await loadHireCheckinCompleted(supabase, input.hireGroupId.trim());
   const finalizationBlock = assertHireSettlementFinalizationAllowed(checkinCompleted);
@@ -717,6 +812,7 @@ export async function recordHireBalancePaymentAction(input: {
     payment_category: "settlement",
     notes: input.notes?.trim() || null,
     recorded_by_user_id: user.id,
+    ...(paidOnYmd ? { paid_at: calendarYmdToUtcNoonIso(paidOnYmd) } : {}),
   });
   if (error) return { ok: false, error: error.message };
 
@@ -731,7 +827,8 @@ export async function recordHireBalancePaymentAction(input: {
       settlement_balance_direction: openDirection,
       settlement_balance_gbp: openDirection === "settled" ? 0 : Math.abs(remaining),
     })
-    .eq("id", input.hireGroupId.trim());
+    .eq("id", input.hireGroupId.trim())
+    .eq("parent_company_id", companyId);
 
   await revalidateHireTermination(input.hireGroupId.trim());
   return { ok: true };
@@ -817,7 +914,7 @@ export async function loadDriverHireSettlementAction(
     supabase
       .from("vehicle_hire_driver_charge_line_items")
       .select(
-        "id, hire_group_id, charge_type, amount_gbp, resolution, source_kind, source_id, description, created_at",
+        "id, hire_group_id, charge_type, amount_gbp, resolution, source_kind, source_id, description, balance_payment_id, charged_on, created_at",
       )
       .eq("hire_group_id", hireGroupId.trim())
       .order("created_at", { ascending: false }),
@@ -825,16 +922,7 @@ export async function loadDriverHireSettlementAction(
 
   const driverChargeLineItems: HireDriverChargeWorkspaceRow[] = mapDriverChargeLineItemsFromDb(
     (chargeRows ?? []) as DriverChargeLineItemDbRow[],
-  ).map((item) => ({
-    id: item.id,
-    chargeType: item.chargeType,
-    chargeTypeLabel: hireDriverChargeTypeLabel(item.chargeType),
-    amountGbp: item.amountGbp,
-    resolution: item.resolution,
-    resolutionLabel: hireDriverChargeResolutionLabel(item.resolution),
-    description: item.description ?? null,
-    createdAt: item.createdAt ?? "",
-  }));
+  ).map((item) => toHireDriverChargeWorkspaceView(item, { allowMutate: false }));
 
   const settlementBalance = computeHireWorkspaceSettlementBalance({
     settlementBalanceDirection: direction,
@@ -875,6 +963,7 @@ export async function loadDriverHireSettlementAction(
           openBalanceGbp: settlementBalance.openBalanceGbp,
           openDirection: settlementBalance.settlementDirection,
           driverChargesGbp: driverChargesOnBalanceGbp,
+          extraCharges: driverChargeLineItems,
           settlementPaymentsToDriverGbp,
           settlementPaymentsFromDriverGbp,
           audience: "driver",
@@ -907,18 +996,32 @@ export async function loadDriverHireSettlementAction(
 
 export type HireSettlementWorkspaceData = {
   hireGroupId: string;
+  hireStatus: string;
   vehicleVrm: string | null;
   driverLabel: string | null;
+  companyName: string | null;
+  activatedAt: string | null;
   terminatedAt: string | null;
   settlementDirection: "driver_owes_company" | "company_owes_driver" | "settled";
   openBalanceGbp: number;
   settlementBreakdown: HireSettlementBreakdown | null;
+  extraChargesOutstandingGbp: number;
   payments: HireBalancePaymentRow[];
   driverChargeLineItems: HireDriverChargeWorkspaceRow[];
   notes: HireBalanceNoteRow[];
   paymentAccounts: HireBalancePaymentAccountOption[];
   defaultPaymentAccountId: string | null;
   canWrite: boolean;
+  statement: HireSettlementStatement;
+  endedPayments: HirePaymentsPageData | null;
+  activePayments: HirePaymentsPageData | null;
+  activeBalanceMetrics: {
+    extraChargesGbp: number;
+    extraChargesPaidGbp: number;
+  } | null;
+  balanceReference: string;
+  rentAmountGbp: number | null;
+  rentCadence: string | null;
 };
 
 /** Staff settlement workspace for ended hires (open or settled). */
@@ -927,28 +1030,38 @@ export async function loadHireSettlementWorkspaceAction(hireGroupId: string): Pr
 > {
   const { profile } = await requireRentalCompanyArea();
   if (!canReadRentals(profile)) return { ok: false, error: "You do not have permission." };
+  const companyId = profile.company_id?.trim();
+  if (!companyId) return { ok: false, error: "No active company." };
 
   const supabase = await createClient();
   const { data: group, error } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, status, terminated_at, settlement_balance_gbp, settlement_balance_direction, parent_company_id, default_payment_account_id, driver_email, driver_licence_number, termination_settlement, vehicles(vrm)",
+      "id, status, start_date, terminated_at, activated_at, rent_amount_gbp, rent_cadence, settlement_balance_gbp, settlement_balance_direction, parent_company_id, subcompany_id, subcompany_legal_snapshot, default_payment_account_id, driver_email, driver_licence_number, driver_user_id, termination_settlement, vehicles(vrm, subcompany_id), companies(name)",
     )
     .eq("id", hireGroupId.trim())
+    .eq("parent_company_id", companyId)
     .maybeSingle();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: "Could not load hire settlement." };
   if (!group) return { ok: false, error: "Hire not found." };
 
+  const scope = await assertStaffHireSubcompanyAccess(
+    profile,
+    (group.subcompany_id as string | null) ?? null,
+  );
+  if (!scope.ok) return scope;
+
   const status = String(group.status ?? "");
-  if (status !== "terminated" && status !== "completed") {
-    return { ok: false, error: "Settlement is only available after the contract ends." };
+  const ended = status === "terminated" || status === "completed";
+  if (status !== "active" && !ended) {
+    return { ok: false, error: "Hire not found." };
   }
 
-  const direction = (group.settlement_balance_direction as
+  const storedDirection = (group.settlement_balance_direction as
     | "driver_owes_company"
     | "company_owes_driver"
     | "settled"
-    | null) ?? "settled";
+    | null) ?? null;
 
   const [{ data: notes }, { data: payments }, { data: chargeRows }] = await Promise.all([
     supabase
@@ -966,13 +1079,13 @@ export async function loadHireSettlementWorkspaceAction(hireGroupId: string): Pr
     supabase
       .from("vehicle_hire_driver_charge_line_items")
       .select(
-        "id, hire_group_id, charge_type, amount_gbp, resolution, source_kind, source_id, description, created_at",
+        "id, hire_group_id, charge_type, amount_gbp, resolution, source_kind, source_id, description, balance_payment_id, charged_on, created_at",
       )
       .eq("hire_group_id", hireGroupId.trim())
       .order("created_at", { ascending: false }),
   ]);
 
-  const companyId = (group.parent_company_id as string | null) ?? null;
+  const companyIdFromGroup = (group.parent_company_id as string | null) ?? null;
   const defaultPaymentAccountId = (group.default_payment_account_id as string | null) ?? null;
   const accountIds = new Set<string>();
   for (const payment of payments ?? []) {
@@ -982,11 +1095,11 @@ export async function loadHireSettlementWorkspaceAction(hireGroupId: string): Pr
   if (defaultPaymentAccountId) accountIds.add(defaultPaymentAccountId);
 
   const accountNameById = new Map<string, string>();
-  if (companyId) {
+  if (companyIdFromGroup) {
     const { data: accounts } = await supabase
       .from("company_payment_accounts")
       .select("id, name")
-      .eq("parent_company_id", companyId)
+      .eq("parent_company_id", companyIdFromGroup)
       .eq("is_active", true)
       .order("sort_order", { ascending: true })
       .order("name", { ascending: true });
@@ -1019,29 +1132,92 @@ export async function loadHireSettlementWorkspaceAction(hireGroupId: string): Pr
     paymentCategory: (payment.payment_category as string | null) ?? "settlement",
   }));
 
-  const driverChargeLineItems: HireDriverChargeWorkspaceRow[] = mapDriverChargeLineItemsFromDb(
+  const mappedChargeRows = mapDriverChargeLineItemsFromDb(
     (chargeRows ?? []) as DriverChargeLineItemDbRow[],
-  ).map((item) => ({
-    id: item.id,
-    chargeType: item.chargeType,
-    chargeTypeLabel: hireDriverChargeTypeLabel(item.chargeType),
-    amountGbp: item.amountGbp,
-    resolution: item.resolution,
-    resolutionLabel: hireDriverChargeResolutionLabel(item.resolution),
-    description: item.description ?? null,
-    createdAt: item.createdAt ?? "",
-  }));
+  );
+  const extraChargesOutstandingGbp = outstandingExtraChargesGbp(
+    mappedChargeRows,
+    mappedPayments.map((payment) => ({
+      amountGbp: payment.amountGbp,
+      direction: payment.direction ?? "received_from_driver",
+      paymentCategory: payment.paymentCategory,
+    })),
+  );
 
-  let openDirection = direction;
-  const openBalanceGbp =
-    direction === "settled"
-      ? 0
-      : Math.round(Math.abs(Number(group.settlement_balance_gbp ?? 0)) * 100) / 100;
-  if (direction === "settled") {
-    openDirection = "settled";
+  const paymentsPage = await loadHirePaymentsPageAction(hireGroupId.trim());
+  const pendingScheduleGbp = paymentsPage.ok
+    ? Math.round(
+        (paymentsPage.data.rows.reduce((sum, row) => sum + (row.pendingSubmittedGbp ?? 0), 0) +
+          (paymentsPage.data.extraChargePendingPayment?.amountGbp ?? 0)) *
+          100,
+      ) / 100
+    : 0;
+  const rentOutstandingGbp = paymentsPage.ok ? paymentsPage.data.summary.balanceGbp : 0;
+  const rentEntries = ended
+    ? { charges: [], payments: [] }
+    : hireActiveRentToSettlementEntries(paymentsPage.ok ? paymentsPage.data.rows : []);
+
+  let openDirection: "driver_owes_company" | "company_owes_driver" | "settled";
+  let openBalanceGbp: number;
+  if (ended) {
+    openDirection = storedDirection ?? "settled";
+    openBalanceGbp =
+      openDirection === "settled"
+        ? 0
+        : Math.round(Math.abs(Number(group.settlement_balance_gbp ?? 0)) * 100) / 100;
+  } else {
+    const activeOpen = activeHireSettlementOpenBalance(rentOutstandingGbp, extraChargesOutstandingGbp);
+    openDirection = activeOpen.openDirection;
+    openBalanceGbp = activeOpen.openBalanceGbp;
   }
 
-  const vehicle = group.vehicles as { vrm?: string } | null;
+  const canWrite = canWriteRentals(profile);
+  const canMutateCharges = canWrite && !(ended && openDirection === "settled");
+  const driverChargeLineItems: HireDriverChargeWorkspaceRow[] = mappedChargeRows.map((item) =>
+    toHireDriverChargeWorkspaceView(item, { allowMutate: canMutateCharges }),
+  );
+
+  const vehicle = group.vehicles as { vrm?: string; subcompany_id?: string } | null;
+  const parentCompanyName =
+    (Array.isArray(group.companies)
+      ? group.companies[0]?.name
+      : (group.companies as { name?: string | null } | null)?.name)?.trim() || null;
+  const snapshot = (group.subcompany_legal_snapshot ?? null) as Record<string, unknown> | null;
+  let companyName = parentCompanyName;
+  if (ended && snapshotHasLessorIdentity(snapshot)) {
+    companyName = resolveHireLessorDisplayName({
+      snapshot,
+      parentCompanyName,
+      hasSubcompany: true,
+    });
+  } else {
+    const effectiveSubcompanyId = resolveHireBalanceLessorSubcompanyId({
+      hireEnded: ended,
+      hireGroupSubcompanyId: (group.subcompany_id as string | null) ?? null,
+      vehicleSubcompanyId: vehicle?.subcompany_id ?? null,
+    });
+    if (effectiveSubcompanyId) {
+      const { data: subcompany } = await supabase
+        .from("subcompanies")
+        .select("name, display_name, legal_name, company_number")
+        .eq("id", effectiveSubcompanyId)
+        .eq("parent_company_id", companyId)
+        .maybeSingle();
+      if (subcompany) {
+        const useSnapshot = shouldUseFrozenLessorSnapshot({
+          hireStatus: status,
+          snapshot,
+          subcompany,
+        });
+        companyName = resolveHireLessorDisplayName({
+          snapshot: useSnapshot ? snapshot : null,
+          subcompany,
+          parentCompanyName,
+          hasSubcompany: true,
+        });
+      }
+    }
+  }
   const rawTerminationSummary = group.termination_settlement as HireTerminationAccountsSummary | null;
   const terminationSummary =
     rawTerminationSummary && typeof rawTerminationSummary === "object" ? rawTerminationSummary : null;
@@ -1061,31 +1237,119 @@ export async function loadHireSettlementWorkspaceAction(hireGroupId: string): Pr
       .filter((item) => item.resolution === "add_to_balance")
       .reduce((sum, item) => sum + item.amountGbp, 0) * 100,
   ) / 100;
-  const settlementBreakdown =
-    terminationSummary && openDirection !== "settled"
+  const extraChargesGbp = Math.round(
+    driverChargeLineItems
+      .filter((item) => item.resolution === "add_to_balance" || item.resolution === "paid_now")
+      .reduce((sum, item) => sum + item.amountGbp, 0) * 100,
+  ) / 100;
+  const extraChargesPaidNowGbp = Math.round(
+    driverChargeLineItems
+      .filter((item) => item.resolution === "paid_now")
+      .reduce((sum, item) => sum + item.amountGbp, 0) * 100,
+  ) / 100;
+  const extraChargesPaidGbp = Math.round(
+    (extraChargesPaidNowGbp + Math.max(0, driverChargesOnBalanceGbp - extraChargesOutstandingGbp)) * 100,
+  ) / 100;
+  const settlementBreakdown = ended
+    ? terminationSummary
       ? buildHireSettlementBreakdown({
           terminationSummary,
           openBalanceGbp,
           openDirection,
           driverChargesGbp: driverChargesOnBalanceGbp,
+          extraCharges: driverChargeLineItems,
           settlementPaymentsToDriverGbp,
           settlementPaymentsFromDriverGbp,
         })
+      : null
+    : buildActiveHireSettlementBreakdown({
+        rentDueGbp: paymentsPage.ok ? paymentsPage.data.summary.rentGrossAccruedGbp : 0,
+        rentDiscountGbp: paymentsPage.ok ? paymentsPage.data.summary.totalDiscountGbp : 0,
+        rentPaidGbp: paymentsPage.ok ? paymentsPage.data.summary.totalPaidGbp : 0,
+        extraChargesGbp,
+        extraCharges: driverChargeLineItems,
+        extraChargesPaidGbp,
+        openBalanceGbp,
+        openDirection,
+        pendingPaymentsGbp: pendingScheduleGbp,
+      });
+
+  const mutableChargeIds = new Set(
+    driverChargeLineItems.filter((item) => item.canMutate).map((item) => item.id),
+  );
+  const extraCharges = driverChargeLineItems.map((item) => ({
+    id: item.id,
+    chargedOn: item.chargedOn,
+    createdAt: item.createdAt,
+    chargeType: item.chargeType,
+    description: item.description,
+    amountGbp: item.amountGbp,
+    resolution: item.resolution,
+  }));
+  const extraPayments = mappedPayments.map((payment) => ({
+    id: payment.id,
+    paidAt: payment.paidAt,
+    amountGbp: payment.amountGbp,
+    direction: payment.direction ?? "received_from_driver" as const,
+    paymentCategory: payment.paymentCategory,
+    paymentMethod: payment.paymentMethod,
+    paymentReference: payment.paymentReference,
+    notes: payment.notes,
+  }));
+  const statement = buildHireSettlementStatement({
+    openingNetSettlementGbp: ended ? terminationSummary?.netSettlementGbp ?? 0 : 0,
+    openingDateYmd: (group.terminated_at as string | null)?.slice(0, 10) ?? null,
+    charges: [...rentEntries.charges, ...extraCharges],
+    payments: [...rentEntries.payments, ...extraPayments],
+    pendingScheduleGbp,
+    currentDirection: openDirection,
+    currentOpenBalanceGbp: openBalanceGbp,
+    mutableChargeIds,
+    openingActivityDetail: ended ? hireSettlementOpeningDetail(terminationSummary) : null,
+  });
+
+  const activatedAt =
+    (group.activated_at as string | null) ?? (group.start_date as string | null) ?? null;
+  const rentAmountRaw = group.rent_amount_gbp;
+  const rentAmountGbp =
+    rentAmountRaw != null && Number.isFinite(Number(rentAmountRaw))
+      ? Math.round(Number(rentAmountRaw) * 100) / 100
       : null;
+  const rentCadence = (group.rent_cadence as string | null) ?? null;
+  const balanceReference = hireBalanceReference(vehicle?.vrm ?? null, activatedAt);
+
+  const driverEmail = (group.driver_email as string | null)?.trim() || null;
+  const driverLicence = (group.driver_licence_number as string | null)?.trim() || null;
+  const driverUserId = (group.driver_user_id as string | null)?.trim() || null;
+  let driverName: string | null = null;
+  if (driverUserId) {
+    try {
+      const labels = await loadDriverLabelsMap(createSupabaseAdminClient(), [driverUserId]);
+      const label = labels.get(driverUserId)?.trim() || "";
+      if (label && label !== "Driver") {
+        const looksLikeEmail = label.includes("@");
+        if (!looksLikeEmail) driverName = label;
+      }
+    } catch {
+      driverName = null;
+    }
+  }
+  const driverLabel = driverName || driverEmail || driverLicence || null;
 
   return {
     ok: true,
     data: {
       hireGroupId: hireGroupId.trim(),
+      hireStatus: status,
       vehicleVrm: vehicle?.vrm?.trim() || null,
-      driverLabel:
-        (group.driver_email as string | null)?.trim() ||
-        (group.driver_licence_number as string | null)?.trim() ||
-        null,
+      driverLabel,
+      companyName,
+      activatedAt,
       terminatedAt: (group.terminated_at as string | null) ?? null,
       settlementDirection: openDirection,
       openBalanceGbp,
       settlementBreakdown,
+      extraChargesOutstandingGbp,
       payments: mappedPayments,
       driverChargeLineItems,
       notes: (notes ?? []).map((note) => ({
@@ -1096,8 +1360,74 @@ export async function loadHireSettlementWorkspaceAction(hireGroupId: string): Pr
       })),
       paymentAccounts,
       defaultPaymentAccountId,
-      canWrite: canWriteRentals(profile),
+      canWrite,
+      statement,
+      endedPayments: ended && paymentsPage.ok ? paymentsPage.data : null,
+      activePayments: !ended && paymentsPage.ok ? paymentsPage.data : null,
+      activeBalanceMetrics: !ended
+        ? {
+            extraChargesGbp,
+            extraChargesPaidGbp,
+          }
+        : null,
+      balanceReference,
+      rentAmountGbp,
+      rentCadence,
     },
+  };
+}
+
+export async function exportHireBalanceAccountStatementAction(
+  hireGroupId: string,
+): Promise<{ ok: true; base64: string; fileName: string } | { ok: false; error: string }> {
+  const loaded = await loadHireSettlementWorkspaceAction(hireGroupId);
+  if (!loaded.ok) return loaded;
+
+  const content = buildHireBalanceAccountStatementContent({
+    vehicleVrm: loaded.data.vehicleVrm,
+    driverLabel: loaded.data.driverLabel,
+    balanceReference: loaded.data.balanceReference,
+    currentBalanceGbp: loaded.data.openBalanceGbp,
+    rows: loaded.data.statement.rows,
+  });
+
+  const { createHireSummaryPdfCanvas } = await import("@/lib/esign/pdf-generate");
+  const { loadHireInspectionReportPdfContext } = await import(
+    "@/lib/fleet/hire-inspection-report-context"
+  );
+  const { formatUkDateTime } = await import("@/lib/datetime/uk");
+
+  const supabase = await createClient();
+  const letterhead = await loadHireInspectionReportPdfContext(supabase, hireGroupId.trim(), "checkout");
+  const summary = letterhead.ok
+    ? {
+        ...letterhead.summary,
+        title: "Account statement",
+        documentLabel: "Account statement",
+        metaLine: `${loaded.data.balanceReference} · Generated ${formatUkDateTime(new Date().toISOString())}`,
+      }
+    : {
+        title: "Account statement",
+        subtitle: loaded.data.vehicleVrm,
+        documentLabel: "Account statement",
+        metaLine: `${loaded.data.balanceReference} · Generated ${formatUkDateTime(new Date().toISOString())}`,
+      };
+
+  const canvas = await createHireSummaryPdfCanvas(summary);
+  canvas.addPage();
+  for (const section of content.sections) {
+    canvas.drawSectionHeading(section.heading);
+    for (const line of section.lines) {
+      canvas.drawBodyLine(line);
+    }
+    canvas.setY(canvas.getY() - 6);
+  }
+
+  const bytes = await canvas.finalize();
+  return {
+    ok: true,
+    base64: Buffer.from(bytes).toString("base64"),
+    fileName: content.fileName,
   };
 }
 

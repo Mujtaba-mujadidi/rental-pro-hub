@@ -61,6 +61,7 @@ describe("buildHireSummaryActionItems", () => {
         rentOutstandingGbp: 10,
         rentPaidGbp: 0,
         currentlyDueGbp: 110,
+        extraChargesOutstandingGbp: 0,
         dueBreakdownLabel: null,
       },
       paymentsHref: "/rental/hires/g1/payments",

@@ -87,7 +87,8 @@ export function HirePaymentAmendModal({
             Amend approved payment
           </h2>
           <p className="mt-1 text-sm text-rph-fg-secondary">
-            Adjust the recorded paid amount. The previous value is kept in the audit trail.
+            Adjust the recorded paid amount. Setting it to £0.00 removes the approval and marks
+            the period unpaid again. The previous value is kept in the audit trail.
           </p>
         </div>
 
@@ -109,6 +110,11 @@ export function HirePaymentAmendModal({
               onChange={(e) => setAmount(e.target.value)}
             />
             <p className="rph-meta text-xs">Maximum {formatGbp(row.netDueGbp)} for this period</p>
+            {parsedAmount === 0 ? (
+              <p className="rph-meta text-xs">
+                This will remove the approval. The period will show as unpaid again.
+              </p>
+            ) : null}
           </label>
 
           <label className="block space-y-1">

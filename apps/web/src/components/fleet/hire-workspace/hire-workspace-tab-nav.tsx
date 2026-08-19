@@ -71,6 +71,7 @@ export function HireWorkspaceTabNav({
             <Link
               key={item.href}
               href={item.href}
+              prefetch
               className={active ? "hire-ws-tab hire-ws-tab-active" : "hire-ws-tab"}
               aria-current={active ? "page" : undefined}
             >

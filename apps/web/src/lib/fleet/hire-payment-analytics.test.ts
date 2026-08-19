@@ -169,5 +169,14 @@ describe("hire-payment-analytics", () => {
         periodLabel: "08/07/2026 – 14/07/2026",
       }),
     ).toContain("approved");
+    expect(
+      formatHirePaymentEventSummary({
+        fromStatus: "approved",
+        toStatus: "not_received",
+        actorRole: "company_staff",
+        periodLabel: "12/08/2026",
+        eventKind: "status_change",
+      }),
+    ).toBe("Approval removed for 12/08/2026");
   });
 });

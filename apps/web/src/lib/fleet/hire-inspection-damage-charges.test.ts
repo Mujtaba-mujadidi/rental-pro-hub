@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyDamageChargesToSettlementBalance,
+  applySignedChargeDeltaToSettlementBalance,
   summarizeInspectionDamageCharges,
   validateInspectionDamageCharges,
 } from "@/lib/fleet/hire-inspection-damage-charges";
@@ -90,5 +91,41 @@ describe("applyDamageChargesToSettlementBalance", () => {
     });
     expect(next.settlementBalanceDirection).toBe("driver_owes_company");
     expect(next.settlementBalanceGbp).toBe(120);
+  });
+});
+
+describe("applySignedChargeDeltaToSettlementBalance", () => {
+  it("reduces an open driver balance when a charge is amended down", () => {
+    const next = applySignedChargeDeltaToSettlementBalance({
+      settlementBalanceDirection: "driver_owes_company",
+      settlementBalanceGbp: 150,
+      deltaGbp: -40,
+    });
+    expect(next.settlementBalanceDirection).toBe("driver_owes_company");
+    expect(next.settlementBalanceGbp).toBe(110);
+  });
+
+  it("reverses a charge to settled when the remaining amount is cleared", () => {
+    const next = applySignedChargeDeltaToSettlementBalance({
+      settlementBalanceDirection: "driver_owes_company",
+      settlementBalanceGbp: 40,
+      deltaGbp: -40,
+    });
+    expect(next.settlementBalanceDirection).toBe("settled");
+    expect(next.settlementBalanceGbp).toBe(0);
+  });
+
+  it("does not double-count extras already included at terminate plus a later add", () => {
+    const afterTerminate = applySignedChargeDeltaToSettlementBalance({
+      settlementBalanceDirection: "driver_owes_company",
+      settlementBalanceGbp: 100,
+      deltaGbp: 50,
+    });
+    expect(afterTerminate.settlementBalanceGbp).toBe(150);
+    const afterLaterCharge = applySignedChargeDeltaToSettlementBalance({
+      ...afterTerminate,
+      deltaGbp: 25,
+    });
+    expect(afterLaterCharge.settlementBalanceGbp).toBe(175);
   });
 });

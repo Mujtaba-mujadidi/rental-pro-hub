@@ -32,6 +32,7 @@ import {
 } from "@/lib/fleet/hire-payment-workflow";
 import type { HireTerminationRentBillingMode } from "@/lib/fleet/hire-termination-billing";
 import type { HirePaymentStatus, RentCadence } from "@/lib/fleet/hire-types";
+import { computeHireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
 import { ukTodayYmd } from "@/lib/datetime/uk";
 import { computeVehiclePnl, type VehiclePnlBreakdown } from "@/lib/fleet/vehicle-pnl";
 import { revalidateVehicleWorkspaceCache } from "@/lib/fleet/vehicle-workspace-cache";
@@ -160,6 +161,8 @@ type HireGroupIncomeSource = {
   termination_settlement?: unknown;
   deposit_disposition?: string | null;
   deposit_refund_amount_gbp?: number | string | null;
+  settlement_balance_direction?: string | null;
+  settlement_balance_gbp?: number | string | null;
 };
 
 function parseTerminationDepositGbp(raw: unknown): number {
@@ -210,6 +213,12 @@ function buildGroupContextByGroupId(groups: readonly HireGroupIncomeSource[]): M
           signedRentBalanceGbp: parseTerminationSignedRentBalanceGbp(group.termination_settlement),
           accruedRentPaidGbp: parseTerminationAccruedRentPaidGbp(group.termination_settlement),
           accruedRentDueGbp: parseTerminationAccruedRentDueGbp(group.termination_settlement),
+          settlementSettled:
+            computeHireWorkspaceSettlementBalance({
+              settlementBalanceDirection: group.settlement_balance_direction ?? null,
+              settlementBalanceGbp:
+                group.settlement_balance_gbp != null ? Number(group.settlement_balance_gbp) : 0,
+            })?.settled === true,
         },
       ];
     }),
@@ -326,7 +335,7 @@ async function loadVehicleHireIncomeContext(vehicleId: string): Promise<
   const { data: groups, error: groupsErr } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, status, terminated_at, ended_at, settlement_discount_gbp, rent_cadence, termination_settlement, deposit_disposition, deposit_refund_amount_gbp",
+      "id, status, terminated_at, ended_at, settlement_discount_gbp, rent_cadence, termination_settlement, deposit_disposition, deposit_refund_amount_gbp, settlement_balance_direction, settlement_balance_gbp",
     )
     .eq("vehicle_id", vehicleId);
   if (groupsErr) return { ok: false, error: groupsErr.message };
@@ -343,6 +352,8 @@ async function loadVehicleHireIncomeContext(vehicleId: string): Promise<
       termination_settlement: group.termination_settlement,
       deposit_disposition: group.deposit_disposition as string | null,
       deposit_refund_amount_gbp: group.deposit_refund_amount_gbp,
+      settlement_balance_direction: (group.settlement_balance_direction as string | null) ?? null,
+      settlement_balance_gbp: group.settlement_balance_gbp,
     })),
   );
   if (!groupIds.length) {
@@ -395,6 +406,7 @@ async function loadVehicleHireIncomeContext(vehicleId: string): Promise<
   const driverChargeLineItems = mapDriverChargeLineItemsFromDb(
     (chargeRows ?? []) as DriverChargeLineItemDbRow[],
   ).map((item) => ({
+    hireGroupId: item.hireGroupId,
     chargeType: item.chargeType,
     amountGbp: item.amountGbp,
     resolution: item.resolution,

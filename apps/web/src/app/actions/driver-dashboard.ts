@@ -98,6 +98,7 @@ export async function loadDriverDashboardAction(): Promise<LoadResult> {
         includeDeposit: dashboardRes.data.includeDeposit,
         summary: dashboardRes.data.summary,
         paymentRows: paymentsRes.data.rows,
+        extraChargesOutstandingGbp: paymentsRes.data.extraChargesOutstandingGbp,
         audience: "driver",
       });
       currentlyDueGbp = position.currentlyDueGbp;

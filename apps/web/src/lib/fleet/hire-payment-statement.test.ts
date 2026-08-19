@@ -65,6 +65,9 @@ function minimalPage(overrides: Partial<HirePaymentsPageData> = {}): HirePayment
     canResolveDeposit: false,
     checkinCompleted: true,
     driverChargeLineItems: [],
+    extraChargesOutstandingGbp: 0,
+    extraChargePendingPayment: null,
+    canMutateExtraCharges: false,
     rows: [
       {
         id: "d1",

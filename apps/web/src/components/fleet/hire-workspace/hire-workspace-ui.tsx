@@ -32,17 +32,20 @@ export function HireWorkspaceStatCard({
   value,
   hint,
   warn,
+  action,
 }: {
   label: string;
   value: ReactNode;
   hint?: string;
   warn?: boolean;
+  action?: ReactNode;
 }) {
   return (
     <div className={warn ? "hire-ws-stat-card hire-ws-stat-card-warn" : "hire-ws-stat-card"}>
       <p className="hire-ws-section-kicker">{label}</p>
       <p className="mt-1.5 text-xl font-semibold tabular-nums tracking-tight text-rph-fg">{value}</p>
       {hint ? <p className="mt-1 text-xs text-rph-fg-muted">{hint}</p> : null}
+      {action ? <div className="mt-2">{action}</div> : null}
     </div>
   );
 }

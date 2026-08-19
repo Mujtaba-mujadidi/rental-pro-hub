@@ -771,7 +771,7 @@ export function buildNeedsAttentionItems(input: {
       detail: ended
         ? `${formatGbpPlain(amount)} is still owed after contract end.`
         : `${formatGbpPlain(amount)} is unpaid after the rent period ended.`,
-      href: ended ? `/rental/balances/${hireId}` : `/rental/hires/${hireId}/payments`,
+      href: `/rental/balances/${hireId}`,
     });
   }
 

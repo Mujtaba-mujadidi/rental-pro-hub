@@ -8,7 +8,9 @@
  *   of the schedule (avoids double-counting schedule + settlement for the same rent).
  * - Plus deposit retention when staff forfeit or partially retain the deposit after contract end
  *   (deposit applied to rent at contract end counts as rent income, not deposit retention).
- * - Plus itemized driver charges (damage, etc.) recorded on check-in or future flows.
+ * - Plus realised driver charges: charged-now cash, extra-charge receipts, and unpaid extras
+ *   once the hire is settled (netted into settlement). Unpaid extras on an open hire are owed,
+ *   not vehicle profit.
  * - Minus settlement write-offs only (balance-ledger refunds return deposits/prepaid
  *   rent and are not contra-revenue when that rent was never recognised on the vehicle).
  */
@@ -24,8 +26,7 @@ import { summarizeHireRentSettlement } from "@/lib/fleet/hire-rent-settlement";
 import type { HirePaymentStatus, RentCadence } from "@/lib/fleet/hire-types";
 import {
   partitionBalancePaymentsForIncome,
-  sumDriverChargeIncomeByTypeGbp,
-  sumDriverChargeIncomeGbp,
+  realisedDriverChargeIncomeGbp,
   type HireDriverChargeLineItemInput,
   type HireDriverChargeType,
 } from "@/lib/fleet/hire-driver-charges";
@@ -60,6 +61,8 @@ export type HireIncomeGroupContext = {
   /** Persisted at contract end — preferred over raw schedule paid for ended hires. */
   accruedRentPaidGbp?: number | null;
   accruedRentDueGbp?: number | null;
+  /** Unpaid extras count as P&L income only after the hire is settled. */
+  settlementSettled?: boolean;
 };
 
 function roundGbp(n: number): number {
@@ -335,6 +338,54 @@ export function supplementalSettlementRentCollectionsGbp(input: {
   return roundGbp(Math.min(input.collectionsFromDriverGbp, uncollectedOnScheduleGbp));
 }
 
+function realisedDriverChargeIncomeForVehicle(input: {
+  charges: readonly HireDriverChargeLineItemInput[];
+  receipts: readonly HireRefundPaymentRow[];
+  groupContextByGroupId: ReadonlyMap<string, HireIncomeGroupContext>;
+}): {
+  totalGbp: number;
+  byTypeGbp: Partial<Record<HireDriverChargeType, number>>;
+} {
+  const fallbackGroupId =
+    input.groupContextByGroupId.size === 1 ? [...input.groupContextByGroupId.keys()][0]! : null;
+  const chargesByGroupId = new Map<string, HireDriverChargeLineItemInput[]>();
+  const receiptsByGroupId = new Map<string, HireRefundPaymentRow[]>();
+
+  for (const item of input.charges) {
+    const groupId = item.hireGroupId?.trim() || fallbackGroupId || "";
+    const list = chargesByGroupId.get(groupId) ?? [];
+    list.push(item);
+    chargesByGroupId.set(groupId, list);
+  }
+  for (const payment of input.receipts) {
+    const groupId = payment.hireGroupId?.trim() || fallbackGroupId || "";
+    const list = receiptsByGroupId.get(groupId) ?? [];
+    list.push(payment);
+    receiptsByGroupId.set(groupId, list);
+  }
+
+  const groupIds = new Set([
+    ...chargesByGroupId.keys(),
+    ...receiptsByGroupId.keys(),
+    ...input.groupContextByGroupId.keys(),
+  ]);
+  let totalGbp = 0;
+  const byTypeGbp: Partial<Record<HireDriverChargeType, number>> = {};
+  for (const groupId of groupIds) {
+    const hireSettled = input.groupContextByGroupId.get(groupId)?.settlementSettled === true;
+    const part = realisedDriverChargeIncomeGbp({
+      charges: chargesByGroupId.get(groupId) ?? [],
+      receipts: receiptsByGroupId.get(groupId) ?? [],
+      hireSettled,
+    });
+    totalGbp += part.totalGbp;
+    for (const [type, amount] of Object.entries(part.byTypeGbp) as [HireDriverChargeType, number][]) {
+      byTypeGbp[type] = roundGbp((byTypeGbp[type] ?? 0) + amount);
+    }
+  }
+  return { totalGbp: roundGbp(totalGbp), byTypeGbp };
+}
+
 export function computeVehicleHireIncomeGbp(input: {
   scheduleRows: readonly VehicleHireIncomeScheduleRow[];
   balancePayments: readonly HireRefundPaymentRow[];
@@ -447,17 +498,17 @@ export function computeVehicleHireIncomeGbp(input: {
   depositRetentionGbp = roundGbp(depositRetentionGbp);
   accruedRentDueGbp = roundGbp(accruedRentDueGbp);
   postEndPrepaidExcludedGbp = roundGbp(postEndPrepaidExcludedGbp);
-  const { settlementPayments } = partitionBalancePaymentsForIncome(input.balancePayments);
+  const { settlementPayments, driverChargePayments } = partitionBalancePaymentsForIncome(
+    input.balancePayments,
+  );
   const refundsToDriverGbp = sumHireRefundsToDriverGbp(settlementPayments);
   const collectionsFromDriverGbp = sumHireCollectionsFromDriverGbp(settlementPayments);
-  const driverChargeIncomeGbp = sumDriverChargeIncomeGbp(input.driverChargeLineItems ?? []);
-  const driverChargeIncomeByTypeGbp = sumDriverChargeIncomeByTypeGbp(
-    (input.driverChargeLineItems ?? []).map((item) => ({
-      chargeType: item.chargeType,
-      amountGbp: item.amountGbp,
-      resolution: item.resolution,
-    })),
-  );
+  const { totalGbp: driverChargeIncomeGbp, byTypeGbp: driverChargeIncomeByTypeGbp } =
+    realisedDriverChargeIncomeForVehicle({
+      charges: input.driverChargeLineItems ?? [],
+      receipts: driverChargePayments,
+      groupContextByGroupId: input.groupContextByGroupId,
+    });
 
   const singleGroupFallback = groupIds.size === 1;
   let supplementalCollectionsGbp = 0;

@@ -535,6 +535,7 @@ describe("computeVehicleHireIncomeGbp", () => {
         signedRentBalanceGbp: 57.14,
         accruedRentPaidGbp: 100,
         accruedRentDueGbp: 157.14,
+        settlementSettled: true,
       }),
       todayYmd: "2026-08-08",
     });
@@ -545,7 +546,7 @@ describe("computeVehicleHireIncomeGbp", () => {
     expect(result.driverChargeIncomeGbp).toBe(100);
   });
 
-  it("includes itemized driver charges in gross and net income", () => {
+  it("includes realised driver charges in gross and net income", () => {
     const result = computeVehicleHireIncomeGbp({
       scheduleRows: [
         {
@@ -559,7 +560,10 @@ describe("computeVehicleHireIncomeGbp", () => {
           discountTotalGbp: 0,
         },
       ],
-      balancePayments: [],
+      balancePayments: [
+        { amountGbp: 50, direction: "received_from_driver", paymentCategory: "driver_charge" },
+        { amountGbp: 25, direction: "received_from_driver", paymentCategory: "driver_charge" },
+      ],
       driverChargeLineItems: [
         {
           chargeType: "damage",
@@ -582,6 +586,38 @@ describe("computeVehicleHireIncomeGbp", () => {
     expect(result.driverChargeIncomeByTypeGbp).toEqual({ damage: 75 });
     expect(result.grossApprovedGbp).toBe(175);
     expect(result.netIncomeGbp).toBe(175);
+  });
+
+  it("does not book unpaid extras on an open hire as vehicle profit", () => {
+    const result = computeVehicleHireIncomeGbp({
+      scheduleRows: [
+        {
+          hireGroupId: "g1",
+          periodStart: "2026-07-01",
+          periodEnd: "2026-07-07",
+          rowKind: "rent",
+          paymentStatus: "approved",
+          approvedAmountGbp: 100,
+          baseAmountGbp: 100,
+          discountTotalGbp: 0,
+        },
+      ],
+      balancePayments: [],
+      driverChargeLineItems: [
+        {
+          hireGroupId: "g1",
+          chargeType: "administration",
+          amountGbp: 40,
+          resolution: "add_to_balance",
+          sourceKind: "staff_manual",
+        },
+      ],
+      groupContextByGroupId: groupContext(null),
+      todayYmd,
+    });
+
+    expect(result.driverChargeIncomeGbp).toBe(0);
+    expect(result.netIncomeGbp).toBe(100);
   });
 
   it("excludes driver_charge balance payments from settlement collections", () => {

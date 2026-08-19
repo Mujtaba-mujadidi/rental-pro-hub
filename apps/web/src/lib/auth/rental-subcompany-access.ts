@@ -4,6 +4,28 @@ import { userHasAllSubcompanyScope } from "@/lib/fleet/vehicle-historic-access";
 
 export type UserAccessibleSubcompanies = "all" | string[];
 
+/** Explicit-scope staff may only access hires whose subcompany is in their grant list. */
+export function staffCanAccessHireSubcompany(
+  accessible: UserAccessibleSubcompanies,
+  hireSubcompanyId: string | null | undefined,
+): boolean {
+  if (accessible === "all") return true;
+  const id = hireSubcompanyId?.trim() ?? "";
+  if (!id) return false;
+  return accessible.includes(id);
+}
+
+export async function assertStaffHireSubcompanyAccess(
+  profile: AppProfile,
+  hireSubcompanyId: string | null | undefined,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const accessible = await loadUserAccessibleSubcompanyIds(profile);
+  if (!staffCanAccessHireSubcompany(accessible, hireSubcompanyId)) {
+    return { ok: false, error: "Hire not found." };
+  }
+  return { ok: true };
+}
+
 export async function loadUserAccessibleSubcompanyIds(
   profile: AppProfile,
 ): Promise<UserAccessibleSubcompanies> {

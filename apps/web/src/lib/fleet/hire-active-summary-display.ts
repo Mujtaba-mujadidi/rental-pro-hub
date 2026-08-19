@@ -16,6 +16,7 @@ export type ActiveHirePaymentPosition = {
   rentDueToDateGbp: number;
   rentOutstandingGbp: number;
   rentPaidGbp: number;
+  extraChargesOutstandingGbp: number;
   currentlyDueGbp: number;
   dueBreakdownLabel: string | null;
 };
@@ -32,6 +33,7 @@ export function buildActiveHirePaymentPosition(input: {
   includeDeposit: boolean;
   summary: Pick<HireDashboardData["summary"], "totalDueGbp" | "balanceGbp" | "totalPaidGbp">;
   paymentRows: readonly Pick<HirePaymentPageRow, "rowKind" | "balanceGbp" | "netDueGbp">[];
+  extraChargesOutstandingGbp?: number;
   audience?: "staff" | "driver";
 }): ActiveHirePaymentPosition {
   const { summary, paymentRows, audience = "staff" } = input;
@@ -47,14 +49,24 @@ export function buildActiveHirePaymentPosition(input: {
   const rentDueToDateGbp = roundGbp(summary.totalDueGbp);
   const rentOutstandingGbp = roundGbp(summary.balanceGbp);
   const rentPaidGbp = roundGbp(summary.totalPaidGbp);
-  const currentlyDueGbp = roundGbp(depositOutstandingGbp + rentOutstandingGbp);
+  const extraChargesOutstandingGbp = roundGbp(Math.max(0, input.extraChargesOutstandingGbp ?? 0));
+  const currentlyDueGbp = roundGbp(
+    depositOutstandingGbp + rentOutstandingGbp + extraChargesOutstandingGbp,
+  );
+
+  const parts: string[] = [];
+  if (depositOutstandingGbp > 0.005) parts.push(`${formatGbp(depositOutstandingGbp)} deposit`);
+  if (rentOutstandingGbp > 0.005) parts.push(`${formatGbp(rentOutstandingGbp)} rent`);
+  if (extraChargesOutstandingGbp > 0.005) {
+    parts.push(`${formatGbp(extraChargesOutstandingGbp)} extra charges`);
+  }
 
   let dueBreakdownLabel: string | null = null;
-  if (depositOutstandingGbp > 0.005 && rentOutstandingGbp > 0.005) {
+  if (parts.length >= 2) {
     dueBreakdownLabel =
       audience === "driver"
-        ? `Includes ${formatGbp(depositOutstandingGbp)} deposit and ${formatGbp(rentOutstandingGbp)} rent.`
-        : `${formatGbp(depositOutstandingGbp)} deposit plus ${formatGbp(rentOutstandingGbp)} rent outstanding.`;
+        ? `Includes ${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}.`
+        : `${parts.slice(0, -1).join(" plus ")} plus ${parts.at(-1)} outstanding.`;
   } else if (depositOutstandingGbp > 0.005) {
     dueBreakdownLabel =
       audience === "driver"
@@ -65,6 +77,11 @@ export function buildActiveHirePaymentPosition(input: {
       audience === "driver"
         ? `${formatGbp(rentOutstandingGbp)} rent is outstanding on accrued periods.`
         : `${formatGbp(rentOutstandingGbp)} rent outstanding on accrued periods.`;
+  } else if (extraChargesOutstandingGbp > 0.005) {
+    dueBreakdownLabel =
+      audience === "driver"
+        ? `${formatGbp(extraChargesOutstandingGbp)} in extra charges is still due.`
+        : `${formatGbp(extraChargesOutstandingGbp)} extra charges outstanding.`;
   }
 
   return {
@@ -72,6 +89,7 @@ export function buildActiveHirePaymentPosition(input: {
     rentDueToDateGbp,
     rentOutstandingGbp,
     rentPaidGbp,
+    extraChargesOutstandingGbp,
     currentlyDueGbp,
     dueBreakdownLabel,
   };
@@ -141,6 +159,9 @@ export function buildActiveHirePaymentRatingDisplay(input: {
   }
   if (position.rentOutstandingGbp > 0.005) {
     unpaidParts.push(`${formatGbp(position.rentOutstandingGbp)} unpaid rent`);
+  }
+  if (position.extraChargesOutstandingGbp > 0.005) {
+    unpaidParts.push(`${formatGbp(position.extraChargesOutstandingGbp)} extra charges`);
   }
 
   let detail: string;

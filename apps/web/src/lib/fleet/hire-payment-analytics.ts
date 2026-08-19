@@ -271,6 +271,9 @@ export function formatHirePaymentEventSummary(input: {
   if (input.eventKind === "amendment") {
     return `Payment amended for ${input.periodLabel}${amount}`;
   }
+  if (input.fromStatus === "approved" && input.toStatus === "not_received") {
+    return `Approval removed for ${input.periodLabel}`;
+  }
   if (input.toStatus === "pending_approval") {
     return `${actor} submitted payment for ${input.periodLabel}${amount}`;
   }

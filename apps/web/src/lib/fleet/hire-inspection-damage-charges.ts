@@ -120,6 +120,40 @@ export function applyDamageChargesToSettlementBalance(input: {
   };
 }
 
+/** Apply a signed extra-charge delta (positive = driver owes more). */
+export function applySignedChargeDeltaToSettlementBalance(input: {
+  settlementBalanceDirection:
+    | "driver_owes_company"
+    | "company_owes_driver"
+    | "settled"
+    | null;
+  settlementBalanceGbp: number;
+  deltaGbp: number;
+}): {
+  settlementBalanceDirection: "driver_owes_company" | "company_owes_driver" | "settled";
+  settlementBalanceGbp: number;
+} {
+  const delta = Math.round(input.deltaGbp * 100) / 100;
+  if (Math.abs(delta) <= 0.005) {
+    const direction = input.settlementBalanceDirection ?? "settled";
+    return {
+      settlementBalanceDirection: direction === "settled" ? "settled" : direction,
+      settlementBalanceGbp: Math.round(Math.abs(input.settlementBalanceGbp) * 100) / 100,
+    };
+  }
+
+  const signed = signedSettlementBalanceGbp(
+    input.settlementBalanceDirection ?? "settled",
+    input.settlementBalanceGbp,
+  );
+  const nextSigned = Math.round((signed + delta) * 100) / 100;
+  const nextDirection = openBalanceDirection(nextSigned);
+  return {
+    settlementBalanceDirection: nextDirection,
+    settlementBalanceGbp: nextDirection === "settled" ? 0 : Math.abs(nextSigned),
+  };
+}
+
 export function settlementBalanceAfterPayments(input: {
   settlementBalanceDirection:
     | "driver_owes_company"

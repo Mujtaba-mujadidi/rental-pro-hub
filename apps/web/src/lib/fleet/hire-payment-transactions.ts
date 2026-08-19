@@ -94,7 +94,8 @@ export const HIRE_PAYMENT_TRANSACTION_SPECS: readonly HirePaymentTransactionSpec
       },
       {
         table: "vehicle_hire_payment_schedule",
-        fields: ["approved_amount_gbp"],
+        fields: ["approved_amount_gbp", "payment_status"],
+        notes: "Amending to £0 clears approval (not_received, approved_amount null)",
       },
     ],
   },

@@ -48,6 +48,12 @@ const HIRE_ACTIVITY_TITLES: Record<HireGroupEventType, string> = {
   deposit_refund_recorded: "Deposit refund recorded",
   settlement_refund_recorded: "Refund recorded",
   settlement_discount_recorded: "Settlement discount recorded",
+  driver_charge_added: "Extra charge added",
+  driver_charge_amended: "Extra charge amended",
+  driver_charge_removed: "Extra charge removed",
+  driver_charge_payment_submitted: "Extra charge payment submitted",
+  driver_charge_payment_approved: "Extra charge payment approved",
+  driver_charge_payment_rejected: "Extra charge payment rejected",
 };
 
 const HIRE_ACTIVITY_KINDS: Record<HireGroupEventType, HireActivityKind> = {
@@ -78,6 +84,12 @@ const HIRE_ACTIVITY_KINDS: Record<HireGroupEventType, HireActivityKind> = {
   deposit_refund_recorded: "payment",
   settlement_refund_recorded: "payment",
   settlement_discount_recorded: "payment",
+  driver_charge_added: "charge",
+  driver_charge_amended: "charge",
+  driver_charge_removed: "charge",
+  driver_charge_payment_submitted: "payment",
+  driver_charge_payment_approved: "payment",
+  driver_charge_payment_rejected: "warn",
 };
 
 /** Events a driver may see on their hire activity timeline. */
@@ -96,6 +108,12 @@ export const DRIVER_HIRE_ACTIVITY_EVENT_TYPES = new Set<HireGroupEventType>([
   "deposit_refund_recorded",
   "settlement_refund_recorded",
   "settlement_discount_recorded",
+  "driver_charge_added",
+  "driver_charge_amended",
+  "driver_charge_removed",
+  "driver_charge_payment_submitted",
+  "driver_charge_payment_approved",
+  "driver_charge_payment_rejected",
 ]);
 
 export function isHireGroupEventType(value: string): value is HireGroupEventType {

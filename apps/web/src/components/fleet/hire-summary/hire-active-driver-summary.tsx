@@ -34,6 +34,7 @@ export function HireActiveDriverSummary({
   data,
   context,
   paymentRows,
+  extraChargesOutstandingGbp,
   checkout,
   hireStatus,
   paymentsHref,
@@ -43,6 +44,7 @@ export function HireActiveDriverSummary({
   data: HireDashboardData;
   context: HireOverviewContext;
   paymentRows: readonly HirePaymentPageRow[];
+  extraChargesOutstandingGbp?: number;
   checkout: HireCheckoutGlanceData | null;
   hireStatus: string;
   paymentsHref: string;
@@ -54,6 +56,7 @@ export function HireActiveDriverSummary({
     includeDeposit: data.includeDeposit,
     summary: data.summary,
     paymentRows,
+    extraChargesOutstandingGbp,
     audience: "driver",
   });
   const rating = buildActiveHirePaymentRatingDisplay({

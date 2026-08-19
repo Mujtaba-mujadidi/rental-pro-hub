@@ -187,6 +187,16 @@ export function resolveEffectiveHireLessorSubcompanyId(input: {
   return input.hireGroupSubcompanyId?.trim() || null;
 }
 
+/** Balance pages belong to one hire — ended rentals must not follow a later vehicle transfer. */
+export function resolveHireBalanceLessorSubcompanyId(input: {
+  hireEnded: boolean;
+  hireGroupSubcompanyId?: string | null;
+  vehicleSubcompanyId?: string | null;
+}): string | null {
+  if (input.hireEnded) return input.hireGroupSubcompanyId?.trim() || null;
+  return resolveEffectiveHireLessorSubcompanyId(input);
+}
+
 export type HireLessorIdentitySource = HireLessorNameSource & {
   company_number?: string | null;
   registered_address_line1?: string | null;

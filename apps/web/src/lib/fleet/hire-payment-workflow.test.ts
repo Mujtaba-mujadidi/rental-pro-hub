@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canTransitionPaymentStatus,
   driverCanSubmitPayment,
+  nextStatusAfterApprovedAmountAmendment,
   requiresAmendmentReason,
   resolveHirePaymentWorkflowStatus,
 } from "@/lib/fleet/hire-payment-workflow";
@@ -84,12 +85,44 @@ describe("canTransitionPaymentStatus", () => {
       }),
     ).toBe(true);
   });
+
+  it("allows company to remove approval by amending to unpaid", () => {
+    expect(
+      canTransitionPaymentStatus({
+        from: "approved",
+        to: "not_received",
+        actor: "company_staff",
+        comment: "",
+      }),
+    ).toBe(false);
+    expect(
+      canTransitionPaymentStatus({
+        from: "approved",
+        to: "not_received",
+        actor: "company_staff",
+        comment: "Payment was not received",
+      }),
+    ).toBe(true);
+  });
 });
 
 describe("requiresAmendmentReason", () => {
   it("true for approved amendment", () => {
     expect(requiresAmendmentReason("approved", "approved")).toBe(true);
+    expect(requiresAmendmentReason("approved", "not_received")).toBe(true);
     expect(requiresAmendmentReason("pending_approval", "approved")).toBe(false);
+  });
+});
+
+describe("nextStatusAfterApprovedAmountAmendment", () => {
+  it("keeps approved when a positive amount remains", () => {
+    expect(nextStatusAfterApprovedAmountAmendment(7)).toBe("approved");
+    expect(nextStatusAfterApprovedAmountAmendment(0.01)).toBe("approved");
+  });
+
+  it("returns not_received when the approved amount is cleared", () => {
+    expect(nextStatusAfterApprovedAmountAmendment(0)).toBe("not_received");
+    expect(nextStatusAfterApprovedAmountAmendment(0.004)).toBe("not_received");
   });
 });
 

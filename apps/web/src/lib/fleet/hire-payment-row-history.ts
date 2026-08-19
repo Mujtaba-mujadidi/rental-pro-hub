@@ -1,3 +1,4 @@
+import { formatUkDate } from "@/lib/datetime/uk";
 import { formatGbp } from "@/lib/fleet/maintenance";
 
 export type HirePaymentRowEventInput = {
@@ -92,10 +93,13 @@ export function formatHirePaymentRowEvent(event: HirePaymentRowEventInput): Hire
     };
   }
 
-  if (event.eventKind === "amendment") {
+  if (
+    event.eventKind === "amendment" ||
+    (event.fromStatus === "approved" && event.toStatus === "not_received")
+  ) {
     const previous = amountFromPayload(payload, "previousApprovedAmountGbp");
     const next = amountFromPayload(payload, "newApprovedAmountGbp");
-    title = "Approved amount amended";
+    title = event.toStatus === "not_received" ? "Approval removed" : "Approved amount amended";
     if (previous != null && next != null) {
       detailLines.push(`Changed from ${formatGbp(previous)} to ${formatGbp(next)}`);
     } else if (next != null) {
@@ -115,6 +119,11 @@ export function formatHirePaymentRowEvent(event: HirePaymentRowEventInput): Hire
   const approved = amountFromPayload(payload, "approvedAmountGbp");
   const reference =
     typeof payload?.paymentReference === "string" ? payload.paymentReference.trim() : "";
+  const paymentMethod =
+    typeof payload?.paymentMethod === "string" ? payload.paymentMethod.trim() : "";
+  const paymentAccountName =
+    typeof payload?.paymentAccountName === "string" ? payload.paymentAccountName.trim() : "";
+  const paidOnYmd = typeof payload?.paidOnYmd === "string" ? payload.paidOnYmd.trim() : "";
 
   if (event.toStatus === "pending_approval") {
     title = "Payment submitted";
@@ -126,6 +135,9 @@ export function formatHirePaymentRowEvent(event: HirePaymentRowEventInput): Hire
     if (approved != null) detailLines.push(`Approved total: ${formatGbp(approved)}`);
     else if (submitted != null) detailLines.push(`Amount: ${formatGbp(submitted)}`);
     if (reference) detailLines.push(`Reference: ${reference}`);
+    if (paymentMethod) detailLines.push(`Method: ${paymentMethod.replace(/_/g, " ")}`);
+    if (paymentAccountName) detailLines.push(`Paid into: ${paymentAccountName}`);
+    if (paidOnYmd) detailLines.push(`Paid on: ${formatUkDate(paidOnYmd)}`);
   } else if (event.toStatus === "rejected") {
     title = "Payment rejected";
     if (submitted != null) detailLines.push(`Submitted amount: ${formatGbp(submitted)}`);

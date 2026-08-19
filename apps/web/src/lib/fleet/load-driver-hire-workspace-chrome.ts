@@ -57,6 +57,7 @@ async function fetchDriverHireWorkspaceChrome(groupId: string): Promise<DriverHi
     includeDeposit: dashboardRes.data.includeDeposit,
     summary: dashboardRes.data.summary,
     paymentRows: paymentsRes.data.rows,
+    extraChargesOutstandingGbp: paymentsRes.data.extraChargesOutstandingGbp,
     audience: "driver",
   });
   const amountDueChip = context.contractEnded

@@ -95,6 +95,9 @@ describe("buildHireEndedDepositRefundDisplay", () => {
             resolutionLabel: "Deducted from refund",
             description: "Rear bumper scratch",
             createdAt: "2026-08-08T12:33:00.000Z",
+            chargedOn: "2026-08-08",
+            sourceKind: "checkin_inspection_damage",
+            canMutate: false,
           },
         ],
         settlementBalancePayments: [
@@ -148,6 +151,9 @@ describe("buildHireEndedDepositRefundDisplay", () => {
             resolutionLabel: "Deducted from refund",
             description: "Rear bumper · scratch · minor",
             createdAt: "2026-08-08T12:33:00.000Z",
+            chargedOn: "2026-08-08",
+            sourceKind: "checkin_inspection_damage",
+            canMutate: false,
           },
         ],
         settlementBalancePayments: [
