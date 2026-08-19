@@ -64,7 +64,7 @@ export function HireContractRowActionsMenu({
     : {};
 
   return (
-    <DropdownMenu.Root>
+    <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
         <button type="button" className={triggerClass} disabled={disabled} aria-label="Contract actions" title="Actions">
           <IconKebabVertical />

@@ -1,6 +1,7 @@
 "use client";
 
 import { loadHirePaymentRowEventsAction } from "@/app/actions/hire-payments";
+import { formModalBtnGhost } from "@/components/forms/form-modal-actions";
 import type { HirePaymentRowEventDisplay } from "@/lib/fleet/hire-payment-row-history";
 import { formatUkDateTime } from "@/lib/datetime/uk";
 import { useEffect, useState, useTransition } from "react";
@@ -38,22 +39,22 @@ export function HirePaymentRowHistoryModal({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !pending) onClose();
+      if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, pending, onClose]);
+  }, [open, onClose]);
 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 sm:p-6">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-[1px]" aria-hidden />
+    <div className="fixed inset-0 z-[400] flex items-end justify-center p-0 sm:items-center sm:p-6">
+      <button type="button" className="absolute inset-0 bg-black/50 backdrop-blur-[1px]" aria-label="Close" onClick={onClose} />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="hire-history-modal-title"
-        className="relative z-[1] flex max-h-[min(90vh,36rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-rph-border bg-rph-elevated shadow-2xl"
+        className="relative z-[1] flex max-h-[min(92dvh,36rem)] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-rph-border bg-rph-elevated shadow-2xl sm:rounded-2xl"
       >
         <div className="shrink-0 border-b border-rph-border px-5 py-4 sm:px-6">
           <h2 id="hire-history-modal-title" className="text-lg font-semibold text-rph-fg">
@@ -62,7 +63,7 @@ export function HirePaymentRowHistoryModal({
           <p className="mt-1 text-sm text-rph-fg-secondary">{periodLabel}</p>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 [-webkit-overflow-scrolling:touch] sm:px-6">
           {pending && !events ? (
             <p className="rph-muted text-sm" role="status">
               Loading history…
@@ -99,8 +100,8 @@ export function HirePaymentRowHistoryModal({
           ) : null}
         </div>
 
-        <div className="flex shrink-0 justify-end border-t border-rph-border px-5 py-4 sm:px-6">
-          <button type="button" className="rph-btn-ghost h-10 px-4" disabled={pending} onClick={onClose}>
+        <div className="rph-modal-footer shrink-0 border-t border-rph-border px-5 py-4 sm:px-6">
+          <button type="button" className={formModalBtnGhost} onClick={onClose}>
             Close
           </button>
         </div>

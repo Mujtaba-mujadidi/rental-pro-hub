@@ -148,14 +148,14 @@ function HireRecordCashPaymentForm({
       onConfirmDiscard={onClose}
       onCancelDiscard={() => setDiscardOpen(false)}
       footer={
-        <div className="flex w-full flex-wrap items-center justify-end gap-2">
+        <>
           <button type="button" className={formModalBtnGhost} disabled={pending} onClick={requestClose}>
             Cancel
           </button>
           <button type="button" className={formModalBtnContinue} disabled={pending} onClick={submit}>
             {pending ? "Saving…" : "Record payment"}
           </button>
-        </div>
+        </>
       }
     >
       <div className="grid gap-3 sm:grid-cols-2">

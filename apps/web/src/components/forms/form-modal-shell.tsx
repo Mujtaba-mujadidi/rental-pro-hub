@@ -231,7 +231,7 @@ export function FormModalShell({
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-10">{children}</div>
 
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-zinc-200 px-4 py-4 dark:border-zinc-700 sm:gap-3 sm:px-10">
+          <div className="rph-modal-footer shrink-0 border-t border-zinc-200 px-4 py-4 dark:border-zinc-700 sm:px-10">
             {footer}
           </div>
 

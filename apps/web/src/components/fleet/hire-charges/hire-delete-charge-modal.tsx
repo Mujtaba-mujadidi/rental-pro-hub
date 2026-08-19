@@ -88,7 +88,7 @@ function HireDeleteChargeForm({
       onConfirmDiscard={onClose}
       onCancelDiscard={() => setDiscardOpen(false)}
       footer={
-        <div className="flex w-full flex-wrap items-center justify-end gap-2">
+        <>
           <button type="button" className={formModalBtnGhost} disabled={pending} onClick={requestClose}>
             Cancel
           </button>
@@ -100,7 +100,7 @@ function HireDeleteChargeForm({
           >
             {pending ? "Deleting…" : "Delete charge"}
           </button>
-        </div>
+        </>
       }
     >
       <FormModalField label="Reason">

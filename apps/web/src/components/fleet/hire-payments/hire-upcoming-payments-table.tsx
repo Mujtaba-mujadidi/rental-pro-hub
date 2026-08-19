@@ -40,6 +40,7 @@ export function HireUpcomingPaymentsTable({
     <div className="space-y-3">
       {rowError ? <p className="rph-alert-error text-sm">{rowError}</p> : null}
       <div className="hire-ws-payments-table-wrap">
+        <div className="hire-ws-payments-table-scroll">
         <table className={showActions ? "hire-ws-payments-table" : "hire-ws-payments-table hire-ws-payments-table-no-actions"}>
           <colgroup>
             <col className="hire-ws-payments-col-period" />
@@ -123,6 +124,7 @@ export function HireUpcomingPaymentsTable({
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

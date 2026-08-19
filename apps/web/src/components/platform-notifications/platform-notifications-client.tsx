@@ -234,7 +234,7 @@ function NotificationRowActions({
   onDelete: () => void;
 }) {
   return (
-    <DropdownMenu.Root>
+    <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
         <button type="button" className={rowActionTriggerClass} disabled={disabled} aria-label="Notification actions" title="Actions">
           <IconKebabVertical />

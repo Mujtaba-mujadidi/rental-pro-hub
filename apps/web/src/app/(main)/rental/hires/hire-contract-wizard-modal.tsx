@@ -513,7 +513,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
             <button type="button" className={formModalBtnGhost} disabled={busy || draftLoading} onClick={requestClose}>
               Cancel
             </button>
-            <div className="flex flex-wrap gap-3">
+            <div className="rph-modal-footer-end">
               {step === 6 && contractTermsLocked ? (
                 <button type="button" className={formModalBtnGhost} disabled={busy} onClick={goBack}>
                   Back

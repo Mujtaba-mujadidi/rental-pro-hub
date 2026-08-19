@@ -74,32 +74,26 @@ export function HirePaymentRowActions({
   if (readOnly) {
     return (
       <>
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger asChild>
-            <button type="button" className={triggerClass} aria-label="Payment row actions" title="Actions">
-              <IconKebabVertical />
-            </button>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content
-              side="bottom"
-              align="end"
-              sideOffset={6}
-              avoidCollisions={false}
-              className={contentClass}
-            >
-              <DropdownMenu.Item
-                className={itemClass}
-                onSelect={(e) => {
-                  e.preventDefault();
-                  setHistoryOpen(true);
-                }}
-              >
-                History
-              </DropdownMenu.Item>
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        </DropdownMenu.Root>
+      <DropdownMenu.Root modal={false}>
+        <DropdownMenu.Trigger asChild>
+          <button type="button" className={triggerClass} aria-label="Payment row actions" title="Actions">
+            <IconKebabVertical />
+          </button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            side="bottom"
+            align="end"
+            sideOffset={6}
+            collisionPadding={12}
+            className={contentClass}
+          >
+            <DropdownMenu.Item className={itemClass} onSelect={() => setHistoryOpen(true)}>
+              History
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
         <HirePaymentRowHistoryModal
           scheduleRowId={row.id}
           periodLabel={row.periodLabel}
@@ -134,7 +128,7 @@ export function HirePaymentRowActions({
 
   return (
     <>
-      <DropdownMenu.Root>
+      <DropdownMenu.Root modal={false}>
         <DropdownMenu.Trigger asChild>
           <button
             type="button"
@@ -151,76 +145,34 @@ export function HirePaymentRowActions({
             side="bottom"
             align="end"
             sideOffset={6}
-            avoidCollisions={false}
+            collisionPadding={12}
             className={contentClass}
           >
-            <DropdownMenu.Item
-              className={itemClass}
-              disabled={pending}
-              onSelect={(e) => {
-                e.preventDefault();
-                setHistoryOpen(true);
-              }}
-            >
+            <DropdownMenu.Item className={itemClass} disabled={pending} onSelect={() => setHistoryOpen(true)}>
               History
             </DropdownMenu.Item>
             {canMarkPaid ? (
-              <DropdownMenu.Item
-                className={itemClass}
-                disabled={pending}
-                onSelect={(e) => {
-                  e.preventDefault();
-                  recordRow();
-                }}
-              >
+              <DropdownMenu.Item className={itemClass} disabled={pending} onSelect={recordRow}>
                 Mark paid
               </DropdownMenu.Item>
             ) : null}
             {canDiscount ? (
-              <DropdownMenu.Item
-                className={itemClass}
-                disabled={pending}
-                onSelect={(e) => {
-                  e.preventDefault();
-                  setDiscountOpen(true);
-                }}
-              >
+              <DropdownMenu.Item className={itemClass} disabled={pending} onSelect={() => setDiscountOpen(true)}>
                 Apply discount
               </DropdownMenu.Item>
             ) : null}
             {canApproveRow ? (
               <>
-                <DropdownMenu.Item
-                  className={itemClass}
-                  disabled={pending}
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    approveRow();
-                  }}
-                >
+                <DropdownMenu.Item className={itemClass} disabled={pending} onSelect={approveRow}>
                   Approve
                 </DropdownMenu.Item>
-                <DropdownMenu.Item
-                  className={itemClass}
-                  disabled={pending}
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    setRejectOpen(true);
-                  }}
-                >
+                <DropdownMenu.Item className={itemClass} disabled={pending} onSelect={() => setRejectOpen(true)}>
                   Reject…
                 </DropdownMenu.Item>
               </>
             ) : null}
             {canAmendRow ? (
-              <DropdownMenu.Item
-                className={itemClass}
-                disabled={pending}
-                onSelect={(e) => {
-                  e.preventDefault();
-                  setAmendOpen(true);
-                }}
-              >
+              <DropdownMenu.Item className={itemClass} disabled={pending} onSelect={() => setAmendOpen(true)}>
                 Amend approved…
               </DropdownMenu.Item>
             ) : null}

@@ -57,7 +57,7 @@ export function RphSelect({
   contentClassName?: string;
 }) {
   return (
-    <Select.Root value={value} onValueChange={onValueChange} disabled={disabled}>
+    <Select.Root value={value} onValueChange={onValueChange} disabled={disabled} modal={false}>
       {name ? <input type="hidden" name={name} value={value} /> : null}
       <Select.Trigger className={triggerClassName} aria-label={ariaLabel}>
         <Select.Value placeholder={placeholder} />

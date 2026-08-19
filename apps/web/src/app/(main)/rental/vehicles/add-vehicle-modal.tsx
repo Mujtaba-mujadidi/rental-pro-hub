@@ -408,7 +408,7 @@ export function AddVehicleModal({
           <button type="button" className={formModalBtnGhost} disabled={busy} onClick={requestClose}>
             Cancel
           </button>
-          <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:gap-3">
+          <div className="rph-modal-footer-end">
             {step > 0 ? (
               <button type="button" className={formModalBtnGhost} disabled={busy} onClick={() => setStep((s) => s - 1)}>
                 Back

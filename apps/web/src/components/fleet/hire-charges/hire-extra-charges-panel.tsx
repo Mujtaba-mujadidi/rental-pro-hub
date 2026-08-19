@@ -151,7 +151,7 @@ export function HireExtraChargesPanel({
       {actionError ? <p className="rph-alert-error mx-4 mt-3 text-sm">{actionError}</p> : null}
 
       <div className="hire-ws-payments-table-wrap">
-        <div className="max-h-[min(60vh,28rem)] overflow-y-auto overscroll-y-contain">
+        <div className="hire-ws-payments-table-scroll">
           <table className={showActions ? "hire-ws-payments-table" : "hire-ws-payments-table hire-ws-payments-table-no-actions"}>
           <colgroup>
             <col className="hire-ws-payments-col-period" />

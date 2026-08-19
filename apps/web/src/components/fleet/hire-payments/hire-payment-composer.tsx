@@ -488,7 +488,7 @@ export function HirePaymentComposer({
         onCancelDiscard={() => setDiscardOpen(false)}
         maxWidthClass="max-w-2xl"
         footer={
-          <div className="flex w-full flex-wrap items-center justify-end gap-2">
+          <>
             <button type="button" className={formModalBtnGhost} disabled={fieldsDisabled} onClick={requestClose}>
               Cancel
             </button>
@@ -500,7 +500,7 @@ export function HirePaymentComposer({
             >
               {submitPending ? "Submitting…" : submitLabel}
             </button>
-          </div>
+          </>
         }
       >
         {maximized ? (

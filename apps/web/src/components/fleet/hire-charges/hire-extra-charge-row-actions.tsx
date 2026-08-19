@@ -47,7 +47,7 @@ export function HireExtraChargeRowActions({
   const canEditRow = canMutate && row.canMutate;
 
   return (
-    <DropdownMenu.Root>
+    <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
@@ -64,63 +64,28 @@ export function HireExtraChargeRowActions({
           side="bottom"
           align="end"
           sideOffset={6}
-          avoidCollisions={false}
+          collisionPadding={12}
           className={contentClass}
         >
-          <DropdownMenu.Item
-            className={itemClass}
-            disabled={busy}
-            onSelect={(e) => {
-              e.preventDefault();
-              onHistory();
-            }}
-          >
+          <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onHistory}>
             History
           </DropdownMenu.Item>
           {canApproveRow ? (
             <>
-              <DropdownMenu.Item
-                className={itemClass}
-                disabled={busy}
-                onSelect={(e) => {
-                  e.preventDefault();
-                  onApprove();
-                }}
-              >
+              <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onApprove}>
                 Approve
               </DropdownMenu.Item>
-              <DropdownMenu.Item
-                className={itemClass}
-                disabled={busy}
-                onSelect={(e) => {
-                  e.preventDefault();
-                  onReject();
-                }}
-              >
+              <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onReject}>
                 Reject…
               </DropdownMenu.Item>
             </>
           ) : null}
           {canEditRow ? (
             <>
-              <DropdownMenu.Item
-                className={itemClass}
-                disabled={busy}
-                onSelect={(e) => {
-                  e.preventDefault();
-                  onEdit();
-                }}
-              >
+              <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onEdit}>
                 Edit
               </DropdownMenu.Item>
-              <DropdownMenu.Item
-                className={itemClass}
-                disabled={busy}
-                onSelect={(e) => {
-                  e.preventDefault();
-                  onDelete();
-                }}
-              >
+              <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onDelete}>
                 Delete
               </DropdownMenu.Item>
             </>

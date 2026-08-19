@@ -364,11 +364,11 @@ export function HireTerminateContractModal({
         preview ? <FormModalStepProgress step={stepIndex} labels={stepLabels} /> : null
       }
       footer={
-        <div className="flex w-full items-center justify-between gap-2">
+        <>
           <button type="button" className={formModalBtnGhost} onClick={onClose} disabled={submitting}>
             Cancel
           </button>
-          <div className="flex gap-2">
+          <div className="rph-modal-footer-end">
             {stepIndex > 0 ? (
               <button
                 type="button"
@@ -388,7 +388,7 @@ export function HireTerminateContractModal({
               {stepBusy ? "Calculating…" : isLastStep ? "End contract" : "Continue"}
             </button>
           </div>
-        </div>
+        </>
       }
     >
       {error ? <p className="rph-alert-error mb-3 text-sm">{error}</p> : null}
