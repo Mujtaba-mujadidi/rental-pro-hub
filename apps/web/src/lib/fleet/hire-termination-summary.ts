@@ -38,21 +38,40 @@ export type HireTerminationAccountsSummary = {
   billedPeriods: number;
   rentCadence: RentCadence;
   rentAmountGbp: number;
+  /** Accrued rent before discounts (schedule base amounts). */
+  rentGrossAccruedGbp: number;
   accruedRentDueGbp: number;
   accruedRentPaidGbp: number;
   prepaidRentCreditGbp: number;
   accruedOverpaymentGbp: number;
+  /** Staff/driver discounts on accrued rent periods (not pro-rata). */
+  totalDiscountGbp: number;
   totalDueGbp: number;
   totalPaidGbp: number;
   balanceGbp: number;
   rentCreditGbp: number;
   signedRentBalanceGbp: number;
   depositGbp: number;
+  /** Unpaid extra charges (damage, admin, etc.) still owed at contract end. */
+  outstandingExtraChargesGbp: number;
   balanceDirection: SettlementBalanceDirection;
+  /**
+   * Rent position after deposit disposition (extras not included).
+   * Use {@link overallTerminationPositionGbp} for the full amount tracked on the hire.
+   */
   netSettlementGbp: number;
   rentBillingMode: HireTerminationRentBillingMode;
   billingPeriodBreakdown: HireTerminationBillingPeriodBreakdown | null;
 };
+
+/** Full hire position at end: rent (after deposit decision) + outstanding extras. */
+export function overallTerminationPositionGbp(
+  summary: Pick<HireTerminationAccountsSummary, "netSettlementGbp" | "outstandingExtraChargesGbp">,
+): number {
+  const extras = Number(summary.outstandingExtraChargesGbp);
+  const safeExtras = Number.isFinite(extras) && extras > 0 ? extras : 0;
+  return Math.round((summary.netSettlementGbp + safeExtras) * 100) / 100;
+}
 
 export function resolveSettlementBalanceDirection(balanceGbp: number): SettlementBalanceDirection {
   if (balanceGbp > 0.005) return "driver_owes_company";
@@ -140,6 +159,7 @@ export function buildHireTerminationAccountsSummary(input: {
   depositGbp: number;
   depositDisposition?: HireDepositDisposition;
   depositRefundAmountGbp?: number | null;
+  outstandingExtraChargesGbp?: number;
 }): HireTerminationAccountsSummary {
   const terminatedYmd = input.terminatedAtIso.slice(0, 10);
   const fromYmd = input.activatedAt?.slice(0, 10) ?? input.startDateYmd;
@@ -148,12 +168,16 @@ export function buildHireTerminationAccountsSummary(input: {
   const signedRentBalance = input.rentSettlement.signedRentSettlementGbp;
   const rentCreditGbp = Math.max(0, -signedRentBalance);
   const balanceGbp = Math.max(0, signedRentBalance);
+  const extrasRaw = Number(input.outstandingExtraChargesGbp ?? 0);
+  const outstandingExtraChargesGbp =
+    Number.isFinite(extrasRaw) && extrasRaw > 0.005 ? Math.round(extrasRaw * 100) / 100 : 0;
   const netSettlementGbp = netSettlementAfterDeposit({
     balanceGbp: signedRentBalance,
     depositGbp: input.depositGbp,
     disposition,
     refundAmountGbp: input.depositRefundAmountGbp,
   });
+  const overallPositionGbp = Math.round((netSettlementGbp + outstandingExtraChargesGbp) * 100) / 100;
 
   return {
     activatedAt: input.activatedAt,
@@ -162,17 +186,21 @@ export function buildHireTerminationAccountsSummary(input: {
     billedPeriods: billedPeriodsForDuration(input.rentCadence, durationDays),
     rentCadence: input.rentCadence,
     rentAmountGbp: input.rentAmountGbp,
+    rentGrossAccruedGbp:
+      Math.round(Math.max(0, input.paymentSummary.rentGrossAccruedGbp) * 100) / 100,
     accruedRentDueGbp: input.rentSettlement.accruedRentDueGbp,
     accruedRentPaidGbp: input.rentSettlement.accruedRentPaidGbp,
     prepaidRentCreditGbp: input.rentSettlement.prepaidRentCreditGbp,
     accruedOverpaymentGbp: input.rentSettlement.accruedOverpaymentGbp,
+    totalDiscountGbp: Math.round(Math.max(0, input.paymentSummary.totalDiscountGbp) * 100) / 100,
     totalDueGbp: input.paymentSummary.totalDueGbp,
     totalPaidGbp: input.paymentSummary.totalPaidGbp,
     balanceGbp,
     rentCreditGbp,
     signedRentBalanceGbp: signedRentBalance,
     depositGbp: input.depositGbp,
-    balanceDirection: resolveSettlementBalanceDirection(netSettlementGbp),
+    outstandingExtraChargesGbp,
+    balanceDirection: resolveSettlementBalanceDirection(overallPositionGbp),
     netSettlementGbp,
     rentBillingMode: input.rentSettlement.billingMode,
     billingPeriodBreakdown: input.rentSettlement.billingPeriodBreakdown,

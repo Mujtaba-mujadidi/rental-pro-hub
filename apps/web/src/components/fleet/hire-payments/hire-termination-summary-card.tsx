@@ -1,7 +1,10 @@
 "use client";
 
 import type { HireTerminationAccountsSummary, HireUiAudience } from "@/lib/fleet/hire-termination-summary";
-import { settlementBalanceLabel } from "@/lib/fleet/hire-termination-summary";
+import {
+  overallTerminationPositionGbp,
+  settlementBalanceLabel,
+} from "@/lib/fleet/hire-termination-summary";
 import { formatGbp } from "@/lib/fleet/maintenance";
 
 export function HireTerminationSummaryCard({
@@ -16,6 +19,8 @@ export function HireTerminationSummaryCard({
   audience?: HireUiAudience;
 }) {
   const isDriver = audience === "driver";
+  const extrasGbp = Math.max(0, summary.outstandingExtraChargesGbp ?? 0);
+  const overallGbp = overallTerminationPositionGbp(summary);
   return (
     <section className="rph-card space-y-3 p-4">
       <div>
@@ -48,15 +53,26 @@ export function HireTerminationSummaryCard({
           <dt className="text-xs text-rph-fg-muted">Deposit</dt>
           <dd className="mt-0.5 font-medium tabular-nums text-rph-fg">{formatGbp(summary.depositGbp)}</dd>
         </div>
+        {extrasGbp > 0.005 ? (
+          <div className="sm:col-span-2">
+            <dt className="text-xs text-rph-fg-muted">Extra charges outstanding</dt>
+            <dd className="mt-0.5 font-medium tabular-nums text-rph-fg">{formatGbp(extrasGbp)}</dd>
+          </div>
+        ) : null}
         <div className="sm:col-span-2">
           <dt className="text-xs text-rph-fg-muted">Money owed at end</dt>
           <dd className="mt-0.5 font-semibold tabular-nums text-rph-fg">
             {settlementBalanceLabel(
               summary.balanceDirection,
-              Math.abs(summary.netSettlementGbp),
+              Math.abs(overallGbp),
               audience,
             )}
           </dd>
+          {extrasGbp > 0.005 ? (
+            <dd className="mt-0.5 text-xs text-rph-fg-muted">
+              Includes {formatGbp(extrasGbp)} outstanding extra charges
+            </dd>
+          ) : null}
         </div>
         {depositDispositionLabel ? (
           <div>

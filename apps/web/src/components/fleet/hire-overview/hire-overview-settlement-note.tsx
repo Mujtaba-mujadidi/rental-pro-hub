@@ -2,7 +2,10 @@
 
 import type { HireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
 import type { HireTerminationAccountsSummary } from "@/lib/fleet/hire-termination-summary";
-import { settlementBalanceLabel } from "@/lib/fleet/hire-termination-summary";
+import {
+  overallTerminationPositionGbp,
+  settlementBalanceLabel,
+} from "@/lib/fleet/hire-termination-summary";
 import { driverHireWorkspaceHref } from "@/lib/fleet/driver-hire-workspace-nav";
 import { formatGbp } from "@/lib/fleet/maintenance";
 import Link from "next/link";
@@ -47,10 +50,16 @@ export function HireOverviewSettlementNote({
             <span className="font-medium text-rph-fg">
               {settlementBalanceLabel(
                 terminationSummary.balanceDirection,
-                Math.abs(terminationSummary.netSettlementGbp),
+                Math.abs(overallTerminationPositionGbp(terminationSummary)),
                 audience,
               )}
             </span>
+            {(terminationSummary.outstandingExtraChargesGbp ?? 0) > 0.005 ? (
+              <span className="text-rph-fg-secondary">
+                {" "}
+                (includes {formatGbp(terminationSummary.outstandingExtraChargesGbp)} extra charges)
+              </span>
+            ) : null}
           </li>
         ) : null}
         <li>

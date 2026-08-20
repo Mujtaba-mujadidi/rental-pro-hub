@@ -119,7 +119,23 @@ export function parseTerminationAccountsSummary(
   if (typeof summary.signedRentBalanceGbp !== "number" || typeof summary.depositGbp !== "number") {
     return null;
   }
-  return summary as HireTerminationAccountsSummary;
+  const extrasRaw = Number(summary.outstandingExtraChargesGbp ?? 0);
+  const discountRaw = Number(summary.totalDiscountGbp ?? 0);
+  const grossRaw = Number(summary.rentGrossAccruedGbp ?? 0);
+  const accruedDue = Number(summary.accruedRentDueGbp ?? 0);
+  const safeDiscount =
+    Number.isFinite(discountRaw) && discountRaw > 0.005 ? Math.round(discountRaw * 100) / 100 : 0;
+  const safeGross =
+    Number.isFinite(grossRaw) && grossRaw > 0.005
+      ? Math.round(grossRaw * 100) / 100
+      : Math.round((Math.max(0, accruedDue) + safeDiscount) * 100) / 100;
+  return {
+    ...(summary as HireTerminationAccountsSummary),
+    outstandingExtraChargesGbp:
+      Number.isFinite(extrasRaw) && extrasRaw > 0.005 ? Math.round(extrasRaw * 100) / 100 : 0,
+    totalDiscountGbp: safeDiscount,
+    rentGrossAccruedGbp: safeGross,
+  };
 }
 
 export function depositResolutionHelpText(): string {

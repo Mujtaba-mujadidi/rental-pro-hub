@@ -6,6 +6,7 @@ import {
   hireDepositDispositionLabel,
   hireProRataRentAdjustmentGbp,
   netSettlementAfterDeposit,
+  overallTerminationPositionGbp,
   resolveSettlementBalanceDirection,
   settlementBalanceLabel,
 } from "@/lib/fleet/hire-termination-summary";
@@ -130,6 +131,84 @@ describe("hire-termination-summary", () => {
     expect(summary.durationDays).toBe(15);
     expect(summary.rentCreditGbp).toBe(300);
     expect(summary.netSettlementGbp).toBe(-800);
+    expect(summary.outstandingExtraChargesGbp).toBe(0);
+    expect(summary.totalDiscountGbp).toBe(0);
     expect(summary.balanceDirection).toBe("company_owes_driver");
+  });
+
+  it("records rent discounts applied on the schedule", () => {
+    const summary = buildHireTerminationAccountsSummary({
+      activatedAt: "2026-01-01T10:00:00.000Z",
+      terminatedAtIso: "2026-01-15T16:30:00.000Z",
+      startDateYmd: "2026-01-01",
+      rentCadence: "weekly",
+      rentAmountGbp: 250,
+      depositGbp: 0,
+      paymentSummary: {
+        rentGrossAccruedGbp: 500,
+        totalDueGbp: 450,
+        totalPaidGbp: 450,
+        balanceGbp: 0,
+        creditGbp: 0,
+        signedAccruedBalanceGbp: 0,
+        scheduleBalanceGbp: 0,
+        totalDiscountGbp: 50,
+        contractTotalGbp: 450,
+        nextDue: null,
+      },
+      rentSettlement: {
+        accruedRentDueGbp: 450,
+        accruedRentPaidGbp: 450,
+        prepaidRentCreditGbp: 0,
+        accruedOverpaymentGbp: 0,
+        signedRentSettlementGbp: 0,
+        billingMode: "end_of_period",
+        billingPeriodBreakdown: null,
+      },
+      depositDisposition: "hold_pending",
+    });
+
+    expect(summary.totalDiscountGbp).toBe(50);
+    expect(summary.rentGrossAccruedGbp).toBe(500);
+    expect(summary.accruedRentDueGbp).toBe(450);
+  });
+
+  it("includes outstanding extras in overall position and balance direction", () => {
+    const summary = buildHireTerminationAccountsSummary({
+      activatedAt: "2026-01-01T10:00:00.000Z",
+      terminatedAtIso: "2026-01-15T16:30:00.000Z",
+      startDateYmd: "2026-01-01",
+      rentCadence: "weekly",
+      rentAmountGbp: 250,
+      depositGbp: 0,
+      outstandingExtraChargesGbp: 90,
+      paymentSummary: {
+        rentGrossAccruedGbp: 250,
+        totalDueGbp: 250,
+        totalPaidGbp: 250,
+        balanceGbp: 0,
+        creditGbp: 0,
+        signedAccruedBalanceGbp: 0,
+        scheduleBalanceGbp: 0,
+        totalDiscountGbp: 0,
+        contractTotalGbp: 500,
+        nextDue: null,
+      },
+      rentSettlement: {
+        accruedRentDueGbp: 250,
+        accruedRentPaidGbp: 250,
+        prepaidRentCreditGbp: 0,
+        accruedOverpaymentGbp: 0,
+        signedRentSettlementGbp: 0,
+        billingMode: "end_of_period",
+        billingPeriodBreakdown: null,
+      },
+      depositDisposition: "hold_pending",
+    });
+
+    expect(summary.netSettlementGbp).toBe(0);
+    expect(summary.outstandingExtraChargesGbp).toBe(90);
+    expect(overallTerminationPositionGbp(summary)).toBe(90);
+    expect(summary.balanceDirection).toBe("driver_owes_company");
   });
 });

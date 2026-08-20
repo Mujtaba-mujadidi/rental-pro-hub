@@ -21,6 +21,7 @@ import {
 } from "@/lib/fleet/hire-termination-billing";
 import {
   hireDepositDispositionLabel,
+  overallTerminationPositionGbp,
   rentCadenceLabel,
   rentCadencePluralLabel,
   settlementBalanceLabel,
@@ -96,93 +97,156 @@ function AccountsSummaryPanel({
   accounts,
   showDepositLines,
   billingDetail,
+  pendingExtraApprovalGbp = 0,
   compact = false,
 }: {
   accounts: HireTerminationAccountsSummary;
   showDepositLines: boolean;
   billingDetail: string | null;
+  pendingExtraApprovalGbp?: number;
   compact?: boolean;
 }) {
+  const extrasGbp = accounts.outstandingExtraChargesGbp ?? 0;
+  const overallGbp = overallTerminationPositionGbp(accounts);
+  const rentPositionLabel = settlementBalanceLabel(
+    accounts.signedRentBalanceGbp > 0.005
+      ? "driver_owes_company"
+      : accounts.signedRentBalanceGbp < -0.005
+        ? "company_owes_driver"
+        : "settled",
+    accounts.signedRentBalanceGbp,
+  );
+  const overallLabel = settlementBalanceLabel(
+    overallGbp > 0.005 ? "driver_owes_company" : overallGbp < -0.005 ? "company_owes_driver" : "settled",
+    overallGbp,
+  );
+
   return (
-    <div className={`rph-card space-y-2 text-sm ${compact ? "p-3" : "p-4"}`}>
-      {!compact ? <p className="font-semibold text-rph-fg">Accounts summary</p> : null}
-      <p className="rph-muted">
+    <div className={`rph-card space-y-3 text-sm ${compact ? "p-3" : "p-4"}`}>
+      {!compact ? <p className="font-semibold text-rph-fg">Accounts at end of hire</p> : null}
+      <p className="rph-muted text-xs">
         Ends {formatUkDateTimeSeconds(accounts.terminatedAt)}
         {billingDetail ? ` · ${billingDetail}` : null}
       </p>
-      <dl className="grid gap-2 sm:grid-cols-2">
-        <div>
-          <dt className="rph-muted text-xs">Time on hire</dt>
-          <dd className="font-medium text-rph-fg">
-            {accounts.durationDays} day{accounts.durationDays === 1 ? "" : "s"} · {accounts.billedPeriods}{" "}
-            {rentCadencePluralLabel(accounts.rentCadence)}
-          </dd>
-        </div>
-        <div>
-          <dt className="rph-muted text-xs">Rent rate</dt>
-          <dd className="font-medium text-rph-fg">
-            £{accounts.rentAmountGbp.toFixed(2)} per {rentCadenceLabel(accounts.rentCadence)}
-          </dd>
-        </div>
-        <div>
-          <dt className="rph-muted text-xs">Rent due so far</dt>
-          <dd className="font-medium text-rph-fg">£{accounts.accruedRentDueGbp.toFixed(2)}</dd>
-        </div>
-        <div>
-          <dt className="rph-muted text-xs">Rent paid so far</dt>
-          <dd className="font-medium text-rph-fg">£{accounts.accruedRentPaidGbp.toFixed(2)}</dd>
-        </div>
-        {accounts.accruedOverpaymentGbp > 0 ? (
+
+      <div className="space-y-2 rounded-lg border border-rph-border bg-rph-page/40 px-3 py-2.5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Rent</p>
+        <dl className="grid gap-2 sm:grid-cols-2">
           <div>
-            <dt className="rph-muted text-xs">Rent overpayment</dt>
-            <dd className="font-medium text-rph-fg">£{accounts.accruedOverpaymentGbp.toFixed(2)}</dd>
+            <dt className="rph-muted text-xs">Time on hire</dt>
+            <dd className="font-medium text-rph-fg">
+              {accounts.durationDays} day{accounts.durationDays === 1 ? "" : "s"} · {accounts.billedPeriods}{" "}
+              {rentCadencePluralLabel(accounts.rentCadence)}
+            </dd>
           </div>
-        ) : null}
-        {accounts.prepaidRentCreditGbp > 0 ? (
           <div>
-            <dt className="rph-muted text-xs">Rent paid in advance</dt>
-            <dd className="font-medium text-rph-fg">£{accounts.prepaidRentCreditGbp.toFixed(2)}</dd>
+            <dt className="rph-muted text-xs">Rent rate</dt>
+            <dd className="font-medium text-rph-fg">
+              £{accounts.rentAmountGbp.toFixed(2)} per {rentCadenceLabel(accounts.rentCadence)}
+            </dd>
           </div>
-        ) : null}
-        <div>
-          <dt className="rph-muted text-xs">Rent balance</dt>
-          <dd className="font-medium text-rph-fg">
-            {accounts.rentCreditGbp > 0
-              ? `You owe driver £${accounts.rentCreditGbp.toFixed(2)}`
-              : accounts.balanceGbp > 0
-                ? `Driver owes £${accounts.balanceGbp.toFixed(2)}`
-                : "All clear — no rent owed"}
-          </dd>
-        </div>
-        {showDepositLines ? (
-          <>
+          {(accounts.totalDiscountGbp ?? 0) > 0.005 ? (
+            <>
+              <div>
+                <dt className="rph-muted text-xs">Rent due so far</dt>
+                <dd className="font-medium text-rph-fg">
+                  £{(accounts.rentGrossAccruedGbp ?? accounts.accruedRentDueGbp).toFixed(2)}
+                </dd>
+                <dd className="rph-muted mt-0.5 text-xs">Before discount</dd>
+              </div>
+              <div>
+                <dt className="rph-muted text-xs">Discount</dt>
+                <dd className="font-medium text-rph-fg">
+                  −£{accounts.totalDiscountGbp.toFixed(2)}
+                </dd>
+              </div>
+              <div className="sm:col-span-2">
+                <dt className="rph-muted text-xs">Rent due so far after discount</dt>
+                <dd className="font-semibold text-rph-fg">
+                  £{accounts.accruedRentDueGbp.toFixed(2)}
+                </dd>
+              </div>
+            </>
+          ) : (
             <div>
-              <dt className="rph-muted text-xs">Deposit held</dt>
+              <dt className="rph-muted text-xs">Rent due so far</dt>
+              <dd className="font-medium text-rph-fg">£{accounts.accruedRentDueGbp.toFixed(2)}</dd>
+            </div>
+          )}
+          <div>
+            <dt className="rph-muted text-xs">Rent paid so far</dt>
+            <dd className="font-medium text-rph-fg">£{accounts.accruedRentPaidGbp.toFixed(2)}</dd>
+          </div>
+          {accounts.accruedOverpaymentGbp > 0.005 ? (
+            <div>
+              <dt className="rph-muted text-xs">Rent overpayment</dt>
+              <dd className="font-medium text-rph-fg">£{accounts.accruedOverpaymentGbp.toFixed(2)}</dd>
+            </div>
+          ) : null}
+          {accounts.prepaidRentCreditGbp > 0.005 ? (
+            <div>
+              <dt className="rph-muted text-xs">Rent paid in advance</dt>
+              <dd className="font-medium text-rph-fg">£{accounts.prepaidRentCreditGbp.toFixed(2)}</dd>
+            </div>
+          ) : null}
+          <div className="sm:col-span-2">
+            <dt className="rph-muted text-xs">Rent balance</dt>
+            <dd className="font-semibold text-rph-fg">{rentPositionLabel}</dd>
+          </div>
+        </dl>
+      </div>
+
+      <div className="space-y-2 rounded-lg border border-rph-border bg-rph-page/40 px-3 py-2.5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Extra charges</p>
+        {extrasGbp > 0.005 ? (
+          <>
+            <p className="font-semibold text-rph-fg">£{extrasGbp.toFixed(2)} still outstanding</p>
+            <p className="rph-muted text-xs">
+              Damage, admin and other charges not yet paid. These are included in the overall position
+              below and stay on Payments after the contract ends.
+            </p>
+            {pendingExtraApprovalGbp > 0.005 ? (
+              <p className="rph-alert-warn text-xs">
+                £{pendingExtraApprovalGbp.toFixed(2)} has been submitted for approval. It still counts as
+                outstanding until it is approved.
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <p className="font-medium text-rph-fg">None outstanding</p>
+        )}
+      </div>
+
+      {showDepositLines ? (
+        <div className="space-y-2 rounded-lg border border-rph-border bg-rph-page/40 px-3 py-2.5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Deposit</p>
+          <dl className="grid gap-2 sm:grid-cols-2">
+            <div>
+              <dt className="rph-muted text-xs">Held</dt>
               <dd className="font-medium text-rph-fg">£{accounts.depositGbp.toFixed(2)}</dd>
             </div>
             <div>
-              <dt className="rph-muted text-xs">Deposit decision</dt>
-              <dd className="font-medium text-rph-fg">
-                {hireDepositDispositionLabel("hold_pending")}
-              </dd>
+              <dt className="rph-muted text-xs">Decision</dt>
+              <dd className="font-medium text-rph-fg">{hireDepositDispositionLabel("hold_pending")}</dd>
             </div>
-          </>
-        ) : null}
-      </dl>
-      <p className="border-t border-rph-border pt-2 font-semibold text-rph-fg">
-        Rent position at end:{" "}
-        {settlementBalanceLabel(
-          accounts.netSettlementGbp > 0
-            ? "driver_owes_company"
-            : accounts.netSettlementGbp < 0
-              ? "company_owes_driver"
-              : "settled",
-          accounts.netSettlementGbp,
-        )}
-      </p>
-      <p className="rph-muted text-xs">
-        Final settlement — including the deposit — is completed after vehicle check-in on Payments.
-      </p>
+          </dl>
+          <p className="rph-muted text-xs">
+            Deposit is not applied yet. After vehicle check-in you choose refund, apply to balance, or
+            keep on Payments.
+          </p>
+        </div>
+      ) : null}
+
+      <div className="rounded-lg border border-rph-border-strong px-3 py-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Overall position</p>
+        <p className="mt-1 text-base font-semibold text-rph-fg">{overallLabel}</p>
+        <p className="rph-muted mt-1 text-xs">
+          Rent balance
+          {extrasGbp > 0.005 ? ` + £${extrasGbp.toFixed(2)} extras` : ""}
+          {showDepositLines ? " · deposit held separately until check-in" : ""}. Final settlement is
+          completed on Payments after check-in.
+        </p>
+      </div>
     </div>
   );
 }
@@ -210,8 +274,9 @@ export function HireTerminateContractModal({
   const accounts = preview?.accounts;
   const depositPaid = (preview?.depositPaidGbp ?? 0) > 0.005;
   const showDepositStep = Boolean(preview?.includeDeposit);
-  const needsSettlement = settlementStepRequired(accounts?.netSettlementGbp ?? 0);
-  const settlementAmount = accounts ? Math.abs(accounts.netSettlementGbp) : 0;
+  const overallPositionGbp = accounts ? overallTerminationPositionGbp(accounts) : 0;
+  const needsSettlement = settlementStepRequired(overallPositionGbp);
+  const settlementAmount = Math.abs(overallPositionGbp);
 
   const stepFlow = useMemo(() => buildStepFlow(showDepositStep), [showDepositStep]);
   const currentStepId = stepFlow[stepIndex] ?? "verify";
@@ -287,15 +352,9 @@ export function HireTerminateContractModal({
     if (!canAdvanceFromStep()) return;
     setError(null);
 
-    if (currentStepId === "verify") {
-      const data = await loadPreview({
-        rentBillingMode,
-        depositDisposition: "hold_pending",
-      });
-      if (!data) return;
-    }
-
-    if (currentStepId === "deposit") {
+    // Preview is loaded on open. Only recalculate when the rent billing choice changed —
+    // deposit is always hold_pending until check-in, so Deposit → Accounts needs no server round-trip.
+    if (currentStepId === "verify" && preview?.accounts.rentBillingMode !== rentBillingMode) {
       const data = await loadPreview({
         rentBillingMode,
         depositDisposition: "hold_pending",
@@ -436,7 +495,7 @@ export function HireTerminateContractModal({
                 <div className="rph-card space-y-3 p-4 text-sm">
                   <p className="font-semibold text-rph-fg">Rent billing for final period</p>
                   <p className="rph-muted text-xs">
-                    Your choice is applied when you continue — figures below are indicative only.
+                    If you change this, accounts are recalculated when you continue.
                   </p>
                   <div className="space-y-2">
                     {(["actual", "end_of_period"] as const).map((mode) => (
@@ -527,6 +586,7 @@ export function HireTerminateContractModal({
               accounts={accounts}
               showDepositLines={showDepositStep && depositPaid}
               billingDetail={billingDetail}
+              pendingExtraApprovalGbp={preview.extraChargePendingApprovalGbp}
             />
           ) : null}
 
@@ -537,14 +597,20 @@ export function HireTerminateContractModal({
                 accounts={accounts}
                 showDepositLines={showDepositStep && depositPaid}
                 billingDetail={billingDetail}
+                pendingExtraApprovalGbp={preview.extraChargePendingApprovalGbp}
                 compact
               />
               {needsSettlement ? (
                 <div className="rph-card p-3 text-sm">
                   <p className="font-medium text-rph-fg">
-                    Rent balance: {settlementResolutionLabel(PROVISIONAL_TERMINATION_SETTLEMENT_RESOLUTION)}
+                    Overall balance: {settlementResolutionLabel(PROVISIONAL_TERMINATION_SETTLEMENT_RESOLUTION)}
                     {" · "}£{settlementAmount.toFixed(2)} tracked until check-in is complete
                   </p>
+                  {(accounts.outstandingExtraChargesGbp ?? 0) > 0.005 ? (
+                    <p className="rph-muted mt-1 text-xs">
+                      Includes £{accounts.outstandingExtraChargesGbp.toFixed(2)} outstanding extra charges.
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
               <div className="rph-card space-y-3 border border-rph-border-strong p-4 text-sm">
@@ -558,7 +624,7 @@ export function HireTerminateContractModal({
                   with driver{" "}
                   <span className="font-semibold">{preview.driverLabel ?? "—"}</span>. Rent stops
                   today. You will complete vehicle check-in next, then finalise the deposit and any
-                  balance on Payments.
+                  rent or extra-charge balance on Payments.
                 </p>
                 <label className="flex cursor-pointer items-start gap-2">
                   <input
@@ -568,7 +634,7 @@ export function HireTerminateContractModal({
                     onChange={(event) => setFinalConfirmed(event.target.checked)}
                   />
                   <span className="text-sm text-rph-fg">
-                    I confirm the rent position above is correct and I want to end this hire contract
+                    I confirm the overall position above is correct and I want to end this hire contract
                     for {preview.vehicleVrm ?? "this vehicle"} / {preview.driverLabel ?? "this driver"}.
                   </span>
                 </label>

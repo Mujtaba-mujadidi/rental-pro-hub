@@ -78,11 +78,11 @@ export function summarizeHireRentSettlement(
   };
 }
 
+/** Reason required only for final non-full-refund decisions (not provisional hold_pending). */
 export function requiresDepositDispositionReason(disposition: string): boolean {
   return (
     disposition === "apply_to_balance" ||
     disposition === "forfeit" ||
-    disposition === "hold_pending" ||
     disposition === "refund_partial"
   );
 }

@@ -57,7 +57,6 @@ import {
 } from "@/lib/fleet/hire-driver-charges";
 import type { HireTerminationRentBillingMode } from "@/lib/fleet/hire-termination-billing";
 import { HIRE_TERMINATION_RENT_BILLING_MODES } from "@/lib/fleet/hire-termination-billing";
-import { applySignedChargeDeltaToSettlementBalance } from "@/lib/fleet/hire-inspection-damage-charges";
 import {
   buildActiveHireSettlementBreakdown,
   buildHireSettlementBreakdown,
@@ -86,6 +85,7 @@ import {
   HIRE_DEPOSIT_DISPOSITIONS,
   HIRE_DEPOSIT_REFUND_METHODS,
   hireDepositDispositionLabel,
+  overallTerminationPositionGbp,
   resolveSettlementBalanceDirection,
   settlementBalanceLabel,
   type HireDepositDisposition,
@@ -115,6 +115,8 @@ export type HireTerminationPreview = {
   driverLabel: string | null;
   includeDeposit: boolean;
   depositPaidGbp: number;
+  /** Extra-charge payment submitted but not yet approved (still in outstanding). */
+  extraChargePendingApprovalGbp: number;
   rentCadence: RentCadence;
   accounts: HireTerminationAccountsSummary;
 };
@@ -273,6 +275,7 @@ export async function loadHireTerminationPreviewAction(
     depositGbp,
     depositDisposition,
     depositRefundAmountGbp,
+    outstandingExtraChargesGbp: payments.data.extraChargesOutstandingGbp,
   });
 
   const vehicle = group.vehicles as { vrm?: string; make?: string; model?: string } | null;
@@ -310,6 +313,9 @@ export async function loadHireTerminationPreviewAction(
       driverLabel,
       includeDeposit: Boolean(group.include_deposit),
       depositPaidGbp: Math.round(depositPaidGbp * 100) / 100,
+      extraChargePendingApprovalGbp: Math.round(
+        (payments.data.extraChargePendingPayment?.amountGbp ?? 0) * 100,
+      ) / 100,
       rentCadence,
       accounts,
     },
@@ -384,20 +390,20 @@ export async function terminateHireGroupAction(input: {
   }
 
   const accounts = preview.data.accounts;
-  const netSettlement = accounts.netSettlementGbp;
-  const needsSettlementStep = settlementStepRequired(netSettlement);
-  const resolution = provisionalTerminationSettlementResolution(netSettlement);
+  const overallPositionGbp = overallTerminationPositionGbp(accounts);
+  const needsSettlementStep = settlementStepRequired(overallPositionGbp);
+  const resolution = provisionalTerminationSettlementResolution(overallPositionGbp);
 
   if (needsSettlementStep) {
     const requestedResolution = parseSettlementResolution((input.settlementResolution ?? "").trim());
-    const settlementBlock = assertProvisionalTerminationSettlement(requestedResolution, netSettlement);
+    const settlementBlock = assertProvisionalTerminationSettlement(requestedResolution, overallPositionGbp);
     if (settlementBlock) return { ok: false, error: settlementBlock };
   }
 
   let balanceState;
   try {
     balanceState = resolveTerminationBalanceState({
-      netSettlementGbp: netSettlement,
+      netSettlementGbp: overallPositionGbp,
       resolution: resolution ?? "paid_now",
     });
   } catch (error) {
@@ -418,44 +424,14 @@ export async function terminateHireGroupAction(input: {
   const admin = createSupabaseAdminClient();
   const now = new Date().toISOString();
   const terminatedYmd = now.slice(0, 10);
-  const settlementDirection = resolveSettlementBalanceDirection(netSettlement);
+  const settlementDirection = resolveSettlementBalanceDirection(overallPositionGbp);
   const retainUntil = driverDocumentsRetainUntilYmd(terminatedYmd);
   const depositReason =
     preview.data.includeDeposit && requiresDepositDispositionReason(disposition)
       ? input.depositDispositionReason?.trim() || null
       : null;
 
-  const extraChargesRes = await admin
-    .from("vehicle_hire_driver_charge_line_items")
-    .select(
-      "id, hire_group_id, charge_type, amount_gbp, resolution, source_kind, source_id, description, balance_payment_id, charged_on, created_at",
-    )
-    .eq("hire_group_id", input.hireGroupId.trim());
-  const extraReceiptsRes = await admin
-    .from("vehicle_hire_balance_payments")
-    .select("amount_gbp, direction, payment_category")
-    .eq("hire_group_id", input.hireGroupId.trim());
-  const outstandingExtrasGbp = outstandingExtraChargesGbp(
-    mapDriverChargeLineItemsFromDb((extraChargesRes.data ?? []) as DriverChargeLineItemDbRow[]),
-    (extraReceiptsRes.data ?? []).map((payment) => ({
-      amountGbp: Number(payment.amount_gbp ?? 0),
-      direction: (payment.direction as string | null) ?? null,
-      paymentCategory: (payment.payment_category as string | null) ?? "settlement",
-    })),
-  );
   const settlementDiscountGbp = balanceState.settlementDiscountGbp;
-  if (outstandingExtrasGbp > 0.005) {
-    const nextBalance = applySignedChargeDeltaToSettlementBalance({
-      settlementBalanceDirection: balanceState.settlementBalanceDirection,
-      settlementBalanceGbp: balanceState.settlementBalanceGbp,
-      deltaGbp: outstandingExtrasGbp,
-    });
-    balanceState = {
-      ...balanceState,
-      settlementBalanceDirection: nextBalance.settlementBalanceDirection,
-      settlementBalanceGbp: nextBalance.settlementBalanceGbp,
-    };
-  }
 
   const { error: updateError } = await admin
     .from("vehicle_hire_groups")
@@ -512,7 +488,11 @@ export async function terminateHireGroupAction(input: {
   await logHireGroupEvent(admin, {
     hireGroupId: input.hireGroupId.trim(),
     eventType: "hire_terminated",
-    summary: `Contract ended. ${settlementBalanceLabel(settlementDirection, netSettlement)} · Deposit: ${hireDepositDispositionLabel(disposition)}.`,
+    summary: `Contract ended. ${settlementBalanceLabel(settlementDirection, overallPositionGbp)} · Deposit: ${hireDepositDispositionLabel(disposition)}${
+      accounts.outstandingExtraChargesGbp > 0.005
+        ? ` · Extras outstanding £${accounts.outstandingExtraChargesGbp.toFixed(2)}`
+        : ""
+    }.`,
     actorRole: "company_staff",
     actorUserId: user.id,
     metadata: {
@@ -1550,9 +1530,12 @@ export async function resolveHireDepositDispositionAction(input: {
     : null;
 
   const admin = createSupabaseAdminClient();
+  // Deposit was applied against the open settlement balance (rent + extras). Fold extras into
+  // netSettlementGbp so overallTerminationPositionGbp does not double-count them afterwards.
   const updatedSummary: HireTerminationAccountsSummary = {
     ...terminationSummary,
     netSettlementGbp,
+    outstandingExtraChargesGbp: 0,
     balanceDirection: balanceState.settlementBalanceDirection,
   };
 

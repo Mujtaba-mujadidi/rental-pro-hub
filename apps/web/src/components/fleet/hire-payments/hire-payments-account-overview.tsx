@@ -1,7 +1,10 @@
 "use client";
 
 import type { HireTerminationAccountsSummary, HireUiAudience } from "@/lib/fleet/hire-termination-summary";
-import { settlementBalanceLabel } from "@/lib/fleet/hire-termination-summary";
+import {
+  overallTerminationPositionGbp,
+  settlementBalanceLabel,
+} from "@/lib/fleet/hire-termination-summary";
 import type { HireDriverChargeWorkspaceRow } from "@/app/actions/rental-hire-termination";
 import type { HireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
 import type { HirePaymentSummary } from "@/lib/fleet/hire-payment-summary";
@@ -172,16 +175,20 @@ export function HirePaymentsAccountOverview({
         />
         {terminationSummary ? (
           <Metric
-            label={canFinalizeSettlement ? "Rent position at end" : "Rent position at end (provisional)"}
+            label={canFinalizeSettlement ? "Position at end" : "Position at end (provisional)"}
             value={settlementBalanceLabel(
               terminationSummary.balanceDirection,
-              Math.abs(terminationSummary.netSettlementGbp),
+              Math.abs(overallTerminationPositionGbp(terminationSummary)),
               audience,
             )}
             hint={
-              canFinalizeSettlement
-                ? "Recorded when the contract was ended"
-                : "Final balance is confirmed after vehicle check-in"
+              (terminationSummary.outstandingExtraChargesGbp ?? 0) > 0.005
+                ? `Includes ${formatGbp(terminationSummary.outstandingExtraChargesGbp)} outstanding extras${
+                    canFinalizeSettlement ? "" : " · final balance after check-in"
+                  }`
+                : canFinalizeSettlement
+                  ? "Recorded when the contract was ended"
+                  : "Final balance is confirmed after vehicle check-in"
             }
           />
         ) : null}

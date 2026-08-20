@@ -85,9 +85,11 @@ describe("summarizeHireRentSettlement", () => {
 });
 
 describe("requiresDepositDispositionReason", () => {
-  it("requires reason when deposit is not refunded in full", () => {
+  it("requires reason only for final non-full-refund decisions", () => {
     expect(requiresDepositDispositionReason("forfeit")).toBe(true);
+    expect(requiresDepositDispositionReason("apply_to_balance")).toBe(true);
     expect(requiresDepositDispositionReason("refund_partial")).toBe(true);
     expect(requiresDepositDispositionReason("refund_full")).toBe(false);
+    expect(requiresDepositDispositionReason("hold_pending")).toBe(false);
   });
 });
