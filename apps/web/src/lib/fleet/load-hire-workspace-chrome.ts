@@ -29,6 +29,7 @@ import { buildHireWorkspaceHeroMetrics } from "@/lib/fleet/hire-workspace-hero-d
 import type { HireWorkspaceChromeData } from "@/lib/fleet/hire-workspace-chrome-types";
 import { hireAllowsCompanyDriverPackageAccess } from "@/lib/fleet/hire-driver-package-access";
 import type { HireTerminationAccountsSummary } from "@/lib/fleet/hire-termination-summary";
+import { canStartCheckin, canTerminateHire } from "@/lib/fleet/hire-lifecycle-attention";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -68,6 +69,19 @@ async function loadCompletedCheckout(hireGroupId: string) {
     fuelLevelPercent: data.fuel_level,
     completedAtLabel: data.completed_at ? formatUkDateTime(data.completed_at) : null,
   };
+}
+
+async function loadCheckinCompleted(hireGroupId: string): Promise<boolean> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("vehicle_hire_inspections")
+    .select("id")
+    .eq("hire_group_id", hireGroupId.trim())
+    .eq("kind", "checkin")
+    .eq("status", "completed")
+    .limit(1)
+    .maybeSingle();
+  return Boolean(data?.id);
 }
 
 /**
@@ -151,8 +165,9 @@ async function fetchStaffHireWorkspaceChrome(groupId: string): Promise<HireWorks
   const id = groupId.trim();
   const supabase = await createClient();
   const admin = createSupabaseAdminClient();
-  const [checkout, groupRes, lessorName, glance] = await Promise.all([
+  const [checkout, checkinCompleted, groupRes, lessorName, glance] = await Promise.all([
     loadCompletedCheckout(id),
+    loadCheckinCompleted(id),
     supabase
       .from("vehicle_hire_groups")
       .select(
@@ -274,7 +289,12 @@ async function fetchStaffHireWorkspaceChrome(groupId: string): Promise<HireWorks
       endedHirePeriodLabel: endedHero?.hirePeriodLabel ?? null,
       endedTimeOnHireLabel: endedHero?.timeOnHireLabel ?? null,
       settlementStatusChip,
-      canTerminate: hireStatus === "active",
+      canTerminate: canTerminateHire(hireStatus),
+      canCheckIn: canStartCheckin({
+        status: hireStatus,
+        checkoutCompleted: Boolean(checkout),
+        checkinCompleted,
+      }),
       includeDeposit,
       checkout,
     },

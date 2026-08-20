@@ -121,6 +121,12 @@ function AccountsSummaryPanel({
     overallGbp,
   );
 
+  const hasDiscount = (accounts.totalDiscountGbp ?? 0) > 0.005;
+  const timeOnHireLabel =
+    accounts.rentCadence === "daily"
+      ? `${accounts.durationDays} day${accounts.durationDays === 1 ? "" : "s"}`
+      : `${accounts.durationDays} day${accounts.durationDays === 1 ? "" : "s"} · ${accounts.billedPeriods} ${rentCadencePluralLabel(accounts.rentCadence)}`;
+
   return (
     <div className={`rph-card space-y-3 text-sm ${compact ? "p-3" : "p-4"}`}>
       {!compact ? <p className="font-semibold text-rph-fg">Accounts at end of hire</p> : null}
@@ -131,45 +137,37 @@ function AccountsSummaryPanel({
 
       <div className="space-y-2 rounded-lg border border-rph-border bg-rph-page/40 px-3 py-2.5">
         <p className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Rent</p>
-        <dl className="grid gap-2 sm:grid-cols-2">
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4">
           <div>
             <dt className="rph-muted text-xs">Time on hire</dt>
-            <dd className="font-medium text-rph-fg">
-              {accounts.durationDays} day{accounts.durationDays === 1 ? "" : "s"} · {accounts.billedPeriods}{" "}
-              {rentCadencePluralLabel(accounts.rentCadence)}
-            </dd>
+            <dd className="font-medium text-rph-fg">{timeOnHireLabel}</dd>
           </div>
           <div>
             <dt className="rph-muted text-xs">Rent rate</dt>
             <dd className="font-medium text-rph-fg">
-              £{accounts.rentAmountGbp.toFixed(2)} per {rentCadenceLabel(accounts.rentCadence)}
+              £{accounts.rentAmountGbp.toFixed(2)} / {rentCadenceLabel(accounts.rentCadence)}
             </dd>
           </div>
-          {(accounts.totalDiscountGbp ?? 0) > 0.005 ? (
+          {hasDiscount ? (
             <>
               <div>
-                <dt className="rph-muted text-xs">Rent due so far</dt>
+                <dt className="rph-muted text-xs">Rent so far</dt>
                 <dd className="font-medium text-rph-fg">
                   £{(accounts.rentGrossAccruedGbp ?? accounts.accruedRentDueGbp).toFixed(2)}
                 </dd>
-                <dd className="rph-muted mt-0.5 text-xs">Before discount</dd>
               </div>
               <div>
                 <dt className="rph-muted text-xs">Discount</dt>
-                <dd className="font-medium text-rph-fg">
-                  −£{accounts.totalDiscountGbp.toFixed(2)}
-                </dd>
+                <dd className="font-medium text-rph-fg">−£{accounts.totalDiscountGbp.toFixed(2)}</dd>
               </div>
-              <div className="sm:col-span-2">
-                <dt className="rph-muted text-xs">Rent due so far after discount</dt>
-                <dd className="font-semibold text-rph-fg">
-                  £{accounts.accruedRentDueGbp.toFixed(2)}
-                </dd>
+              <div>
+                <dt className="rph-muted text-xs">Rent due after discount</dt>
+                <dd className="font-semibold text-rph-fg">£{accounts.accruedRentDueGbp.toFixed(2)}</dd>
               </div>
             </>
           ) : (
             <div>
-              <dt className="rph-muted text-xs">Rent due so far</dt>
+              <dt className="rph-muted text-xs">Rent so far</dt>
               <dd className="font-medium text-rph-fg">£{accounts.accruedRentDueGbp.toFixed(2)}</dd>
             </div>
           )}
@@ -179,36 +177,37 @@ function AccountsSummaryPanel({
           </div>
           {accounts.accruedOverpaymentGbp > 0.005 ? (
             <div>
-              <dt className="rph-muted text-xs">Rent overpayment</dt>
+              <dt className="rph-muted text-xs">Overpayment</dt>
               <dd className="font-medium text-rph-fg">£{accounts.accruedOverpaymentGbp.toFixed(2)}</dd>
             </div>
           ) : null}
           {accounts.prepaidRentCreditGbp > 0.005 ? (
             <div>
-              <dt className="rph-muted text-xs">Rent paid in advance</dt>
+              <dt className="rph-muted text-xs">Paid in advance</dt>
               <dd className="font-medium text-rph-fg">£{accounts.prepaidRentCreditGbp.toFixed(2)}</dd>
             </div>
           ) : null}
-          <div className="sm:col-span-2">
+          <div className={hasDiscount ? "sm:col-span-2" : "col-span-2 sm:col-span-1"}>
             <dt className="rph-muted text-xs">Rent balance</dt>
             <dd className="font-semibold text-rph-fg">{rentPositionLabel}</dd>
           </div>
         </dl>
       </div>
 
-      <div className="space-y-2 rounded-lg border border-rph-border bg-rph-page/40 px-3 py-2.5">
+      <div className="space-y-1.5 rounded-lg border border-rph-border bg-rph-page/40 px-3 py-2.5">
         <p className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Extra charges</p>
         {extrasGbp > 0.005 ? (
           <>
-            <p className="font-semibold text-rph-fg">£{extrasGbp.toFixed(2)} still outstanding</p>
-            <p className="rph-muted text-xs">
-              Damage, admin and other charges not yet paid. These are included in the overall position
-              below and stay on Payments after the contract ends.
-            </p>
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+              <p className="font-semibold text-rph-fg">£{extrasGbp.toFixed(2)} still outstanding</p>
+              <p className="rph-muted max-w-md text-xs">
+                Included in overall position · stays on Payments after end
+              </p>
+            </div>
             {pendingExtraApprovalGbp > 0.005 ? (
               <p className="rph-alert-warn text-xs">
-                £{pendingExtraApprovalGbp.toFixed(2)} has been submitted for approval. It still counts as
-                outstanding until it is approved.
+                £{pendingExtraApprovalGbp.toFixed(2)} submitted for approval — still counts as outstanding
+                until approved.
               </p>
             ) : null}
           </>
@@ -218,9 +217,9 @@ function AccountsSummaryPanel({
       </div>
 
       {showDepositLines ? (
-        <div className="space-y-2 rounded-lg border border-rph-border bg-rph-page/40 px-3 py-2.5">
+        <div className="space-y-1.5 rounded-lg border border-rph-border bg-rph-page/40 px-3 py-2.5">
           <p className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Deposit</p>
-          <dl className="grid gap-2 sm:grid-cols-2">
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
             <div>
               <dt className="rph-muted text-xs">Held</dt>
               <dd className="font-medium text-rph-fg">£{accounts.depositGbp.toFixed(2)}</dd>
@@ -231,21 +230,26 @@ function AccountsSummaryPanel({
             </div>
           </dl>
           <p className="rph-muted text-xs">
-            Deposit is not applied yet. After vehicle check-in you choose refund, apply to balance, or
-            keep on Payments.
+            Not applied yet — after check-in choose refund, apply to balance, or keep on Payments.
           </p>
         </div>
       ) : null}
 
-      <div className="rounded-lg border border-rph-border-strong px-3 py-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">Overall position</p>
-        <p className="mt-1 text-base font-semibold text-rph-fg">{overallLabel}</p>
-        <p className="rph-muted mt-1 text-xs">
-          Rent balance
-          {extrasGbp > 0.005 ? ` + £${extrasGbp.toFixed(2)} extras` : ""}
-          {showDepositLines ? " · deposit held separately until check-in" : ""}. Final settlement is
-          completed on Payments after check-in.
-        </p>
+      <div className="rounded-lg border border-rph-border-strong px-3 py-2.5">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-rph-fg-muted">
+              Overall position
+            </p>
+            <p className="mt-0.5 text-base font-semibold text-rph-fg">{overallLabel}</p>
+          </div>
+          <p className="rph-muted max-w-sm text-xs">
+            Rent balance
+            {extrasGbp > 0.005 ? ` + £${extrasGbp.toFixed(2)} extras` : ""}
+            {showDepositLines ? " · deposit held until check-in" : ""}. Finalise on Payments after
+            check-in.
+          </p>
+        </div>
       </div>
     </div>
   );

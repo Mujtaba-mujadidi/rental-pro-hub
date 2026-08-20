@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { useLockBackgroundScroll } from "@/lib/ui/lock-background-scroll";
 
 const btnGhost =
   "inline-flex h-9 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800";
@@ -101,6 +102,7 @@ export function FormModalShell({
   pendingMessage = "Saving…",
 }: FormModalShellProps) {
   const [maximized, setMaximized] = useState(false);
+  useLockBackgroundScroll(open);
 
   useEffect(() => {
     if (!open) {
@@ -126,8 +128,8 @@ export function FormModalShell({
       : `relative z-[1] flex ${panelHeightClass} w-full ${maxWidthClass} flex-col overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-950`);
 
   const outerClass = maximized
-    ? `fixed inset-0 ${zClass} flex items-stretch justify-stretch p-0`
-    : `fixed inset-0 ${zClass} flex items-center justify-center p-3 sm:p-6`;
+    ? `fixed inset-0 ${zClass} flex items-stretch justify-stretch overflow-hidden overscroll-none p-0`
+    : `fixed inset-0 ${zClass} flex items-center justify-center overflow-hidden overscroll-none p-3 sm:p-6`;
 
   const draftActions =
     showDraftActions &&
@@ -229,7 +231,7 @@ export function FormModalShell({
             {headerExtra}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-10">{children}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-10">{children}</div>
 
           <div className="rph-modal-footer shrink-0 border-t border-zinc-200 px-4 py-4 dark:border-zinc-700 sm:px-10">
             {footer}

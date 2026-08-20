@@ -25,6 +25,8 @@ export type HireWorkspaceChromeData = {
   endedTimeOnHireLabel: string | null;
   settlementStatusChip: string | null;
   canTerminate: boolean;
+  /** Terminated, checkout done, check-in not completed — show Check in next to End contract. */
+  canCheckIn: boolean;
   includeDeposit: boolean;
   checkout: HireWorkspaceCheckoutGlance | null;
 };

@@ -71,6 +71,18 @@ export function HireWorkspaceHero({
               End contract
             </button>
           ) : null}
+          {chrome.canCheckIn ? (
+            <Link
+              href={
+                mode === "driver"
+                  ? `/driver/hires/${chrome.hireGroupId}/checkin`
+                  : `/rental/hires/${chrome.hireGroupId}/checkin`
+              }
+              className="inline-flex h-8 items-center rounded-lg border border-rph-rail/30 bg-rph-rail px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-rph-rail-hover"
+            >
+              Check in
+            </Link>
+          ) : null}
         </div>
 
         <div className="hire-ws-hero-metrics">

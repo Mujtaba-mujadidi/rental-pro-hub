@@ -776,7 +776,10 @@ export function Option7Shell({
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col bg-rph-page">
-          <main className="min-h-0 w-full min-w-0 flex-1 overflow-auto bg-rph-page p-3 sm:p-4">
+          <main
+            data-rph-scroll-root
+            className="min-h-0 w-full min-w-0 flex-1 overflow-auto bg-rph-page p-3 sm:p-4"
+          >
             {variant === "driver" && driverLicenceBanner && driverLicenceBanner.bullets.length > 0 ? (
               <div
                 className="mb-3 w-full rounded-xl border border-amber-300/90 bg-amber-50 px-4 py-3 dark:border-amber-800/80 dark:bg-amber-950/50"

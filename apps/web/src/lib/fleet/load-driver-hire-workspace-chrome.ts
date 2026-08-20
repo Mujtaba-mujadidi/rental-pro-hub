@@ -11,6 +11,7 @@ import {
   buildHireEndedHeroMetrics,
   hireEndedSettlementChipLabel,
 } from "@/lib/fleet/hire-ended-summary-display";
+import { canStartCheckin } from "@/lib/fleet/hire-lifecycle-attention";
 import type { HireWorkspaceChromeData } from "@/lib/fleet/hire-workspace-chrome-types";
 import { createClient } from "@/lib/supabase/server";
 
@@ -41,18 +42,33 @@ async function loadCompletedCheckout(hireGroupId: string) {
   };
 }
 
+async function loadCheckinCompleted(hireGroupId: string): Promise<boolean> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("vehicle_hire_inspections")
+    .select("id")
+    .eq("hire_group_id", hireGroupId.trim())
+    .eq("kind", "checkin")
+    .eq("status", "completed")
+    .limit(1)
+    .maybeSingle();
+  return Boolean(data?.id);
+}
+
 async function fetchDriverHireWorkspaceChrome(groupId: string): Promise<DriverHireWorkspaceChromeResult> {
   const id = groupId.trim();
-  const [dashboardRes, paymentsRes, checkout] = await Promise.all([
+  const [dashboardRes, paymentsRes, checkout, checkinCompleted] = await Promise.all([
     loadDriverHireDashboardAction(id),
     loadDriverHirePaymentsPageAction(id),
     loadCompletedCheckout(id),
+    loadCheckinCompleted(id),
   ]);
   if (!dashboardRes.ok) return dashboardRes;
   if (!paymentsRes.ok) return paymentsRes;
 
   const context = dashboardRes.data.overview;
   const hero = dashboardRes.data.workspaceHero;
+  const hireStatus = paymentsRes.data.hireStatus;
   const paymentPosition = buildActiveHirePaymentPosition({
     includeDeposit: dashboardRes.data.includeDeposit,
     summary: dashboardRes.data.summary,
@@ -93,6 +109,11 @@ async function fetchDriverHireWorkspaceChrome(groupId: string): Promise<DriverHi
       endedTimeOnHireLabel: endedHero?.timeOnHireLabel ?? null,
       settlementStatusChip,
       canTerminate: false,
+      canCheckIn: canStartCheckin({
+        status: hireStatus,
+        checkoutCompleted: Boolean(checkout),
+        checkinCompleted,
+      }),
       includeDeposit: paymentsRes.data.rows.some((row) => row.rowKind === "deposit"),
       checkout,
     },
