@@ -18,7 +18,6 @@ import {
   activeBalanceHeaderRentLine,
   activeBalanceHeroBreakdown,
   activeBalanceNextRentDueHint,
-  activeBalanceOpenAmountGbp,
   activeBalanceRentAccountRows,
   selectFeaturedOutstandingExtraCharge,
 } from "@/lib/fleet/hire-active-balance-display";
@@ -59,7 +58,6 @@ export function HireActiveBalanceWorkspaceView({
   const headerPeriod = activeBalanceHeaderPeriod(data.activatedAt);
   const headerRentLine = activeBalanceHeaderRentLine(data.rentAmountGbp, data.rentCadence);
   const headerCompanyLine = [data.companyName?.trim(), headerRentLine].filter(Boolean).join(" · ");
-  const headerMeta = [data.vehicleVrm, data.driverLabel].filter(Boolean).join(" · ");
 
   const position = useMemo(() => {
     if (!payments) return null;
@@ -80,12 +78,16 @@ export function HireActiveBalanceWorkspaceView({
   });
 
   const openBalanceGbp = position
-    ? activeBalanceOpenAmountGbp(position.rentOutstandingGbp, position.extraChargesOutstandingGbp)
+    ? position.currentlyDueGbp
     : data.openBalanceGbp;
   const heroBreakdown = position
-    ? activeBalanceHeroBreakdown(position.rentOutstandingGbp, position.extraChargesOutstandingGbp)
+    ? activeBalanceHeroBreakdown({
+        depositOutstandingGbp: position.depositOutstandingGbp,
+        rentOutstandingGbp: position.rentOutstandingGbp,
+        extrasOutstandingGbp: position.extraChargesOutstandingGbp,
+      })
     : null;
-  const nextDue = payments?.summary.nextDue ?? null;
+  const nextFutureDue = payments?.summary.nextFutureDue ?? null;
 
   const extraChargeRows = useMemo(
     () =>
@@ -140,8 +142,8 @@ export function HireActiveBalanceWorkspaceView({
 
   return (
     <div className="hire-balance-workspace">
-      {!embedded ? (
-        <header className="hire-balance-page-header">
+      <header className={embedded ? "hire-balance-page-header hire-balance-page-header-embedded" : "hire-balance-page-header"}>
+        {!embedded ? (
           <div className="hire-balance-page-header-top">
             <Link href="/rental/balances" className="text-sm font-medium text-rph-link hover:text-rph-link-hover">
               ← Back to balances
@@ -150,41 +152,75 @@ export function HireActiveBalanceWorkspaceView({
               <BalanceHeaderTools hireGroupId={hireGroupId} />
             </div>
           </div>
+        ) : (
+          <div className="hire-balance-page-header-top">
+            <span className="hire-balance-page-badge">Active hire</span>
+            <div className="hire-balance-page-header-tools-desktop">
+              <HirePaymentStatementDownloadButton
+                hireGroupId={hireGroupId}
+                variant="default"
+                source="balance-account"
+              />
+            </div>
+          </div>
+        )}
+        {!embedded ? (
           <div className="hire-balance-page-header-meta">
             <span className="hire-balance-page-badge">Active hire</span>
             {data.balanceReference ? (
               <span className="hire-balance-page-reference">{data.balanceReference}</span>
             ) : null}
           </div>
-          <h1 className="hire-balance-page-title">Payments & balance</h1>
-          <p className="hire-balance-page-line">
-            {data.vehicleVrm ? <span className="font-semibold text-rph-fg">{data.vehicleVrm}</span> : null}
-            {data.driverLabel ? (
+        ) : null}
+        <div className="hire-balance-page-header-copy">
+          <div className="min-w-0 flex-1">
+            <h1 className="hire-balance-page-title">Payments & balance</h1>
+            {embedded ? (
+              <p className="hire-balance-page-desc">
+                Manage rent, extra charges, payments and the running account without leaving this hire.
+              </p>
+            ) : (
               <>
-                {data.vehicleVrm ? " · " : null}
-                {data.driverLabel}
+                <p className="hire-balance-page-line">
+                  {data.vehicleVrm ? <span className="font-semibold text-rph-fg">{data.vehicleVrm}</span> : null}
+                  {data.driverLabel ? (
+                    <>
+                      {data.vehicleVrm ? " · " : null}
+                      {data.driverLabel}
+                    </>
+                  ) : null}
+                  {(data.vehicleVrm || data.driverLabel) && headerPeriod ? " · " : null}
+                  {headerPeriod}
+                </p>
+                {headerCompanyLine ? <p className="hire-balance-page-line">{headerCompanyLine}</p> : null}
               </>
-            ) : null}
-            {(data.vehicleVrm || data.driverLabel) && headerPeriod ? " · " : null}
-            {headerPeriod}
-          </p>
-          {headerCompanyLine ? <p className="hire-balance-page-line">{headerCompanyLine}</p> : null}
-          <div className="hire-balance-page-header-tools-mobile">
-            <BalanceHeaderTools hireGroupId={hireGroupId} stacked />
-            {tab === "account-statement" && canRecordPayment ? (
-              <HireAllocatedPaymentComposer
-                hireGroupId={hireGroupId}
-                payments={payments}
-                submitLabel="Record payment"
-                triggerLabel="Record payment"
-                triggerClassName="rph-btn-primary h-10 w-full"
-                onAllocationChange={setHighlightedRowIds}
-                onSuccess={onReload}
-              />
-            ) : null}
+            )}
           </div>
-        </header>
-      ) : null}
+        </div>
+        <div className="hire-balance-page-header-tools-mobile">
+          {embedded ? (
+            <HirePaymentStatementDownloadButton
+              hireGroupId={hireGroupId}
+              variant="default"
+              source="balance-account"
+              className="w-full min-w-0 items-stretch"
+            />
+          ) : (
+            <BalanceHeaderTools hireGroupId={hireGroupId} stacked />
+          )}
+          {tab === "account-statement" && canRecordPayment ? (
+            <HireAllocatedPaymentComposer
+              hireGroupId={hireGroupId}
+              payments={payments}
+              submitLabel="Record payment"
+              triggerLabel="Record payment"
+              triggerClassName="rph-btn-primary h-10 w-full"
+              onAllocationChange={setHighlightedRowIds}
+              onSuccess={onReload}
+            />
+          ) : null}
+        </div>
+      </header>
 
       <section className={tab === "account-statement" ? "hire-balance-shell hire-balance-shell-statement" : "hire-balance-shell"}>
         <nav className="hire-balance-tabs" aria-label="Balance sections">
@@ -207,7 +243,7 @@ export function HireActiveBalanceWorkspaceView({
             <section className="hire-balance-hero">
               <div className="hire-balance-hero-inner">
                 <div className="min-w-0">
-                  <span className="hire-balance-hero-badge">Outstanding balance</span>
+                  <span className="hire-balance-hero-badge">Payment due</span>
                   <p className="hire-balance-hero-label">Driver currently owes</p>
                   <p className="hire-balance-hero-amount">{formatGbp(openBalanceGbp)}</p>
                   {heroBreakdown ? <p className="hire-balance-hero-breakdown">{heroBreakdown}</p> : null}
@@ -219,7 +255,7 @@ export function HireActiveBalanceWorkspaceView({
                       payments={payments}
                       submitLabel="Record payment"
                       triggerLabel="Record payment"
-                      triggerClassName="rph-btn-primary"
+                      triggerClassName="hire-balance-hero-cta"
                       onAllocationChange={setHighlightedRowIds}
                       onSuccess={onReload}
                     />
@@ -230,8 +266,8 @@ export function HireActiveBalanceWorkspaceView({
           ) : null}
 
           <div className="hire-balance-kpi-grid">
-            <div className={`hire-balance-kpi${depositCard.warn ? " hire-balance-kpi-warn" : ""}`}>
-              <p className="hire-balance-kpi-label">Deposit</p>
+            <div className={`hire-balance-kpi hire-balance-kpi-deposit`}>
+              <p className="hire-balance-kpi-label">{depositCard.label}</p>
               <p
                 className={`hire-balance-kpi-value${depositCard.paid ? " hire-balance-kpi-value-paid" : ""}`}
               >
@@ -239,9 +275,7 @@ export function HireActiveBalanceWorkspaceView({
               </p>
               <p className="hire-balance-kpi-hint">{depositCard.hint}</p>
             </div>
-            <div
-              className={`hire-balance-kpi${position.rentOutstandingGbp > 0.005 ? " hire-balance-kpi-warn" : ""}`}
-            >
+            <div className="hire-balance-kpi hire-balance-kpi-rent">
               <p className="hire-balance-kpi-label">Outstanding rent</p>
               <p className="hire-balance-kpi-value">{formatGbp(position.rentOutstandingGbp)}</p>
               <p className="hire-balance-kpi-hint">
@@ -251,20 +285,22 @@ export function HireActiveBalanceWorkspaceView({
                 )}
               </p>
             </div>
-            <div
-              className={`hire-balance-kpi${position.extraChargesOutstandingGbp > 0.005 ? " hire-balance-kpi-warn" : ""}`}
-            >
+            <div className="hire-balance-kpi hire-balance-kpi-extras">
               <p className="hire-balance-kpi-label">Outstanding extras</p>
               <p className="hire-balance-kpi-value">{formatGbp(position.extraChargesOutstandingGbp)}</p>
               <p className="hire-balance-kpi-hint">
                 {activeBalanceChargedPaidHint(metrics.extraChargesGbp, metrics.extraChargesPaidGbp)}
               </p>
             </div>
-            <div className="hire-balance-kpi">
+            <div className="hire-balance-kpi hire-balance-kpi-next">
               <p className="hire-balance-kpi-label">Next future rent</p>
-              <p className="hire-balance-kpi-value">{nextDue ? formatGbp(nextDue.amountGbp) : "—"}</p>
+              <p className="hire-balance-kpi-value">
+                {nextFutureDue ? formatGbp(nextFutureDue.amountGbp) : "—"}
+              </p>
               <p className="hire-balance-kpi-hint">
-                {nextDue ? activeBalanceNextRentDueHint(nextDue.periodStart) : "No future rent scheduled"}
+                {nextFutureDue
+                  ? activeBalanceNextRentDueHint(nextFutureDue.periodStart)
+                  : "No future rent scheduled"}
               </p>
             </div>
           </div>
@@ -273,7 +309,7 @@ export function HireActiveBalanceWorkspaceView({
             <section className="hire-balance-panel">
               <div className="hire-balance-panel-head">
                 <div>
-                  <p className="driver-dash-section-label">Rent to date</p>
+                  <p className="hire-balance-panel-kicker">Rent to date</p>
                   <h2 className="hire-balance-panel-title">Rent account</h2>
                 </div>
                 <button type="button" className="hire-balance-panel-link" onClick={switchToRentSchedule}>
@@ -299,17 +335,20 @@ export function HireActiveBalanceWorkspaceView({
             <section className="hire-balance-panel">
               <div className="hire-balance-panel-head">
                 <div>
-                  <p className="driver-dash-section-label">Next scheduled</p>
+                  <p className="hire-balance-panel-kicker">Next scheduled</p>
                   <h2 className="hire-balance-panel-title">Future rent payment</h2>
                 </div>
-                {nextDue ? <span className="hire-balance-status-pill">Not yet owed</span> : null}
+                {nextFutureDue ? <span className="hire-balance-status-pill">Not yet owed</span> : null}
               </div>
-              {nextDue ? (
+              {nextFutureDue ? (
                 <>
-                  <p className="hire-balance-future-date">{formatUkDateTextLong(nextDue.periodStart)}</p>
-                  <p className="hire-balance-future-amount">{formatGbp(nextDue.amountGbp)}</p>
+                  <p className="hire-balance-future-date">
+                    {formatUkDateTextLong(nextFutureDue.periodStart)}
+                  </p>
+                  <p className="hire-balance-future-amount">{formatGbp(nextFutureDue.amountGbp)}</p>
                   <p className="hire-balance-future-note">
-                    This is the next future rent period. Existing overdue rent is included in the balance above.
+                    This future period is not included in today&apos;s balance. It will only be charged if the hire
+                    remains active.
                   </p>
                 </>
               ) : (
@@ -322,7 +361,7 @@ export function HireActiveBalanceWorkspaceView({
             <section className="hire-balance-panel">
               <div className="hire-balance-panel-head">
                 <div>
-                  <p className="driver-dash-section-label">Additional charge</p>
+                  <p className="hire-balance-panel-kicker">Additional charge</p>
                   <h2 className="hire-balance-panel-title">{featuredCharge.item.chargeTypeLabel} charge</h2>
                 </div>
                 <button type="button" className="hire-balance-panel-link" onClick={switchToExtraCharges}>
@@ -365,7 +404,36 @@ export function HireActiveBalanceWorkspaceView({
                 </div>
               </div>
             </section>
-          ) : null}
+          ) : (
+            <section className="hire-balance-panel">
+              <div className="hire-balance-panel-head">
+                <div>
+                  <p className="hire-balance-panel-kicker">Additional charges</p>
+                  <h2 className="hire-balance-panel-title">No extra charges</h2>
+                </div>
+                {canMutateCharges ? (
+                  <button type="button" className="hire-balance-panel-link" onClick={switchToExtraCharges}>
+                    Add a charge
+                  </button>
+                ) : (
+                  <button type="button" className="hire-balance-panel-link" onClick={switchToExtraCharges}>
+                    View charges
+                  </button>
+                )}
+              </div>
+              <div className="hire-balance-empty-charges">
+                <span className="hire-balance-empty-charges-icon" aria-hidden>
+                  ✓
+                </span>
+                <div className="min-w-0">
+                  <p className="hire-balance-empty-charges-title">Nothing additional has been charged.</p>
+                  <p className="hire-balance-empty-charges-hint">
+                    Damage, administration fees and adjustments will appear here when posted.
+                  </p>
+                </div>
+              </div>
+            </section>
+          )}
         </div>
       ) : null}
 
@@ -391,6 +459,8 @@ export function HireActiveBalanceWorkspaceView({
           canMutate={payments.canMutateExtraCharges}
           canApprovePayments={payments.canApprovePayments}
           payments={payments}
+          currentlyOwedGbp={openBalanceGbp}
+          headerMeta={data.vehicleVrm}
           onReload={onReload}
           onAllocationChange={setHighlightedRowIds}
         />
@@ -420,7 +490,11 @@ export function HireActiveBalanceWorkspaceView({
       <HireAddChargeModal
         hireGroupId={hireGroupId}
         open={addOpen}
-        headerMeta={headerMeta}
+        headerMeta={
+          openBalanceGbp > 0.005
+            ? `${data.vehicleVrm} · ${formatGbp(openBalanceGbp)} currently owed`.toUpperCase()
+            : data.vehicleVrm?.toUpperCase() ?? null
+        }
         onClose={() => setAddOpen(false)}
         onSaved={onReload}
       />

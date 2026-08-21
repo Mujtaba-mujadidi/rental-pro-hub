@@ -1,5 +1,6 @@
 import type { HirePaymentsPageData } from "@/app/actions/hire-payments";
 import type { HireDriverChargeWorkspaceRow } from "@/app/actions/rental-hire-termination";
+import { buildEndedHireAccountPosition } from "@/lib/fleet/hire-account-adapters";
 import { formatGbp } from "@/lib/fleet/maintenance";
 import {
   hireDepositAppliedToRentGbp,
@@ -7,10 +8,7 @@ import {
 } from "@/lib/fleet/hire-ended-summary-display";
 import { summarizeHireSettlementLedger } from "@/lib/fleet/hire-payments-ledger";
 import { hireProRataRentAdjustmentGbp, type HireTerminationAccountsSummary } from "@/lib/fleet/hire-termination-summary";
-
-function roundGbp(value: number): number {
-  return Math.round(value * 100) / 100;
-}
+import { roundGbp } from "@/lib/fleet/hire-money";
 
 /** Unused rent paid for periods after the end date, plus overpayment on accrued rent. */
 export function hireAdvanceRentToRefundGbp(
@@ -47,28 +45,33 @@ export type HireEndedRentCalculationDisplay = {
 };
 
 export function buildHireEndedRentCalculation(
-  payments: Pick<HirePaymentsPageData, "terminationSummary" | "summary">,
+  payments: Pick<
+    HirePaymentsPageData,
+    "terminationSummary" | "summary" | "depositDisposition" | "depositReceivedGbp"
+  >,
   options?: { audience?: "staff" | "driver" },
 ): HireEndedRentCalculationDisplay {
   const audience = options?.audience ?? "staff";
   const termination = payments.terminationSummary;
-  const rentDueToEndGbp = roundGbp(
-    termination?.accruedRentDueGbp ?? payments.summary.totalDueGbp,
-  );
-  const paymentReceivedDuringHireGbp = roundGbp(
-    termination?.accruedRentPaidGbp ?? payments.summary.totalPaidGbp,
-  );
   const advanceRentToRefundGbp = hireAdvanceRentToRefundGbp(termination);
-  const totalRentReceivedDuringHireGbp = termination
-    ? roundGbp(paymentReceivedDuringHireGbp + advanceRentToRefundGbp)
-    : roundGbp(payments.summary.totalPaidGbp);
-  const paidFromDepositGbp = termination ? hireDepositAppliedToRentGbp(termination) : 0;
-  const rentOutstandingGbp = roundGbp(
-    Math.max(0, rentDueToEndGbp - paymentReceivedDuringHireGbp - paidFromDepositGbp),
-  );
 
-  let cancelledPeriodNote: string | null = null;
   if (termination) {
+    const account = buildEndedHireAccountPosition({
+      terminationSummary: termination,
+      depositDisposition: payments.depositDisposition,
+      depositReceivedGbp: payments.depositReceivedGbp ?? 0,
+      extraChargesOutstandingGbp: 0,
+      lifecycle: "ended",
+    });
+    const rentDueToEndGbp = account.rentChargedGbp;
+    const paymentReceivedDuringHireGbp = account.rentPaidGbp;
+    const paidFromDepositGbp = account.depositAppliedToRentGbp;
+    const rentOutstandingGbp = account.rentOutstandingGbp;
+    const totalRentReceivedDuringHireGbp = roundGbp(
+      paymentReceivedDuringHireGbp + advanceRentToRefundGbp,
+    );
+
+    let cancelledPeriodNote: string | null = null;
     const cancelledGbp = hireProRataRentAdjustmentGbp({
       rentGrossAccruedGbp: payments.summary.rentGrossAccruedGbp,
       totalDiscountGbp: payments.summary.totalDiscountGbp,
@@ -83,25 +86,38 @@ export function buildHireEndedRentCalculation(
             : "day";
       cancelledPeriodNote = `${formatGbp(cancelledGbp)} of the final ${periodWord} was cancelled after early termination. It is not unpaid rent.`;
     }
+
+    let advanceRentNote: string | null = null;
+    if (advanceRentToRefundGbp > 0.005) {
+      advanceRentNote =
+        audience === "driver"
+          ? `You also paid ${formatGbp(advanceRentToRefundGbp)} in advance for later rent periods. Unused advance rent is on the refund card.`
+          : `The driver also paid ${formatGbp(advanceRentToRefundGbp)} in advance for later rent periods. Unused advance rent is on the refund card.`;
+    }
+
+    return {
+      rentDueToEndGbp,
+      totalRentReceivedDuringHireGbp,
+      paymentReceivedDuringHireGbp,
+      paidFromDepositGbp,
+      rentOutstandingGbp,
+      advanceRentToRefundGbp,
+      advanceRentNote,
+      cancelledPeriodNote,
+    };
   }
 
-  let advanceRentNote: string | null = null;
-  if (advanceRentToRefundGbp > 0.005) {
-    advanceRentNote =
-      audience === "driver"
-        ? `You also paid ${formatGbp(advanceRentToRefundGbp)} in advance for later rent periods. Unused advance rent is on the refund card.`
-        : `The driver also paid ${formatGbp(advanceRentToRefundGbp)} in advance for later rent periods. Unused advance rent is on the refund card.`;
-  }
-
+  const rentDueToEndGbp = roundGbp(payments.summary.totalDueGbp);
+  const paymentReceivedDuringHireGbp = roundGbp(payments.summary.totalPaidGbp);
   return {
     rentDueToEndGbp,
-    totalRentReceivedDuringHireGbp,
+    totalRentReceivedDuringHireGbp: paymentReceivedDuringHireGbp,
     paymentReceivedDuringHireGbp,
-    paidFromDepositGbp,
-    rentOutstandingGbp,
-    advanceRentToRefundGbp,
-    advanceRentNote,
-    cancelledPeriodNote,
+    paidFromDepositGbp: 0,
+    rentOutstandingGbp: roundGbp(Math.max(0, rentDueToEndGbp - paymentReceivedDuringHireGbp)),
+    advanceRentToRefundGbp: 0,
+    advanceRentNote: null,
+    cancelledPeriodNote: null,
   };
 }
 
@@ -123,19 +139,33 @@ export type HireEndedDepositRefundDisplay = {
 export function buildHireEndedDepositRefundDisplay(input: {
   payments: Pick<
     HirePaymentsPageData,
-    "terminationSummary" | "depositGbp" | "settlementBalancePayments" | "driverChargeLineItems"
+    | "terminationSummary"
+    | "depositGbp"
+    | "depositDisposition"
+    | "depositReceivedGbp"
+    | "settlementBalancePayments"
+    | "driverChargeLineItems"
   >;
   audience?: "staff" | "driver";
 }): HireEndedDepositRefundDisplay | null {
   const audience = input.audience ?? "staff";
-  const depositGbp = roundGbp(
-    input.payments.terminationSummary?.depositGbp ?? input.payments.depositGbp ?? 0,
+  // Only received deposit money can be refunded or applied. Contractual unpaid deposit
+  // has no end-of-hire refund/collect impact.
+  const depositReceivedGbp = roundGbp(
+    input.payments.depositReceivedGbp ??
+      // Legacy callers without depositReceivedGbp: do not invent receipt from contractual amount.
+      0,
   );
   const advanceRentToRefundGbp = hireAdvanceRentToRefundGbp(input.payments.terminationSummary);
-  if (depositGbp <= 0.005 && advanceRentToRefundGbp <= 0.005) return null;
+  if (depositReceivedGbp <= 0.005 && advanceRentToRefundGbp <= 0.005) return null;
 
+  const depositGbp = depositReceivedGbp;
   const lessUnpaidRentGbp = input.payments.terminationSummary
-    ? hireDepositAppliedToRentGbp(input.payments.terminationSummary)
+    ? hireDepositAppliedToRentGbp(
+        input.payments.terminationSummary,
+        input.payments.depositDisposition,
+        depositReceivedGbp,
+      )
     : 0;
   const lessDamageGbp = sumDriverChargesGbp(input.payments.driverChargeLineItems);
   const ledger = summarizeHireSettlementLedger(input.payments.settlementBalancePayments);
@@ -219,7 +249,10 @@ export type HireEndedPositionSnapshotDisplay = {
 };
 
 export function buildHireEndedPositionSnapshot(
-  payments: Pick<HirePaymentsPageData, "terminationSummary" | "summary" | "depositGbp">,
+  payments: Pick<
+    HirePaymentsPageData,
+    "terminationSummary" | "summary" | "depositGbp" | "depositDisposition" | "depositReceivedGbp"
+  >,
   options?: { audience?: "staff" | "driver" },
 ): HireEndedPositionSnapshotDisplay | null {
   const termination = payments.terminationSummary;
@@ -227,8 +260,9 @@ export function buildHireEndedPositionSnapshot(
 
   const audience = options?.audience ?? "staff";
   const rent = buildHireEndedRentCalculation(payments, { audience });
+  const depositReceivedGbp = roundGbp(payments.depositReceivedGbp ?? 0);
   const depositHeldGbp = roundGbp(
-    Math.max(0, (termination.depositGbp || payments.depositGbp || 0) - rent.paidFromDepositGbp),
+    Math.max(0, depositReceivedGbp - rent.paidFromDepositGbp),
   );
 
   const noteParts: string[] = [

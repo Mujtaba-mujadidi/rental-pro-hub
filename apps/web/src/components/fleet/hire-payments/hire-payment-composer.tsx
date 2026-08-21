@@ -3,8 +3,17 @@
 import type { HirePaymentAccountDisplay, HirePaymentPageRow } from "@/app/actions/hire-payments";
 import { formatUkDate, ukTodayYmd } from "@/lib/datetime/uk";
 import { allocatePaymentAcrossRows } from "@/lib/fleet/hire-payment-allocation";
-import { defaultHirePaymentApplyTo, type HirePaymentApplyTo } from "@/lib/fleet/hire-active-balance-display";
-import { accruedRentOutstandingGbp, payBalanceToDateGbp } from "@/lib/fleet/hire-active-payments-display";
+import {
+  defaultHirePaymentApplyTo,
+  defaultHireSchedulePaymentTarget,
+  type HirePaymentApplyTo,
+  type HireSchedulePaymentTarget,
+} from "@/lib/fleet/hire-active-balance-display";
+import {
+  accruedRentOutstandingGbp,
+  depositOutstandingGbp,
+  payBalanceToDateGbp,
+} from "@/lib/fleet/hire-active-payments-display";
 import {
   allocateExtraChargePaymentAcrossRows,
   type ExtraChargePaymentAllocationRow,
@@ -51,6 +60,8 @@ export type HirePaymentComposerSubmitInput = {
   paidOnYmd?: string;
   notes?: string;
   allocationKind: HirePaymentApplyTo;
+  /** When applying to the schedule and deposit is still owed, deposit vs rent. */
+  scheduleTarget?: HireSchedulePaymentTarget;
 };
 
 export function HirePaymentComposer({
@@ -118,30 +129,49 @@ export function HirePaymentComposer({
   const extrasSelectable =
     extraChargesSelectable ?? extraOutstandingGbp > 0.005;
   const dueRentGbp = useMemo(() => accruedRentOutstandingGbp(scheduleRows), [scheduleRows]);
-  const rentSelectable = allowAllocationChoice ? dueRentGbp > 0.005 : scheduleBalanceGbp > 0.005;
+  const depositDueGbp = useMemo(() => depositOutstandingGbp(scheduleRows), [scheduleRows]);
+  const showDepositRentChoice = depositDueGbp > 0.005;
+  const rentSelectable = allowAllocationChoice ? dueRentGbp > 0.005 || depositDueGbp > 0.005 : scheduleBalanceGbp > 0.005;
   const defaultApplyTo = allowAllocationChoice
     ? defaultHirePaymentApplyTo({
-        rentOutstandingGbp: dueRentGbp,
+        rentOutstandingGbp: dueRentGbp + depositDueGbp,
         extraOutstandingGbp,
         extraChargesSelectable: extrasSelectable,
         preferred: preferredAllocationKind,
       })
     : allocationKind;
   const [chosenKind, setChosenKind] = useState<HirePaymentApplyTo>(defaultApplyTo);
+  const [scheduleTarget, setScheduleTarget] = useState<HireSchedulePaymentTarget>(() =>
+    defaultHireSchedulePaymentTarget(depositDueGbp),
+  );
 
   const allocationInputs = useMemo(() => toAllocationInputs(scheduleRows), [scheduleRows]);
   const effectiveKind = allowAllocationChoice ? chosenKind : allocationKind;
   const isExtraCharges = effectiveKind === "extra_charges";
-  const balanceShortcutGbp = useMemo(
-    () => (isExtraCharges ? extraOutstandingGbp : payBalanceToDateGbp(scheduleRows)),
-    [extraOutstandingGbp, isExtraCharges, scheduleRows],
-  );
+  const effectiveScheduleTarget: HireSchedulePaymentTarget = showDepositRentChoice
+    ? scheduleTarget
+    : "rent";
+  const balanceShortcutGbp = useMemo(() => {
+    if (isExtraCharges) return extraOutstandingGbp;
+    if (showDepositRentChoice && effectiveScheduleTarget === "deposit") return depositDueGbp;
+    return payBalanceToDateGbp(scheduleRows, { includeDeposit: false });
+  }, [
+    depositDueGbp,
+    effectiveScheduleTarget,
+    extraOutstandingGbp,
+    isExtraCharges,
+    scheduleRows,
+    showDepositRentChoice,
+  ]);
   const scheduleAllocation = useMemo(() => {
     if (!open || isExtraCharges) return null;
     const parsed = parseAmountInput(amount);
     if (!parsed) return null;
-    return allocatePaymentAcrossRows(parsed, allocationInputs, ukTodayYmd());
-  }, [allocationInputs, amount, isExtraCharges, open]);
+    return allocatePaymentAcrossRows(parsed, allocationInputs, ukTodayYmd(), {
+      rowKind: effectiveScheduleTarget,
+      overflowRemainderToRent: effectiveScheduleTarget === "deposit",
+    });
+  }, [allocationInputs, amount, effectiveScheduleTarget, isExtraCharges, open]);
   const extraAllocation = useMemo(() => {
     if (!open || !isExtraCharges) return null;
     const parsed = parseAmountInput(amount);
@@ -168,8 +198,15 @@ export function HirePaymentComposer({
     setNotes("");
     setSubmitError(null);
     setChosenKind(defaultApplyTo);
+    setScheduleTarget(defaultHireSchedulePaymentTarget(depositDueGbp));
     onAllocationChange?.([]);
-  }, [defaultApplyTo, defaultStaffPaymentAccountId, onAllocationChange, staffPaymentAccounts]);
+  }, [defaultApplyTo, defaultStaffPaymentAccountId, depositDueGbp, onAllocationChange, staffPaymentAccounts]);
+
+  useEffect(() => {
+    if (!showDepositRentChoice && scheduleTarget !== "rent") {
+      setScheduleTarget("rent");
+    }
+  }, [scheduleTarget, showDepositRentChoice]);
 
   useEffect(() => {
     if (!allowAllocationChoice) return;
@@ -198,7 +235,10 @@ export function HirePaymentComposer({
     Boolean(notes.trim()) ||
     paymentMethod !== "bank_transfer" ||
     paidOn !== ukTodayYmd() ||
-    (allowAllocationChoice && chosenKind !== defaultApplyTo);
+    (allowAllocationChoice && chosenKind !== defaultApplyTo) ||
+    (showDepositRentChoice &&
+      !isExtraCharges &&
+      scheduleTarget !== defaultHireSchedulePaymentTarget(depositDueGbp));
 
   const requestClose = useCallback(() => {
     if (submitPending) return;
@@ -247,6 +287,7 @@ export function HirePaymentComposer({
         amountGbp: parsed,
         paymentReference: reference,
         allocationKind: effectiveKind,
+        ...(!isExtraCharges ? { scheduleTarget: effectiveScheduleTarget } : {}),
         ...(asDriver
           ? {}
           : {
@@ -286,7 +327,9 @@ export function HirePaymentComposer({
     ? asDriver
       ? "Enter the amount paid — we allocate it to outstanding extra charges in date order. The company will review this before it is marked paid."
       : "Enter the amount paid — we allocate it to outstanding extra charges in date order, including partial cover on the last charge."
-    : "Enter the amount paid — we allocate it to outstanding periods in date order, including future periods where the payment covers them in full or in part.";
+    : showDepositRentChoice
+      ? "Choose whether this payment counts towards the deposit or rent, then enter the amount."
+      : "Enter the amount paid — we allocate it to outstanding periods in date order, including future periods where the payment covers them in full or in part.";
 
   const allocationPreview =
     !isExtraCharges && scheduleAllocation?.allocations.length ? (
@@ -326,8 +369,8 @@ export function HirePaymentComposer({
               {
                 value: "schedule",
                 label: rentSelectable
-                  ? `Hire rent (${formatGbp(dueRentGbp)} due)`
-                  : "Hire rent (nothing due)",
+                  ? `Hire schedule (${formatGbp(dueRentGbp + depositDueGbp)} due)`
+                  : "Hire schedule (nothing due)",
                 disabled: !rentSelectable,
               },
               {
@@ -345,6 +388,51 @@ export function HirePaymentComposer({
               setSubmitError(null);
             }}
           />
+        </FormModalField>
+      ) : null}
+
+      {!isExtraCharges && showDepositRentChoice ? (
+        <FormModalField label="Count this payment towards">
+          <div className="flex flex-col gap-2 rounded-lg border border-rph-border bg-rph-page px-3 py-3">
+            <label className="flex cursor-pointer items-start gap-2.5 text-sm text-rph-fg">
+              <input
+                type="radio"
+                className="mt-0.5"
+                name="hire-schedule-payment-target"
+                checked={scheduleTarget === "deposit"}
+                disabled={fieldsDisabled}
+                onChange={() => {
+                  setScheduleTarget("deposit");
+                  setSubmitError(null);
+                }}
+              />
+              <span>
+                <span className="font-medium">Deposit</span>
+                <span className="mt-0.5 block text-xs text-rph-fg-secondary">
+                  {formatGbp(depositDueGbp)} still outstanding — any amount over this goes to rent
+                </span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2.5 text-sm text-rph-fg">
+              <input
+                type="radio"
+                className="mt-0.5"
+                name="hire-schedule-payment-target"
+                checked={scheduleTarget === "rent"}
+                disabled={fieldsDisabled}
+                onChange={() => {
+                  setScheduleTarget("rent");
+                  setSubmitError(null);
+                }}
+              />
+              <span>
+                <span className="font-medium">Rent</span>
+                <span className="mt-0.5 block text-xs text-rph-fg-secondary">
+                  Apply to rent periods only (deposit stays unpaid)
+                </span>
+              </span>
+            </label>
+          </div>
         </FormModalField>
       ) : null}
 
@@ -380,7 +468,13 @@ export function HirePaymentComposer({
           disabled={fieldsDisabled || balanceShortcutGbp <= 0}
           onClick={() => setAmount(balanceShortcutGbp.toFixed(2))}
         >
-          Pay {isExtraCharges ? "outstanding extras" : "balance to date"} ({formatGbp(balanceShortcutGbp)})
+          Pay{" "}
+          {isExtraCharges
+            ? "outstanding extras"
+            : showDepositRentChoice && effectiveScheduleTarget === "deposit"
+              ? "outstanding deposit"
+              : "balance to date"}{" "}
+          ({formatGbp(balanceShortcutGbp)})
         </button>
       </div>
 
@@ -462,6 +556,7 @@ export function HirePaymentComposer({
         disabled={triggerDisabled}
         onClick={() => {
           setChosenKind(defaultApplyTo);
+          setScheduleTarget(defaultHireSchedulePaymentTarget(depositDueGbp));
           setOpen(true);
           if (defaultApplyTo === "extra_charges" && extraOutstandingGbp > 0.005 && !amount) {
             setAmount(extraOutstandingGbp.toFixed(2));

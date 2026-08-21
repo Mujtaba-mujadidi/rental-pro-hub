@@ -92,6 +92,27 @@ export function formatHirePaymentRowEvent(event: HirePaymentRowEventInput): Hire
     };
   }
 
+  if (payload?.discountChange === true) {
+    const previous = amountFromPayload(payload, "previousDiscountGbp");
+    const next = amountFromPayload(payload, "newDiscountGbp");
+    title = next != null && next <= 0.005 ? "Discount cancelled" : "Discount amended";
+    if (previous != null && next != null) {
+      detailLines.push(`Changed from −${formatGbp(previous)} to −${formatGbp(next)}`);
+    } else if (next != null && next > 0.005) {
+      detailLines.push(`New discount: −${formatGbp(next)}`);
+    } else if (previous != null) {
+      detailLines.push(`Removed −${formatGbp(previous)}`);
+    }
+    return {
+      id: event.id,
+      title,
+      body,
+      detailLines,
+      actorLabel,
+      createdAt: event.createdAt,
+    };
+  }
+
   if (
     event.eventKind === "amendment" ||
     (event.fromStatus === "approved" && event.toStatus === "not_received")

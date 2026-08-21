@@ -8,7 +8,9 @@ import {
 import type { HireDriverChargeWorkspaceRow } from "@/app/actions/rental-hire-termination";
 import type { HireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
 import type { HirePaymentSummary } from "@/lib/fleet/hire-payment-summary";
+import { buildHireAccountPositionFromTerminationSummary } from "@/lib/fleet/hire-account-position";
 import { formatGbp } from "@/lib/fleet/maintenance";
+import { roundGbp } from "@/lib/fleet/hire-money";
 
 function StatusPill({
   label,
@@ -89,9 +91,21 @@ export function HirePaymentsAccountOverview({
 
   const rentDueGbp = terminationSummary?.accruedRentDueGbp ?? summary.totalDueGbp;
   const rentPaidGbp = summary.totalPaidGbp;
-  const rentOutstandingGbp = Math.max(0, rentDueGbp - rentPaidGbp);
-  const rentCreditGbp = Math.max(0, summary.creditGbp);
+  const rentAccount = terminationSummary
+    ? buildHireAccountPositionFromTerminationSummary(terminationSummary, {
+        depositDisposition: "hold_pending",
+        depositReceivedGbp: 0,
+        lifecycle: "ended",
+      })
+    : null;
+  const rentOutstandingGbp = rentAccount
+    ? rentAccount.rentOutstandingGbp
+    : roundGbp(Math.max(0, rentDueGbp - rentPaidGbp));
+  const rentCreditGbp = roundGbp(Math.max(0, summary.creditGbp));
   const settlementSettled = settlementBalance?.settled === true;
+  const positionAtEndGbp = terminationSummary
+    ? Math.abs(overallTerminationPositionGbp(terminationSummary))
+    : 0;
   const needsAction = !settlementSettled || depositPendingReview || !canFinalizeSettlement;
   const isDriver = audience === "driver";
 
@@ -178,7 +192,7 @@ export function HirePaymentsAccountOverview({
             label={canFinalizeSettlement ? "Position at end" : "Position at end (provisional)"}
             value={settlementBalanceLabel(
               terminationSummary.balanceDirection,
-              Math.abs(overallTerminationPositionGbp(terminationSummary)),
+              positionAtEndGbp,
               audience,
             )}
             hint={

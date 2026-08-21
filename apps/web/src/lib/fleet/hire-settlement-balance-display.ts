@@ -50,6 +50,7 @@ export function hireBalanceCompanyLine(companyName: string | null | undefined, e
 
 export function hireSettlementChargeActivityTitle(chargeType: string): string {
   if (chargeType === "rent") return "Hire rent";
+  if (chargeType === "deposit") return "Deposit charge";
   const label = hireDriverChargeTypeLabel(chargeType);
   if (label === "Damage" || label === "Administration") return `${label} charge`;
   if (label === "Other") return "Other charge";

@@ -4,10 +4,12 @@ import {
   buildCompanyBalancesAccountRows,
   buildCompanyBalancesKpis,
   buildCompanyBalancesPage,
+  chaseableScheduleRentGbp,
   companyBalancesAccountsForTab,
   companyBalancesKpiSubtext,
   companyBalancesPeriodLabel,
   defaultCompanyBalancesTab,
+  endedHireAccountFinancials,
   filterCompanyBalancesAccounts,
   hireNeedsLiveBalanceFacts,
   parseHireBalanceSnapshotFromTermination,
@@ -265,7 +267,7 @@ describe("company balances summary", () => {
     ).toHaveLength(1);
   });
 
-  it("keeps partial shortfall in outstanding balance while pending covers the submitted amount", () => {
+  it("keeps confirmed outstanding balance while pending submissions are shown separately", () => {
     const pendingGbp = pendingApprovalAmountGbp(
       schedule({
         scheduleRowId: "p1",
@@ -298,15 +300,84 @@ describe("company balances summary", () => {
       todayYmd: "2026-08-17",
     });
 
-    expect(rows[0]?.balanceGbp).toBe(30);
+    // Pending never reduces the confirmed open balance; chaseable shortfall stays available via helpers.
+    expect(rows[0]?.balanceGbp).toBe(110);
     expect(rows[0]?.pendingReviewGbp).toBe(80);
+    expect(
+      chaseableScheduleRentGbp(
+        schedule({
+          scheduleRowId: "p1",
+          hireGroupId: "active1",
+          periodStart: "2026-08-01",
+          periodEnd: "2026-08-07",
+          paymentStatus: "pending_approval",
+          pendingSubmittedGbp: 80,
+          baseAmountGbp: 110,
+        }),
+        "2026-08-17",
+      ),
+    ).toBe(30);
     const kpis = buildCompanyBalancesKpis({
       accountRows: rows,
       activityRows: [],
       pendingReviewSubmissionCount: 1,
     });
     expect(kpis.pendingReviewGbp).toBe(80);
-    expect(kpis.outstandingAcrossHiresGbp).toBe(30);
+    expect(kpis.outstandingAcrossHiresGbp).toBe(110);
+  });
+
+  it("does not double-count paid_now damage cash on ended hire Received", () => {
+    const financials = endedHireAccountFinancials({
+      hire: hire({
+        id: "f547",
+        status: "completed",
+        terminatedAtYmd: "2026-08-20",
+        settlementBalanceDirection: "driver_owes_company",
+        settlementOpenBalanceGbp: 500,
+      }),
+      scheduleRows: [
+        schedule({
+          scheduleRowId: "r1",
+          hireGroupId: "f547",
+          periodStart: "2026-08-01",
+          periodEnd: "2026-08-20",
+          baseAmountGbp: 400,
+          paymentStatus: "not_received",
+          approvedAmountGbp: 0,
+        }),
+        schedule({
+          scheduleRowId: "d1",
+          hireGroupId: "f547",
+          periodStart: "2026-08-01",
+          periodEnd: "2026-08-01",
+          rowKind: "deposit",
+          baseAmountGbp: 400,
+          paymentStatus: "not_received",
+          approvedAmountGbp: 0,
+        }),
+      ],
+      extraCharges: [
+        { amountGbp: 100, resolution: "paid_now" },
+        { amountGbp: 100, resolution: "add_to_balance" },
+      ],
+      balancePayments: [
+        {
+          id: "pn1",
+          hireGroupId: "f547",
+          amountGbp: 100,
+          direction: "received_from_driver",
+          paymentCategory: "driver_charge",
+          paidAt: "2026-08-20T12:00:00Z",
+          vehicleVrm: "KE18 FSX",
+          driverLabel: "driver@example.com",
+        },
+      ],
+      todayYmd: "2026-08-21",
+    });
+
+    expect(financials.chargesGbp).toBe(600);
+    expect(financials.receivedGbp).toBe(100);
+    expect(financials.balanceGbp).toBe(500);
   });
 
   it("skips live facts for settled ended hires and uses the termination snapshot", () => {

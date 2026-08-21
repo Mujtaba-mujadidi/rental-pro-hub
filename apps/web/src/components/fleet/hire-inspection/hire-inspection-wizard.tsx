@@ -428,7 +428,7 @@ export function HireInspectionWizard({
     setLinkPreExisting(false);
   }
 
-  async function persistDraft(): Promise<boolean> {
+  async function persistDraft(options?: { reload?: boolean }): Promise<boolean> {
     const payload = buildDraftPayload();
     if (!payload) {
       setError("Enter a valid odometer reading.");
@@ -447,7 +447,9 @@ export function HireInspectionWizard({
       return false;
     }
     setError(null);
-    await loadInspection();
+    if (options?.reload !== false) {
+      await loadInspection();
+    }
     return true;
   }
 
@@ -593,7 +595,7 @@ export function HireInspectionWizard({
         setError("Add at least one vehicle photo before completing.");
         return;
       }
-      const saved = await persistDraft();
+      const saved = await persistDraft({ reload: false });
       if (!saved) return;
       const res =
         kind === "checkout"

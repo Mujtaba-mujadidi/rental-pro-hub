@@ -80,7 +80,10 @@ async function fetchDriverHireWorkspaceChrome(groupId: string): Promise<DriverHi
     ? null
     : formatAmountDueChip(paymentPosition.currentlyDueGbp);
   const endedHero = context.contractEnded
-    ? buildHireEndedHeroMetrics({ payments: paymentsRes.data })
+    ? buildHireEndedHeroMetrics({
+        payments: paymentsRes.data,
+        startDateYmd: context.startDateYmd,
+      })
     : null;
   const settlementStatusChip = context.contractEnded
     ? hireEndedSettlementChipLabel(paymentsRes.data)
@@ -99,6 +102,7 @@ async function fetchDriverHireWorkspaceChrome(groupId: string): Promise<DriverHi
       contractEnded: context.contractEnded,
       amountDueChip,
       driverName: null,
+      contractStartLabel: hero.contractStartLabel,
       activeSinceLabel: hero.activeSinceLabel,
       contractEndLabel: hero.contractEndLabel,
       dailyRentLabel: hero.dailyRentLabel,

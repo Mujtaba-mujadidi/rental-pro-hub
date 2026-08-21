@@ -30,6 +30,7 @@ export const HIRE_GROUP_EVENT_TYPES = [
   "settlement_discount_recorded",
   "driver_charge_added",
   "driver_charge_amended",
+  "driver_charge_voided",
   "driver_charge_removed",
   "driver_charge_payment_submitted",
   "driver_charge_payment_approved",

@@ -84,6 +84,8 @@ function payments(overrides: Partial<HirePaymentsPageData> = {}): HirePaymentsPa
     depositDisposition: "refund_full",
     depositPendingReview: false,
     depositGbp: 500,
+    depositReceivedGbp: 500,
+    accountPosition: null,
     currentSignedSettlementGbp: 0,
     checkinCompleted: true,
     canFinalizeSettlement: true,
@@ -119,6 +121,7 @@ function payments(overrides: Partial<HirePaymentsPageData> = {}): HirePaymentsPa
       totalDiscountGbp: 0,
       contractTotalGbp: 3650,
       nextDue: null,
+      nextFutureDue: null,
     },
     rows: [],
     paymentAccount: null,
@@ -172,6 +175,8 @@ function dashboard(overrides: Partial<HireDashboardData> = {}): HireDashboardDat
       rentLabel: "£100.00 / week",
       rentCadence: "weekly",
       depositLabel: "£500.00",
+      contractStartLabel: "29/07/2026, 09:00",
+      startDateYmd: "2026-07-29",
       startAtLabel: "29/07/2026, 09:00",
       scheduledEndAtLabel: null,
       endedAtLabel: "08/08/2026, 10:00",
@@ -180,6 +185,7 @@ function dashboard(overrides: Partial<HireDashboardData> = {}): HireDashboardDat
       contractEnded: true,
     },
     workspaceHero: {
+      contractStartLabel: "29 Jul 2026, 09:00",
       activeSinceLabel: "29 Jul 2026, 09:00",
       contractEndLabel: "8 Aug 2026, 10:00",
       dailyRentLabel: "£100.00",
@@ -190,8 +196,10 @@ function dashboard(overrides: Partial<HireDashboardData> = {}): HireDashboardDat
 }
 
 describe("hire-ended-summary-display", () => {
-  it("computes deposit applied to rent from termination summary", () => {
-    expect(hireDepositAppliedToRentGbp(terminationSummary())).toBe(57.14);
+  it("computes deposit applied to rent only after disposition (not while hold_pending)", () => {
+    expect(hireDepositAppliedToRentGbp(terminationSummary(), "hold_pending")).toBe(0);
+    expect(hireDepositAppliedToRentGbp(terminationSummary(), "refund_full")).toBe(57.14);
+    expect(hireDepositAppliedToRentGbp(terminationSummary(), "apply_to_balance")).toBe(57.14);
   });
 
   it("formats rent settled and driver charge hints", () => {
@@ -225,6 +233,8 @@ describe("hire-ended-summary-display", () => {
       terminationSummary: terminationSummary(),
       driverChargesGbp: 100,
       settlementPaymentsToDriverGbp: 342.86,
+      depositDisposition: "refund_full",
+      depositReceivedGbp: 500,
     });
     expect(refund).toMatchObject({
       originalDepositGbp: 500,
@@ -236,6 +246,18 @@ describe("hire-ended-summary-display", () => {
       finalRefundPaidGbp: 342.86,
       visible: true,
     });
+  });
+
+  it("ignores unpaid contractual deposit in refund calculation", () => {
+    expect(
+      buildHireEndedRefundCalculation({
+        terminationSummary: terminationSummary({ depositGbp: 400 }),
+        driverChargesGbp: 200,
+        settlementPaymentsToDriverGbp: 0,
+        depositDisposition: "hold_pending",
+        depositReceivedGbp: 0,
+      }),
+    ).toBeNull();
   });
 
   it("summarises ended hire stat cards from payments data", () => {

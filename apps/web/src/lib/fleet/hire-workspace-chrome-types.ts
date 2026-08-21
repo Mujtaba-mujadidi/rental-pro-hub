@@ -15,6 +15,9 @@ export type HireWorkspaceChromeData = {
   contractEnded: boolean;
   amountDueChip: string | null;
   driverName: string | null;
+  /** Agreed contract start (`start_date` + time). */
+  contractStartLabel: string;
+  /** Actual checkout / go-live (`activated_at`), or not-yet label. */
   activeSinceLabel: string;
   contractEndLabel: string | null;
   dailyRentLabel: string | null;

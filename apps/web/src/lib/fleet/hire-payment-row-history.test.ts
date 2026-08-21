@@ -104,6 +104,33 @@ describe("formatHirePaymentDiscountEvent", () => {
     expect(display.detailLines).toEqual(["Amount: −£25.00"]);
     expect(display.actorLabel).toBe("Alex Ops · Company staff");
   });
+  it("formats discount amendment and cancellation audit events", () => {
+    expect(
+      formatHirePaymentRowEvent({
+        id: "e-disc-amend",
+        eventKind: "amendment",
+        fromStatus: "not_received",
+        toStatus: "not_received",
+        comment: "Reduced promo",
+        amendmentPayload: { discountChange: true, previousDiscountGbp: 10, newDiscountGbp: 5 },
+        actorRole: "company_staff",
+        createdAt: "2026-08-21T12:00:00Z",
+        actorDisplayName: "Alex Ops",
+      }).title,
+    ).toBe("Discount amended");
+    expect(
+      formatHirePaymentRowEvent({
+        id: "e-disc-cancel",
+        eventKind: "amendment",
+        fromStatus: "not_received",
+        toStatus: "not_received",
+        comment: "Promo withdrawn",
+        amendmentPayload: { discountChange: true, previousDiscountGbp: 10, newDiscountGbp: 0 },
+        actorRole: "company_staff",
+        createdAt: "2026-08-21T12:05:00Z",
+      }).title,
+    ).toBe("Discount cancelled");
+  });
 });
 
 describe("mergeHirePaymentRowHistory", () => {

@@ -29,7 +29,7 @@ export function HireExtraChargeRowActions({
   busy = false,
   onHistory,
   onEdit,
-  onDelete,
+  onVoid,
   onApprove,
   onReject,
 }: {
@@ -39,7 +39,7 @@ export function HireExtraChargeRowActions({
   busy?: boolean;
   onHistory: () => void;
   onEdit: () => void;
-  onDelete: () => void;
+  onVoid: () => void;
   onApprove: () => void;
   onReject: () => void;
 }) {
@@ -85,8 +85,8 @@ export function HireExtraChargeRowActions({
               <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onEdit}>
                 Edit
               </DropdownMenu.Item>
-              <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onDelete}>
-                Delete
+              <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onVoid}>
+                Void…
               </DropdownMenu.Item>
             </>
           ) : null}

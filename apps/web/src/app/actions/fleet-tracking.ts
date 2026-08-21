@@ -439,6 +439,7 @@ export async function loadVehicleTrackingPageAction(
 export async function setVehicleTrackerMileageAction(
   vehicleId: string,
   mileageMiles: number,
+  options?: { waitForDevice?: boolean },
 ): Promise<
   | { ok: true; response: string; targetMiles: number; deviceCount: number }
   | { ok: false; error: string }
@@ -479,7 +480,9 @@ export async function setVehicleTrackerMileageAction(
   const mileageKm = milesToSetMileageKmString(milesInt);
   const responses: string[] = [];
   for (const imei of unique) {
-    const res = await setDeviceMileage(tokenRes.token, imei, mileageKm);
+    const res = await setDeviceMileage(tokenRes.token, imei, mileageKm, {
+      waitForDevice: options?.waitForDevice,
+    });
     if (!res.ok) return { ok: false, error: `${imei}: ${res.error}` };
     responses.push(res.data.response);
   }

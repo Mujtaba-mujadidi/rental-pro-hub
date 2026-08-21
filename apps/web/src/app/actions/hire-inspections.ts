@@ -14,13 +14,11 @@ import {
   applyDamageChargesToSettlementBalance,
   isValidDamageChargeResolution,
   parseDamageChargeGbp,
-  settlementBalanceAfterPayments,
   summarizeInspectionDamageCharges,
   validateInspectionDamageCharges,
 } from "@/lib/fleet/hire-inspection-damage-charges";
 import { buildDriverChargeDraftsFromCheckinDamages } from "@/lib/fleet/hire-driver-charges";
 import { HIRE_DEPOSIT_REFUND_METHODS } from "@/lib/fleet/hire-termination-summary";
-import { signedSettlementBalanceGbp } from "@/lib/fleet/hire-open-balance";
 import {
   EMPTY_HIRE_INSPECTION_ACCESSORIES,
   type HireInspectionAccessories,
@@ -119,25 +117,41 @@ function accessoriesToDb(accessories: HireInspectionAccessories) {
   };
 }
 
-async function syncTrackerOdometerIfNeeded(
+/**
+ * Keep vehicle mileage in sync after inspection without blocking on GPS device confirmation.
+ * SET_MILEAGE can poll for ~30s per IMEI — that must not hold "Saving inspection…".
+ */
+async function syncInspectionOdometerBestEffort(
   supabase: Awaited<ReturnType<typeof createClient>>,
   companyId: string,
   vehicleId: string | null | undefined,
   odometerMiles: number | null,
-  trackerMetres: number | null | undefined,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (!vehicleId?.trim() || odometerMiles == null || odometerMiles < 0) return { ok: true };
+): Promise<void> {
+  if (!vehicleId?.trim() || odometerMiles == null || odometerMiles < 0) return;
+  const milesInt = Math.ceil(odometerMiles);
+  try {
+    await supabase
+      .from("vehicles")
+      .update({ current_mileage: milesInt })
+      .eq("id", vehicleId)
+      .eq("parent_company_id", companyId);
 
-  if (trackerMetres != null) {
-    if (trackOdometerMatchesMiles(trackerMetres, odometerMiles)) return { ok: true };
-  } else {
     const deviceLinked = await isVehicleTrackerDeviceLinked(supabase, companyId, vehicleId);
-    if (!deviceLinked) return { ok: true };
-  }
+    if (!deviceLinked) return;
 
-  const res = await setVehicleTrackerMileageAction(vehicleId, odometerMiles);
-  if (!res.ok) return res;
-  return { ok: true };
+    // Cap live-track lookup so a hung tracker API cannot stall the save.
+    const trackerMetres = await Promise.race([
+      fetchTrackerOdometerMetres(vehicleId),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+    ]);
+    if (trackerMetres != null && trackOdometerMatchesMiles(trackerMetres, odometerMiles)) {
+      return;
+    }
+
+    await setVehicleTrackerMileageAction(vehicleId, odometerMiles, { waitForDevice: false });
+  } catch {
+    // Inspection save must succeed even if tracker sync fails.
+  }
 }
 
 async function resolveInspectionVehicleId(
@@ -688,16 +702,12 @@ export async function saveHireInspectionDraftAction(input: {
   }
 
   if (input.syncTrackerOdometer && input.odometerReading != null) {
-    const vehicleId = access.group.vehicle_id as string;
-    const trackerMetres = await fetchTrackerOdometerMetres(vehicleId);
-    const sync = await syncTrackerOdometerIfNeeded(
+    await syncInspectionOdometerBestEffort(
       access.supabase,
       access.group.parent_company_id as string,
-      vehicleId,
+      access.group.vehicle_id as string,
       input.odometerReading,
-      trackerMetres,
     );
-    if (!sync.ok) return sync;
   }
   revalidateHirePaths(input.hireGroupId, access.group.vehicle_id as string);
   return { ok: true, data: { inspectionId: draft.inspectionId } };
@@ -1150,10 +1160,6 @@ export async function completeHireCheckinAction(
       | "settled"
       | null;
     const initialAmountGbp = Number(hireGroup.settlement_balance_gbp ?? 0);
-    const initialSigned = signedSettlementBalanceGbp(
-      initialDirection ?? "settled",
-      initialAmountGbp,
-    );
 
     let balanceDirection = initialDirection ?? "settled";
     let balanceAmountGbp = initialAmountGbp;
@@ -1207,33 +1213,8 @@ export async function completeHireCheckinAction(
         .single();
       if (paymentError) return { ok: false, error: paymentError.message };
       damagePaymentId = (paymentRow?.id as string | undefined) ?? null;
-
-      const hadOpenBalanceToApply =
-        chargeSummary.addToBalanceGbp > 0 || Math.abs(initialSigned) > 0.005;
-      if (hadOpenBalanceToApply) {
-        const { data: payments } = await admin
-          .from("vehicle_hire_balance_payments")
-          .select("amount_gbp, direction")
-          .eq("hire_group_id", hireGroupId);
-        const remaining = settlementBalanceAfterPayments({
-          settlementBalanceDirection: balanceDirection,
-          settlementBalanceGbp: balanceAmountGbp,
-          payments: (payments ?? []).map((payment) => ({
-            amountGbp: Number(payment.amount_gbp ?? 0),
-            direction:
-              (payment.direction as "received_from_driver" | "paid_to_driver" | null) ??
-              "received_from_driver",
-          })),
-        });
-        const { error: remainingError } = await admin
-          .from("vehicle_hire_groups")
-          .update({
-            settlement_balance_direction: remaining.settlementBalanceDirection,
-            settlement_balance_gbp: remaining.settlementBalanceGbp,
-          })
-          .eq("id", hireGroupId);
-        if (remainingError) return { ok: false, error: remainingError.message };
-      }
+      // paid_now is cash for that damage only — do not replay it against settlement open balance
+      // (that previously undid concurrent add_to_balance charges).
     }
 
     const chargeDrafts = buildDriverChargeDraftsFromCheckinDamages(

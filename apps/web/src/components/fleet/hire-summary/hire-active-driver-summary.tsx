@@ -10,7 +10,6 @@ import {
   buildActiveHirePaymentRatingDisplay,
 } from "@/lib/fleet/hire-active-summary-display";
 import { buildHireSummaryActionItems, type HireSummaryActionItem } from "@/lib/fleet/hire-summary-action-items";
-import { formatHireFuelLevelPercent } from "@/lib/fleet/hire-fuel-level";
 import { formatHireRentMetricLabel, RENT_CADENCE_LABELS } from "@/lib/fleet/hire-access-display";
 import { formatUkDate } from "@/lib/datetime/uk";
 import { formatGbp } from "@/lib/fleet/maintenance";
@@ -76,15 +75,6 @@ export function HireActiveDriverSummary({
     includeDeposit,
     audience: "driver",
   });
-
-  const checkoutOdometer =
-    checkout?.odometerMiles != null
-      ? `${checkout.odometerMiles.toLocaleString("en-GB")} mi`
-      : "—";
-  const checkoutFuel =
-    checkout?.fuelLevelPercent != null
-      ? formatHireFuelLevelPercent(checkout.fuelLevelPercent).replace("Not recorded", "—")
-      : "—";
 
   const rentPaidHint =
     position.rentPaidGbp <= 0.005 && position.rentDueToDateGbp > 0.005
@@ -217,10 +207,10 @@ export function HireActiveDriverSummary({
             Key dates and rental terms for your hire.
           </p>
           <dl className="hire-ws-glance-grid">
+            <GlanceCell label="Contract start" value={context.contractStartLabel} />
             <GlanceCell label="Active since" value={context.startAtLabel} />
             <GlanceCell label="Contract end" value={context.scheduledEndAtLabel ?? "—"} hint={`${cadenceLabel} term`} />
             <GlanceCell label={formatHireRentMetricLabel(context.rentCadence)} value={context.rentLabel ?? "—"} hint={context.frequencyPositionLabel} />
-            <GlanceCell label="Checkout reading" value={checkoutOdometer} hint={`Fuel at checkout: ${checkoutFuel}`} />
           </dl>
           <p className="mt-3 border-t border-rph-border pt-3">
             <Link href={detailsHref} className="rph-open-link-sm">

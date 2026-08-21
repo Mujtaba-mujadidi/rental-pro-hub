@@ -72,6 +72,7 @@ export function HirePaymentScheduleTable({
   readOnly = false,
   showActions = true,
   variant = "default",
+  showFilters,
   onRefresh,
 }: {
   rows: HirePaymentPageRow[];
@@ -86,12 +87,17 @@ export function HirePaymentScheduleTable({
   readOnly?: boolean;
   showActions?: boolean;
   variant?: "default" | "workspace" | "balance";
+  /** When omitted, filters show for non-balance tables only. */
+  showFilters?: boolean;
   onRefresh: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | HirePaymentDisplayStatus>("all");
   const [rowError, setRowError] = useState<string | null>(null);
   const todayYmd = ukTodayYmd();
+  const workspaceTable = variant === "workspace" || variant === "balance";
+  const balanceTable = variant === "balance";
+  const filtersEnabled = showFilters ?? !balanceTable;
   const displayOptions = useMemo(
     () => ({ contractEndedYmd, settlementSettled, audience, refundMarkByRowId }),
     [audience, contractEndedYmd, refundMarkByRowId, settlementSettled],
@@ -110,6 +116,12 @@ export function HirePaymentScheduleTable({
   const highlightSet = useMemo(() => new Set(highlightedRowIds ?? []), [highlightedRowIds]);
 
   const filtered = useMemo(() => {
+    if (!filtersEnabled) {
+      return [...rows].sort((a, b) => {
+        if (a.periodStart !== b.periodStart) return a.periodStart.localeCompare(b.periodStart);
+        return a.sortOrder - b.sortOrder;
+      });
+    }
     const term = search.trim().toLowerCase();
     return rows
       .filter((row) => {
@@ -140,10 +152,8 @@ export function HirePaymentScheduleTable({
         if (a.periodStart !== b.periodStart) return a.periodStart.localeCompare(b.periodStart);
         return a.sortOrder - b.sortOrder;
       });
-  }, [audience, displayOptions, rows, search, statusFilter, todayYmd]);
+  }, [audience, displayOptions, filtersEnabled, rows, search, statusFilter, todayYmd]);
 
-  const workspaceTable = variant === "workspace" || variant === "balance";
-  const balanceTable = variant === "balance";
   const includeActions = showActions;
   const emptyColSpan = includeActions ? 8 : 7;
 
@@ -248,7 +258,7 @@ export function HirePaymentScheduleTable({
             return (
               <tr key={row.id} className={rowClass}>
                 <td
-                  data-label="Period"
+                  data-label={balanceTable ? "Rent date" : "Period"}
                   className={workspaceTable ? undefined : "rph-table-primary px-4 py-3"}
                 >
                   {workspaceTable ? (
@@ -270,16 +280,22 @@ export function HirePaymentScheduleTable({
                     </>
                   )}
                 </td>
-                <td data-label="Due" className={workspaceTable ? "tabular-nums" : "px-4 py-3 tabular-nums"}>
+                <td
+                  data-label={balanceTable ? "Scheduled" : "Due"}
+                  className={workspaceTable ? "tabular-nums" : "px-4 py-3 tabular-nums"}
+                >
                   {moneyCell(workspaceTable, row.baseAmountGbp)}
                 </td>
-                <td data-label="Discount" className={workspaceTable ? "tabular-nums" : "px-4 py-3 tabular-nums"}>
+                <td
+                  data-label={balanceTable ? "Adjustment" : "Discount"}
+                  className={workspaceTable ? "tabular-nums" : "px-4 py-3 tabular-nums"}
+                >
                   {balanceTable
                     ? balanceRentScheduleAdjustmentLabel(row.discountTotalGbp)
                     : moneyCell(workspaceTable, row.discountTotalGbp, true)}
                 </td>
                 <td
-                  data-label="After discount"
+                  data-label={balanceTable ? "Charged" : "After discount"}
                   className={workspaceTable ? "tabular-nums font-medium" : "px-4 py-3 tabular-nums font-medium"}
                 >
                   {moneyCell(workspaceTable, row.netDueGbp)}
@@ -291,7 +307,7 @@ export function HirePaymentScheduleTable({
                   data-label="Balance"
                   className={
                     balanceTable
-                      ? `tabular-nums font-semibold ${
+                      ? `hire-ws-payments-balance-cell tabular-nums font-semibold ${
                           balanceTone === "paid"
                             ? "text-emerald-700 dark:text-emerald-300"
                             : balanceTone === "upcoming"
@@ -305,7 +321,14 @@ export function HirePaymentScheduleTable({
                 >
                   {moneyCell(workspaceTable, row.balanceGbp)}
                 </td>
-                <td data-label="Status" className={workspaceTable ? undefined : "px-4 py-3"}>
+                <td
+                  data-label={workspaceTable ? "" : "Status"}
+                  className={
+                    workspaceTable
+                      ? "hire-ws-payments-status-cell"
+                      : "px-4 py-3"
+                  }
+                >
                   {workspaceTable ? (
                     <span
                       className={`hire-ws-payments-status-pill ${hireTableStatusToneClass(workspaceStatus.tone)}`}
@@ -357,7 +380,7 @@ export function HirePaymentScheduleTable({
 
   return (
     <div className={balanceTable ? "hire-balance-rent-schedule-table" : "space-y-3"}>
-      {!balanceTable ? (
+      {filtersEnabled ? (
         <div className="flex flex-wrap items-end gap-3">
           <label className="min-w-[12rem] flex-1 space-y-1">
             <span className="text-xs font-medium text-rph-fg-muted">Search</span>

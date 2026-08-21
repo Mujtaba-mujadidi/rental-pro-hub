@@ -1,5 +1,6 @@
 import { formatUkDateTextLong, formatUkDateTime } from "@/lib/datetime/uk";
 import type { HirePaymentPageRow } from "@/app/actions/hire-payments";
+import { buildHireAccountPosition } from "@/lib/fleet/hire-account-position";
 import {
   deriveHirePaymentDisplayStatus,
   type HirePaymentDisplayOptions,
@@ -8,14 +9,21 @@ import {
 import { formatHireSettlementSignedAmount } from "@/lib/fleet/hire-settlement-balance-display";
 import { formatGbp } from "@/lib/fleet/maintenance";
 
-function roundGbp(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
-export function activeBalanceHeroBreakdown(rentOutstandingGbp: number, extrasOutstandingGbp: number): string | null {
+export function activeBalanceHeroBreakdown(input: {
+  depositOutstandingGbp: number;
+  rentOutstandingGbp: number;
+  extrasOutstandingGbp: number;
+}): string | null {
   const parts: string[] = [];
-  if (rentOutstandingGbp > 0.005) parts.push(`${formatGbp(rentOutstandingGbp)} rent`);
-  if (extrasOutstandingGbp > 0.005) parts.push(`${formatGbp(extrasOutstandingGbp)} extra charges`);
+  if (input.depositOutstandingGbp > 0.005) {
+    parts.push(`${formatGbp(input.depositOutstandingGbp)} deposit`);
+  }
+  if (input.rentOutstandingGbp > 0.005) {
+    parts.push(`${formatGbp(input.rentOutstandingGbp)} rent`);
+  }
+  if (input.extrasOutstandingGbp > 0.005) {
+    parts.push(`${formatGbp(input.extrasOutstandingGbp)} extra charges`);
+  }
   if (parts.length === 0) return null;
   if (parts.length === 1) return parts[0]!;
   return `${parts.slice(0, -1).join(" + ")} + ${parts.at(-1)}`;
@@ -29,22 +37,30 @@ export function activeBalanceDepositCardDisplay(input: {
   depositDueGbp: number;
   depositPaidGbp: number;
   depositOutstandingGbp: number;
-}): { value: string; hint: string; paid: boolean; warn: boolean } {
+}): { label: string; value: string; hint: string; paid: boolean; warn: boolean } {
   const { depositDueGbp, depositPaidGbp, depositOutstandingGbp } = input;
   if (depositDueGbp <= 0.005) {
-    return { value: "None", hint: "No deposit on this hire", paid: true, warn: false };
+    return {
+      label: "Deposit required",
+      value: "None",
+      hint: "No deposit on this hire",
+      paid: true,
+      warn: false,
+    };
   }
   if (depositOutstandingGbp <= 0.005) {
     return {
-      value: "Paid",
-      hint: `${formatGbp(depositPaidGbp)} received · ${formatGbp(0)} outstanding`,
+      label: "Deposit required",
+      value: formatGbp(depositDueGbp),
+      hint: `${formatGbp(depositPaidGbp)} actually received · ${formatGbp(0)} outstanding`,
       paid: true,
       warn: false,
     };
   }
   return {
-    value: formatGbp(depositOutstandingGbp),
-    hint: `${formatGbp(depositPaidGbp)} received · ${formatGbp(depositOutstandingGbp)} outstanding`,
+    label: "Deposit required",
+    value: formatGbp(depositDueGbp),
+    hint: `${formatGbp(depositPaidGbp)} actually received · ${formatGbp(depositOutstandingGbp)} outstanding`,
     paid: false,
     warn: true,
   };
@@ -78,14 +94,14 @@ export function activeBalanceRentAccountRows(input: {
   rentOutstandingGbp: number;
 }): Array<{ label: string; value: string; strong?: boolean }> {
   return [
-    { label: "Scheduled rent to date", value: formatGbp(input.scheduledRentGbp) },
+    { label: "Rent charged to date", value: formatGbp(input.scheduledRentGbp) },
     {
       label: "Discount applied",
-      value: input.discountGbp > 0.005 ? `−${formatGbp(input.discountGbp)}` : formatGbp(0),
+      value: input.discountGbp > 0.005 ? `−${formatGbp(input.discountGbp)}` : `−${formatGbp(0)}`,
     },
     {
-      label: "Rent paid",
-      value: input.rentPaidGbp > 0.005 ? `−${formatGbp(input.rentPaidGbp)}` : formatGbp(0),
+      label: "Rent received",
+      value: input.rentPaidGbp > 0.005 ? `−${formatGbp(input.rentPaidGbp)}` : `−${formatGbp(0)}`,
     },
     {
       label: "Outstanding rent",
@@ -117,13 +133,16 @@ export function activeBalanceOpenAmountGbp(
   rentOutstandingGbp: number,
   extrasOutstandingGbp: number,
 ): number {
-  return roundGbp(Math.max(0, rentOutstandingGbp) + Math.max(0, extrasOutstandingGbp));
-}
-
-function addDaysYmd(ymd: string, days: number): string {
-  const parsed = Date.parse(`${ymd}T12:00:00`);
-  if (!Number.isFinite(parsed)) return ymd;
-  return new Date(parsed + days * 86_400_000).toISOString().slice(0, 10);
+  return buildHireAccountPosition({
+    lifecycle: "active",
+    depositRequiredGbp: 0,
+    depositReceivedGbp: 0,
+    rentGrossChargedGbp: Math.max(0, rentOutstandingGbp),
+    rentDiscountGbp: 0,
+    rentPaidConfirmedGbp: 0,
+    extraChargesPostedGbp: Math.max(0, extrasOutstandingGbp),
+    extraChargePaymentsConfirmedGbp: 0,
+  }).amountDriverOwesCompanyGbp;
 }
 
 export function balanceRentScheduleCadenceKicker(cadence: string | null | undefined): string {
@@ -156,19 +175,23 @@ export function balanceRentScheduleBalanceTone(
   return "due";
 }
 
+/**
+ * Primary table: deposit + all due/overdue/paid (non-upcoming) rent, plus up to
+ * `upcomingLimit` upcoming periods. Remaining upcoming periods go in the future card.
+ */
 export function splitBalanceRentScheduleRows(
   rows: readonly HirePaymentPageRow[],
   todayYmd: string,
   options?: HirePaymentDisplayOptions,
-  lookaheadDays = 7,
+  upcomingLimit = 1,
 ): { primaryRows: HirePaymentPageRow[]; futureRows: HirePaymentPageRow[] } {
   const sorted = [...rows].sort((a, b) => {
     if (a.periodStart !== b.periodStart) return a.periodStart.localeCompare(b.periodStart);
     return a.sortOrder - b.sortOrder;
   });
-  const lookaheadEndYmd = addDaysYmd(todayYmd, lookaheadDays);
   const primaryRows: HirePaymentPageRow[] = [];
   const futureRows: HirePaymentPageRow[] = [];
+  let upcomingIncluded = 0;
 
   for (const row of sorted) {
     if (row.rowKind === "deposit") {
@@ -182,10 +205,15 @@ export function splitBalanceRentScheduleRows(
       row.discountTotalGbp > 0.005 ||
       row.paymentStatus !== "not_received" ||
       (row.pendingSubmittedGbp ?? 0) > 0.005;
-    const withinLookahead = row.periodStart <= lookaheadEndYmd;
 
-    if (row.accrued || hasActivity || withinLookahead || status !== "upcoming") {
+    if (row.accrued || hasActivity || status !== "upcoming") {
       primaryRows.push(row);
+      continue;
+    }
+
+    if (upcomingIncluded < upcomingLimit) {
+      primaryRows.push(row);
+      upcomingIncluded += 1;
       continue;
     }
 
@@ -250,6 +278,9 @@ export function activeBalanceStatementCalculation(input: {
 
 export type HirePaymentApplyTo = "schedule" | "extra_charges";
 
+/** When deposit is still owed, staff/driver choose deposit vs rent for schedule payments. */
+export type HireSchedulePaymentTarget = "deposit" | "rent";
+
 /** Default apply-to when both rent and extra charges can be paid from one composer. */
 export function defaultHirePaymentApplyTo(input: {
   rentOutstandingGbp: number;
@@ -263,4 +294,8 @@ export function defaultHirePaymentApplyTo(input: {
   if (input.preferred === "schedule" && rentOpen) return "schedule";
   if (extrasOpen && !rentOpen) return "extra_charges";
   return "schedule";
+}
+
+export function defaultHireSchedulePaymentTarget(depositOutstandingGbp: number): HireSchedulePaymentTarget {
+  return depositOutstandingGbp > 0.005 ? "deposit" : "rent";
 }

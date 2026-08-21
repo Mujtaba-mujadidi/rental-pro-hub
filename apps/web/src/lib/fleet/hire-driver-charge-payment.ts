@@ -32,7 +32,8 @@ export type ExtraChargePaymentDisplayStatus =
   | "partially_paid"
   | "pending_approval"
   | "due"
-  | "waived";
+  | "waived"
+  | "voided";
 
 export type ExtraChargePaymentTableRow = {
   id: string;
@@ -40,7 +41,11 @@ export type ExtraChargePaymentTableRow = {
   chargeTypeLabel: string;
   description: string | null;
   chargedOn: string | null;
+  /** Original posted amount (Scheduled column). */
   dueGbp: number;
+  /** Void reduces charged amount; mirrors rent Adjustment. */
+  adjustmentGbp: number;
+  chargedGbp: number;
   paidGbp: number;
   balanceGbp: number;
   status: ExtraChargePaymentDisplayStatus;
@@ -115,6 +120,7 @@ export function extraChargePaymentStatusMeta(
   if (status === "partially_paid") return { label: "Partially paid", tone: "warning" };
   if (status === "pending_approval") return { label: "Pending approval", tone: "pending" };
   if (status === "waived") return { label: "No charge", tone: "neutral" };
+  if (status === "voided") return { label: "Voided", tone: "neutral" };
   return { label: "Due", tone: "warning" };
 }
 
@@ -164,6 +170,7 @@ export function allocateExtraChargePaymentAcrossRows(
       row.balanceGbp > 0.005 &&
       row.status !== "paid" &&
       row.status !== "waived" &&
+      row.status !== "voided" &&
       row.status !== "pending_approval",
   );
 
@@ -270,10 +277,13 @@ export function buildExtraChargePaymentTableRows(input: {
 
   for (const item of ordered) {
     const dueGbp = roundGbp(item.amountGbp);
-    const paidGbp = roundGbp(paidById.get(item.id) ?? 0);
-    const unpaidGbp = roundGbp(Math.max(0, dueGbp - paidGbp));
+    const voided = item.resolution === "voided";
+    const waived = item.resolution === "waived";
+    const paidGbp = voided || waived ? 0 : roundGbp(paidById.get(item.id) ?? 0);
+    const unpaidGbp = voided || waived ? 0 : roundGbp(Math.max(0, dueGbp - paidGbp));
     let status: ExtraChargePaymentDisplayStatus = "due";
-    if (item.resolution === "waived") status = "waived";
+    if (voided) status = "voided";
+    else if (waived) status = "waived";
     else if (unpaidGbp <= 0.005) status = "paid";
     else if (pendingRemaining > 0.005) {
       status = "pending_approval";
@@ -282,6 +292,8 @@ export function buildExtraChargePaymentTableRows(input: {
       status = "partially_paid";
     }
     const meta = extraChargePaymentStatusMeta(status);
+    const adjustmentGbp = voided ? dueGbp : 0;
+    const chargedGbp = voided || waived ? 0 : dueGbp;
     rows.push({
       id: item.id,
       periodLabel: hireDriverChargeTypeLabel(item.chargeType),
@@ -289,12 +301,18 @@ export function buildExtraChargePaymentTableRows(input: {
       description: item.description ?? null,
       chargedOn: item.chargedOn ?? null,
       dueGbp,
+      adjustmentGbp,
+      chargedGbp,
       paidGbp,
       balanceGbp: unpaidGbp,
       status,
       statusLabel: meta.label,
       statusTone: meta.tone,
-      canMutate: input.allowMutate === true && item.sourceKind === "staff_manual" && !item.balancePaymentId,
+      canMutate:
+        input.allowMutate === true &&
+        item.sourceKind === "staff_manual" &&
+        !item.balancePaymentId &&
+        !voided,
     });
   }
   return rows;

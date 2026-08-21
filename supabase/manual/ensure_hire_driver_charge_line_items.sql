@@ -6,7 +6,7 @@ create table if not exists public.vehicle_hire_driver_charge_line_items (
   parent_company_id uuid not null references public.companies (id) on delete cascade,
   charge_type text not null,
   amount_gbp numeric(12, 2) not null check (amount_gbp > 0),
-  resolution text not null check (resolution in ('waived', 'paid_now', 'add_to_balance')),
+  resolution text not null check (resolution in ('waived', 'paid_now', 'add_to_balance', 'voided')),
   source_kind text not null,
   source_id uuid,
   description text,

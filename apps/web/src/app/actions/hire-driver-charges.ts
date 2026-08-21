@@ -326,6 +326,9 @@ export async function amendHireDriverChargeAction(input: {
 
   const mapped = mapDriverChargeLineItemFromDb(row as DriverChargeLineItemDbRow);
   if (!mapped) return { ok: false, error: "Charge not found." };
+  if (mapped.resolution === "voided") {
+    return { ok: false, error: "This charge has already been voided." };
+  }
 
   const mutationBlock = staffManualChargeMutationBlock({
     canWriteRentals: true,
@@ -377,7 +380,7 @@ export async function amendHireDriverChargeAction(input: {
   return { ok: true };
 }
 
-export async function deleteHireDriverChargeAction(input: {
+export async function voidHireDriverChargeAction(input: {
   hireGroupId: string;
   chargeLineItemId: string;
   reason: string;
@@ -402,38 +405,46 @@ export async function deleteHireDriverChargeAction(input: {
 
   const mapped = mapDriverChargeLineItemFromDb(row as DriverChargeLineItemDbRow);
   if (!mapped) return { ok: false, error: "Charge not found." };
+  if (mapped.resolution === "voided") {
+    return { ok: false, error: "This charge has already been voided." };
+  }
 
   const mutationBlock = staffManualChargeMutationBlock({
     canWriteRentals: true,
     hireStatus: hire.status,
     settlementDirection: hire.settlementBalanceDirection,
-    action: "delete",
+    action: "void",
     sourceKind: mapped.sourceKind,
     balancePaymentId: mapped.balancePaymentId ?? null,
   });
   if (mutationBlock) return { ok: false, error: mutationBlock };
 
-  const { error: deleteError } = await supabase
+  const { error: updateError } = await supabase
     .from("vehicle_hire_driver_charge_line_items")
-    .delete()
+    .update({ resolution: "voided" })
     .eq("id", mapped.id)
     .eq("hire_group_id", hire.id)
     .eq("parent_company_id", hire.parentCompanyId);
-  if (deleteError) return { ok: false, error: deleteError.message };
+  if (updateError) return { ok: false, error: updateError.message };
 
-  const settled = await persistEndedSettlementDelta(hire, -mapped.amountGbp);
+  const settlementDelta =
+    mapped.resolution === "add_to_balance" || mapped.resolution === "paid_now"
+      ? -mapped.amountGbp
+      : 0;
+  const settled = await persistEndedSettlementDelta(hire, settlementDelta);
   if (!settled.ok) return settled;
 
   const admin = createSupabaseAdminClient();
   await logHireGroupEvent(admin, {
     hireGroupId: hire.id,
-    eventType: "driver_charge_removed",
+    eventType: "driver_charge_voided",
     summary: reason,
     actorRole: "company_staff",
     actorUserId: user.id,
     metadata: {
       chargeLineItemId: mapped.id,
       amountGbp: mapped.amountGbp,
+      previousResolution: mapped.resolution,
       chargeType: mapped.chargeType,
       chargeTypeLabel: hireDriverChargeTypeLabel(mapped.chargeType),
       description: mapped.description ?? null,
@@ -565,7 +576,12 @@ export async function loadHireDriverChargeHistoryAction(
     .from("vehicle_hire_group_events")
     .select("id, event_type, actor_user_id, summary, metadata, created_at")
     .eq("hire_group_id", hireId)
-    .in("event_type", ["driver_charge_added", "driver_charge_amended", "driver_charge_removed"])
+    .in("event_type", [
+      "driver_charge_added",
+      "driver_charge_amended",
+      "driver_charge_voided",
+      "driver_charge_removed",
+    ])
     .order("created_at", { ascending: true });
   if (error) return { ok: false, error: error.message };
 

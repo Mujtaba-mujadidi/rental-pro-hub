@@ -5,13 +5,13 @@
 
 import { formatUkDateRangeText, formatUkDateText, ukTodayYmd } from "@/lib/datetime/uk";
 import {
-  endedHireDriverOwesCompanyGbp,
   isEndedHireStatus,
   scheduleRowPaidInWindowGbp,
   type DashboardHireFact,
   type DashboardScheduleFact,
 } from "@/lib/fleet/company-dashboard-display";
 import { resolveCompanyDashboardPeriod } from "@/lib/fleet/company-dashboard-period";
+import { buildHireAccountPosition } from "@/lib/fleet/hire-account-position";
 import { outstandingExtraChargesGbp } from "@/lib/fleet/hire-driver-charges";
 import type { HireInspectionDamageChargeResolution } from "@/lib/fleet/hire-inspection-damage-charges";
 import {
@@ -155,41 +155,6 @@ function toScheduleInput(row: CompanyBalancesScheduleFact): HirePaymentScheduleR
   };
 }
 
-function toDashboardHire(hire: CompanyBalancesHireFact): DashboardHireFact {
-  return {
-    id: hire.id,
-    vehicleId: "",
-    subcompanyId: hire.subcompanyId ?? "",
-    status: hire.status,
-    startDateYmd: hire.startDateYmd,
-    activatedAtYmd: hire.activatedAtYmd,
-    endedAtYmd: hire.endedAtYmd,
-    terminatedAtYmd: hire.terminatedAtYmd,
-    rentAmountGbp: 0,
-    rentCadence: hire.rentCadence,
-    unsignedAgreementCount: 0,
-    insuranceStatus: "none",
-    settlementBalanceDirection: hire.settlementBalanceDirection,
-    settlementOpenBalanceGbp: hire.settlementOpenBalanceGbp,
-    rentBillingMode: hire.rentBillingMode,
-  };
-}
-
-function toDashboardSchedule(row: CompanyBalancesScheduleFact): DashboardScheduleFact {
-  return {
-    hireGroupId: row.hireGroupId,
-    vehicleId: "",
-    subcompanyId: "",
-    periodStart: row.periodStart,
-    periodEnd: row.periodEnd,
-    rowKind: row.rowKind,
-    paymentStatus: row.paymentStatus,
-    approvedAmountGbp: row.approvedAmountGbp,
-    baseAmountGbp: row.baseAmountGbp,
-    discountTotalGbp: row.discountTotalGbp,
-  };
-}
-
 export function companyBalancesVehicleLabel(
   hire: Pick<CompanyBalancesHireFact, "vehicleMake" | "vehicleModel">,
 ): string | null {
@@ -329,15 +294,31 @@ export function activeHireAccountFinancials(input: {
   const settlementReceivedGbp = sumReceivedFromDriverGbp(
     input.balancePayments.filter((payment) => payment.paymentCategory !== "driver_charge"),
   );
-  let rentOutstandingGbp = 0;
-  for (const row of input.scheduleRows) {
-    rentOutstandingGbp = roundGbp(rentOutstandingGbp + chaseableScheduleRentGbp(row, input.todayYmd));
-  }
+
+  const depositRow = input.scheduleRows.find((row) => row.rowKind === "deposit");
+  const depositRequiredGbp = depositRow ? Number(depositRow.baseAmountGbp ?? 0) : 0;
+  const depositReceivedGbp =
+    depositRow && (depositRow.paymentStatus === "approved" || Number(depositRow.approvedAmountGbp ?? 0) > 0)
+      ? Number(depositRow.approvedAmountGbp ?? depositRow.baseAmountGbp ?? 0)
+      : 0;
+
+  const position = buildHireAccountPosition({
+    lifecycle: "active",
+    depositRequiredGbp,
+    depositReceivedGbp,
+    rentGrossChargedGbp: summary.rentGrossAccruedGbp,
+    rentDiscountGbp: summary.totalDiscountGbp,
+    rentPaidConfirmedGbp: summary.totalPaidGbp,
+    extraChargesPostedGbp: extrasGbp,
+    extraChargePaymentsConfirmedGbp: extraReceivedGbp,
+    settlementReceivedFromDriverGbp: settlementReceivedGbp,
+  });
 
   return {
-    chargesGbp: roundGbp(summary.totalDueGbp + extrasGbp),
+    chargesGbp: position.totalConfirmedChargesGbp,
     receivedGbp: roundGbp(summary.totalPaidGbp + extraReceivedGbp + settlementReceivedGbp),
-    balanceGbp: roundGbp(rentOutstandingGbp + extraOutstanding),
+    // Charge-side open balance only — deposit outstanding stays separate (totalToCollect).
+    balanceGbp: position.amountDriverOwesCompanyGbp,
   };
 }
 
@@ -365,7 +346,11 @@ export function endedHireAccountFinancials(input: {
     })),
   );
   const extraReceivedGbp = roundGbp(Math.max(0, extrasGbp - extraOutstanding));
-  const settlementReceivedGbp = sumReceivedFromDriverGbp(input.balancePayments);
+  // `paid_now` / driver_charge receipts are already reflected in extraReceivedGbp —
+  // do not also count them as settlement received (that double-counted Received at £200).
+  const settlementReceivedGbp = sumReceivedFromDriverGbp(
+    input.balancePayments.filter((payment) => payment.paymentCategory !== "driver_charge"),
+  );
   const settled = input.hire.settlementBalanceDirection === "settled";
   const openSettlement = computeHireWorkspaceSettlementBalance({
     settlementBalanceDirection: input.hire.settlementBalanceDirection,
@@ -375,18 +360,34 @@ export function endedHireAccountFinancials(input: {
       direction: payment.direction,
     })),
   });
-  const driverOwesGbp =
-    openSettlement?.settlementDirection === "driver_owes_company"
-      ? openSettlement.openBalanceGbp
-      : endedHireDriverOwesCompanyGbp(
-          toDashboardHire(input.hire),
-          input.scheduleRows.map(toDashboardSchedule),
-        );
+
+  const depositRow = input.scheduleRows.find((row) => row.rowKind === "deposit");
+  const depositRequiredGbp = depositRow ? Number(depositRow.baseAmountGbp ?? 0) : 0;
+  const depositReceivedGbp =
+    depositRow && (depositRow.paymentStatus === "approved" || Number(depositRow.approvedAmountGbp ?? 0) > 0)
+      ? Number(depositRow.approvedAmountGbp ?? depositRow.baseAmountGbp ?? 0)
+      : 0;
+
+  const position = buildHireAccountPosition({
+    lifecycle: settled ? "completed" : "ended",
+    depositRequiredGbp,
+    depositReceivedGbp,
+    rentGrossChargedGbp: summary.rentGrossAccruedGbp,
+    rentDiscountGbp: summary.totalDiscountGbp,
+    rentPaidConfirmedGbp: summary.totalPaidGbp,
+    extraChargesPostedGbp: extrasGbp,
+    extraChargePaymentsConfirmedGbp: extraReceivedGbp,
+    settlementReceivedFromDriverGbp: settlementReceivedGbp,
+  });
 
   return {
-    chargesGbp: roundGbp(summary.totalDueGbp + extrasGbp),
+    chargesGbp: position.totalConfirmedChargesGbp,
     receivedGbp: roundGbp(summary.totalPaidGbp + extraReceivedGbp + settlementReceivedGbp),
-    balanceGbp: settled ? 0 : roundGbp(Math.max(0, driverOwesGbp, extraOutstanding)),
+    balanceGbp: settled
+      ? 0
+      : openSettlement?.settlementDirection === "driver_owes_company"
+        ? roundGbp(Math.max(openSettlement.openBalanceGbp, position.amountDriverOwesCompanyGbp))
+        : position.amountDriverOwesCompanyGbp,
     settled,
   };
 }

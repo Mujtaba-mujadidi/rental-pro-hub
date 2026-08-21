@@ -1,6 +1,9 @@
 "use client";
 
 import { formatUkDate } from "@/lib/datetime/uk";
+import { buildActiveHireAccountPosition } from "@/lib/fleet/hire-account-adapters";
+import { buildHireAccountPositionFromTerminationSummary } from "@/lib/fleet/hire-account-position";
+import { roundGbp } from "@/lib/fleet/hire-money";
 import type { HirePaymentSummary } from "@/lib/fleet/hire-payment-summary";
 import { hireTerminationRentBillingDetail } from "@/lib/fleet/hire-termination-billing";
 import {
@@ -28,18 +31,28 @@ function EndedContractPaymentSummary({
   summary: HirePaymentSummary;
   terminationSummary: HireTerminationAccountsSummary;
 }) {
-  const rentDueGbp = terminationSummary.accruedRentDueGbp;
-  const rentPaidGbp = summary.totalPaidGbp;
-  const balanceGbp = Math.max(0, rentDueGbp - rentPaidGbp);
-  const creditGbp = Math.max(0, rentPaidGbp - rentDueGbp);
+  const account = buildHireAccountPositionFromTerminationSummary(terminationSummary, {
+    depositDisposition: "hold_pending",
+    depositReceivedGbp: terminationSummary.depositGbp,
+    lifecycle: "ended",
+  });
+  // Rent card: schedule paid vs due — deposit apply shown via account when disposition applied later.
+  const rentDueGbp = account.rentChargedGbp;
+  const rentPaidGbp = roundGbp(summary.totalPaidGbp);
+  const balanceGbp = account.rentOutstandingGbp;
+  const creditGbp = roundGbp(Math.max(0, rentPaidGbp - rentDueGbp));
   const balanceValue =
-    balanceGbp > 0 ? formatGbp(balanceGbp) : creditGbp > 0 ? formatGbp(creditGbp) : formatGbp(0);
+    balanceGbp > 0.005
+      ? formatGbp(balanceGbp)
+      : creditGbp > 0.005
+        ? formatGbp(creditGbp)
+        : formatGbp(0);
   const balanceLabel =
-    balanceGbp > 0 ? "Still owed" : creditGbp > 0 ? "Rent credit" : "Balance";
+    balanceGbp > 0.005 ? "Still owed" : creditGbp > 0.005 ? "Rent credit" : "Balance";
 
-  const fullPeriodRentGbp = Math.round(
-    (summary.rentGrossAccruedGbp - summary.totalDiscountGbp) * 100,
-  ) / 100;
+  const fullPeriodRentGbp = roundGbp(
+    summary.rentGrossAccruedGbp - summary.totalDiscountGbp,
+  );
   const proRataAdjustmentGbp = hireProRataRentAdjustmentGbp({
     rentGrossAccruedGbp: summary.rentGrossAccruedGbp,
     totalDiscountGbp: summary.totalDiscountGbp,
@@ -110,12 +123,23 @@ export function HireOverviewPaymentSummary({
 
   const rentDueGbp = summary.totalDueGbp;
   const rentPaidGbp = summary.totalPaidGbp;
-  const balanceGbp = Math.max(0, rentDueGbp - rentPaidGbp);
-  const creditGbp = Math.max(0, rentPaidGbp - rentDueGbp);
+  const account = buildActiveHireAccountPosition({
+    depositRequiredGbp: 0,
+    depositReceivedGbp: 0,
+    rentChargedAfterDiscountGbp: rentDueGbp,
+    rentPaidConfirmedGbp: rentPaidGbp,
+    extraChargesOutstandingGbp: 0,
+  });
+  const balanceGbp = account.rentOutstandingGbp;
+  const creditGbp = roundGbp(Math.max(0, rentPaidGbp - rentDueGbp));
   const balanceValue =
-    balanceGbp > 0 ? formatGbp(balanceGbp) : creditGbp > 0 ? formatGbp(creditGbp) : formatGbp(0);
+    balanceGbp > 0.005
+      ? formatGbp(balanceGbp)
+      : creditGbp > 0.005
+        ? formatGbp(creditGbp)
+        : formatGbp(0);
   const balanceLabel =
-    balanceGbp > 0 ? "Still owed" : creditGbp > 0 ? "Rent credit" : "Balance";
+    balanceGbp > 0.005 ? "Still owed" : creditGbp > 0.005 ? "Rent credit" : "Balance";
 
   const nextPayment = !summary.nextDue
     ? "—"

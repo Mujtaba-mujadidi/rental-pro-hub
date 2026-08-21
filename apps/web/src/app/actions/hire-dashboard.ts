@@ -178,9 +178,11 @@ function buildOverviewContext(input: {
     rentLabel: formatRentLabel(input.group.rent_amount_gbp, cadence),
     rentCadence: cadence,
     depositLabel: depositGbp > 0 ? `£${depositGbp.toFixed(2)}` : null,
+    contractStartLabel: formatHireContractStartLabel(startDate, input.group.start_time),
+    startDateYmd: startDate,
     startAtLabel: activatedAt
       ? formatUkDateTimeSeconds(activatedAt)
-      : formatHireContractStartLabel(startDate, input.group.start_time),
+      : "Not yet activated",
     scheduledEndAtLabel:
       !contractEndedYmd && maxAgreementEndDate
         ? formatHireContractEndLabel(maxAgreementEndDate, input.group.end_time)
@@ -224,6 +226,8 @@ function paymentDisplayOptions(
     | "rows"
     | "terminationSummary"
     | "depositGbp"
+    | "depositDisposition"
+    | "depositReceivedGbp"
     | "settlementBalancePayments"
     | "driverChargeLineItems"
   >,

@@ -49,6 +49,8 @@ function payments(
   | "terminationSummary"
   | "summary"
   | "depositGbp"
+  | "depositDisposition"
+  | "depositReceivedGbp"
   | "settlementBalancePayments"
   | "driverChargeLineItems"
 > {
@@ -65,8 +67,13 @@ function payments(
       totalDiscountGbp: 0,
       contractTotalGbp: 200,
       nextDue: null,
+      nextFutureDue: null,
     },
     depositGbp: partial.depositGbp ?? 500,
+    depositDisposition: partial.depositDisposition ?? null,
+    depositReceivedGbp:
+      partial.depositReceivedGbp ??
+      (partial.depositGbp === 0 ? 0 : partial.depositGbp ?? 500),
     settlementBalancePayments: partial.settlementBalancePayments ?? [],
     driverChargeLineItems: partial.driverChargeLineItems ?? [],
   };
@@ -74,7 +81,9 @@ function payments(
 
 describe("buildHireEndedRentCalculation", () => {
   it("shows rent due, paid, deposit applied and zero outstanding", () => {
-    const calc = buildHireEndedRentCalculation(payments({}));
+    const calc = buildHireEndedRentCalculation(
+      payments({ depositDisposition: "refund_full" }),
+    );
     expect(calc.rentDueToEndGbp).toBe(157.14);
     expect(calc.totalRentReceivedDuringHireGbp).toBe(100);
     expect(calc.paymentReceivedDuringHireGbp).toBe(100);
@@ -84,6 +93,12 @@ describe("buildHireEndedRentCalculation", () => {
     expect(calc.advanceRentNote).toBeNull();
     expect(calc.cancelledPeriodNote).toContain("£42.86");
     expect(calc.cancelledPeriodNote).toContain("final week");
+  });
+
+  it("does not treat unpaid rent as deposit-applied while disposition is hold_pending", () => {
+    const calc = buildHireEndedRentCalculation(payments({ depositDisposition: "hold_pending" }));
+    expect(calc.paidFromDepositGbp).toBe(0);
+    expect(calc.rentOutstandingGbp).toBe(57.14);
   });
 
   it("keeps accrued rent on the rent card and points advance rent at the refund card", () => {
@@ -108,6 +123,7 @@ describe("buildHireEndedRentCalculation", () => {
           totalDiscountGbp: 0,
           contractTotalGbp: 440,
           nextDue: null,
+          nextFutureDue: null,
         },
       }),
     );
@@ -121,9 +137,37 @@ describe("buildHireEndedRentCalculation", () => {
 });
 
 describe("buildHireEndedDepositRefundDisplay", () => {
+  it("hides deposit and refund when contractual deposit was never received", () => {
+    const display = buildHireEndedDepositRefundDisplay({
+      payments: payments({
+        depositGbp: 400,
+        depositReceivedGbp: 0,
+        depositDisposition: "hold_pending",
+        driverChargeLineItems: [
+          {
+            id: "c1",
+            chargeType: "damage",
+            chargeTypeLabel: "Damage",
+            amountGbp: 100,
+            resolution: "add_to_balance",
+            resolutionLabel: "Added to balance",
+            description: null,
+            createdAt: "2026-08-20T23:02:00.000Z",
+            chargedOn: "2026-08-21",
+            sourceKind: "checkin_inspection_damage",
+            canMutate: false,
+          },
+        ],
+      }),
+    });
+    expect(display).toBeNull();
+  });
+
   it("builds deposit refund lines with damage and paid refunds", () => {
     const display = buildHireEndedDepositRefundDisplay({
       payments: payments({
+        depositDisposition: "refund_full",
+        depositReceivedGbp: 500,
         driverChargeLineItems: [
           {
             id: "c1",
@@ -320,14 +364,16 @@ describe("buildHireEndedDepositRefundDisplay", () => {
 });
 
 describe("buildHireEndedPositionSnapshot", () => {
-  it("shows remaining deposit as held, not as a refund due", () => {
-    const snapshot = buildHireEndedPositionSnapshot(payments({}));
+  it("shows full deposit as held while disposition is still pending (no phantom apply)", () => {
+    const snapshot = buildHireEndedPositionSnapshot(
+      payments({ depositDisposition: "hold_pending" }),
+    );
     expect(snapshot?.rentDueGbp).toBe(157.14);
     expect(snapshot?.rentAppliedGbp).toBe(100);
     expect(snapshot?.totalRentReceivedDuringHireGbp).toBe(100);
     expect(snapshot?.advanceRentToRefundGbp).toBe(0);
-    expect(snapshot?.depositAppliedToRentGbp).toBe(57.14);
-    expect(snapshot?.depositHeldGbp).toBe(442.86);
+    expect(snapshot?.depositAppliedToRentGbp).toBe(0);
+    expect(snapshot?.depositHeldGbp).toBe(500);
     expect(snapshot?.note).toContain("deposit was still held");
     expect(snapshot?.note).not.toContain("refund due");
   });
@@ -354,6 +400,7 @@ describe("buildHireEndedPositionSnapshot", () => {
           totalDiscountGbp: 0,
           contractTotalGbp: 440,
           nextDue: null,
+          nextFutureDue: null,
         },
         depositGbp: 300,
       }),

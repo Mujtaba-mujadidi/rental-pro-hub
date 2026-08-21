@@ -4,12 +4,11 @@ import {
   loadHirePaymentsPageAction,
   type HirePaymentsPageData,
 } from "@/app/actions/hire-payments";
-import { HireActiveCompanyPaymentsView } from "@/components/fleet/hire-payments/hire-active-company-payments-view";
 import { HireEndedCompanyPaymentsView } from "@/components/fleet/hire-payments/hire-ended-company-payments-view";
+import { HireSettlementWorkspacePanel } from "@/components/fleet/hire-settlement/hire-settlement-workspace-panel";
 import { useHireWorkspaceCachedLoad } from "@/hooks/use-hire-workspace-cached-load";
 import { hireWorkspaceKeysInvalidatedByPaymentChange } from "@/lib/fleet/hire-workspace-tab-cache";
 import { useHireWorkspace } from "@/app/(main)/rental/hires/[groupId]/hire-workspace-provider";
-import { useState } from "react";
 
 export function HirePaymentsView({
   hireGroupId,
@@ -18,8 +17,7 @@ export function HirePaymentsView({
   hireGroupId: string;
   onDataChange?: () => void;
 }) {
-  const { chrome, invalidateCache } = useHireWorkspace();
-  const [highlightedRowIds, setHighlightedRowIds] = useState<string[]>([]);
+  const { invalidateCache } = useHireWorkspace();
   const query = useHireWorkspaceCachedLoad<HirePaymentsPageData>({
     key: "payments",
     load: () => loadHirePaymentsPageAction(hireGroupId),
@@ -45,17 +43,7 @@ export function HirePaymentsView({
   const contractEnded = Boolean(query.data.contractEndedYmd);
 
   if (!contractEnded) {
-    return (
-      <HireActiveCompanyPaymentsView
-        hireGroupId={hireGroupId}
-        data={query.data}
-        chrome={chrome}
-        highlightedRowIds={highlightedRowIds}
-        onHighlightedRowIdsChange={setHighlightedRowIds}
-        onReload={reload}
-        busy={query.pending}
-      />
-    );
+    return <HireSettlementWorkspacePanel hireGroupId={hireGroupId} embedded />;
   }
 
   return (

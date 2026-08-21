@@ -1,13 +1,11 @@
 import { formatGbp } from "@/lib/fleet/maintenance";
+import { buildHireAccountPosition } from "@/lib/fleet/hire-account-position";
+import { roundGbp } from "@/lib/fleet/hire-money";
 import { signedSettlementBalanceGbp } from "@/lib/fleet/hire-open-balance";
 import {
   hireSettlementChargeActivityTitle,
   hireSettlementPaymentActivityDetail,
 } from "@/lib/fleet/hire-settlement-balance-display";
-
-function roundGbp(value: number): number {
-  return Math.round(value * 100) / 100;
-}
 
 export type HireSettlementStatementChargeInput = {
   id: string;
@@ -142,10 +140,20 @@ export function activeHireSettlementOpenBalance(
   openBalanceGbp: number;
   openDirection: "driver_owes_company" | "settled";
 } {
-  const openBalanceGbp = roundGbp(Math.max(0, rentOutstandingGbp) + Math.max(0, extrasOutstandingGbp));
+  const position = buildHireAccountPosition({
+    lifecycle: "active",
+    depositRequiredGbp: 0,
+    depositReceivedGbp: 0,
+    rentGrossChargedGbp: Math.max(0, rentOutstandingGbp),
+    rentDiscountGbp: 0,
+    rentPaidConfirmedGbp: 0,
+    extraChargesPostedGbp: Math.max(0, extrasOutstandingGbp),
+    extraChargePaymentsConfirmedGbp: 0,
+  });
   return {
-    openBalanceGbp,
-    openDirection: openBalanceGbp > 0.005 ? "driver_owes_company" : "settled",
+    openBalanceGbp: position.amountDriverOwesCompanyGbp,
+    openDirection:
+      position.accountDirection === "driver_owes_company" ? "driver_owes_company" : "settled",
   };
 }
 

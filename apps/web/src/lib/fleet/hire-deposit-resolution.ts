@@ -5,18 +5,15 @@ import {
   type HireTerminationAccountsSummary,
 } from "@/lib/fleet/hire-termination-summary";
 import {
-  openBalanceDirection,
   remainingOpenBalanceGbp,
+  settlementCacheFromSignedGbp,
   signedSettlementBalanceGbp,
 } from "@/lib/fleet/hire-open-balance";
 import {
   resolveTerminationBalanceState,
   type HireSettlementResolution,
 } from "@/lib/fleet/hire-settlement-resolution";
-
-function roundGbp(value: number): number {
-  return Math.round(value * 100) / 100;
-}
+import { roundGbp } from "@/lib/fleet/hire-money";
 
 /**
  * Apply a deposit disposition to the current signed settlement position.
@@ -81,15 +78,15 @@ export function computeSettlementAfterDepositResolution(input: {
     balanceState.settlementBalanceGbp,
   );
   const remaining = remainingOpenBalanceGbp(signed, []);
-  const openDirection = openBalanceDirection(remaining);
+  const cache = settlementCacheFromSignedGbp(remaining);
 
   return {
     netSettlementGbp: roundGbp(netSettlementGbp),
-    settlementBalanceGbp: roundGbp(Math.abs(remaining)),
-    settlementBalanceDirection: openDirection,
+    settlementBalanceGbp: cache.settlementBalanceGbp,
+    settlementBalanceDirection: cache.settlementBalanceDirection,
     settlementDiscountGbp: balanceState.settlementDiscountGbp,
     recordPayment: balanceState.recordPayment,
-    openBalanceGbp: roundGbp(Math.abs(remaining)),
+    openBalanceGbp: cache.settlementBalanceGbp,
   };
 }
 

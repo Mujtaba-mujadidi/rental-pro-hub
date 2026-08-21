@@ -5,18 +5,27 @@ import type { HireOverviewContext } from "@/lib/fleet/hire-overview-types";
 import { formatUkDateRangeText } from "@/lib/datetime/uk";
 import type { HirePaymentHealthSummary } from "@/lib/fleet/hire-payment-analytics";
 import { formatGbp } from "@/lib/fleet/maintenance";
+import { depositRentScheduleCreditGbp } from "@/lib/fleet/hire-deposit-schedule-allocation";
 import {
   formatHireDurationWeeksAndDays,
+  type HireDepositDisposition,
   type HireTerminationAccountsSummary,
 } from "@/lib/fleet/hire-termination-summary";
 import { summarizeHireSettlementLedger } from "@/lib/fleet/hire-payments-ledger";
+import { roundGbp } from "@/lib/fleet/hire-money";
 
-function roundGbp(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
-export function hireDepositAppliedToRentGbp(summary: HireTerminationAccountsSummary): number {
-  return roundGbp(Math.max(0, summary.accruedRentDueGbp - summary.accruedRentPaidGbp));
+export function hireDepositAppliedToRentGbp(
+  summary: HireTerminationAccountsSummary,
+  disposition?: HireDepositDisposition | string | null,
+  depositReceivedGbp?: number,
+): number {
+  const received =
+    depositReceivedGbp != null ? Math.max(0, depositReceivedGbp) : Math.max(0, summary.depositGbp);
+  return depositRentScheduleCreditGbp({
+    disposition: disposition ?? "hold_pending",
+    depositGbp: received,
+    signedRentBalanceGbp: Math.max(0, summary.signedRentBalanceGbp),
+  });
 }
 
 export function sumDriverChargesGbp(items: readonly HireDriverChargeWorkspaceRow[]): number {
@@ -92,16 +101,23 @@ export function buildHireEndedRefundCalculation(input: {
   terminationSummary: HireTerminationAccountsSummary | null;
   driverChargesGbp: number;
   settlementPaymentsToDriverGbp: number;
+  depositDisposition?: HireDepositDisposition | string | null;
+  /** Confirmed deposit money received. Unpaid contractual deposit is ignored. */
+  depositReceivedGbp?: number | null;
 }): HireEndedRefundCalculation | null {
   const summary = input.terminationSummary;
   if (!summary) return null;
   const advanceRentToRefundGbp = roundGbp(
     Math.max(0, summary.prepaidRentCreditGbp) + Math.max(0, summary.accruedOverpaymentGbp),
   );
-  if (summary.depositGbp <= 0.005 && advanceRentToRefundGbp <= 0.005) return null;
+  const depositReceivedGbp = roundGbp(Math.max(0, Number(input.depositReceivedGbp ?? 0)));
+  if (depositReceivedGbp <= 0.005 && advanceRentToRefundGbp <= 0.005) return null;
 
-  const rentFromDepositGbp = hireDepositAppliedToRentGbp(summary);
-  const driverChargesGbp = roundGbp(input.driverChargesGbp);
+  const rentFromDepositGbp =
+    depositReceivedGbp > 0.005
+      ? hireDepositAppliedToRentGbp(summary, input.depositDisposition, depositReceivedGbp)
+      : 0;
+  const driverChargesGbp = depositReceivedGbp > 0.005 ? roundGbp(input.driverChargesGbp) : 0;
   const finalRefundPaidGbp = roundGbp(input.settlementPaymentsToDriverGbp);
   const advanceRentRefundedGbp = roundGbp(Math.min(advanceRentToRefundGbp, finalRefundPaidGbp));
   const depositRefundedGbp = roundGbp(Math.max(0, finalRefundPaidGbp - advanceRentRefundedGbp));
@@ -112,7 +128,7 @@ export function buildHireEndedRefundCalculation(input: {
     advanceRentToRefundGbp > 0.005;
 
   return {
-    originalDepositGbp: summary.depositGbp,
+    originalDepositGbp: depositReceivedGbp,
     advanceRentToRefundGbp,
     rentFromDepositGbp,
     driverChargesGbp,
@@ -258,7 +274,9 @@ export function buildHireEndedGlanceDisplay(input: {
   const endYmd =
     input.payments.contractEndedYmd ??
     (summary?.terminatedAt ? summary.terminatedAt.slice(0, 10) : null);
-  const startYmd = summary?.activatedAt ? summary.activatedAt.slice(0, 10) : null;
+  const startYmd =
+    input.context.startDateYmd?.trim() ||
+    (summary?.activatedAt ? summary.activatedAt.slice(0, 10) : null);
 
   return {
     hirePeriodLabel: startYmd && endYmd ? formatUkDateRangeText(startYmd, endYmd) : "—",
@@ -273,12 +291,16 @@ export function buildHireEndedGlanceDisplay(input: {
 
 export function buildHireEndedHeroMetrics(input: {
   payments: Pick<HirePaymentsPageData, "terminationSummary" | "contractEndedYmd">;
+  /** Contractual hire start (`start_date`); preferred over activation for the hire period. */
+  startDateYmd?: string | null;
 }): { hirePeriodLabel: string; timeOnHireLabel: string } {
   const summary = input.payments.terminationSummary;
   const endYmd =
     input.payments.contractEndedYmd ??
     (summary?.terminatedAt ? summary.terminatedAt.slice(0, 10) : null);
-  const startYmd = summary?.activatedAt ? summary.activatedAt.slice(0, 10) : null;
+  const startYmd =
+    input.startDateYmd?.trim() ||
+    (summary?.activatedAt ? summary.activatedAt.slice(0, 10) : null);
 
   return {
     hirePeriodLabel: startYmd && endYmd ? formatUkDateRangeText(startYmd, endYmd) : "—",
@@ -295,7 +317,9 @@ export function buildHireEndedSummaryStats(input: {
 }) {
   const audience = input.audience ?? "staff";
   const summary = input.payments.terminationSummary;
-  const depositAppliedGbp = summary ? hireDepositAppliedToRentGbp(summary) : 0;
+  const depositAppliedGbp = summary
+    ? hireDepositAppliedToRentGbp(summary, input.payments.depositDisposition)
+    : 0;
   const rentSettledGbp = summary?.accruedRentDueGbp ?? input.dashboard.summary.totalDueGbp;
   const rentPaidGbp = summary?.accruedRentPaidGbp ?? input.dashboard.summary.totalPaidGbp;
   const driverChargesGbp = sumDriverChargesGbp(input.payments.driverChargeLineItems);

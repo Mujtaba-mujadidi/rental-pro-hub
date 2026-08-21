@@ -25,10 +25,12 @@ describe("hireActivityTitle", () => {
   it("maps known event types to workspace titles", () => {
     expect(hireActivityTitle("hire_terminated")).toBe("Hire ended");
     expect(hireActivityTitle("driver_charge_added")).toBe("Extra charge added");
+    expect(hireActivityTitle("driver_charge_voided")).toBe("Extra charge voided");
     expect(hireActivityTitle("driver_charge_payment_submitted")).toBe("Extra charge payment submitted");
     expect(hireActivityTitle("driver_charge_payment_approved")).toBe("Extra charge payment approved");
     expect(hireActivityTitle("driver_charge_payment_rejected")).toBe("Extra charge payment rejected");
     expect(hireActivityKind("driver_charge_amended")).toBe("charge");
+    expect(hireActivityKind("driver_charge_voided")).toBe("charge");
     expect(hireActivityTitle("checkout_completed")).toBe("Vehicle checked out");
     expect(hireActivityTitle("settlement_refund_recorded")).toBe("Refund recorded");
   });

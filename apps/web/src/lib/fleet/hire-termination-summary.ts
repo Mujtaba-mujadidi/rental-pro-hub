@@ -6,6 +6,8 @@ import type {
   HireTerminationRentBillingMode,
 } from "@/lib/fleet/hire-termination-billing";
 import type { RentCadence } from "@/lib/fleet/hire-types";
+import { addGbp, roundGbp } from "@/lib/fleet/hire-money";
+import { settlementCacheFromSignedGbp } from "@/lib/fleet/hire-open-balance";
 
 export const HIRE_DEPOSIT_DISPOSITIONS = [
   "apply_to_balance",
@@ -69,14 +71,12 @@ export function overallTerminationPositionGbp(
   summary: Pick<HireTerminationAccountsSummary, "netSettlementGbp" | "outstandingExtraChargesGbp">,
 ): number {
   const extras = Number(summary.outstandingExtraChargesGbp);
-  const safeExtras = Number.isFinite(extras) && extras > 0 ? extras : 0;
-  return Math.round((summary.netSettlementGbp + safeExtras) * 100) / 100;
+  const safeExtras = Number.isFinite(extras) && extras > 0 ? roundGbp(extras) : 0;
+  return addGbp(summary.netSettlementGbp, safeExtras);
 }
 
 export function resolveSettlementBalanceDirection(balanceGbp: number): SettlementBalanceDirection {
-  if (balanceGbp > 0.005) return "driver_owes_company";
-  if (balanceGbp < -0.005) return "company_owes_driver";
-  return "settled";
+  return settlementCacheFromSignedGbp(balanceGbp).settlementBalanceDirection;
 }
 
 export function rentCadenceLabel(cadence: RentCadence): string {

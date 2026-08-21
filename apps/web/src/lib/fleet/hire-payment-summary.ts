@@ -33,7 +33,13 @@ export type HirePaymentSummary = {
   totalDiscountGbp: number;
   /** Full contract rent after discounts (rent rows only, excludes deposit). */
   contractTotalGbp: number;
+  /**
+   * Next unpaid accrued rent period (due now / overdue). Deposit excluded.
+   * Prefer {@link nextFutureDue} for “not yet owed” future schedule cards.
+   */
   nextDue: { rowId: string; amountGbp: number; periodStart: string; periodEnd: string } | null;
+  /** Next unpaid rent period that has not started yet (periodStart > today). */
+  nextFutureDue: { rowId: string; amountGbp: number; periodStart: string; periodEnd: string } | null;
 };
 
 export type HirePaymentRowComputed = HirePaymentScheduleRowInput & {
@@ -106,6 +112,7 @@ export function summarizeHirePayments(
   let totalDiscountGbp = 0;
   let contractTotalGbp = 0;
   let nextDue: HirePaymentSummary["nextDue"] = null;
+  let nextFutureDue: HirePaymentSummary["nextFutureDue"] = null;
 
   for (const row of enriched) {
     if (row.balanceGbp > 0 && row.paymentStatus !== "pending_approval") {
@@ -115,7 +122,17 @@ export function summarizeHirePayments(
     if (row.rowKind !== "rent") continue;
 
     contractTotalGbp += row.netDueGbp;
-    if (!row.accrued) continue;
+    if (!row.accrued) {
+      if (row.balanceGbp > 0.005 && !nextFutureDue) {
+        nextFutureDue = {
+          rowId: row.id,
+          amountGbp: row.balanceGbp,
+          periodStart: row.periodStart,
+          periodEnd: row.periodEnd,
+        };
+      }
+      continue;
+    }
 
     rentGrossAccruedGbp += row.baseAmountGbp;
     totalDiscountGbp += row.discountTotalGbp;
@@ -146,5 +163,6 @@ export function summarizeHirePayments(
     totalDiscountGbp: Math.round(totalDiscountGbp * 100) / 100,
     contractTotalGbp: Math.round(contractTotalGbp * 100) / 100,
     nextDue,
+    nextFutureDue,
   };
 }

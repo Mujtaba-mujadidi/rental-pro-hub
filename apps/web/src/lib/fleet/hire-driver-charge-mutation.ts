@@ -1,13 +1,12 @@
 import { parseUkDate } from "@/lib/validation/driver-signup";
 import {
-  HIRE_DRIVER_CHARGE_TYPES,
-  isHireDriverChargeType,
+  hireDriverChargeTypeLabel,
   type HireDriverChargeType,
 } from "@/lib/fleet/hire-driver-charges";
 
 const CHARGE_ALLOWED_HIRE_STATUSES = new Set(["active", "terminated", "completed"]);
 
-export type StaffManualChargeAction = "add" | "amend" | "delete";
+export type StaffManualChargeAction = "add" | "amend" | "void";
 
 export function staffManualChargeMutationBlock(input: {
   canWriteRentals: boolean;
@@ -43,9 +42,22 @@ export function parseStaffManualChargeAmountGbp(value: number): number | null {
   return amount;
 }
 
-export function parseStaffManualChargeType(value: string): HireDriverChargeType | null {
+/** Manual extra charges — rent and deposit are handled elsewhere on the hire. */
+export const STAFF_MANUAL_CHARGE_TYPES = [
+  "damage",
+  "administration",
+  "other",
+] as const satisfies readonly HireDriverChargeType[];
+
+export type StaffManualChargeType = (typeof STAFF_MANUAL_CHARGE_TYPES)[number];
+
+export function isStaffManualChargeType(value: string): value is StaffManualChargeType {
+  return (STAFF_MANUAL_CHARGE_TYPES as readonly string[]).includes(value);
+}
+
+export function parseStaffManualChargeType(value: string): StaffManualChargeType | null {
   const trimmed = value.trim();
-  if (!isHireDriverChargeType(trimmed)) return null;
+  if (!isStaffManualChargeType(trimmed)) return null;
   return trimmed;
 }
 
@@ -79,7 +91,7 @@ export function parseStaffManualChargeFields(input: {
       ok: true;
       data: {
         amountGbp: number;
-        chargeType: HireDriverChargeType;
+        chargeType: StaffManualChargeType;
         chargedOnYmd: string;
         description: string;
         reason: string | null;
@@ -102,11 +114,10 @@ export function parseStaffManualChargeFields(input: {
   return { ok: true, data: { amountGbp, chargeType, chargedOnYmd, description, reason } };
 }
 
-export const STAFF_MANUAL_CHARGE_TYPE_OPTIONS: { value: HireDriverChargeType; label: string }[] =
-  HIRE_DRIVER_CHARGE_TYPES.map((value) => ({
+export const STAFF_MANUAL_CHARGE_TYPE_OPTIONS: { value: StaffManualChargeType; label: string }[] =
+  STAFF_MANUAL_CHARGE_TYPES.map((value) => ({
     value,
-    label:
-      value === "damage" ? "Damage" : value === "administration" ? "Administration" : "Other",
+    label: hireDriverChargeTypeLabel(value),
   }));
 
 /** Store a calendar day as a midday UTC instant so the UK date does not shift. */

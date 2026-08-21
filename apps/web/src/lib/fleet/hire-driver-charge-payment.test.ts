@@ -220,4 +220,29 @@ describe("buildExtraChargePaymentTableRowsFromWorkspace", () => {
       statusLabel: "Pending approval",
     });
   });
+
+  it("shows voided charges with zero charged/balance and a void adjustment", () => {
+    const rows = buildExtraChargePaymentTableRows({
+      charges: [
+        charge({
+          id: "v1",
+          amountGbp: 35,
+          resolution: "voided",
+          chargedOn: "2026-08-12",
+        }),
+      ],
+      receipts: [],
+      allowMutate: true,
+    });
+    expect(rows[0]).toMatchObject({
+      dueGbp: 35,
+      adjustmentGbp: 35,
+      chargedGbp: 0,
+      paidGbp: 0,
+      balanceGbp: 0,
+      status: "voided",
+      statusLabel: "Voided",
+      canMutate: false,
+    });
+  });
 });

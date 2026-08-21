@@ -115,6 +115,7 @@ describe("hire-termination-summary", () => {
         totalDiscountGbp: 0,
         contractTotalGbp: 1000,
         nextDue: null,
+        nextFutureDue: null,
       },
       rentSettlement: {
         accruedRentDueGbp: 500,
@@ -155,6 +156,7 @@ describe("hire-termination-summary", () => {
         totalDiscountGbp: 50,
         contractTotalGbp: 450,
         nextDue: null,
+        nextFutureDue: null,
       },
       rentSettlement: {
         accruedRentDueGbp: 450,
@@ -193,6 +195,7 @@ describe("hire-termination-summary", () => {
         totalDiscountGbp: 0,
         contractTotalGbp: 500,
         nextDue: null,
+        nextFutureDue: null,
       },
       rentSettlement: {
         accruedRentDueGbp: 250,

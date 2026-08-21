@@ -53,6 +53,7 @@ function dashboard(overrides: Partial<HireDashboardData> = {}): HireDashboardDat
     financialClosure: {} as HireDashboardData["financialClosure"],
     overview: {} as HireDashboardData["overview"],
     workspaceHero: {
+      contractStartLabel: "—",
       activeSinceLabel: "—",
       contractEndLabel: null,
       dailyRentLabel: null,
@@ -113,7 +114,7 @@ describe("depositRowFromPayments", () => {
 
 describe("formatAmountDueChip", () => {
   it("formats chip when amount is due", () => {
-    expect(formatAmountDueChip(110)).toBe("£110.00 due today");
+    expect(formatAmountDueChip(110)).toBe("£110.00 outstanding");
   });
 
   it("returns null when nothing is due", () => {

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { openBalanceDirection, remainingOpenBalanceGbp, signedSettlementBalanceGbp } from "@/lib/fleet/hire-open-balance";
+import {
+  openBalanceDirection,
+  recomputeSettlementBalanceCache,
+  remainingOpenBalanceGbp,
+  settlementCacheFromSignedGbp,
+  signedSettlementBalanceGbp,
+} from "@/lib/fleet/hire-open-balance";
 
 describe("hire-open-balance", () => {
   it("signs settlement balances by direction", () => {
@@ -21,5 +27,29 @@ describe("hire-open-balance", () => {
     const remaining = remainingOpenBalanceGbp(-100, [{ amountGbp: 40, direction: "paid_to_driver" }]);
     expect(remaining).toBe(-60);
     expect(openBalanceDirection(remaining)).toBe("company_owes_driver");
+  });
+
+  it("rebuilds settlement cache after damage and payments", () => {
+    const afterDamage = recomputeSettlementBalanceCache({
+      openingDirection: "driver_owes_company",
+      openingBalanceGbp: 269,
+      extraChargesAddedGbp: 120,
+    });
+    expect(afterDamage.settlementBalanceGbp).toBe(389);
+    expect(afterDamage.settlementBalanceDirection).toBe("driver_owes_company");
+
+    const afterPayment = recomputeSettlementBalanceCache({
+      openingDirection: afterDamage.settlementBalanceDirection,
+      openingBalanceGbp: afterDamage.settlementBalanceGbp,
+      payments: [{ amountGbp: 89, direction: "received_from_driver" }],
+    });
+    expect(afterPayment).toMatchObject({
+      settlementBalanceGbp: 300,
+      settlementBalanceDirection: "driver_owes_company",
+    });
+    expect(settlementCacheFromSignedGbp(0)).toEqual({
+      settlementBalanceDirection: "settled",
+      settlementBalanceGbp: 0,
+    });
   });
 });

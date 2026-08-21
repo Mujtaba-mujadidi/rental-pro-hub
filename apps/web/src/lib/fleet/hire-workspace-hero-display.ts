@@ -8,6 +8,9 @@ import {
 } from "@/lib/fleet/hire-pdf-details";
 
 export type HireWorkspaceHeroMetrics = {
+  /** Agreed contract start (`start_date` + `start_time`). */
+  contractStartLabel: string;
+  /** Actual checkout / go-live (`activated_at`), or not-yet label. */
   activeSinceLabel: string;
   contractEndLabel: string | null;
   dailyRentLabel: string | null;
@@ -24,13 +27,15 @@ export function buildHireWorkspaceHeroMetrics(input: {
   rentAmountGbp?: number | null;
   agreementEndDates?: (string | null | undefined)[];
 }): HireWorkspaceHeroMetrics {
+  const contractStartLabel = formatUkCalendarDateTimeText(
+    input.startDate,
+    normalizeHireTime(input.startTime, HIRE_PDF_DEFAULT_START_TIME),
+  );
+
   const activatedAt = input.activatedAt?.trim() || null;
   const activeSinceLabel = activatedAt
     ? formatUkDateTimeText(activatedAt)
-    : formatUkCalendarDateTimeText(
-        input.startDate,
-        normalizeHireTime(input.startTime, HIRE_PDF_DEFAULT_START_TIME),
-      );
+    : "Not yet activated";
 
   const contractEndedYmd = hireContractEndYmd({
     status: String(input.status ?? ""),
@@ -55,6 +60,7 @@ export function buildHireWorkspaceHeroMetrics(input: {
   }
 
   return {
+    contractStartLabel,
     activeSinceLabel,
     contractEndLabel,
     dailyRentLabel: formatHireRentAmountGbp(input.rentAmountGbp),

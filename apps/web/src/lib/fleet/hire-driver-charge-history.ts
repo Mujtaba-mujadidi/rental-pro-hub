@@ -4,7 +4,11 @@ import { formatGbp } from "@/lib/fleet/maintenance";
 
 export type HireDriverChargeHistoryEventInput = {
   id: string;
-  eventType: "driver_charge_added" | "driver_charge_amended" | "driver_charge_removed";
+  eventType:
+    | "driver_charge_added"
+    | "driver_charge_amended"
+    | "driver_charge_voided"
+    | "driver_charge_removed";
   createdAt: string;
   actorDisplayName?: string | null;
   metadata: Record<string, unknown>;
@@ -23,7 +27,7 @@ function textFromMetadata(metadata: Record<string, unknown>, key: string): strin
   return trimmed || null;
 }
 
-/** Charge add / amend / delete events in the same shape as payment-row history. */
+/** Charge add / amend / void events in the same shape as payment-row history. */
 export function formatHireDriverChargeHistoryEvent(
   event: HireDriverChargeHistoryEventInput,
 ): HirePaymentRowEventDisplay {
@@ -48,6 +52,10 @@ export function formatHireDriverChargeHistoryEvent(
     } else if (amountGbp != null) {
       detailLines.push(`New amount: ${formatGbp(amountGbp)}`);
     }
+    if (typeLabel) detailLines.push(`Type: ${typeLabel}`);
+  } else if (event.eventType === "driver_charge_voided") {
+    title = "Charge voided";
+    if (amountGbp != null) detailLines.push(`Voided amount: ${formatGbp(amountGbp)}`);
     if (typeLabel) detailLines.push(`Type: ${typeLabel}`);
   } else {
     title = "Charge removed";

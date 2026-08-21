@@ -65,7 +65,7 @@ describe("staffManualChargeMutationBlock", () => {
     ).toBeNull();
   });
 
-  it("blocks amend/delete of check-in damage and linked payments", () => {
+  it("blocks amend/void of check-in damage and linked payments", () => {
     expect(
       staffManualChargeMutationBlock({
         canWriteRentals: true,
@@ -81,7 +81,7 @@ describe("staffManualChargeMutationBlock", () => {
         canWriteRentals: true,
         hireStatus: "active",
         settlementDirection: null,
-        action: "delete",
+        action: "void",
         sourceKind: "staff_manual",
         balancePaymentId: "pay-1",
       }),
@@ -114,7 +114,7 @@ describe("parseStaffManualChargeFields", () => {
     expect(
       parseStaffManualChargeFields({
         amountGbp: 25,
-        chargeType: "rent",
+        chargeType: "invalid_type",
         chargedOnYmd: "2026-08-17",
         description: "Admin fee",
         requireReason: false,
@@ -129,6 +129,26 @@ describe("parseStaffManualChargeFields", () => {
         description: "Admin fee",
         requireReason: true,
         reason: "   ",
+      }).ok,
+    ).toBe(false);
+
+    expect(
+      parseStaffManualChargeFields({
+        amountGbp: 25,
+        chargeType: "rent",
+        chargedOnYmd: "2026-08-17",
+        description: "Extra rent",
+        requireReason: false,
+      }).ok,
+    ).toBe(false);
+
+    expect(
+      parseStaffManualChargeFields({
+        amountGbp: 25,
+        chargeType: "deposit",
+        chargedOnYmd: "2026-08-17",
+        description: "Deposit top-up",
+        requireReason: false,
       }).ok,
     ).toBe(false);
   });

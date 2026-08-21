@@ -12,6 +12,7 @@ import {
   selectFeaturedOutstandingExtraCharge,
   activeBalanceStatementCalculation,
   defaultHirePaymentApplyTo,
+  defaultHireSchedulePaymentTarget,
 } from "./hire-active-balance-display";
 
 function rentRow(overrides: Partial<HirePaymentPageRow> & Pick<HirePaymentPageRow, "id" | "periodStart">): HirePaymentPageRow {
@@ -35,17 +36,42 @@ function rentRow(overrides: Partial<HirePaymentPageRow> & Pick<HirePaymentPageRo
 }
 
 describe("hire active balance display", () => {
-  it("builds hero breakdown from rent and extras only", () => {
-    expect(activeBalanceHeroBreakdown(55, 90)).toBe("£55.00 rent + £90.00 extra charges");
-    expect(activeBalanceHeroBreakdown(55, 0)).toBe("£55.00 rent");
-    expect(activeBalanceHeroBreakdown(0, 0)).toBeNull();
+  it("builds hero breakdown including deposit when outstanding", () => {
+    expect(
+      activeBalanceHeroBreakdown({
+        depositOutstandingGbp: 400,
+        rentOutstandingGbp: 400,
+        extrasOutstandingGbp: 0,
+      }),
+    ).toBe("£400.00 deposit + £400.00 rent");
+    expect(
+      activeBalanceHeroBreakdown({
+        depositOutstandingGbp: 0,
+        rentOutstandingGbp: 55,
+        extrasOutstandingGbp: 90,
+      }),
+    ).toBe("£55.00 rent + £90.00 extra charges");
+    expect(
+      activeBalanceHeroBreakdown({
+        depositOutstandingGbp: 0,
+        rentOutstandingGbp: 55,
+        extrasOutstandingGbp: 0,
+      }),
+    ).toBe("£55.00 rent");
+    expect(
+      activeBalanceHeroBreakdown({
+        depositOutstandingGbp: 0,
+        rentOutstandingGbp: 0,
+        extrasOutstandingGbp: 0,
+      }),
+    ).toBeNull();
   });
 
   it("formats charged and paid hints", () => {
     expect(activeBalanceChargedPaidHint(77, 22)).toBe("£77.00 charged · £22.00 paid");
   });
 
-  it("shows paid deposit card when nothing outstanding", () => {
+  it("shows deposit required card with received and outstanding hint", () => {
     expect(
       activeBalanceDepositCardDisplay({
         depositDueGbp: 100,
@@ -53,10 +79,24 @@ describe("hire active balance display", () => {
         depositOutstandingGbp: 0,
       }),
     ).toEqual({
-      value: "Paid",
-      hint: "£100.00 received · £0.00 outstanding",
+      label: "Deposit required",
+      value: "£100.00",
+      hint: "£100.00 actually received · £0.00 outstanding",
       paid: true,
       warn: false,
+    });
+    expect(
+      activeBalanceDepositCardDisplay({
+        depositDueGbp: 400,
+        depositPaidGbp: 0,
+        depositOutstandingGbp: 400,
+      }),
+    ).toEqual({
+      label: "Deposit required",
+      value: "£400.00",
+      hint: "£0.00 actually received · £400.00 outstanding",
+      paid: false,
+      warn: true,
     });
   });
 
@@ -69,9 +109,9 @@ describe("hire active balance display", () => {
         rentOutstandingGbp: 55,
       }),
     ).toEqual([
-      { label: "Scheduled rent to date", value: "£80.00" },
+      { label: "Rent charged to date", value: "£80.00" },
       { label: "Discount applied", value: "−£3.00" },
-      { label: "Rent paid", value: "−£22.00" },
+      { label: "Rent received", value: "−£22.00" },
       { label: "Outstanding rent", value: "£55.00", strong: true },
     ]);
   });
@@ -105,6 +145,21 @@ describe("hire active balance display", () => {
 
     expect(split.primaryRows.map((row) => row.id)).toEqual(["past", "near"]);
     expect(split.futureRows.map((row) => row.id)).toEqual(["far"]);
+  });
+
+  it("includes only one upcoming period by default", () => {
+    const split = splitBalanceRentScheduleRows(
+      [
+        rentRow({ id: "due", periodStart: "2026-08-20", accrued: true }),
+        rentRow({ id: "u1", periodStart: "2026-08-21", accrued: false }),
+        rentRow({ id: "u2", periodStart: "2026-08-22", accrued: false }),
+        rentRow({ id: "u3", periodStart: "2026-08-23", accrued: false }),
+      ],
+      "2026-08-20",
+    );
+
+    expect(split.primaryRows.map((row) => row.id)).toEqual(["due", "u1"]);
+    expect(split.futureRows.map((row) => row.id)).toEqual(["u2", "u3"]);
   });
 
   it("summarises future contract schedule rows", () => {
@@ -165,5 +220,10 @@ describe("hire active balance display", () => {
         preferred: "extra_charges",
       }),
     ).toBe("extra_charges");
+  });
+
+  it("defaults schedule target to deposit when deposit is still owed", () => {
+    expect(defaultHireSchedulePaymentTarget(400)).toBe("deposit");
+    expect(defaultHireSchedulePaymentTarget(0)).toBe("rent");
   });
 });

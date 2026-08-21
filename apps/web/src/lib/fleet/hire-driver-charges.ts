@@ -1,9 +1,25 @@
 import type { HireInspectionDamageChargeResolution } from "@/lib/fleet/hire-inspection-damage-charges";
 
 /** Extensible charge types — add new values here and in product flows as needed. */
-export const HIRE_DRIVER_CHARGE_TYPES = ["damage", "administration", "other"] as const;
+export const HIRE_DRIVER_CHARGE_TYPES = [
+  "rent",
+  "damage",
+  "deposit",
+  "administration",
+  "other",
+] as const;
 
 export type HireDriverChargeType = (typeof HIRE_DRIVER_CHARGE_TYPES)[number];
+
+/** Line-item resolutions — includes staff void (not used on check-in damage). */
+export const HIRE_DRIVER_CHARGE_RESOLUTIONS = [
+  "waived",
+  "paid_now",
+  "add_to_balance",
+  "voided",
+] as const;
+
+export type HireDriverChargeResolution = (typeof HIRE_DRIVER_CHARGE_RESOLUTIONS)[number];
 
 export const HIRE_DRIVER_CHARGE_SOURCE_KINDS = [
   "checkin_inspection_damage",
@@ -20,7 +36,7 @@ export type HireDriverChargeLineItemInput = {
   hireGroupId?: string | null;
   chargeType: HireDriverChargeType;
   amountGbp: number;
-  resolution: HireInspectionDamageChargeResolution;
+  resolution: HireDriverChargeResolution;
   sourceKind: HireDriverChargeSourceKind;
   sourceId?: string | null;
   description?: string | null;
@@ -43,7 +59,9 @@ export type HireBalancePaymentIncomeRow = {
 
 export function hireDriverChargeTypeLabel(chargeType: HireDriverChargeType | string): string {
   const labels: Record<HireDriverChargeType, string> = {
+    rent: "Rent",
     damage: "Damage",
+    deposit: "Deposit",
     administration: "Administration",
     other: "Other",
   };
@@ -52,18 +70,24 @@ export function hireDriverChargeTypeLabel(chargeType: HireDriverChargeType | str
 }
 
 export function hireDriverChargeResolutionLabel(
-  resolution: HireInspectionDamageChargeResolution,
+  resolution: HireDriverChargeResolution | HireInspectionDamageChargeResolution | string,
 ): string {
-  const labels: Record<HireInspectionDamageChargeResolution, string> = {
+  const labels: Record<HireDriverChargeResolution, string> = {
     waived: "No charge",
     paid_now: "Charged now",
     add_to_balance: "Added to balance",
+    voided: "Voided",
   };
-  return labels[resolution];
+  if (isHireDriverChargeResolution(resolution)) return labels[resolution];
+  return resolution;
+}
+
+export function isHireDriverChargeResolution(value: string): value is HireDriverChargeResolution {
+  return (HIRE_DRIVER_CHARGE_RESOLUTIONS as readonly string[]).includes(value);
 }
 
 export function isRecognizedDriverChargeResolution(
-  resolution: HireInspectionDamageChargeResolution,
+  resolution: HireDriverChargeResolution | HireInspectionDamageChargeResolution,
 ): boolean {
   return resolution === "paid_now" || resolution === "add_to_balance";
 }
@@ -264,13 +288,11 @@ export function mapDriverChargeLineItemFromDb(
   row: DriverChargeLineItemDbRow,
 ): HireDriverChargeLineItemRow | null {
   const chargeType = row.charge_type;
-  const resolution = row.resolution as HireInspectionDamageChargeResolution;
+  const resolution = row.resolution;
   const sourceKind = row.source_kind;
   if (!isHireDriverChargeType(chargeType)) return null;
   if (!isHireDriverChargeSourceKind(sourceKind)) return null;
-  if (resolution !== "waived" && resolution !== "paid_now" && resolution !== "add_to_balance") {
-    return null;
-  }
+  if (!isHireDriverChargeResolution(resolution)) return null;
   const amountGbp = Number(row.amount_gbp);
   if (!Number.isFinite(amountGbp) || amountGbp <= 0) return null;
 
@@ -334,7 +356,9 @@ export function outstandingExtraChargesGbp(
 export function isStaffManualChargeMutable(input: {
   sourceKind: string;
   balancePaymentId?: string | null;
+  resolution?: string | null;
 }): boolean {
+  if (input.resolution === "voided") return false;
   return input.sourceKind === "staff_manual" && !input.balancePaymentId;
 }
 

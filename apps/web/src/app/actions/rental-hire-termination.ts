@@ -1460,6 +1460,33 @@ export async function resolveHireDepositDispositionAction(input: {
     return { ok: false, error: "No deposit to resolve." };
   }
 
+  // Unpaid contractual deposit has no refund/collect impact at end of hire.
+  const { data: depositScheduleRows, error: depositScheduleError } = await supabase
+    .from("vehicle_hire_payment_schedule")
+    .select("base_amount_gbp, payment_status, approved_amount_gbp, row_kind")
+    .eq("hire_group_id", input.hireGroupId.trim())
+    .eq("row_kind", "deposit");
+  if (depositScheduleError) return { ok: false, error: depositScheduleError.message };
+  const depositReceivedGbp = (depositScheduleRows ?? []).reduce((sum, row) => {
+    if (row.payment_status === "approved") {
+      return (
+        sum +
+        Math.round(
+          Number(row.approved_amount_gbp ?? row.base_amount_gbp ?? 0) * 100,
+        ) /
+          100
+      );
+    }
+    const approved = Number(row.approved_amount_gbp ?? 0);
+    return sum + (Number.isFinite(approved) && approved > 0 ? Math.round(approved * 100) / 100 : 0);
+  }, 0);
+  if (depositReceivedGbp <= 0.005) {
+    return {
+      ok: false,
+      error: "No deposit was received on this hire, so there is nothing to resolve or refund.",
+    };
+  }
+
   if (!isDepositDispositionAllowed(disposition, terminationSummary.signedRentBalanceGbp)) {
     return { ok: false, error: "The selected deposit option is not valid for this hire." };
   }

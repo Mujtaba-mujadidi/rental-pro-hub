@@ -58,6 +58,8 @@ export function HireEndedDriverSummary({
     terminationSummary: payments.terminationSummary,
     driverChargesGbp: stats.driverChargesGbp,
     settlementPaymentsToDriverGbp: stats.refundPaidGbp,
+    depositDisposition: payments.depositDisposition,
+    depositReceivedGbp: payments.depositReceivedGbp,
   });
   const billableCharges = payments.driverChargeLineItems.filter(
     (item) =>

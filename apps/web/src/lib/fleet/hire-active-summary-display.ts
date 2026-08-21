@@ -5,11 +5,9 @@ import type {
   HirePaymentHealthLevel,
   HirePaymentHealthSummary,
 } from "@/lib/fleet/hire-payment-analytics";
+import { buildActiveHireAccountPosition } from "@/lib/fleet/hire-account-adapters";
 import { formatGbp } from "@/lib/fleet/maintenance";
-
-function roundGbp(value: number): number {
-  return Math.round(value * 100) / 100;
-}
+import { roundGbp } from "@/lib/fleet/hire-money";
 
 export type ActiveHirePaymentPosition = {
   depositOutstandingGbp: number;
@@ -28,7 +26,7 @@ export function depositRowFromPayments(
   return row ?? null;
 }
 
-/** Payment position for active-hire summary cards — uses existing schedule/summary fields only. */
+/** Payment position for active-hire summary cards — via authoritative account position. */
 export function buildActiveHirePaymentPosition(input: {
   includeDeposit: boolean;
   summary: Pick<HireDashboardData["summary"], "totalDueGbp" | "balanceGbp" | "totalPaidGbp">;
@@ -42,20 +40,34 @@ export function buildActiveHirePaymentPosition(input: {
       ? input.includeDeposit || paymentRows.some((row) => row.rowKind === "deposit")
       : input.includeDeposit;
   const depositRow = depositRowFromPayments(paymentRows);
+  const depositRequiredGbp =
+    includeDeposit && depositRow ? roundGbp(Math.max(0, depositRow.netDueGbp)) : 0;
   const depositOutstandingGbp =
     includeDeposit && depositRow && depositRow.balanceGbp > 0.005
       ? roundGbp(depositRow.balanceGbp)
       : 0;
-  const rentDueToDateGbp = roundGbp(summary.totalDueGbp);
-  const rentOutstandingGbp = roundGbp(summary.balanceGbp);
-  const rentPaidGbp = roundGbp(summary.totalPaidGbp);
-  const extraChargesOutstandingGbp = roundGbp(Math.max(0, input.extraChargesOutstandingGbp ?? 0));
-  const currentlyDueGbp = roundGbp(
-    depositOutstandingGbp + rentOutstandingGbp + extraChargesOutstandingGbp,
+  const depositReceivedGbp = roundGbp(
+    Math.max(0, depositRequiredGbp - depositOutstandingGbp),
   );
+  const extraChargesOutstandingGbp = roundGbp(Math.max(0, input.extraChargesOutstandingGbp ?? 0));
+
+  const account = buildActiveHireAccountPosition({
+    depositRequiredGbp,
+    depositReceivedGbp,
+    rentChargedAfterDiscountGbp: roundGbp(summary.totalDueGbp),
+    rentPaidConfirmedGbp: roundGbp(summary.totalPaidGbp),
+    extraChargesOutstandingGbp,
+  });
+
+  const rentDueToDateGbp = account.rentChargedGbp;
+  const rentOutstandingGbp = account.rentOutstandingGbp;
+  const rentPaidGbp = account.rentPaidGbp;
+  const currentlyDueGbp = account.totalToCollectGbp;
 
   const parts: string[] = [];
-  if (depositOutstandingGbp > 0.005) parts.push(`${formatGbp(depositOutstandingGbp)} deposit`);
+  if (account.depositOutstandingGbp > 0.005) {
+    parts.push(`${formatGbp(account.depositOutstandingGbp)} deposit`);
+  }
   if (rentOutstandingGbp > 0.005) parts.push(`${formatGbp(rentOutstandingGbp)} rent`);
   if (extraChargesOutstandingGbp > 0.005) {
     parts.push(`${formatGbp(extraChargesOutstandingGbp)} extra charges`);
@@ -67,11 +79,11 @@ export function buildActiveHirePaymentPosition(input: {
       audience === "driver"
         ? `Includes ${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}.`
         : `${parts.slice(0, -1).join(" plus ")} plus ${parts.at(-1)} outstanding.`;
-  } else if (depositOutstandingGbp > 0.005) {
+  } else if (account.depositOutstandingGbp > 0.005) {
     dueBreakdownLabel =
       audience === "driver"
-        ? `${formatGbp(depositOutstandingGbp)} deposit is still due before or at vehicle handover.`
-        : `${formatGbp(depositOutstandingGbp)} deposit outstanding before or at vehicle handover.`;
+        ? `${formatGbp(account.depositOutstandingGbp)} deposit is still due before or at vehicle handover.`
+        : `${formatGbp(account.depositOutstandingGbp)} deposit outstanding before or at vehicle handover.`;
   } else if (rentOutstandingGbp > 0.005) {
     dueBreakdownLabel =
       audience === "driver"
@@ -85,7 +97,7 @@ export function buildActiveHirePaymentPosition(input: {
   }
 
   return {
-    depositOutstandingGbp,
+    depositOutstandingGbp: account.depositOutstandingGbp,
     rentDueToDateGbp,
     rentOutstandingGbp,
     rentPaidGbp,
@@ -97,7 +109,7 @@ export function buildActiveHirePaymentPosition(input: {
 
 export function formatAmountDueChip(currentlyDueGbp: number): string | null {
   if (currentlyDueGbp <= 0.005) return null;
-  return `${formatGbp(currentlyDueGbp)} due today`;
+  return `${formatGbp(currentlyDueGbp)} outstanding`;
 }
 
 const STAFF_PAYMENT_RATING_LABEL: Record<HirePaymentHealthLevel, string> = {

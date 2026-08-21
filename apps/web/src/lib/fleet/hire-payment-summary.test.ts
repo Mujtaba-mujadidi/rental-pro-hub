@@ -69,6 +69,14 @@ describe("hire-payment-summary", () => {
     expect(summary.totalDiscountGbp).toBe(50);
     expect(summary.contractTotalGbp).toBe(700);
     expect(summary.nextDue?.rowId).toBe("w2");
+    expect(summary.nextFutureDue?.rowId).toBe("w3");
+    expect(summary.nextFutureDue?.amountGbp).toBe(250);
+  });
+
+  it("does not treat overdue accrued rent as nextFutureDue", () => {
+    const summary = summarizeHirePayments(rows, "2026-08-21");
+    expect(summary.nextDue?.rowId).toBe("w2");
+    expect(summary.nextFutureDue).toBeNull();
   });
 
   it("marks rows accrued when period has started", () => {
@@ -104,6 +112,29 @@ describe("hire-payment-allocation", () => {
     const result = allocatePaymentAcrossRows(1000, rows, "2026-07-10", { accruedOnly: true });
     expect(result.allocations.map((a) => a.rowId)).toEqual(["dep", "w2"]);
     expect(result.unallocatedGbp).toBe(250);
+  });
+
+  it("can allocate to deposit or rent only", () => {
+    const depositOnly = allocatePaymentAcrossRows(100, rows, "2026-07-10", { rowKind: "deposit" });
+    expect(depositOnly.allocations.map((a) => a.rowId)).toEqual(["dep"]);
+    expect(depositOnly.allocations[0]?.allocatedGbp).toBe(100);
+
+    const rentOnly = allocatePaymentAcrossRows(300, rows, "2026-07-10", { rowKind: "rent" });
+    expect(rentOnly.allocations.map((a) => a.rowId)).toEqual(["w2", "w3"]);
+    expect(rentOnly.allocations[0]?.allocatedGbp).toBe(250);
+    expect(rentOnly.allocations[1]?.allocatedGbp).toBe(50);
+    expect(rentOnly.unallocatedGbp).toBe(0);
+  });
+
+  it("pours deposit overpayment into rent when overflowRemainderToRent is set", () => {
+    const result = allocatePaymentAcrossRows(600, rows, "2026-07-10", {
+      rowKind: "deposit",
+      overflowRemainderToRent: true,
+    });
+    expect(result.allocations.map((a) => a.rowId)).toEqual(["dep", "w2"]);
+    expect(result.allocations[0]?.allocatedGbp).toBe(500);
+    expect(result.allocations[1]?.allocatedGbp).toBe(100);
+    expect(result.unallocatedGbp).toBe(0);
   });
 
   it("includes rejected rows so drivers can resubmit payment", () => {

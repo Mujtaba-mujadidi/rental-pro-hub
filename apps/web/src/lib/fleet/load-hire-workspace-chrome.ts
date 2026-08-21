@@ -228,6 +228,7 @@ async function fetchStaffHireWorkspaceChrome(groupId: string): Promise<HireWorks
           contractEndedYmd,
           terminationSummary: (group.termination_settlement as HireTerminationAccountsSummary | null) ?? null,
         },
+        startDateYmd: startDate,
       })
     : null;
   const settlementStatusChip = contractEnded
@@ -275,6 +276,7 @@ async function fetchStaffHireWorkspaceChrome(groupId: string): Promise<HireWorks
       contractEnded,
       amountDueChip,
       driverName,
+      contractStartLabel: hero.contractStartLabel,
       activeSinceLabel: hero.activeSinceLabel,
       contractEndLabel: hero.contractEndLabel,
       dailyRentLabel: hero.dailyRentLabel,

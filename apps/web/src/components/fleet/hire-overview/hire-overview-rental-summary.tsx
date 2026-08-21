@@ -19,7 +19,8 @@ export function HireOverviewRentalSummary({ context }: { context: HireOverviewCo
     <section className="rph-card p-4">
       <h2 className="text-sm font-semibold text-rph-fg">Rental summary</h2>
       <dl className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <SummaryItem label="Started" value={context.startAtLabel} />
+        <SummaryItem label="Contract start" value={context.contractStartLabel} />
+        <SummaryItem label="Active since" value={context.startAtLabel} />
         {context.contractEnded && context.endedAtLabel ? (
           <SummaryItem label="Ended" value={context.endedAtLabel} />
         ) : context.scheduledEndAtLabel ? (

@@ -458,7 +458,9 @@ export async function setDeviceMileage(
   accessToken: string,
   imei: string,
   mileageKmString: string,
+  options?: { waitForDevice?: boolean },
 ): Promise<TrackerApiOk<{ commandId: string; response: string }> | TrackerApiError> {
+  const waitForDevice = options?.waitForDevice !== false;
   const body = new URLSearchParams({
     access_token: accessToken,
     imei,
@@ -476,6 +478,11 @@ export async function setDeviceMileage(
     }
     const commandId = String((send.record as { commandid?: string } | null)?.commandid ?? "").trim();
     if (!commandId) return { ok: false, error: "No command id returned." };
+
+    // Inspection saves must not wait — device confirmation can take ~30s per IMEI.
+    if (!waitForDevice) {
+      return { ok: true, data: { commandId, response: "queued" } };
+    }
 
     let lastResponse = "";
     for (let i = 0; i < 30; i++) {

@@ -2,10 +2,11 @@ import type { HireDepositDisposition } from "@/lib/fleet/hire-termination-summar
 import {
   HIRE_DEPOSIT_DISPOSITIONS,
   hireDepositDispositionLabel,
-  resolveSettlementBalanceDirection,
   type HireUiAudience,
   type SettlementBalanceDirection,
 } from "@/lib/fleet/hire-termination-summary";
+import { settlementCacheFromSignedGbp } from "@/lib/fleet/hire-open-balance";
+import { roundGbp } from "@/lib/fleet/hire-money";
 
 export const HIRE_SETTLEMENT_RESOLUTIONS = ["paid_now", "open_balance", "written_off"] as const;
 
@@ -108,9 +109,10 @@ export function resolveTerminationBalanceState(input: {
   netSettlementGbp: number;
   resolution: HireSettlementResolution;
 }): TerminationBalanceState {
-  const net = Math.round(input.netSettlementGbp * 100) / 100;
-  const direction = resolveSettlementBalanceDirection(net);
-  const amount = Math.abs(net);
+  const net = roundGbp(input.netSettlementGbp);
+  const cache = settlementCacheFromSignedGbp(net);
+  const direction = cache.settlementBalanceDirection;
+  const amount = cache.settlementBalanceGbp;
 
   if (direction === "settled") {
     return {

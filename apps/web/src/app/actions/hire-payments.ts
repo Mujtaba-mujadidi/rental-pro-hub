@@ -35,6 +35,10 @@ import {
   adjustEndedContractPaymentRowDues,
   hasPostEndPrepaidRows,
 } from "@/lib/fleet/hire-ended-payment-schedule";
+import {
+  buildActiveHireAccountPosition,
+  buildEndedHireAccountPosition,
+} from "@/lib/fleet/hire-account-adapters";
 import { buildHireSettlementBreakdown, type HireSettlementBreakdown } from "@/lib/fleet/hire-settlement-breakdown";
 import { loadHireCheckinCompleted } from "@/lib/fleet/hire-inspection-status";
 import { canFinalizeHireSettlement } from "@/lib/fleet/hire-settlement-finalization";
@@ -123,6 +127,10 @@ export type HirePaymentsPageData = {
   depositDisposition: string | null;
   depositPendingReview: boolean;
   depositGbp: number | null;
+  /** Confirmed deposit money received (0 if contractual deposit unpaid). */
+  depositReceivedGbp: number;
+  /** Authoritative hire account position for this payments page load. */
+  accountPosition: import("@/lib/fleet/hire-account-position").HireAccountPosition | null;
   currentSignedSettlementGbp: number;
   checkinCompleted: boolean;
   canFinalizeSettlement: boolean;
@@ -400,7 +408,7 @@ async function buildPaymentsPageData(
   if (contractEndedYmd) {
     enriched = filterPaymentScheduleForEndedContract(enriched, contractEndedYmd);
     summary = summarizeHirePayments(enriched, accrualYmd);
-    summary = { ...summary, nextDue: null };
+    summary = { ...summary, nextDue: null, nextFutureDue: null };
 
     const rawTerminationSummary = group.termination_settlement as HireTerminationAccountsSummary | null;
     const terminationSummaryForReconcile =
@@ -450,6 +458,10 @@ async function buildPaymentsPageData(
   const hasPostEndPrepaidPayments = contractEndedYmd
     ? hasPostEndPrepaidRows(enriched, contractEndedYmd)
     : false;
+
+  const depositReceivedGbp = roundGbpSum(
+    enriched.filter((row) => row.rowKind === "deposit").map((row) => row.paidGbp),
+  );
 
   const accountId =
     dbRows.find((r) => r.expected_payment_account_id)?.expected_payment_account_id ??
@@ -586,6 +598,7 @@ async function buildPaymentsPageData(
     canResolveDeposit =
       canFinalizeSettlement &&
       isDepositDispositionPending((group.deposit_disposition as string | null) ?? null) &&
+      depositReceivedGbp > 0.005 &&
       can(profile, "rentals.write");
 
     defaultSettlementPaymentAccountId = (group.default_payment_account_id as string | null) ?? null;
@@ -642,7 +655,8 @@ async function buildPaymentsPageData(
       ? rawTerminationSummary
       : null;
   const depositDisposition = (group.deposit_disposition as string | null) ?? null;
-  const depositPendingReview = isDepositDispositionPending(depositDisposition);
+  const depositPendingReview =
+    isDepositDispositionPending(depositDisposition) && depositReceivedGbp > 0.005;
   const settlementResolution = (group.settlement_resolution as string | null) ?? null;
 
   const settlementPaymentsToDriverGbp = roundGbpSum(
@@ -677,9 +691,47 @@ async function buildPaymentsPageData(
           })),
           settlementPaymentsToDriverGbp,
           settlementPaymentsFromDriverGbp,
+          depositDisposition,
+          depositReceivedGbp,
           audience,
         })
       : null;
+
+  const accountPosition =
+    contractEndedYmd && terminationSummary
+      ? (() => {
+          const extrasPostedGbp = roundGbpSum(
+            mappedCharges
+              .filter(
+                (item) =>
+                  item.resolution === "add_to_balance" || item.resolution === "paid_now",
+              )
+              .map((item) => item.amountGbp),
+          );
+          return buildEndedHireAccountPosition({
+            terminationSummary,
+            depositDisposition,
+            depositReceivedGbp,
+            extraChargesOutstandingGbp,
+            extraChargesPostedGbp: extrasPostedGbp,
+            extraChargePaymentsConfirmedGbp: roundGbpSum([
+              Math.max(0, extrasPostedGbp - extraChargesOutstandingGbp),
+            ]),
+            refundPaidGbp: settlementPaymentsToDriverGbp,
+            settlementReceivedFromDriverGbp: settlementPaymentsFromDriverGbp,
+            lifecycle: settlementBalance?.settled ? "completed" : "ended",
+          });
+        })()
+      : buildActiveHireAccountPosition({
+          depositRequiredGbp: (() => {
+            const depositRow = enriched.find((row) => row.rowKind === "deposit");
+            return depositRow ? Number(depositRow.netDueGbp ?? 0) : 0;
+          })(),
+          depositReceivedGbp,
+          rentChargedAfterDiscountGbp: summary.totalDueGbp,
+          rentPaidConfirmedGbp: summary.totalPaidGbp,
+          extraChargesOutstandingGbp,
+        });
 
   return {
     ok: true,
@@ -707,6 +759,8 @@ async function buildPaymentsPageData(
       depositDisposition,
       depositPendingReview,
       depositGbp: terminationSummary?.depositGbp ?? null,
+      depositReceivedGbp,
+      accountPosition,
       currentSignedSettlementGbp,
       checkinCompleted,
       canFinalizeSettlement,
@@ -764,6 +818,8 @@ type SubmitPaymentInput = {
   paymentAccountId?: string | null;
   paidOnYmd?: string | null;
   notes?: string | null;
+  /** When set, allocate only to deposit or rent rows. */
+  scheduleTarget?: "deposit" | "rent" | null;
   actor: "driver" | "company_staff";
   userId: string;
 };
@@ -848,9 +904,36 @@ async function submitHirePaymentAllocation(input: SubmitPaymentInput): Promise<
     sortOrder: row.sortOrder,
   }));
 
-  const allocation = allocatePaymentAcrossRows(amount, inputs, ukTodayYmd());
+  const scheduleTarget =
+    input.scheduleTarget === "deposit" || input.scheduleTarget === "rent" ? input.scheduleTarget : null;
+  const depositStillDue = page.data.rows.some(
+    (row) =>
+      row.rowKind === "deposit" &&
+      row.balanceGbp > 0.005 &&
+      row.paymentStatus !== "pending_approval",
+  );
+
+  if (scheduleTarget === "deposit" && !depositStillDue) {
+    return { ok: false, error: "The deposit is already paid in full." };
+  }
+  if (scheduleTarget == null && depositStillDue) {
+    return { ok: false, error: "Choose whether this payment counts towards the deposit or rent." };
+  }
+
+  const allocation = allocatePaymentAcrossRows(amount, inputs, ukTodayYmd(), {
+    ...(scheduleTarget ? { rowKind: scheduleTarget } : {}),
+    ...(scheduleTarget === "deposit" ? { overflowRemainderToRent: true } : {}),
+  });
   if (!allocation.allocations.length) {
-    return { ok: false, error: "No outstanding balance on the payment schedule to allocate this payment to." };
+    return {
+      ok: false,
+      error:
+        scheduleTarget === "deposit"
+          ? "No outstanding deposit or rent balance to allocate this payment to."
+          : scheduleTarget === "rent"
+            ? "No outstanding rent balance to allocate this payment to."
+            : "No outstanding balance on the payment schedule to allocate this payment to.",
+    };
   }
 
   const supabase = await createClient();
@@ -1023,6 +1106,7 @@ export async function submitDriverHirePaymentAction(input: {
   hireGroupId: string;
   amountGbp: number;
   paymentReference?: string | null;
+  scheduleTarget?: "deposit" | "rent" | null;
 }): Promise<{ ok: true; submissionId: string } | { ok: false; error: string }> {
   const user = await getSessionUser();
   if (!user) return { ok: false, error: "Sign in required." };
@@ -1030,6 +1114,7 @@ export async function submitDriverHirePaymentAction(input: {
     hireGroupId: input.hireGroupId,
     amountGbp: input.amountGbp,
     paymentReference: input.paymentReference,
+    scheduleTarget: input.scheduleTarget,
     actor: "driver",
     userId: user.id,
   });
@@ -1043,6 +1128,7 @@ export async function submitStaffHirePaymentAction(input: {
   paymentAccountId?: string | null;
   paidOnYmd: string;
   notes?: string | null;
+  scheduleTarget?: "deposit" | "rent" | null;
 }): Promise<{ ok: true; submissionId: string } | { ok: false; error: string }> {
   const user = await getSessionUser();
   if (!user) return { ok: false, error: "Sign in required." };
@@ -1056,6 +1142,7 @@ export async function submitStaffHirePaymentAction(input: {
     paymentAccountId: input.paymentAccountId,
     paidOnYmd: input.paidOnYmd,
     notes: input.notes,
+    scheduleTarget: input.scheduleTarget,
     actor: "company_staff",
     userId: user.id,
   });
@@ -1430,7 +1517,7 @@ export async function applyHirePaymentDiscountAction(input: {
   const { data: row, error } = await supabase
     .from("vehicle_hire_payment_schedule")
     .select(
-      "id, hire_group_id, payment_status, base_amount_gbp, approved_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp)",
+      "id, hire_group_id, row_kind, payment_status, base_amount_gbp, approved_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp)",
     )
     .eq("id", scheduleRowId)
     .maybeSingle();
@@ -1439,6 +1526,10 @@ export async function applyHirePaymentDiscountAction(input: {
 
   const editable = await assertHirePaymentScheduleEditable(row.hire_group_id as string);
   if (!editable.ok) return editable;
+
+  if (String(row.row_kind ?? "") === "deposit") {
+    return { ok: false, error: "Discounts cannot be applied to the deposit." };
+  }
 
   const status = row.payment_status as HirePaymentStatus;
   if (status === "pending_approval") {
@@ -1463,6 +1554,108 @@ export async function applyHirePaymentDiscountAction(input: {
     applied_by_user_id: user.id,
   });
   if (insertErr) return { ok: false, error: insertErr.message };
+
+  await refreshVehicleFinancialsForHire(row.hire_group_id as string);
+  return { ok: true };
+}
+
+/**
+ * Replace the total discount on a schedule row (amend), or remove it when amountGbp is 0 (cancel).
+ * Existing discount rows are deleted and a single replacement row is inserted when amount > 0.
+ */
+export async function replaceHirePaymentDiscountAction(input: {
+  scheduleRowId: string;
+  amountGbp: number;
+  reason: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await getSessionUser();
+  if (!user) return { ok: false, error: "Sign in required." };
+
+  const { profile } = await requireRentalCompanyArea();
+  if (!can(profile, "rentals.write")) return { ok: false, error: "You do not have permission." };
+
+  const scheduleRowId = input.scheduleRowId.trim();
+  const reason = input.reason.trim();
+  if (!reason) return { ok: false, error: "A reason is required for the discount change." };
+
+  const amount = Math.round(input.amountGbp * 100) / 100;
+  if (!Number.isFinite(amount) || amount < 0) {
+    return { ok: false, error: "Enter a valid discount amount." };
+  }
+
+  const supabase = await createClient();
+  const { data: row, error } = await supabase
+    .from("vehicle_hire_payment_schedule")
+    .select(
+      "id, hire_group_id, row_kind, payment_status, base_amount_gbp, vehicle_hire_schedule_discounts(id, amount_gbp)",
+    )
+    .eq("id", scheduleRowId)
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!row) return { ok: false, error: "Payment row not found." };
+
+  const editable = await assertHirePaymentScheduleEditable(row.hire_group_id as string);
+  if (!editable.ok) return editable;
+
+  const page = await buildPaymentsPageData(row.hire_group_id as string, {});
+  if (!page.ok) return page;
+
+  if (String(row.row_kind ?? "") === "deposit") {
+    return { ok: false, error: "Discounts cannot be applied to the deposit." };
+  }
+
+  const status = row.payment_status as HirePaymentStatus;
+  if (status === "pending_approval") {
+    return { ok: false, error: "Cannot change a discount while a payment is pending approval." };
+  }
+  if (status === "approved") {
+    return { ok: false, error: "This row is already fully paid." };
+  }
+
+  const existing = (row.vehicle_hire_schedule_discounts ?? []) as { id: string; amount_gbp: number }[];
+  const existingTotal = Math.round(existing.reduce((sum, d) => sum + Number(d.amount_gbp), 0) * 100) / 100;
+  if (existingTotal <= 0.005 && amount <= 0.005) {
+    return { ok: false, error: "This row has no discount to cancel." };
+  }
+
+  const base = Number(row.base_amount_gbp);
+  if (amount > base + 0.005) {
+    return { ok: false, error: `Discount cannot exceed ${base.toFixed(2)} on this row.` };
+  }
+
+  if (existing.length > 0) {
+    const { error: deleteErr } = await supabase
+      .from("vehicle_hire_schedule_discounts")
+      .delete()
+      .eq("schedule_row_id", scheduleRowId);
+    if (deleteErr) return { ok: false, error: deleteErr.message };
+  }
+
+  if (amount > 0.005) {
+    const { error: insertErr } = await supabase.from("vehicle_hire_schedule_discounts").insert({
+      schedule_row_id: scheduleRowId,
+      amount_gbp: amount,
+      reason,
+      applied_by_user_id: user.id,
+    });
+    if (insertErr) return { ok: false, error: insertErr.message };
+  }
+
+  const { error: auditErr } = await supabase.from("vehicle_hire_payment_status_events").insert({
+    schedule_row_id: scheduleRowId,
+    event_kind: "amendment",
+    from_status: status,
+    to_status: status,
+    comment: reason,
+    amendment_payload: {
+      discountChange: true,
+      previousDiscountGbp: existingTotal,
+      newDiscountGbp: amount,
+    },
+    actor_user_id: user.id,
+    actor_role: "company_staff",
+  });
+  if (auditErr) return { ok: false, error: auditErr.message };
 
   await refreshVehicleFinancialsForHire(row.hire_group_id as string);
   return { ok: true };

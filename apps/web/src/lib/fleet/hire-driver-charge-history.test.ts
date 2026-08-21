@@ -53,4 +53,20 @@ describe("formatHireDriverChargeHistoryEvent", () => {
     expect(display.body).toBe("Charged in error");
     expect(display.detailLines).toContain("Removed amount: £25.00");
   });
+
+  it("formats void with voided amount and reason", () => {
+    const display = formatHireDriverChargeHistoryEvent({
+      id: "e4",
+      eventType: "driver_charge_voided",
+      createdAt: "2026-08-17T13:00:00Z",
+      metadata: {
+        amountGbp: 50,
+        chargeTypeLabel: "Administration",
+        reason: "Posted in error",
+      },
+    });
+    expect(display.title).toBe("Charge voided");
+    expect(display.body).toBe("Posted in error");
+    expect(display.detailLines).toContain("Voided amount: £50.00");
+  });
 });

@@ -2,7 +2,9 @@ import type {
   HireTerminationAccountsSummary,
   HireUiAudience,
 } from "@/lib/fleet/hire-termination-summary";
+import { buildHireAccountPositionFromTerminationSummary } from "@/lib/fleet/hire-account-position";
 import { hireDriverChargeTypeLabel } from "@/lib/fleet/hire-driver-charges";
+import { roundGbp } from "@/lib/fleet/hire-money";
 
 export type HireSettlementBreakdownSectionId = "rent" | "deposit" | "charges" | "adjustments";
 
@@ -42,10 +44,6 @@ export type HireSettlementBreakdown = {
   pendingPaymentsGbp?: number;
 };
 
-function roundGbp(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
 export type HireSettlementExtraChargeInput = {
   id: string;
   chargeType: string;
@@ -71,7 +69,7 @@ function extraChargeBreakdownLines(
   if (!charges?.length) return [];
   const lines: HireSettlementBreakdownLine[] = [];
   for (const item of charges) {
-    if (item.resolution === "waived") continue;
+    if (item.resolution === "waived" || item.resolution === "voided") continue;
     const amountGbp = roundGbp(item.amountGbp);
     if (amountGbp <= 0.005) continue;
     lines.push({
@@ -97,11 +95,19 @@ export function buildHireSettlementBreakdown(input: {
   extraCharges?: readonly HireSettlementExtraChargeInput[];
   settlementPaymentsToDriverGbp?: number;
   settlementPaymentsFromDriverGbp?: number;
+  depositDisposition?: string | null;
+  depositReceivedGbp?: number;
   audience?: HireUiAudience;
 }): HireSettlementBreakdown | null {
   const audience = input.audience ?? "staff";
   const summary = input.terminationSummary;
   if (!summary) return null;
+
+  const account = buildHireAccountPositionFromTerminationSummary(summary, {
+    depositDisposition: input.depositDisposition ?? "hold_pending",
+    depositReceivedGbp: input.depositReceivedGbp ?? 0,
+    lifecycle: "ended",
+  });
 
   const lines: HireSettlementBreakdownLine[] = [];
   lines.push({
@@ -120,26 +126,22 @@ export function buildHireSettlementBreakdown(input: {
     });
   }
 
-  const depositAppliedGbp = roundGbp(
-    Math.max(0, summary.depositGbp - Math.max(0, -summary.netSettlementGbp)),
-  );
-  if (summary.depositGbp > 0.005 && depositAppliedGbp > 0.005) {
+  if (account.depositAppliedToRentGbp > 0.005) {
     lines.push({
       label: "Deposit used to pay rent",
-      amountGbp: depositAppliedGbp,
+      amountGbp: account.depositAppliedToRentGbp,
       section: "rent",
       direction: "company_pays",
     });
   }
 
-  const depositRefundDueGbp = roundGbp(Math.max(0, -summary.netSettlementGbp));
-  if (depositRefundDueGbp > 0.005) {
+  if (account.refundCalculatedGbp > 0.005) {
     lines.push({
       label:
         audience === "driver"
           ? "Deposit refund due to you at contract end"
           : "Deposit refund due at contract end",
-      amountGbp: depositRefundDueGbp,
+      amountGbp: account.refundCalculatedGbp,
       section: "deposit",
       direction: "company_pays",
     });

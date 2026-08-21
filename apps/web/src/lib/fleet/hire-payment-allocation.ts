@@ -24,6 +24,16 @@ export type HirePaymentAllocationResult = {
 export type AllocatePaymentOptions = {
   /** When true, only rows whose period has started are eligible (legacy accrued-only). */
   accruedOnly?: boolean;
+  /**
+   * Restrict allocation to deposit or rent rows only.
+   * When omitted, any outstanding schedule row is eligible (FIFO).
+   */
+  rowKind?: "deposit" | "rent";
+  /**
+   * When {@link rowKind} is `"deposit"` and the payment exceeds the deposit balance,
+   * pour the remainder into outstanding rent rows (FIFO).
+   */
+  overflowRemainderToRent?: boolean;
 };
 
 /**
@@ -38,19 +48,38 @@ export function allocatePaymentAcrossRows(
 ): HirePaymentAllocationResult {
   const amount = Math.round(Math.max(0, paymentAmountGbp) * 100) / 100;
   const accruedOnly = options?.accruedOnly ?? false;
-  const enriched = enrichHirePaymentRows(rows, todayYmd).filter(
+  const rowKind = options?.rowKind;
+  const overflowRemainderToRent = options?.overflowRemainderToRent === true && rowKind === "deposit";
+
+  const eligible = enrichHirePaymentRows(rows, todayYmd).filter(
     (row) =>
       row.balanceGbp > 0 &&
       row.paymentStatus !== "pending_approval" &&
       (accruedOnly ? row.accrued : true),
   );
 
+  const primary = eligible.filter((row) => (rowKind ? row.rowKind === rowKind : true));
+  const overflow =
+    overflowRemainderToRent
+      ? eligible.filter((row) => row.rowKind === "rent")
+      : [];
+  // Avoid double-counting the same row if it somehow appeared in both lists.
+  const overflowIds = new Set(primary.map((row) => row.id));
+  const ordered = [
+    ...primary,
+    ...overflow.filter((row) => !overflowIds.has(row.id)),
+  ];
+
   let remaining = amount;
   const allocations: HirePaymentAllocationLine[] = [];
   let totalOutstandingGbp = 0;
+  const countedForTotal = new Set<string>();
 
-  for (const row of enriched) {
-    totalOutstandingGbp += row.balanceGbp;
+  for (const row of ordered) {
+    if (!countedForTotal.has(row.id)) {
+      totalOutstandingGbp += row.balanceGbp;
+      countedForTotal.add(row.id);
+    }
     if (remaining <= 0) continue;
 
     const allocatedGbp = Math.min(remaining, row.balanceGbp);

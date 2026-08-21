@@ -2,7 +2,7 @@ import { recordHireDriverChargePaymentAction, submitDriverExtraChargePaymentActi
 import { submitDriverHirePaymentAction, submitStaffHirePaymentAction } from "@/app/actions/hire-payments";
 import type { HirePaymentComposerSubmitInput } from "@/components/fleet/hire-payments/hire-payment-composer";
 import { ukTodayYmd } from "@/lib/datetime/uk";
-import type { HirePaymentApplyTo } from "@/lib/fleet/hire-active-balance-display";
+import type { HirePaymentApplyTo, HireSchedulePaymentTarget } from "@/lib/fleet/hire-active-balance-display";
 
 export async function submitAllocatedHirePayment(input: {
   hireGroupId: string;
@@ -10,6 +10,7 @@ export async function submitAllocatedHirePayment(input: {
   payment: HirePaymentComposerSubmitInput;
 }): Promise<{ ok: boolean; error?: string }> {
   const allocationKind: HirePaymentApplyTo = input.payment.allocationKind;
+  const scheduleTarget: HireSchedulePaymentTarget | undefined = input.payment.scheduleTarget;
   if (input.asDriver) {
     if (allocationKind === "extra_charges") {
       return submitDriverExtraChargePaymentAction({
@@ -22,6 +23,7 @@ export async function submitAllocatedHirePayment(input: {
       hireGroupId: input.hireGroupId,
       amountGbp: input.payment.amountGbp,
       paymentReference: input.payment.paymentReference,
+      scheduleTarget,
     });
   }
 
@@ -46,5 +48,6 @@ export async function submitAllocatedHirePayment(input: {
     paymentAccountId: input.payment.paymentAccountId,
     paidOnYmd,
     notes: input.payment.notes,
+    scheduleTarget,
   });
 }

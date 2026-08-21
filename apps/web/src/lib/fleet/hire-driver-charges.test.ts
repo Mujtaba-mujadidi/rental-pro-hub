@@ -229,6 +229,18 @@ describe("outstandingExtraChargesGbp", () => {
       ),
     ).toBe(25);
   });
+
+  it("excludes voided charges from outstanding extras", () => {
+    expect(
+      outstandingExtraChargesGbp(
+        [
+          { amountGbp: 40, resolution: "add_to_balance" },
+          { amountGbp: 25, resolution: "voided" },
+        ],
+        [],
+      ),
+    ).toBe(40);
+  });
 });
 
 describe("isStaffManualChargeMutable", () => {
@@ -244,6 +256,13 @@ describe("isStaffManualChargeMutable", () => {
     ).toBe(false);
     expect(
       isStaffManualChargeMutable({ sourceKind: "staff_manual", balancePaymentId: "pay-1" }),
+    ).toBe(false);
+    expect(
+      isStaffManualChargeMutable({
+        sourceKind: "staff_manual",
+        balancePaymentId: null,
+        resolution: "voided",
+      }),
     ).toBe(false);
   });
 });

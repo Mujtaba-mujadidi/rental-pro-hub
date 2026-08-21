@@ -1,9 +1,8 @@
 import {
-  openBalanceDirection,
-  remainingOpenBalanceGbp,
-  signedSettlementBalanceGbp,
+  recomputeSettlementBalanceCache,
   type HireBalancePaymentInput,
 } from "@/lib/fleet/hire-open-balance";
+import { clampNonNegativeGbp, isZeroGbp, roundGbp } from "@/lib/fleet/hire-money";
 
 export const HIRE_INSPECTION_DAMAGE_CHARGE_RESOLUTIONS = [
   "waived",
@@ -37,7 +36,7 @@ export function isValidDamageChargeResolution(
 export function parseDamageChargeGbp(value: number | null | undefined): number | null {
   if (value == null) return null;
   if (!Number.isFinite(value) || value < 0) return null;
-  return Math.round(value * 100) / 100;
+  return roundGbp(value);
 }
 
 export function summarizeInspectionDamageCharges(
@@ -61,9 +60,9 @@ export function summarizeInspectionDamageCharges(
   }
 
   return {
-    addToBalanceGbp: Math.round(addToBalanceGbp * 100) / 100,
-    paidNowGbp: Math.round(paidNowGbp * 100) / 100,
-    waivedGbp: Math.round(waivedGbp * 100) / 100,
+    addToBalanceGbp: roundGbp(addToBalanceGbp),
+    paidNowGbp: roundGbp(paidNowGbp),
+    waivedGbp: roundGbp(waivedGbp),
   };
 }
 
@@ -99,25 +98,19 @@ export function applyDamageChargesToSettlementBalance(input: {
   settlementBalanceDirection: "driver_owes_company" | "company_owes_driver" | "settled";
   settlementBalanceGbp: number;
 } {
-  const add = Math.round(Math.max(0, input.addToBalanceGbp) * 100) / 100;
-  if (add <= 0) {
-    const direction = input.settlementBalanceDirection ?? "settled";
-    return {
-      settlementBalanceDirection: direction === "settled" ? "settled" : direction,
-      settlementBalanceGbp: Math.round(Math.abs(input.settlementBalanceGbp) * 100) / 100,
-    };
+  const add = clampNonNegativeGbp(roundGbp(input.addToBalanceGbp));
+  if (isZeroGbp(add)) {
+    return recomputeSettlementBalanceCache({
+      openingDirection: input.settlementBalanceDirection,
+      openingBalanceGbp: input.settlementBalanceGbp,
+    });
   }
 
-  const signed = signedSettlementBalanceGbp(
-    input.settlementBalanceDirection ?? "settled",
-    input.settlementBalanceGbp,
-  );
-  const nextSigned = Math.round((signed + add) * 100) / 100;
-  const nextDirection = openBalanceDirection(nextSigned);
-  return {
-    settlementBalanceDirection: nextDirection,
-    settlementBalanceGbp: nextDirection === "settled" ? 0 : Math.abs(nextSigned),
-  };
+  return recomputeSettlementBalanceCache({
+    openingDirection: input.settlementBalanceDirection,
+    openingBalanceGbp: input.settlementBalanceGbp,
+    extraChargesAddedGbp: add,
+  });
 }
 
 /** Apply a signed extra-charge delta (positive = driver owes more). */
@@ -133,25 +126,19 @@ export function applySignedChargeDeltaToSettlementBalance(input: {
   settlementBalanceDirection: "driver_owes_company" | "company_owes_driver" | "settled";
   settlementBalanceGbp: number;
 } {
-  const delta = Math.round(input.deltaGbp * 100) / 100;
-  if (Math.abs(delta) <= 0.005) {
-    const direction = input.settlementBalanceDirection ?? "settled";
-    return {
-      settlementBalanceDirection: direction === "settled" ? "settled" : direction,
-      settlementBalanceGbp: Math.round(Math.abs(input.settlementBalanceGbp) * 100) / 100,
-    };
+  const delta = roundGbp(input.deltaGbp);
+  if (isZeroGbp(delta)) {
+    return recomputeSettlementBalanceCache({
+      openingDirection: input.settlementBalanceDirection,
+      openingBalanceGbp: input.settlementBalanceGbp,
+    });
   }
 
-  const signed = signedSettlementBalanceGbp(
-    input.settlementBalanceDirection ?? "settled",
-    input.settlementBalanceGbp,
-  );
-  const nextSigned = Math.round((signed + delta) * 100) / 100;
-  const nextDirection = openBalanceDirection(nextSigned);
-  return {
-    settlementBalanceDirection: nextDirection,
-    settlementBalanceGbp: nextDirection === "settled" ? 0 : Math.abs(nextSigned),
-  };
+  return recomputeSettlementBalanceCache({
+    openingDirection: input.settlementBalanceDirection,
+    openingBalanceGbp: input.settlementBalanceGbp,
+    extraChargesAddedGbp: delta,
+  });
 }
 
 export function settlementBalanceAfterPayments(input: {
@@ -166,14 +153,9 @@ export function settlementBalanceAfterPayments(input: {
   settlementBalanceDirection: "driver_owes_company" | "company_owes_driver" | "settled";
   settlementBalanceGbp: number;
 } {
-  const signed = signedSettlementBalanceGbp(
-    input.settlementBalanceDirection ?? "settled",
-    input.settlementBalanceGbp,
-  );
-  const remaining = remainingOpenBalanceGbp(signed, input.payments);
-  const direction = openBalanceDirection(remaining);
-  return {
-    settlementBalanceDirection: direction,
-    settlementBalanceGbp: direction === "settled" ? 0 : Math.abs(remaining),
-  };
+  return recomputeSettlementBalanceCache({
+    openingDirection: input.settlementBalanceDirection,
+    openingBalanceGbp: input.settlementBalanceGbp,
+    payments: input.payments,
+  });
 }

@@ -147,6 +147,20 @@ export function extraChargesOutstandingHint(outstandingGbp: number): string {
   return "Damage, admin and other charges";
 }
 
+/** Outstanding deposit that can still take a payment (excludes pending approval). */
+export function depositOutstandingGbp(
+  rows: readonly Pick<HirePaymentPageRow, "rowKind" | "balanceGbp" | "paymentStatus">[],
+): number {
+  let total = 0;
+  for (const row of rows) {
+    if (row.rowKind !== "deposit") continue;
+    if (row.balanceGbp <= 0.005) continue;
+    if (row.paymentStatus === "pending_approval") continue;
+    total += row.balanceGbp;
+  }
+  return Math.round(total * 100) / 100;
+}
+
 /**
  * Shortcut amount for “pay balance to date”: accrued rent still owed plus any
  * outstanding deposit that can still take a payment. Rows awaiting approval are
@@ -157,12 +171,18 @@ export function payBalanceToDateGbp(
     HirePaymentPageRow,
     "rowKind" | "balanceGbp" | "paymentStatus" | "accrued"
   >[],
+  options?: { includeDeposit?: boolean },
 ): number {
+  const includeDeposit = options?.includeDeposit !== false;
   let total = 0;
   for (const row of rows) {
     if (row.balanceGbp <= 0.005) continue;
     if (row.paymentStatus === "pending_approval") continue;
-    if (row.rowKind === "deposit" || row.accrued) {
+    if (row.rowKind === "deposit") {
+      if (includeDeposit) total += row.balanceGbp;
+      continue;
+    }
+    if (row.accrued) {
       total += row.balanceGbp;
     }
   }

@@ -110,16 +110,28 @@ function HireAddChargeForm({
     });
   }
 
+  const titleNode = (
+    <span className="block">
+      {headerMeta ? (
+        <span className="driver-dash-section-label mb-1 block normal-case tracking-[0.08em]">
+          {headerMeta}
+        </span>
+      ) : null}
+      <span>{amending ? "Amend charge" : "Add charge"}</span>
+    </span>
+  );
+
   return (
     <FormModalShell
       open
       titleId="hire-add-charge-title"
-      title={amending ? "Amend charge" : "Add charge"}
-      description={headerMeta ?? "Add an extra charge to this hire."}
+      title={titleNode}
       showDraftActions={false}
-      allowMaximize
+      allowMaximize={false}
       pending={pending}
       isDirty={dirty}
+      maxWidthClass="max-w-xl"
+      panelHeightClass="max-h-[min(90vh,36rem)]"
       onRequestClose={requestClose}
       discardConfirmOpen={discardOpen}
       onConfirmDiscard={onClose}
@@ -129,22 +141,28 @@ function HireAddChargeForm({
           <button type="button" className={formModalBtnGhost} disabled={pending} onClick={requestClose}>
             Cancel
           </button>
-          <button type="button" className={formModalBtnContinue} disabled={pending} onClick={submit}>
-            {pending ? "Saving…" : amending ? "Save changes" : "Add charge"}
+          <button
+            type="button"
+            className={`${formModalBtnContinue} !bg-blue-600 hover:!bg-blue-700 dark:!bg-sky-500 dark:hover:!bg-sky-400 dark:!text-slate-950`}
+            disabled={pending}
+            onClick={submit}
+          >
+            {pending ? "Saving…" : amending ? "Save changes" : "Add to balance"}
           </button>
         </>
       }
     >
-      <div className="grid gap-3 sm:grid-cols-2">
-        <FormModalField label="Amount (£)">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <FormModalField label="Amount">
           <input
             className="rph-input w-full tabular-nums"
             inputMode="decimal"
+            placeholder="£0.00"
             value={amount}
             onChange={(event) => setAmount(event.target.value)}
           />
         </FormModalField>
-        <FormModalField label="Type">
+        <FormModalField label="Charge type">
           <FormModalSelect
             value={chargeType}
             aria-label="Charge type"
@@ -155,7 +173,7 @@ function HireAddChargeForm({
             onValueChange={setChargeType}
           />
         </FormModalField>
-        <FormModalField label="Date">
+        <FormModalField label="Date" className="sm:col-span-2 sm:max-w-[12rem]">
           <input
             type="date"
             className="rph-input w-full"
@@ -164,8 +182,9 @@ function HireAddChargeForm({
           />
         </FormModalField>
         <FormModalField label="Description" className="sm:col-span-2">
-          <input
-            className="rph-input w-full"
+          <textarea
+            className="rph-input min-h-[5.5rem] w-full text-sm"
+            placeholder="Reason and supporting details"
             value={description}
             onChange={(event) => setDescription(event.target.value)}
           />

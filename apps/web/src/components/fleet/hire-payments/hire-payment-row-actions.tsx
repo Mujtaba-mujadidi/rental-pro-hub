@@ -50,6 +50,7 @@ export function HirePaymentRowActions({
 }) {
   const [pending, startTransition] = useTransition();
   const [discountOpen, setDiscountOpen] = useState(false);
+  const [discountMode, setDiscountMode] = useState<"apply" | "amend">("apply");
   const [rejectOpen, setRejectOpen] = useState(false);
   const [amendOpen, setAmendOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -64,12 +65,27 @@ export function HirePaymentRowActions({
   const canDiscount =
     !readOnly &&
     canApplyDiscount &&
+    row.rowKind !== "deposit" &&
     row.balanceGbp > 0 &&
+    row.paymentStatus !== "pending_approval" &&
+    row.paymentStatus !== "approved" &&
+    row.discountTotalGbp <= 0.005;
+
+  const canAmendDiscount =
+    !readOnly &&
+    canApplyDiscount &&
+    row.rowKind !== "deposit" &&
+    row.discountTotalGbp > 0.005 &&
     row.paymentStatus !== "pending_approval" &&
     row.paymentStatus !== "approved";
 
   const canApproveRow = !readOnly && canApprove && row.paymentStatus === "pending_approval";
   const canAmendRow = !readOnly && canApprove && row.paymentStatus === "approved";
+
+  function openDiscount(mode: "apply" | "amend") {
+    setDiscountMode(mode);
+    setDiscountOpen(true);
+  }
 
   if (readOnly) {
     return (
@@ -157,8 +173,13 @@ export function HirePaymentRowActions({
               </DropdownMenu.Item>
             ) : null}
             {canDiscount ? (
-              <DropdownMenu.Item className={itemClass} disabled={pending} onSelect={() => setDiscountOpen(true)}>
+              <DropdownMenu.Item className={itemClass} disabled={pending} onSelect={() => openDiscount("apply")}>
                 Apply discount
+              </DropdownMenu.Item>
+            ) : null}
+            {canAmendDiscount ? (
+              <DropdownMenu.Item className={itemClass} disabled={pending} onSelect={() => openDiscount("amend")}>
+                Amend discount
               </DropdownMenu.Item>
             ) : null}
             {canApproveRow ? (
@@ -183,6 +204,7 @@ export function HirePaymentRowActions({
       <HirePaymentDiscountModal
         row={row}
         open={discountOpen}
+        mode={discountMode}
         onClose={() => setDiscountOpen(false)}
         onSuccess={onRefresh}
       />
