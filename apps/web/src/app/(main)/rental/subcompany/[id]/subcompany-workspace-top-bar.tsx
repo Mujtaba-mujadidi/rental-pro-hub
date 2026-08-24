@@ -251,6 +251,7 @@ export function SubcompanyWorkspaceTopBar({
         <HireContractWizardModal
           open={hireOpen}
           hireGroupId={null}
+          subcompanyId={subcompany.id}
           onClose={() => setHireOpen(false)}
           onSaved={() => {
             setHireOpen(false);

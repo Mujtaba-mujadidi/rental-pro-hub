@@ -153,6 +153,130 @@ export function formatPlatformNotification(
     };
   }
 
+  if (type === "vehicle_expiry_mot" || type === "vehicle_expiry_tax" || type === "vehicle_expiry_phv") {
+    const vrm = String(payload.vehicleVrm ?? "Vehicle");
+    const summary = typeof payload.summary === "string" ? payload.summary : null;
+    const href = typeof payload.href === "string" ? payload.href : null;
+    const tone = payload.tone === "expired" ? "expired" : "expiring";
+    const label =
+      type === "vehicle_expiry_mot" ? "MOT" : type === "vehicle_expiry_tax" ? "Tax" : "PHV/Taxi licence";
+    return {
+      title: tone === "expired" ? `${label} expired` : `${label} expiring soon`,
+      body: summary ?? `${vrm} needs a compliance review.`,
+      href,
+      actionLabel: href ? "View vehicle" : null,
+    };
+  }
+
+  if (type === "driver_licence_expiry") {
+    const audience = payload.audience === "driver" ? "driver" : "staff";
+    const licenceKind = payload.licenceKind === "phv" ? "PHV / taxi licence" : "Driving licence";
+    const tone = payload.tone === "expired" ? "expired" : "expiring";
+    const href = typeof payload.href === "string" ? payload.href : null;
+    const daysUntil = Number(payload.daysUntil);
+    const daysLabel =
+      Number.isFinite(daysUntil) && daysUntil >= 0
+        ? daysUntil === 0
+          ? "today"
+          : `in ${daysUntil} day${daysUntil === 1 ? "" : "s"}`
+        : null;
+
+    if (audience === "driver") {
+      return {
+        title: tone === "expired" ? `${licenceKind} expired` : `${licenceKind} expiring soon`,
+        body:
+          tone === "expired"
+            ? `Your ${licenceKind.toLowerCase()} has expired — update your details and documents.`
+            : daysLabel
+              ? `Your ${licenceKind.toLowerCase()} expires ${daysLabel}.`
+              : `Your ${licenceKind.toLowerCase()} is expiring soon.`,
+        href,
+        actionLabel: href ? "Update licence" : null,
+      };
+    }
+
+    const driverLabel = String(payload.driverLabel ?? "Driver");
+    return {
+      title: tone === "expired" ? "Driver licence expired" : "Driver licence expiring soon",
+      body:
+        tone === "expired"
+          ? `${driverLabel}'s ${licenceKind.toLowerCase()} has expired.`
+          : daysLabel
+            ? `${driverLabel}'s ${licenceKind.toLowerCase()} expires ${daysLabel}.`
+            : `${driverLabel}'s ${licenceKind.toLowerCase()} is expiring soon.`,
+      href,
+      actionLabel: href ? "View driver" : null,
+    };
+  }
+
+  if (type === "hire_insurance_expiry") {
+    const vrm = String(payload.vehicleVrm ?? "Vehicle");
+    const tone = payload.tone === "expired" ? "expired" : "expiring";
+    const audience = payload.audience === "driver" ? "driver" : "staff";
+    const href = typeof payload.href === "string" ? payload.href : null;
+    const daysUntil = Number(payload.daysUntil);
+    const daysLabel =
+      Number.isFinite(daysUntil) && daysUntil >= 0
+        ? daysUntil === 0
+          ? "today"
+          : `in ${daysUntil} day${daysUntil === 1 ? "" : "s"}`
+        : null;
+    const title = tone === "expired" ? "Hire insurance expired" : "Hire insurance expiring soon";
+    const body =
+      audience === "driver"
+        ? tone === "expired"
+          ? `Insurance for your hire of ${vrm} has expired.`
+          : daysLabel
+            ? `Insurance for your hire of ${vrm} expires ${daysLabel}.`
+            : `Insurance for your hire of ${vrm} is expiring soon.`
+        : tone === "expired"
+          ? `Hire insurance for ${vrm} has expired.`
+          : daysLabel
+            ? `Hire insurance for ${vrm} expires ${daysLabel}.`
+            : `Hire insurance for ${vrm} is expiring soon.`;
+    return {
+      title,
+      body,
+      href,
+      actionLabel: href ? "Review insurance" : null,
+    };
+  }
+
+  if (type === "hire_contract_expiry") {
+    const vrm = String(payload.vehicleVrm ?? "Vehicle");
+    const tone = payload.tone === "expired" ? "expired" : "expiring";
+    const audience = payload.audience === "driver" ? "driver" : "staff";
+    const href = typeof payload.href === "string" ? payload.href : null;
+    const daysUntil = Number(payload.daysUntil);
+    const daysLabel =
+      Number.isFinite(daysUntil)
+        ? daysUntil < 0
+          ? `${Math.abs(daysUntil)} day${Math.abs(daysUntil) === 1 ? "" : "s"} ago`
+          : daysUntil === 0
+            ? "today"
+            : `in ${daysUntil} day${daysUntil === 1 ? "" : "s"}`
+        : null;
+    const title = tone === "expired" ? "Hire contract ended" : "Hire contract ending soon";
+    const body =
+      audience === "driver"
+        ? tone === "expired"
+          ? `The contract for your hire of ${vrm} ended${daysLabel ? ` ${daysLabel}` : ""}.`
+          : daysLabel
+            ? `The contract for your hire of ${vrm} ends ${daysLabel}.`
+            : `The contract for your hire of ${vrm} is ending soon.`
+        : tone === "expired"
+          ? `The contract for ${vrm} ended${daysLabel ? ` ${daysLabel}` : ""} while the hire is still active.`
+          : daysLabel
+            ? `The contract for ${vrm} ends ${daysLabel}.`
+            : `The contract for ${vrm} is ending soon.`;
+    return {
+      title,
+      body,
+      href,
+      actionLabel: href ? "Review hire" : null,
+    };
+  }
+
   return {
     title: type.replace(/_/g, " "),
     body: typeof payload.summary === "string" ? payload.summary : "See details in the app.",
@@ -181,7 +305,14 @@ export function platformNotificationGroups(type: string): PlatformNotificationGr
   ) {
     return ["documents"];
   }
-  if (type.includes("compliance") || type.startsWith("vehicle_expiry") || type.startsWith("document_expiry")) {
+  if (
+    type.includes("compliance") ||
+    type.startsWith("vehicle_expiry") ||
+    type.startsWith("document_expiry") ||
+    type === "driver_licence_expiry" ||
+    type === "hire_insurance_expiry" ||
+    type === "hire_contract_expiry"
+  ) {
     return ["compliance"];
   }
   return [];
@@ -197,6 +328,16 @@ export function platformNotificationTone(type: string): PlatformNotificationTone
     return "success";
   }
   if (type === "hire_payment_rejected" || type === "hire_payment_amended" || type.includes("compliance")) {
+    return "warn";
+  }
+  if (
+    type === "vehicle_expiry_mot" ||
+    type === "vehicle_expiry_tax" ||
+    type === "vehicle_expiry_phv" ||
+    type === "driver_licence_expiry" ||
+    type === "hire_insurance_expiry" ||
+    type === "hire_contract_expiry"
+  ) {
     return "warn";
   }
   if (type === "contract_change_review") return "warn";

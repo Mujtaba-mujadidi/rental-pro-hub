@@ -80,15 +80,15 @@ function payments(
 }
 
 describe("buildHireEndedRentCalculation", () => {
-  it("shows rent due, paid, deposit applied and zero outstanding", () => {
+  it("shows rent due, paid, and outstanding when deposit was returned in full", () => {
     const calc = buildHireEndedRentCalculation(
       payments({ depositDisposition: "refund_full" }),
     );
     expect(calc.rentDueToEndGbp).toBe(157.14);
     expect(calc.totalRentReceivedDuringHireGbp).toBe(100);
     expect(calc.paymentReceivedDuringHireGbp).toBe(100);
-    expect(calc.paidFromDepositGbp).toBe(57.14);
-    expect(calc.rentOutstandingGbp).toBe(0);
+    expect(calc.paidFromDepositGbp).toBe(0);
+    expect(calc.rentOutstandingGbp).toBe(57.14);
     expect(calc.advanceRentToRefundGbp).toBe(0);
     expect(calc.advanceRentNote).toBeNull();
     expect(calc.cancelledPeriodNote).toContain("£42.86");
@@ -213,7 +213,7 @@ describe("buildHireEndedDepositRefundDisplay", () => {
     });
 
     expect(display?.originalDepositGbp).toBe(500);
-    expect(display?.lessUnpaidRentGbp).toBe(57.14);
+    expect(display?.lessUnpaidRentGbp).toBe(0);
     expect(display?.lessDamageGbp).toBe(100);
     expect(display?.advanceRentToRefundGbp).toBe(0);
     expect(display?.advanceRentRefundedGbp).toBe(0);

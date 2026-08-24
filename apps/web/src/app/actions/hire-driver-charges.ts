@@ -1,5 +1,9 @@
 "use server";
 
+function roundGbp(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "crypto";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
@@ -10,10 +14,12 @@ import {
   calendarYmdToUtcNoonIso,
   parseStaffManualChargeDateYmd,
   parseStaffManualChargeFields,
+  parseStaffManualChargeResolution,
   staffManualChargeMutationBlock,
+  staffManualExtraChargeEditBlock,
 } from "@/lib/fleet/hire-driver-charge-mutation";
 import {
-  formatHireDriverChargeHistoryEvents,
+  mergeHireDriverChargeHistory,
   type HireDriverChargeHistoryEventInput,
 } from "@/lib/fleet/hire-driver-charge-history";
 import {
@@ -22,13 +28,18 @@ import {
   outstandingExtraChargesGbp,
   type DriverChargeLineItemDbRow,
 } from "@/lib/fleet/hire-driver-charges";
+import { applySignedChargeDeltaToSettlementBalance } from "@/lib/fleet/hire-inspection-damage-charges";
 import {
+  allocateExtraChargePaymentAcrossRows,
+  buildExtraChargePaymentTableRows,
   EXTRA_CHARGE_PAYMENT_EVENT_TYPES,
   extraChargeSubmitBlock,
+  planExtraChargePaidAmendment,
   resolveOpenExtraChargePayment,
+  submittedExtraChargeAllocationsAreValid,
   type OpenExtraChargePayment,
 } from "@/lib/fleet/hire-driver-charge-payment";
-import { applySignedChargeDeltaToSettlementBalance } from "@/lib/fleet/hire-inspection-damage-charges";
+import { isHirePaymentsWorkspaceOpen } from "@/lib/fleet/hire-lifecycle-attention";
 import { loadHireAuditActorDisplayNames, logHireGroupEvent } from "@/lib/fleet/hire-audit";
 import type { HirePaymentRowEventDisplay } from "@/lib/fleet/hire-payment-row-history";
 import { notifyCompanyHirePaymentReviewers, notifyHireDriver } from "@/lib/platform-notifications";
@@ -39,7 +50,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 const CHARGE_LINE_SELECT =
-  "id, hire_group_id, charge_type, amount_gbp, resolution, source_kind, source_id, description, balance_payment_id, charged_on, created_at";
+  "id, hire_group_id, charge_type, amount_gbp, resolution, source_kind, source_id, description, balance_payment_id, charged_on, created_at, paid_gbp, collection_status";
 
 type AuthorizedHire = {
   id: string;
@@ -188,8 +199,11 @@ async function resolvePaymentAccount(input: {
   method: string;
   paymentAccountId?: string | null;
   defaultPaymentAccountId?: string | null;
+  /** When true, an account is required even for cash. */
+  requireAccount?: boolean;
 }): Promise<{ ok: true; accountId: string | null; accountName: string | null } | { ok: false; error: string }> {
-  const accountRequired = settlementPaymentMethodRequiresAccount(input.method);
+  const accountRequired =
+    input.requireAccount === true || settlementPaymentMethodRequiresAccount(input.method);
   const paymentAccountId = input.paymentAccountId?.trim() || input.defaultPaymentAccountId || null;
   if (accountRequired && !paymentAccountId) {
     return { ok: false, error: "Select the payment account this money was paid into." };
@@ -224,6 +238,11 @@ export async function addHireDriverChargeAction(input: {
   chargeType: string;
   chargedOnYmd: string;
   description: string;
+  /** Default add_to_balance. paid_now also records a linked driver_charge receipt. */
+  resolution?: string;
+  paymentMethod?: string | null;
+  paymentAccountId?: string | null;
+  paymentReference?: string | null;
 }): Promise<{ ok: true; chargeId: string } | { ok: false; error: string }> {
   const authorized = await loadAuthorizedHireForChargeWrite(input.hireGroupId);
   if (!authorized.ok) return authorized;
@@ -245,8 +264,62 @@ export async function addHireDriverChargeAction(input: {
   });
   if (!parsed.ok) return parsed;
 
+  const resolution = parseStaffManualChargeResolution(input.resolution ?? "add_to_balance");
+  if (!resolution) return { ok: false, error: "Choose how this charge should be collected." };
+
+  let paymentMethod: string | null = null;
+  let paymentAccountId: string | null = null;
+  let paymentAccountName: string | null = null;
+  let paymentReference: string | null = input.paymentReference?.trim() || null;
+  if (resolution === "paid_now") {
+    const method = parsePaymentMethod(input.paymentMethod ?? "");
+    if (!method) return { ok: false, error: "Select a payment method for the paid charge." };
+    paymentMethod = method;
+    const selectedAccountId = input.paymentAccountId?.trim() || null;
+    if (!selectedAccountId) {
+      return { ok: false, error: "Select the payment account this money was paid into." };
+    }
+    const account = await resolvePaymentAccount({
+      companyId: hire.parentCompanyId,
+      method,
+      paymentAccountId: selectedAccountId,
+      // Charged-now always requires an explicit account selection (no silent default).
+      defaultPaymentAccountId: null,
+      requireAccount: true,
+    });
+    if (!account.ok) return account;
+    paymentAccountId = account.accountId;
+    paymentAccountName = account.accountName;
+  }
+
   const { user } = await requireRentalCompanyArea();
   const supabase = await createClient();
+
+  let balancePaymentId: string | null = null;
+  if (resolution === "paid_now") {
+    // Use the real collection instant — not calendar noon — so history matches charge added.
+    const paidAt = new Date().toISOString();
+    const { data: insertedPayment, error: paymentError } = await supabase
+      .from("vehicle_hire_balance_payments")
+      .insert({
+        hire_group_id: hire.id,
+        amount_gbp: parsed.data.amountGbp,
+        payment_method: paymentMethod,
+        payment_account_id: paymentAccountId,
+        payment_reference: paymentReference,
+        direction: "received_from_driver",
+        payment_category: "driver_charge",
+        notes: "Extra charge collected when posted (charged now).",
+        paid_at: paidAt,
+        recorded_by_user_id: user.id,
+      })
+      .select("id")
+      .maybeSingle();
+    if (paymentError) return { ok: false, error: paymentError.message };
+    if (!insertedPayment?.id) return { ok: false, error: "Could not record the payment for this charge." };
+    balancePaymentId = insertedPayment.id as string;
+  }
+
   const { data: inserted, error } = await supabase
     .from("vehicle_hire_driver_charge_line_items")
     .insert({
@@ -254,25 +327,43 @@ export async function addHireDriverChargeAction(input: {
       parent_company_id: hire.parentCompanyId,
       charge_type: parsed.data.chargeType,
       amount_gbp: parsed.data.amountGbp,
-      resolution: "add_to_balance",
+      resolution,
       source_kind: "staff_manual",
       description: parsed.data.description,
       charged_on: parsed.data.chargedOnYmd,
+      balance_payment_id: balancePaymentId,
       created_by_user_id: user.id,
     })
     .select("id")
     .maybeSingle();
-  if (error) return { ok: false, error: error.message };
-  if (!inserted?.id) return { ok: false, error: "Could not add this charge." };
+  if (error) {
+    if (balancePaymentId) {
+      await supabase.from("vehicle_hire_balance_payments").delete().eq("id", balancePaymentId);
+    }
+    return { ok: false, error: error.message };
+  }
+  if (!inserted?.id) {
+    if (balancePaymentId) {
+      await supabase.from("vehicle_hire_balance_payments").delete().eq("id", balancePaymentId);
+    }
+    return { ok: false, error: "Could not add this charge." };
+  }
 
-  const settled = await persistEndedSettlementDelta(hire, parsed.data.amountGbp);
-  if (!settled.ok) return settled;
+  // paid_now is already collected — only open-balance charges move settlement on ended hires.
+  if (resolution === "add_to_balance") {
+    const settled = await persistEndedSettlementDelta(hire, parsed.data.amountGbp);
+    if (!settled.ok) return settled;
+  }
 
   const admin = createSupabaseAdminClient();
+  const summary =
+    resolution === "paid_now"
+      ? `${hireDriverChargeTypeLabel(parsed.data.chargeType)} charge of £${parsed.data.amountGbp.toFixed(2)} charged now (paid).`
+      : `${hireDriverChargeTypeLabel(parsed.data.chargeType)} charge of £${parsed.data.amountGbp.toFixed(2)} added.`;
   await logHireGroupEvent(admin, {
     hireGroupId: hire.id,
     eventType: "driver_charge_added",
-    summary: `${hireDriverChargeTypeLabel(parsed.data.chargeType)} charge of £${parsed.data.amountGbp.toFixed(2)} added.`,
+    summary,
     actorRole: "company_staff",
     actorUserId: user.id,
     metadata: {
@@ -282,8 +373,44 @@ export async function addHireDriverChargeAction(input: {
       chargeTypeLabel: hireDriverChargeTypeLabel(parsed.data.chargeType),
       description: parsed.data.description,
       chargedOnYmd: parsed.data.chargedOnYmd,
+      resolution,
+      balancePaymentId,
+      ...(resolution === "paid_now"
+        ? {
+            paymentMethod,
+            paymentAccountId,
+            paymentAccountName,
+            paymentReference,
+          }
+        : {}),
     },
   });
+
+  if (resolution === "paid_now" && balancePaymentId) {
+    await logHireGroupEvent(admin, {
+      hireGroupId: hire.id,
+      eventType: "driver_charge_payment_recorded",
+      summary: `Recorded £${parsed.data.amountGbp.toFixed(2)} against ${hireDriverChargeTypeLabel(parsed.data.chargeType)} (charged now).`,
+      actorRole: "company_staff",
+      actorUserId: user.id,
+      metadata: {
+        balancePaymentId,
+        amountGbp: parsed.data.amountGbp,
+        paymentMethod,
+        paymentAccountId,
+        paymentAccountName,
+        paymentReference,
+        paidOnYmd: parsed.data.chargedOnYmd,
+        allocations: [
+          {
+            chargeLineItemId: inserted.id,
+            amountGbp: parsed.data.amountGbp,
+            label: hireDriverChargeTypeLabel(parsed.data.chargeType),
+          },
+        ],
+      },
+    });
+  }
 
   await revalidateHireCharges(hire.id);
   return { ok: true, chargeId: inserted.id as string };
@@ -339,6 +466,61 @@ export async function amendHireDriverChargeAction(input: {
     balancePaymentId: mapped.balancePaymentId ?? null,
   });
   if (mutationBlock) return { ok: false, error: mutationBlock };
+
+  const snapshot = await extraChargePaymentSnapshot(hire.id);
+  const [{ data: chargeRowsForEdit }, { data: receiptRowsForEdit }, { data: eventRowsForEdit }] =
+    await Promise.all([
+      supabase
+        .from("vehicle_hire_driver_charge_line_items")
+        .select(CHARGE_LINE_SELECT)
+        .eq("hire_group_id", hire.id)
+        .eq("parent_company_id", hire.parentCompanyId),
+      supabase
+        .from("vehicle_hire_balance_payments")
+        .select("id, amount_gbp, direction, payment_category, paid_at")
+        .eq("hire_group_id", hire.id),
+      supabase
+        .from("vehicle_hire_group_events")
+        .select("event_type, metadata")
+        .eq("hire_group_id", hire.id)
+        .in("event_type", [...EXTRA_CHARGE_PAYMENT_EVENT_TYPES]),
+    ]);
+  const editCharges = (chargeRowsForEdit ?? [])
+    .map((row) => mapDriverChargeLineItemFromDb(row as DriverChargeLineItemDbRow))
+    .filter((row): row is NonNullable<typeof row> => row != null);
+  const editTimedPayments = (receiptRowsForEdit ?? [])
+    .filter(
+      (payment) =>
+        (payment.payment_category as string | null) === "driver_charge" &&
+        (payment.direction as string | null) === "received_from_driver",
+    )
+    .map((payment) => ({
+      id: payment.id as string,
+      amountGbp: Number(payment.amount_gbp ?? 0),
+      paidAt: (payment.paid_at as string) ?? "",
+    }))
+    .filter((payment) => payment.id && payment.paidAt && payment.amountGbp > 0);
+  const editTableRows = buildExtraChargePaymentTableRows({
+    charges: editCharges,
+    receipts: (receiptRowsForEdit ?? []).map((payment) => ({
+      amountGbp: Number(payment.amount_gbp ?? 0),
+      direction: (payment.direction as string | null) ?? null,
+      paymentCategory: (payment.payment_category as string | null) ?? "settlement",
+    })),
+    timedPayments: editTimedPayments,
+    allocationEvents: (eventRowsForEdit ?? []).map((event) => ({
+      eventType: String(event.event_type ?? ""),
+      metadata: (event.metadata as Record<string, unknown> | null) ?? {},
+    })),
+    pendingAmountGbp: snapshot.pending?.amountGbp,
+    allowMutate: true,
+  });
+  const editRow = editTableRows.find((row) => row.id === mapped.id);
+  const editBlock = staffManualExtraChargeEditBlock({
+    paidGbp: editRow?.paidGbp ?? 0,
+    paymentPendingApproval: editRow?.status === "pending_approval",
+  });
+  if (editBlock) return { ok: false, error: editBlock };
 
   const deltaGbp = Math.round((parsed.data.amountGbp - mapped.amountGbp) * 100) / 100;
   const { error: updateError } = await supabase
@@ -468,7 +650,7 @@ export async function recordHireDriverChargePaymentAction(input: {
   const authorized = await loadAuthorizedHireForChargeWrite(input.hireGroupId);
   if (!authorized.ok) return authorized;
   const { hire } = authorized;
-  if (hire.status !== "active") {
+  if (!isHirePaymentsWorkspaceOpen(hire.status)) {
     return { ok: false, error: "Record extra-charge payments on an active hire from Payments." };
   }
   const snapshot = await extraChargePaymentSnapshot(hire.id);
@@ -507,34 +689,69 @@ export async function recordHireDriverChargePaymentAction(input: {
       .select("amount_gbp, direction, payment_category")
       .eq("hire_group_id", hire.id),
   ]);
-  const outstanding = outstandingExtraChargesGbp(
-    (chargeRows ?? []).map((row) => mapDriverChargeLineItemFromDb(row as DriverChargeLineItemDbRow)).filter(
-      (row): row is NonNullable<typeof row> => row != null,
-    ),
-    (receipts ?? []).map((payment) => ({
-      amountGbp: Number(payment.amount_gbp ?? 0),
-      direction: (payment.direction as string | null) ?? null,
-      paymentCategory: (payment.payment_category as string | null) ?? "settlement",
-    })),
-  );
+
+  const { user } = await requireRentalCompanyArea();
+  const mappedCharges = (chargeRows ?? [])
+    .map((row) => mapDriverChargeLineItemFromDb(row as DriverChargeLineItemDbRow))
+    .filter((row): row is NonNullable<typeof row> => row != null);
+  const receiptRows = (receipts ?? []).map((payment) => ({
+    amountGbp: Number(payment.amount_gbp ?? 0),
+    direction: (payment.direction as string | null) ?? null,
+    paymentCategory: (payment.payment_category as string | null) ?? "settlement",
+  }));
+  const outstanding = outstandingExtraChargesGbp(mappedCharges, receiptRows);
   if (amount - outstanding > 0.005) {
     return { ok: false, error: "Amount exceeds outstanding extra charges." };
   }
 
-  const { user } = await requireRentalCompanyArea();
-  const { error } = await supabase.from("vehicle_hire_balance_payments").insert({
-    hire_group_id: hire.id,
-    amount_gbp: amount,
-    payment_method: method,
-    payment_account_id: account.accountId,
-    payment_reference: input.paymentReference?.trim() || null,
-    direction: "received_from_driver",
-    payment_category: "driver_charge",
-    notes: input.notes?.trim() || null,
-    paid_at: paidOn,
-    recorded_by_user_id: user.id,
+  const tableRows = buildExtraChargePaymentTableRows({
+    charges: mappedCharges,
+    receipts: receiptRows,
   });
+  const allocation = allocateExtraChargePaymentAcrossRows(amount, tableRows);
+
+  const { data: insertedPayment, error } = await supabase
+    .from("vehicle_hire_balance_payments")
+    .insert({
+      hire_group_id: hire.id,
+      amount_gbp: amount,
+      payment_method: method,
+      payment_account_id: account.accountId,
+      payment_reference: input.paymentReference?.trim() || null,
+      direction: "received_from_driver",
+      payment_category: "driver_charge",
+      notes: input.notes?.trim() || null,
+      paid_at: paidOn,
+      recorded_by_user_id: user.id,
+    })
+    .select("id")
+    .maybeSingle();
   if (error) return { ok: false, error: error.message };
+  if (!insertedPayment?.id) return { ok: false, error: "Could not record the extra-charge payment." };
+
+  const admin = createSupabaseAdminClient();
+  await logHireGroupEvent(admin, {
+    hireGroupId: hire.id,
+    eventType: "driver_charge_payment_recorded",
+    summary: `Recorded £${amount.toFixed(2)} against extra charges.`,
+    actorRole: "company_staff",
+    actorUserId: user.id,
+    metadata: {
+      balancePaymentId: insertedPayment.id,
+      amountGbp: amount,
+      paymentMethod: method,
+      paymentAccountId: account.accountId,
+      paymentAccountName: account.accountName,
+      paymentReference: input.paymentReference?.trim() || null,
+      paidOnYmd,
+      notes: input.notes?.trim() || null,
+      allocations: allocation.allocations.map((line) => ({
+        chargeLineItemId: line.rowId,
+        amountGbp: line.allocatedGbp,
+        label: line.label,
+      })),
+    },
+  });
 
   await revalidateHireCharges(hire.id);
   return { ok: true };
@@ -572,47 +789,132 @@ export async function loadHireDriverChargeHistoryAction(
   if (!charge) return { ok: false, error: "Charge not found." };
 
   const admin = createSupabaseAdminClient();
-  const { data: events, error } = await admin
-    .from("vehicle_hire_group_events")
-    .select("id, event_type, actor_user_id, summary, metadata, created_at")
-    .eq("hire_group_id", hireId)
-    .in("event_type", [
-      "driver_charge_added",
-      "driver_charge_amended",
-      "driver_charge_voided",
-      "driver_charge_removed",
-    ])
-    .order("created_at", { ascending: true });
-  if (error) return { ok: false, error: error.message };
+  const [{ data: events, error: eventsError }, { data: chargeRows }, { data: paymentRows }] =
+    await Promise.all([
+      admin
+        .from("vehicle_hire_group_events")
+        .select("id, event_type, actor_user_id, actor_role, summary, metadata, created_at")
+        .eq("hire_group_id", hireId)
+        .in("event_type", [
+          "driver_charge_added",
+          "driver_charge_amended",
+          "driver_charge_voided",
+          "driver_charge_removed",
+          ...EXTRA_CHARGE_PAYMENT_EVENT_TYPES,
+        ])
+        .order("created_at", { ascending: true }),
+      admin
+        .from("vehicle_hire_driver_charge_line_items")
+        .select(CHARGE_LINE_SELECT)
+        .eq("hire_group_id", hireId)
+        .eq("parent_company_id", companyId),
+      admin
+        .from("vehicle_hire_balance_payments")
+        .select(
+          "id, amount_gbp, payment_method, payment_reference, payment_account_id, notes, paid_at, direction, payment_category, recorded_by_user_id",
+        )
+        .eq("hire_group_id", hireId)
+        .eq("payment_category", "driver_charge")
+        .eq("direction", "received_from_driver")
+        .order("paid_at", { ascending: true }),
+    ]);
+  if (eventsError) return { ok: false, error: eventsError.message };
 
-  const matching: HireDriverChargeHistoryEventInput[] = [];
+  const accountIds = [
+    ...new Set(
+      (paymentRows ?? [])
+        .map((row) => (row.payment_account_id as string | null)?.trim() || "")
+        .filter(Boolean),
+    ),
+  ];
+  const accountNames = new Map<string, string>();
+  if (accountIds.length) {
+    const { data: accounts } = await admin
+      .from("company_payment_accounts")
+      .select("id, name")
+      .eq("parent_company_id", companyId)
+      .in("id", accountIds);
+    for (const account of accounts ?? []) {
+      accountNames.set(account.id as string, ((account.name as string | null)?.trim() || "Account") ?? "Account");
+    }
+  }
+
+  const actorIds = [
+    ...(events ?? []).map((event) => event.actor_user_id as string | null),
+    ...(paymentRows ?? []).map((payment) => payment.recorded_by_user_id as string | null),
+  ];
+  const names = await loadHireAuditActorDisplayNames(admin, actorIds);
+
+  const lifecycleEvents: HireDriverChargeHistoryEventInput[] = [];
+  const paymentLifecycleEvents = [];
   for (const event of events ?? []) {
     const metadata = (event.metadata as Record<string, unknown> | null) ?? {};
-    if (String(metadata.chargeLineItemId ?? "") !== lineId) continue;
-    const eventType = event.event_type as HireDriverChargeHistoryEventInput["eventType"];
-    matching.push({
+    const eventType = String(event.event_type ?? "");
+    const actorId = (event.actor_user_id as string | null) ?? null;
+    if (
+      eventType === "driver_charge_added" ||
+      eventType === "driver_charge_amended" ||
+      eventType === "driver_charge_voided" ||
+      eventType === "driver_charge_removed"
+    ) {
+      if (String(metadata.chargeLineItemId ?? "") !== lineId) continue;
+      lifecycleEvents.push({
+        id: event.id as string,
+        eventType,
+        createdAt: event.created_at as string,
+        metadata,
+        summary: (event.summary as string | null) ?? null,
+        actorDisplayName: actorId ? names[actorId] ?? null : null,
+      });
+      continue;
+    }
+    paymentLifecycleEvents.push({
       id: event.id as string,
       eventType,
       createdAt: event.created_at as string,
       metadata,
       summary: (event.summary as string | null) ?? null,
+      actorDisplayName: actorId ? names[actorId] ?? null : null,
+      actorRole: (event.actor_role as "company_staff" | "driver" | "system" | null) ?? null,
     });
   }
 
-  const names = await loadHireAuditActorDisplayNames(
-    admin,
-    (events ?? []).map((event) => event.actor_user_id as string | null),
-  );
-  const named = matching.map((event) => {
-    const raw = (events ?? []).find((row) => row.id === event.id);
-    const actorId = (raw?.actor_user_id as string | null) ?? null;
+  const mappedCharges = (chargeRows ?? [])
+    .map((row) => mapDriverChargeLineItemFromDb(row as DriverChargeLineItemDbRow))
+    .filter((row): row is NonNullable<typeof row> => row != null);
+
+  const payments = (paymentRows ?? []).map((payment) => {
+    const recorderId = (payment.recorded_by_user_id as string | null) ?? null;
+    const accountId = (payment.payment_account_id as string | null)?.trim() || null;
     return {
-      ...event,
-      actorDisplayName: actorId ? names[actorId] ?? null : null,
+      id: payment.id as string,
+      amountGbp: Number(payment.amount_gbp ?? 0),
+      paidAt: (payment.paid_at as string) ?? "",
+      paymentMethod: (payment.payment_method as string | null) ?? null,
+      paymentReference: (payment.payment_reference as string | null) ?? null,
+      paymentAccountName: accountId ? accountNames.get(accountId) ?? null : null,
+      notes: (payment.notes as string | null) ?? null,
+      actorDisplayName: recorderId ? names[recorderId] ?? null : null,
     };
   });
 
-  return { ok: true, events: formatHireDriverChargeHistoryEvents(named) };
+  return {
+    ok: true,
+    events: mergeHireDriverChargeHistory({
+      chargeLineItemId: lineId,
+      lifecycleEvents,
+      charges: mappedCharges.map((row) => ({
+        id: row.id,
+        amountGbp: row.amountGbp,
+        resolution: row.resolution,
+        chargedOn: row.chargedOn ?? null,
+        createdAt: row.createdAt ?? "",
+        balancePaymentId: row.balancePaymentId ?? null,
+      })),
+      payments,
+      paymentLifecycleEvents,
+    }),
+  };
 }
 
 export async function submitDriverExtraChargePaymentAction(input: {
@@ -661,6 +963,29 @@ export async function submitDriverExtraChargePaymentAction(input: {
 
   const submissionId = randomUUID();
   const paymentReference = input.paymentReference?.trim() || null;
+  const [{ data: submitChargeRows }, { data: submitReceiptRows }] = await Promise.all([
+    admin
+      .from("vehicle_hire_driver_charge_line_items")
+      .select(CHARGE_LINE_SELECT)
+      .eq("hire_group_id", hireGroupId),
+    admin
+      .from("vehicle_hire_balance_payments")
+      .select("amount_gbp, direction, payment_category")
+      .eq("hire_group_id", hireGroupId),
+  ]);
+  const submitCharges = (submitChargeRows ?? [])
+    .map((row) => mapDriverChargeLineItemFromDb(row as DriverChargeLineItemDbRow))
+    .filter((row): row is NonNullable<typeof row> => row != null);
+  const submitReceipts = (submitReceiptRows ?? []).map((payment) => ({
+    amountGbp: Number(payment.amount_gbp ?? 0),
+    direction: (payment.direction as string | null) ?? null,
+    paymentCategory: (payment.payment_category as string | null) ?? "settlement",
+  }));
+  const submitTableRows = buildExtraChargePaymentTableRows({
+    charges: submitCharges,
+    receipts: submitReceipts,
+  });
+  const submitAllocation = allocateExtraChargePaymentAcrossRows(amount, submitTableRows);
   const logged = await logHireGroupEvent(admin, {
     hireGroupId,
     eventType: "driver_charge_payment_submitted",
@@ -671,6 +996,11 @@ export async function submitDriverExtraChargePaymentAction(input: {
       submissionId,
       amountGbp: amount,
       paymentReference,
+      allocations: submitAllocation.allocations.map((line) => ({
+        chargeLineItemId: line.rowId,
+        amountGbp: line.allocatedGbp,
+        label: line.label,
+      })),
     },
   });
   if (!logged.ok) return logged;
@@ -770,6 +1100,55 @@ export async function approveDriverExtraChargePaymentAction(
     return { ok: false, error: e instanceof Error ? e.message : "Server error." };
   }
 
+  const [{ data: chargeRows }, { data: receiptRows }] = await Promise.all([
+    admin
+      .from("vehicle_hire_driver_charge_line_items")
+      .select(CHARGE_LINE_SELECT)
+      .eq("hire_group_id", hire.id),
+    admin
+      .from("vehicle_hire_balance_payments")
+      .select("amount_gbp, direction, payment_category")
+      .eq("hire_group_id", hire.id),
+  ]);
+  const mappedCharges = (chargeRows ?? [])
+    .map((row) => mapDriverChargeLineItemFromDb(row as DriverChargeLineItemDbRow))
+    .filter((row): row is NonNullable<typeof row> => row != null);
+  const mappedReceipts = (receiptRows ?? []).map((payment) => ({
+    amountGbp: Number(payment.amount_gbp ?? 0),
+    direction: (payment.direction as string | null) ?? null,
+    paymentCategory: (payment.payment_category as string | null) ?? "settlement",
+  }));
+  const tableRows = buildExtraChargePaymentTableRows({
+    charges: mappedCharges,
+    receipts: mappedReceipts,
+  });
+  const submittedAllocations = snapshot.pending.allocations ?? [];
+  const allocation = submittedExtraChargeAllocationsAreValid(
+    submittedAllocations,
+    tableRows,
+    snapshot.pending.amountGbp,
+  )
+    ? {
+        allocations: submittedAllocations.map((line) => {
+          const row = tableRows.find((item) => item.id === line.chargeLineItemId);
+          const balanceBefore = roundGbp(row?.balanceGbp ?? line.amountGbp);
+          const balanceAfter = roundGbp(balanceBefore - line.amountGbp);
+          return {
+            rowId: line.chargeLineItemId,
+            label: line.label ?? row?.chargeTypeLabel ?? "Extra charge",
+            allocatedGbp: line.amountGbp,
+            rowBalanceBeforeGbp: balanceBefore,
+            rowBalanceAfterGbp: balanceAfter,
+            fullyAllocated: balanceAfter <= 0.005,
+          };
+        }),
+        unallocatedGbp: 0,
+        totalOutstandingGbp: roundGbp(
+          tableRows.reduce((sum, row) => sum + Math.max(0, row.balanceGbp), 0),
+        ),
+      }
+    : allocateExtraChargePaymentAcrossRows(snapshot.pending.amountGbp, tableRows);
+
   const { data: insertedPayment, error: insertError } = await admin
     .from("vehicle_hire_balance_payments")
     .insert({
@@ -797,8 +1176,14 @@ export async function approveDriverExtraChargePaymentAction(
     actorUserId: reviewerUserId,
     metadata: {
       submissionId: snapshot.pending.submissionId,
+      balancePaymentId: insertedPayment.id,
       amountGbp: snapshot.pending.amountGbp,
       paymentReference: snapshot.pending.paymentReference,
+      allocations: allocation.allocations.map((line) => ({
+        chargeLineItemId: line.rowId,
+        amountGbp: line.allocatedGbp,
+        label: line.label,
+      })),
     },
   });
   if (!logged.ok) {
@@ -873,6 +1258,148 @@ export async function rejectDriverExtraChargePaymentAction(input: {
     vehicleVrm: vehicle?.vrm?.trim() || "Vehicle",
     amountGbp: snapshot.pending.amountGbp,
     comment,
+    href: driverHirePaymentsHref(hire.id),
+  });
+
+  await revalidateHireCharges(hire.id);
+  return { ok: true };
+}
+
+export async function amendExtraChargePaidAmountAction(input: {
+  hireGroupId: string;
+  chargeLineItemId: string;
+  paidGbp: number;
+  reason: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const authorized = await loadAuthorizedHireForExtraChargeReview(input.hireGroupId);
+  if (!authorized.ok) return authorized;
+  const { hire, reviewerUserId } = authorized;
+
+  const reason = input.reason.trim();
+  if (!reason) return { ok: false, error: "A reason is required when amending a payment." };
+
+  const newPaidGbp = Math.round(Number(input.paidGbp) * 100) / 100;
+  if (!Number.isFinite(newPaidGbp) || newPaidGbp < 0) {
+    return { ok: false, error: "Enter a valid paid amount." };
+  }
+
+  const chargeLineItemId = input.chargeLineItemId.trim();
+  if (!chargeLineItemId) return { ok: false, error: "Charge not found." };
+
+  let admin: ReturnType<typeof createSupabaseAdminClient>;
+  try {
+    admin = createSupabaseAdminClient();
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Server error." };
+  }
+
+  const [{ data: chargeRows }, { data: paymentRows }, { data: eventRows }] = await Promise.all([
+    admin
+      .from("vehicle_hire_driver_charge_line_items")
+      .select(CHARGE_LINE_SELECT)
+      .eq("hire_group_id", hire.id)
+      .eq("parent_company_id", hire.parentCompanyId),
+    admin
+      .from("vehicle_hire_balance_payments")
+      .select("id, amount_gbp, direction, payment_category, paid_at")
+      .eq("hire_group_id", hire.id),
+    admin
+      .from("vehicle_hire_group_events")
+      .select("event_type, created_at, metadata")
+      .eq("hire_group_id", hire.id)
+      .in("event_type", [...EXTRA_CHARGE_PAYMENT_EVENT_TYPES])
+      .order("created_at", { ascending: true }),
+  ]);
+
+  const mappedCharges = (chargeRows ?? [])
+    .map((row) => mapDriverChargeLineItemFromDb(row as DriverChargeLineItemDbRow))
+    .filter((row): row is NonNullable<typeof row> => row != null);
+  const charge = mappedCharges.find((row) => row.id === chargeLineItemId);
+  if (!charge) return { ok: false, error: "Charge not found." };
+  if (charge.resolution !== "add_to_balance") {
+    return { ok: false, error: "Only balance extra charges can have payments amended." };
+  }
+
+  const timedPayments = (paymentRows ?? [])
+    .filter(
+      (payment) =>
+        (payment.payment_category as string | null) === "driver_charge" &&
+        (payment.direction as string | null) === "received_from_driver",
+    )
+    .map((payment) => ({
+      id: payment.id as string,
+      amountGbp: Number(payment.amount_gbp ?? 0),
+      paidAt: (payment.paid_at as string) ?? "",
+    }))
+    .filter((payment) => payment.id && payment.paidAt && payment.amountGbp > 0);
+
+  const allocationEvents = (eventRows ?? []).map((event) => ({
+    eventType: String(event.event_type ?? ""),
+    metadata: (event.metadata as Record<string, unknown> | null) ?? {},
+  }));
+
+  const plan = planExtraChargePaidAmendment({
+    chargeLineItemId,
+    newPaidGbp,
+    charges: mappedCharges,
+    payments: timedPayments,
+    allocationEvents,
+  });
+  if (!plan.ok) return plan;
+
+  for (const update of plan.paymentUpdates) {
+    if (update.newAmountGbp <= 0.005) {
+      const { error } = await admin
+        .from("vehicle_hire_balance_payments")
+        .delete()
+        .eq("id", update.paymentId)
+        .eq("hire_group_id", hire.id);
+      if (error) return { ok: false, error: error.message };
+    } else {
+      const { error } = await admin
+        .from("vehicle_hire_balance_payments")
+        .update({ amount_gbp: update.newAmountGbp })
+        .eq("id", update.paymentId)
+        .eq("hire_group_id", hire.id);
+      if (error) return { ok: false, error: error.message };
+    }
+
+    const logged = await logHireGroupEvent(admin, {
+      hireGroupId: hire.id,
+      eventType: "driver_charge_payment_amended",
+      summary: `Amended extra-charge payment on ${hireDriverChargeTypeLabel(charge.chargeType)} from £${plan.previousPaidGbp.toFixed(2)} to £${plan.newPaidGbp.toFixed(2)}.`,
+      actorRole: "company_staff",
+      actorUserId: reviewerUserId,
+      metadata: {
+        chargeLineItemId,
+        balancePaymentId: update.paymentId,
+        previousAmountGbp: update.previousAmountGbp,
+        amountGbp: update.newAmountGbp,
+        previousPaidGbp: plan.previousPaidGbp,
+        newPaidGbp: plan.newPaidGbp,
+        reason,
+        allocations: update.allocations.map((line) => ({
+          chargeLineItemId: line.chargeLineItemId,
+          amountGbp: line.amountGbp,
+          ...(line.label ? { label: line.label } : {}),
+        })),
+      },
+    });
+    if (!logged.ok) return logged;
+  }
+
+  const { data: notifyGroup } = await admin
+    .from("vehicle_hire_groups")
+    .select("driver_user_id, vehicles(vrm)")
+    .eq("id", hire.id)
+    .maybeSingle();
+  const vehicle = notifyGroup?.vehicles as { vrm?: string } | null;
+  await notifyHireDriver(admin, (notifyGroup?.driver_user_id as string | null) ?? null, "hire_payment_amended", {
+    hireGroupId: hire.id,
+    vehicleVrm: vehicle?.vrm?.trim() || "Vehicle",
+    amountGbp: plan.newPaidGbp,
+    previousAmountGbp: plan.previousPaidGbp,
+    comment: reason,
     href: driverHirePaymentsHref(hire.id),
   });
 

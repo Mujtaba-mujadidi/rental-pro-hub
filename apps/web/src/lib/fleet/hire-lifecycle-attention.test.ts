@@ -5,6 +5,7 @@ import {
   canStartCheckout,
   canTerminateHire,
   isCheckoutDue,
+  isHirePaymentsWorkspaceOpen,
 } from "@/lib/fleet/hire-lifecycle-attention";
 
 describe("hire-lifecycle-attention", () => {
@@ -27,10 +28,18 @@ describe("hire-lifecycle-attention", () => {
     ).toBe(true);
   });
 
-  it("allows termination only for active hires", () => {
+  it("allows termination for active and ending hires", () => {
     expect(canTerminateHire("active")).toBe(true);
+    expect(canTerminateHire("ending")).toBe(true);
     expect(canTerminateHire("reserved")).toBe(false);
     expect(canTerminateHire("terminated")).toBe(false);
+  });
+
+  it("keeps payments workspace open during end hire", () => {
+    expect(isHirePaymentsWorkspaceOpen("active")).toBe(true);
+    expect(isHirePaymentsWorkspaceOpen("ending")).toBe(true);
+    expect(isHirePaymentsWorkspaceOpen("terminated")).toBe(false);
+    expect(isHirePaymentsWorkspaceOpen("completed")).toBe(false);
   });
 
   it("allows check-in only after contract termination", () => {

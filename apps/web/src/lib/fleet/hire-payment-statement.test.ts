@@ -72,6 +72,7 @@ function minimalPage(overrides: Partial<HirePaymentsPageData> = {}): HirePayment
     driverChargeLineItems: [],
     extraChargesOutstandingGbp: 0,
     extraChargePendingPayment: null,
+    extraChargeAllocationEvents: [],
     canMutateExtraCharges: false,
     rows: [
       {

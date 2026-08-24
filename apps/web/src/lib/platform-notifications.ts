@@ -10,7 +10,21 @@ export type PlatformNotificationType =
   | "hire_payment_amended"
   | "legal_change_applied"
   | "contract_change_requested"
-  | "contract_change_review";
+  | "contract_change_review"
+  | "vehicle_expiry_mot"
+  | "vehicle_expiry_tax"
+  | "vehicle_expiry_phv"
+  | "driver_licence_expiry"
+  | "hire_insurance_expiry"
+  | "hire_contract_expiry";
+
+export type PendingPlatformNotification = {
+  userId: string;
+  type: PlatformNotificationType;
+  payload: Record<string, unknown> & { dedupeKey: string };
+};
+
+const COMPLIANCE_STAFF_ROLES = ["owner", "admin", "operations"] as const;
 
 export async function notifyUserIds(
   admin: ReturnType<typeof createSupabaseAdminClient>,
@@ -92,10 +106,62 @@ export async function notifyHireDriver(
   driverUserId: string | null | undefined,
   type: Extract<
     PlatformNotificationType,
-    "hire_payment_approved" | "hire_payment_rejected" | "hire_payment_amended"
+    | "hire_payment_approved"
+    | "hire_payment_rejected"
+    | "hire_payment_amended"
+    | "hire_insurance_expiry"
+    | "hire_contract_expiry"
+    | "driver_licence_expiry"
   >,
   payload: Record<string, unknown>,
 ): Promise<void> {
   if (!driverUserId) return;
   await notifyUserIds(admin, [driverUserId], type, payload);
+}
+
+/** Notify rental staff who manage fleet compliance (MOT, tax, licences, hire documents). */
+export async function notifyCompanyComplianceStaff(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  parentCompanyId: string,
+  type: Extract<
+    PlatformNotificationType,
+    | "vehicle_expiry_mot"
+    | "vehicle_expiry_tax"
+    | "vehicle_expiry_phv"
+    | "driver_licence_expiry"
+    | "hire_insurance_expiry"
+    | "hire_contract_expiry"
+  >,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const { data, error } = await admin
+    .from("user_company_memberships")
+    .select("user_id")
+    .eq("parent_company_id", parentCompanyId)
+    .eq("status", "active")
+    .in("role", [...COMPLIANCE_STAFF_ROLES]);
+  if (error) {
+    console.error("notifyCompanyComplianceStaff", error.message);
+    return;
+  }
+  const ids = (data ?? []).map((r) => r.user_id as string);
+  await notifyUserIds(admin, ids, type, payload);
+}
+
+export async function insertPendingPlatformNotifications(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  rows: readonly PendingPlatformNotification[],
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  const insertRows = rows.map((row) => ({
+    user_id: row.userId,
+    type: row.type,
+    payload: row.payload,
+  }));
+  const { error } = await admin.from("platform_notifications").insert(insertRows);
+  if (error) {
+    console.error("insertPendingPlatformNotifications", error.message);
+    return 0;
+  }
+  return rows.length;
 }

@@ -44,6 +44,8 @@ export function hireGroupTableStatus(
   switch (status) {
     case "active":
       return { label: "On rent", tone: "success" };
+    case "ending":
+      return { label: "Ending hire", tone: "warning" };
     case "reserved":
       return { label: "Reserved", tone: "pending" };
     case "pending_signature":

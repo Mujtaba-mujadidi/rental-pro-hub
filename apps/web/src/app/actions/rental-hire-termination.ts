@@ -25,7 +25,7 @@ import {
   provisionalTerminationSettlementResolution,
 } from "@/lib/fleet/hire-settlement-finalization";
 import { loadHireCheckinCompleted } from "@/lib/fleet/hire-inspection-status";
-import { canTerminateHire } from "@/lib/fleet/hire-lifecycle-attention";
+import { canTerminateHire, isHirePaymentsWorkspaceOpen } from "@/lib/fleet/hire-lifecycle-attention";
 import {
   openBalanceDirection,
   remainingOpenBalanceGbp,
@@ -76,9 +76,11 @@ import { syncVehicleStatusForHireGroup } from "@/lib/fleet/sync-vehicle-hire-sta
 import { cancelOpenSubcompanyDocumentRequirementsForHire } from "@/lib/rental/subcompany-hire-document-requirements";
 import { revalidateVehicleFinancialsForHireGroup } from "@/app/actions/rental-vehicle-financials";
 import {
+  buildDepositResolutionPreview,
   computeDepositResolutionSettlement,
   isDepositDispositionPending,
   parseTerminationAccountsSummary,
+  type DepositResolutionPreview,
 } from "@/lib/fleet/hire-deposit-resolution";
 import {
   buildHireTerminationAccountsSummary,
@@ -162,6 +164,7 @@ export type HireDriverChargeWorkspaceRow = {
   createdAt: string;
   chargedOn: string | null;
   sourceKind: string;
+  balancePaymentId?: string | null;
   canMutate: boolean;
 };
 
@@ -235,6 +238,7 @@ export async function loadHireTerminationPreviewAction(
   depositDisposition: HireDepositDisposition = "hold_pending",
   depositRefundAmountGbp?: number | null,
   rentBillingMode: HireTerminationRentBillingMode = "end_of_period",
+  returnedAtIso?: string | null,
 ): Promise<{ ok: true; data: HireTerminationPreview } | { ok: false; error: string }> {
   const { profile } = await requireRentalCompanyArea();
   if (!canWriteRentals(profile)) return { ok: false, error: "You do not have permission." };
@@ -256,7 +260,7 @@ export async function loadHireTerminationPreviewAction(
   const payments = await loadHirePaymentsPageAction(hireGroupId);
   if (!payments.ok) return payments;
 
-  const nowIso = new Date().toISOString();
+  const nowIso = returnedAtIso?.trim() || new Date().toISOString();
   const terminatedYmd = nowIso.slice(0, 10);
   const rentCadence = group.rent_cadence as RentCadence;
   const depositGbp = group.include_deposit ? Number(group.deposit_gbp ?? 0) : 0;
@@ -334,6 +338,7 @@ export async function terminateHireGroupAction(input: {
   settlementResolution?: string;
   settlementPaymentMethod?: string;
   settlementPaymentReference?: string;
+  returnedAtIso?: string | null;
 }): Promise<{ ok: true; checkInHref: string } | { ok: false; error: string }> {
   const { profile, user } = await requireRentalCompanyArea();
   const writable = await assertRentalCompanyWritable(profile);
@@ -360,6 +365,7 @@ export async function terminateHireGroupAction(input: {
     disposition,
     input.depositRefundAmountGbp,
     rentBillingMode,
+    input.returnedAtIso,
   );
   if (!preview.ok) return preview;
 
@@ -422,7 +428,7 @@ export async function terminateHireGroupAction(input: {
   if (!paymentsPage.ok) return paymentsPage;
 
   const admin = createSupabaseAdminClient();
-  const now = new Date().toISOString();
+  const now = input.returnedAtIso?.trim() || new Date().toISOString();
   const terminatedYmd = now.slice(0, 10);
   const settlementDirection = resolveSettlementBalanceDirection(overallPositionGbp);
   const retainUntil = driverDocumentsRetainUntilYmd(terminatedYmd);
@@ -451,7 +457,7 @@ export async function terminateHireGroupAction(input: {
       driver_documents_retain_until: retainUntil,
     })
     .eq("id", input.hireGroupId.trim())
-    .eq("status", "active");
+    .in("status", ["active", "ending"]);
 
   if (updateError) return { ok: false, error: updateError.message };
 
@@ -782,18 +788,22 @@ export async function recordHireBalancePaymentAction(input: {
     direction === "driver_owes_company" ? "received_from_driver" : "paid_to_driver";
 
   const roundedAmount = Math.round(amount * 100) / 100;
-  const { error } = await supabase.from("vehicle_hire_balance_payments").insert({
-    hire_group_id: input.hireGroupId.trim(),
-    amount_gbp: roundedAmount,
-    payment_method: method,
-    payment_account_id: accountRequired ? paymentAccountId : null,
-    payment_reference: input.paymentReference?.trim() || null,
-    direction: paymentDirection,
-    payment_category: "settlement",
-    notes: input.notes?.trim() || null,
-    recorded_by_user_id: user.id,
-    ...(paidOnYmd ? { paid_at: calendarYmdToUtcNoonIso(paidOnYmd) } : {}),
-  });
+  const { data: balancePayment, error } = await supabase
+    .from("vehicle_hire_balance_payments")
+    .insert({
+      hire_group_id: input.hireGroupId.trim(),
+      amount_gbp: roundedAmount,
+      payment_method: method,
+      payment_account_id: accountRequired ? paymentAccountId : null,
+      payment_reference: input.paymentReference?.trim() || null,
+      direction: paymentDirection,
+      payment_category: "settlement",
+      notes: input.notes?.trim() || null,
+      recorded_by_user_id: user.id,
+      ...(paidOnYmd ? { paid_at: calendarYmdToUtcNoonIso(paidOnYmd) } : {}),
+    })
+    .select("id")
+    .maybeSingle();
   if (error) return { ok: false, error: error.message };
 
   const signed = signedSettlementBalanceGbp(direction, Number(group.settlement_balance_gbp ?? 0));
@@ -809,6 +819,29 @@ export async function recordHireBalancePaymentAction(input: {
     })
     .eq("id", input.hireGroupId.trim())
     .eq("parent_company_id", companyId);
+
+  const directionLabel =
+    paymentDirection === "paid_to_driver" ? "paid to driver" : "received from driver";
+  try {
+    const admin = createSupabaseAdminClient();
+    await logHireGroupEvent(admin, {
+      hireGroupId: input.hireGroupId.trim(),
+      eventType: "settlement_balance_payment_recorded",
+      summary: `Recorded £${roundedAmount.toFixed(2)} settlement payment ${directionLabel}.`,
+      actorRole: "company_staff",
+      actorUserId: user.id,
+      metadata: {
+        balancePaymentId: (balancePayment?.id as string | undefined) ?? null,
+        amountGbp: roundedAmount,
+        direction: paymentDirection,
+        paymentMethod: method,
+        paymentReference: input.paymentReference?.trim() || null,
+        notes: input.notes?.trim() || null,
+      },
+    });
+  } catch (logError) {
+    console.error("recordHireBalancePaymentAction activity log", logError);
+  }
 
   await revalidateHireTermination(input.hireGroupId.trim());
   return { ok: true };
@@ -1033,7 +1066,7 @@ export async function loadHireSettlementWorkspaceAction(hireGroupId: string): Pr
 
   const status = String(group.status ?? "");
   const ended = status === "terminated" || status === "completed";
-  if (status !== "active" && !ended) {
+  if (!isHirePaymentsWorkspaceOpen(status) && !ended) {
     return { ok: false, error: "Hire not found." };
   }
 
@@ -1115,16 +1148,18 @@ export async function loadHireSettlementWorkspaceAction(hireGroupId: string): Pr
   const mappedChargeRows = mapDriverChargeLineItemsFromDb(
     (chargeRows ?? []) as DriverChargeLineItemDbRow[],
   );
-  const extraChargesOutstandingGbp = outstandingExtraChargesGbp(
-    mappedChargeRows,
-    mappedPayments.map((payment) => ({
-      amountGbp: payment.amountGbp,
-      direction: payment.direction ?? "received_from_driver",
-      paymentCategory: payment.paymentCategory,
-    })),
-  );
 
   const paymentsPage = await loadHirePaymentsPageAction(hireGroupId.trim());
+  const extraChargesOutstandingGbp = paymentsPage.ok
+    ? paymentsPage.data.extraChargesOutstandingGbp
+    : outstandingExtraChargesGbp(
+        mappedChargeRows,
+        mappedPayments.map((payment) => ({
+          amountGbp: payment.amountGbp,
+          direction: payment.direction ?? "received_from_driver",
+          paymentCategory: payment.paymentCategory,
+        })),
+      );
   const pendingScheduleGbp = paymentsPage.ok
     ? Math.round(
         (paymentsPage.data.rows.reduce((sum, row) => sum + (row.pendingSubmittedGbp ?? 0), 0) +
@@ -1411,6 +1446,36 @@ export async function exportHireBalanceAccountStatementAction(
   };
 }
 
+export async function previewHireDepositResolutionAction(input: {
+  hireGroupId: string;
+  depositDisposition: string;
+  depositRefundAmountGbp?: number;
+}): Promise<{ ok: true; preview: DepositResolutionPreview } | { ok: false; error: string }> {
+  const { profile } = await requireRentalCompanyArea();
+  if (!canWriteRentals(profile)) return { ok: false, error: "You do not have permission." };
+
+  const disposition = parseDepositDisposition(input.depositDisposition.trim());
+  if (!disposition) return { ok: false, error: "Choose what to do with the deposit." };
+  if (disposition === "hold_pending") {
+    return { ok: false, error: "Choose how to resolve the held deposit." };
+  }
+
+  const payments = await loadHirePaymentsPageAction(input.hireGroupId.trim());
+  if (!payments.ok) return { ok: false, error: payments.error };
+  if (!payments.data.canResolveDeposit || payments.data.depositReceivedGbp <= 0.005) {
+    return { ok: false, error: "There is no held deposit to preview on this hire." };
+  }
+
+  const preview = buildDepositResolutionPreview({
+    currentSignedSettlementGbp: payments.data.currentSignedSettlementGbp,
+    depositHeldGbp: payments.data.depositReceivedGbp,
+    disposition,
+    refundAmountGbp: input.depositRefundAmountGbp,
+  });
+
+  return { ok: true, preview };
+}
+
 export async function resolveHireDepositDispositionAction(input: {
   hireGroupId: string;
   depositDisposition: string;
@@ -1487,8 +1552,14 @@ export async function resolveHireDepositDispositionAction(input: {
     };
   }
 
-  if (!isDepositDispositionAllowed(disposition, terminationSummary.signedRentBalanceGbp)) {
-    return { ok: false, error: "The selected deposit option is not valid for this hire." };
+  if (
+    disposition === "refund_partial" &&
+    Number(input.depositRefundAmountGbp ?? 0) > depositReceivedGbp + 0.005
+  ) {
+    return {
+      ok: false,
+      error: `Partial refund cannot exceed the £${depositReceivedGbp.toFixed(2)} deposit received.`,
+    };
   }
 
   if (requiresDepositDispositionReason(disposition)) {
@@ -1509,15 +1580,19 @@ export async function resolveHireDepositDispositionAction(input: {
     | "company_owes_driver"
     | "settled"
     | null) ?? "settled";
-  // Use the gross settlement snapshot stored on the hire row; ledger payments are replayed in the UI.
+  // Current open settlement (rent + extras + check-in charges) — not rent-only at terminate.
   const signedGross =
     direction === "settled"
       ? 0
       : signedSettlementBalanceGbp(direction, Number(group.settlement_balance_gbp ?? 0));
 
+  if (!isDepositDispositionAllowed(disposition, signedGross)) {
+    return { ok: false, error: "The selected deposit option is not valid for this hire." };
+  }
+
   const netSettlementGbp = computeDepositResolutionSettlement({
     currentSignedSettlementGbp: signedGross,
-    depositGbp: terminationSummary.depositGbp,
+    depositGbp: depositReceivedGbp,
     disposition,
     refundAmountGbp: input.depositRefundAmountGbp,
   });
@@ -1605,7 +1680,7 @@ export async function resolveHireDepositDispositionAction(input: {
     hireGroupId: input.hireGroupId.trim(),
     userId: user.id,
     disposition,
-    depositGbp: terminationSummary.depositGbp,
+    depositGbp: depositReceivedGbp,
     signedRentBalanceGbp: terminationSummary.signedRentBalanceGbp,
     depositRefundAmountGbp: input.depositRefundAmountGbp,
     accrualYmd,

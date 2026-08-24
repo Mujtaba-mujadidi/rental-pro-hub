@@ -15,9 +15,9 @@ export const HIRE_WORKSPACE_CACHE_KEYS = [
 
 export type HireWorkspaceCacheKey = (typeof HIRE_WORKSPACE_CACHE_KEYS)[number];
 
-/** Active hires can receive payment events; ended hires stay on the first load until a mutation. */
-export function hireWorkspacePaymentRealtimeEnabled(contractEnded: boolean): boolean {
-  return !contractEnded;
+/** Keep payment tabs live for active and ended hires (settlement can still move). */
+export function hireWorkspacePaymentRealtimeEnabled(_contractEnded: boolean): boolean {
+  return true;
 }
 
 export function hireWorkspaceKeysInvalidatedByPaymentChange(): HireWorkspaceCacheKey[] {

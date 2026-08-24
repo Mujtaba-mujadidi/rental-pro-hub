@@ -179,20 +179,21 @@ export function useDriverHireAccessRealtime(onRefresh: () => void, options?: Ref
   }, [options?.enabled, debouncedRefresh]);
 }
 
-/** Reload hire payment sheet when schedule rows, discounts, or status events change. */
+/** Reload hire payment sheet when schedule, discounts, status, balance, or extra-charge rows change. */
 export function useHirePaymentsRealtime(
   hireGroupId: string | null | undefined,
   onRefresh: () => void,
-  options?: RefreshOptions,
+  options?: RefreshOptions & { channelPrefix?: string },
 ) {
   const debouncedRefresh = useDebouncedRefresh(onRefresh);
+  const channelPrefix = options?.channelPrefix?.trim() || "hire-payments";
 
   useEffect(() => {
     if (options?.enabled === false || !hireGroupId) return;
 
     const supabase = createClient();
     const channel = supabase
-      .channel(`hire-payments:${hireGroupId}`)
+      .channel(`${channelPrefix}:${hireGroupId}`)
       .on(
         "postgres_changes",
         {
@@ -221,10 +222,40 @@ export function useHirePaymentsRealtime(
         },
         debouncedRefresh,
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "vehicle_hire_balance_payments",
+          filter: `hire_group_id=eq.${hireGroupId}`,
+        },
+        debouncedRefresh,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "vehicle_hire_balance_notes",
+          filter: `hire_group_id=eq.${hireGroupId}`,
+        },
+        debouncedRefresh,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "vehicle_hire_driver_charge_line_items",
+          filter: `hire_group_id=eq.${hireGroupId}`,
+        },
+        debouncedRefresh,
+      )
       .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [hireGroupId, options?.enabled, debouncedRefresh]);
+  }, [hireGroupId, options?.enabled, channelPrefix, debouncedRefresh]);
 }

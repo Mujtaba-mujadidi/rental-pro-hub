@@ -65,6 +65,7 @@ import {
   vehicleIdsBlockedByInProgressHires,
 } from "@/lib/fleet/sync-vehicle-hire-status";
 import { mapHireInspectionCompletionByGroup } from "@/lib/fleet/hire-inspection-status";
+import { isHireListActiveCloseout, parseHireEndHireDraft } from "@/lib/fleet/hire-end-hire";
 import { buildSubcompanyLegalSnapshot } from "@/lib/rental/subcompany-legal-snapshot";
 import { loadDriverLabelsMap } from "@/lib/fleet/driver-labels";
 import {
@@ -115,6 +116,7 @@ export type HireContractTableRow = {
   can_view_signed_documents: boolean;
   checkout_completed: boolean;
   checkin_completed: boolean;
+  end_hire_in_progress: boolean;
   lifecycle_label: string | null;
   lifecycle_tone: HireTableStatus["tone"];
   can_checkout: boolean;
@@ -243,7 +245,7 @@ export async function listHireContractsAction(
   let groupsQuery = supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, vehicle_id, subcompany_id, status, wizard_step, driver_access_status, driver_user_id, start_date, start_time, end_time, activated_at, rent_amount_gbp, rent_cadence, driver_licence_number, driver_email, updated_at, signing_bundle_sent_at, terminated_at, ended_at, vehicles(vrm, make, model), subcompanies(name)",
+      "id, vehicle_id, subcompany_id, status, wizard_step, driver_access_status, driver_user_id, start_date, start_time, end_time, activated_at, rent_amount_gbp, rent_cadence, driver_licence_number, driver_email, updated_at, signing_bundle_sent_at, terminated_at, ended_at, end_hire_draft, vehicles(vrm, make, model), subcompanies(name)",
     )
     .eq("parent_company_id", companyId)
     .neq("status", "cancelled");
@@ -386,9 +388,20 @@ export async function listHireContractsAction(
       checkinCompleted: false,
     };
     const status = g.status as string;
+    const terminatedAt = (g.terminated_at as string | null) ?? null;
+    const endHireDraft = parseHireEndHireDraft(g.end_hire_draft);
+    const endHireInProgress = isHireListActiveCloseout({
+      status,
+      draft: endHireDraft,
+      terminatedAt,
+      checkinCompleted: inspection.checkinCompleted,
+    });
     let lifecycleLabel: string | null = null;
     let lifecycleTone: HireTableStatus["tone"] = "neutral";
-    if (isCheckoutDue({ status, checkoutCompleted: inspection.checkoutCompleted })) {
+    if (endHireInProgress) {
+      lifecycleLabel = "Ending hire";
+      lifecycleTone = "warning";
+    } else if (isCheckoutDue({ status, checkoutCompleted: inspection.checkoutCompleted })) {
       lifecycleLabel = "Awaiting checkout";
       lifecycleTone = "warning";
     } else if (
@@ -405,7 +418,7 @@ export async function listHireContractsAction(
       id: g.id as string,
       vehicle_id: (g.vehicle_id as string | null) ?? null,
       status: g.status as string,
-      terminated_at: (g.terminated_at as string | null) ?? null,
+      terminated_at: terminatedAt,
       ended_at: (g.ended_at as string | null) ?? null,
       wizard_step: Number(g.wizard_step ?? 1),
       driver_access_status: (g.driver_access_status as string) ?? "not_requested",
@@ -440,6 +453,7 @@ export async function listHireContractsAction(
       can_view_signed_documents: signedAgreementCount > 0,
       checkout_completed: inspection.checkoutCompleted,
       checkin_completed: inspection.checkinCompleted,
+      end_hire_in_progress: endHireInProgress,
       lifecycle_label: lifecycleLabel,
       lifecycle_tone: lifecycleTone,
       can_checkout: canStartCheckout({
@@ -459,11 +473,21 @@ export async function listHireContractsAction(
   return { ok: true, rows, canWrite: canWriteRentals(profile) };
 }
 
-export async function createHireDraftAction(): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+export async function createHireDraftAction(
+  subcompanyId?: string,
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const { profile, user } = await requireRentalCompanyArea();
   const writable = await assertRentalCompanyWritable(profile);
   if (!writable.ok) return writable;
   if (!canWriteRentals(profile)) return { ok: false, error: "You do not have permission." };
+
+  const subcompanyFilter = subcompanyId?.trim();
+  if (subcompanyFilter) {
+    const accessible = await loadUserAccessibleSubcompanyIds(profile);
+    if (accessible !== "all" && !accessible.includes(subcompanyFilter)) {
+      return { ok: false, error: "You do not have permission." };
+    }
+  }
 
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -475,6 +499,7 @@ export async function createHireDraftAction(): Promise<{ ok: true; id: string } 
       rent_amount_gbp: 0,
       rent_cadence: "weekly",
       created_by_user_id: user.id,
+      ...(subcompanyFilter ? { subcompany_id: subcompanyFilter } : {}),
     })
     .select("id")
     .single();
@@ -666,6 +691,9 @@ export async function saveHireDraftStepAction(input: {
     if (!vehicle || vehicle.parent_company_id !== profile.company_id) {
       return { ok: false, error: "Vehicle not found." };
     }
+    if (existing.subcompany_id && vehicle.subcompany_id !== existing.subcompany_id) {
+      return { ok: false, error: "Choose a vehicle assigned to this subcompany." };
+    }
     subcompanyId = vehicle.subcompany_id as string;
   }
 
@@ -771,12 +799,20 @@ function mapAvailableVehicleRow(v: {
 
 export async function searchAvailableVehiclesAction(
   query: string,
-  options?: { forHireGroupId?: string },
+  options?: { forHireGroupId?: string; subcompanyId?: string },
 ): Promise<{ ok: true; rows: AvailableVehicleSearchRow[] } | { ok: false; error: string }> {
   const { profile, user } = await requireRentalCompanyArea();
   if (!canReadRentals(profile)) return { ok: false, error: "You do not have permission." };
   const companyId = profile.company_id?.trim();
   if (!companyId) return { ok: false, error: "No active company." };
+
+  const subcompanyFilter = options?.subcompanyId?.trim();
+  if (subcompanyFilter) {
+    const accessible = await loadUserAccessibleSubcompanyIds(profile);
+    if (accessible !== "all" && !accessible.includes(subcompanyFilter)) {
+      return { ok: false, error: "You do not have permission." };
+    }
+  }
 
   const supabase = await createClient();
   let reservedForDraft: string | null = null;
@@ -799,6 +835,10 @@ export async function searchAvailableVehiclesAction(
     .is("archived_at", null)
     .order("vrm", { ascending: true })
     .limit(40);
+
+  if (subcompanyFilter) {
+    q = q.eq("subcompany_id", subcompanyFilter);
+  }
 
   const term = query.trim();
   if (term.length >= 1) {

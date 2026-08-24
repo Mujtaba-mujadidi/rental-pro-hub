@@ -27,7 +27,6 @@ import { getVehicleLiveTrackAction, setVehicleTrackerMileageAction } from "@/app
 import { isFleetTrackingEnabled } from "@/lib/fleet-tracking/credentials";
 import { milesToMetres, trackOdometerMatchesMiles } from "@/lib/fleet-tracking/units";
 import { syncVehicleStatusForHireGroup } from "@/lib/fleet/sync-vehicle-hire-status";
-import { cancelOpenSubcompanyDocumentRequirementsForHire } from "@/lib/rental/subcompany-hire-document-requirements";
 import { isValidHireFuelLevelPercent } from "@/lib/fleet/hire-fuel-level";
 import {
   HIRE_DAMAGE_SEVERITIES,
@@ -1262,22 +1261,14 @@ export async function completeHireCheckinAction(
 
   if (inspectionError) return { ok: false, error: inspectionError.message };
 
-  const { error: hireError } = await admin
-    .from("vehicle_hire_groups")
-    .update({ status: "completed", ended_at: now })
-    .eq("id", hireGroupId);
-
-  if (hireError) return { ok: false, error: hireError.message };
-
-  await cancelOpenSubcompanyDocumentRequirementsForHire(admin, hireGroupId, userId);
   await syncVehicleStatusForHireGroup(admin, hireGroupId);
   await logHireGroupEvent(admin, {
     hireGroupId,
     eventType: "checkin_completed",
     summary:
       chargeSummary.addToBalanceGbp > 0 || chargeSummary.paidNowGbp > 0
-        ? `Vehicle check-in completed — damage charges applied (£${(chargeSummary.addToBalanceGbp + chargeSummary.paidNowGbp).toFixed(2)}).`
-        : "Vehicle check-in completed — hire ended.",
+        ? `Vehicle check-in completed — damage charges applied (£${(chargeSummary.addToBalanceGbp + chargeSummary.paidNowGbp).toFixed(2)}). Finalise contract termination on the End hire tab when ready.`
+        : "Vehicle check-in completed — continue to final account and finalise contract termination when ready.",
     actorRole: "company_staff",
     actorUserId: userId,
   });

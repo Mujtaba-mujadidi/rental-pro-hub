@@ -137,6 +137,36 @@ describe("hire-payment-allocation", () => {
     expect(result.unallocatedGbp).toBe(0);
   });
 
+  it("allocates remaining balance on a partially approved deposit (C02)", () => {
+    const partialDeposit: HirePaymentScheduleRowInput[] = [
+      {
+        id: "dep",
+        periodStart: "2026-07-01",
+        periodEnd: "2026-07-01",
+        rowKind: "deposit",
+        baseAmountGbp: 1200,
+        discountTotalGbp: 0,
+        paymentStatus: "approved",
+        approvedAmountGbp: 600,
+        pendingSubmittedGbp: null,
+        sortOrder: 0,
+      },
+    ];
+    const result = allocatePaymentAcrossRows(600, partialDeposit, "2026-08-23", {
+      rowKind: "deposit",
+      overflowRemainderToRent: true,
+    });
+    expect(result.allocations).toHaveLength(1);
+    expect(result.allocations[0]).toMatchObject({
+      rowId: "dep",
+      allocatedGbp: 600,
+      rowBalanceBeforeGbp: 600,
+      rowBalanceAfterGbp: 0,
+      fullyAllocated: true,
+    });
+    expect(result.unallocatedGbp).toBe(0);
+  });
+
   it("includes rejected rows so drivers can resubmit payment", () => {
     const rejectedRow: HirePaymentScheduleRowInput = {
       id: "w-rejected",

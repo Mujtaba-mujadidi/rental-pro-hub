@@ -40,6 +40,16 @@ describe("depositRentScheduleCreditGbp", () => {
     ).toBe(0);
   });
 
+  it("does not apply rent credit when returning the full deposit", () => {
+    expect(
+      depositRentScheduleCreditGbp({
+        disposition: "refund_full",
+        depositGbp: 200,
+        signedRentBalanceGbp: 130,
+      }),
+    ).toBe(0);
+  });
+
   it("uses retained deposit on partial refund", () => {
     expect(
       depositRentScheduleCreditGbp({

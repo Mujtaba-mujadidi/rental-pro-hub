@@ -30,8 +30,8 @@ export function HireExtraChargeRowActions({
   onHistory,
   onEdit,
   onVoid,
-  onApprove,
-  onReject,
+  onReview,
+  onAmend,
 }: {
   row: ExtraChargePaymentTableRow;
   canMutate: boolean;
@@ -40,11 +40,16 @@ export function HireExtraChargeRowActions({
   onHistory: () => void;
   onEdit: () => void;
   onVoid: () => void;
-  onApprove: () => void;
-  onReject: () => void;
+  onReview: () => void;
+  onAmend: () => void;
 }) {
-  const canApproveRow = canApprove && row.status === "pending_approval";
-  const canEditRow = canMutate && row.canMutate;
+  const canReviewRow = canApprove && row.status === "pending_approval";
+  const canVoidRow = canMutate && row.canMutate;
+  const canEditRow = canMutate && row.canEdit;
+  const canAmendPaid =
+    canApprove &&
+    row.paidGbp > 0.005 &&
+    (row.status === "paid" || row.status === "partially_paid");
 
   return (
     <DropdownMenu.Root modal={false}>
@@ -70,25 +75,25 @@ export function HireExtraChargeRowActions({
           <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onHistory}>
             History
           </DropdownMenu.Item>
-          {canApproveRow ? (
-            <>
-              <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onApprove}>
-                Approve
-              </DropdownMenu.Item>
-              <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onReject}>
-                Reject…
-              </DropdownMenu.Item>
-            </>
+          {canReviewRow ? (
+            <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onReview}>
+              Review payment…
+            </DropdownMenu.Item>
+          ) : null}
+          {canAmendPaid ? (
+            <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onAmend}>
+              Amend paid…
+            </DropdownMenu.Item>
           ) : null}
           {canEditRow ? (
-            <>
-              <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onEdit}>
-                Edit
-              </DropdownMenu.Item>
-              <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onVoid}>
-                Void…
-              </DropdownMenu.Item>
-            </>
+            <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onEdit}>
+              Edit
+            </DropdownMenu.Item>
+          ) : null}
+          {canVoidRow ? (
+            <DropdownMenu.Item className={itemClass} disabled={busy} onSelect={onVoid}>
+              Void…
+            </DropdownMenu.Item>
           ) : null}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

@@ -362,6 +362,7 @@ export function SubcompanyHiresClient({
       <HireContractWizardModal
         open={wizardOpen}
         hireGroupId={editDraftId}
+        subcompanyId={subcompanyId}
         onClose={() => {
           setWizardOpen(false);
           setEditDraftId(null);

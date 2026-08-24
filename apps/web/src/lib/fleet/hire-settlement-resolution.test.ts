@@ -7,16 +7,21 @@ import {
 } from "@/lib/fleet/hire-settlement-resolution";
 
 describe("hire-settlement-resolution", () => {
-  it("disables apply_to_balance when company owes on rent", () => {
+  it("disables apply_to_balance when company owes on settlement", () => {
     const options = getDepositDispositionOptions(-100);
     expect(options.find((o) => o.value === "apply_to_balance")?.allowed).toBe(false);
     expect(defaultDepositDisposition(-100)).toBe("refund_full");
   });
 
-  it("allows apply_to_balance when driver owes rent", () => {
+  it("allows apply_to_balance when driver owes on settlement (including extras)", () => {
     const options = getDepositDispositionOptions(200);
     expect(options.find((o) => o.value === "apply_to_balance")?.allowed).toBe(true);
     expect(defaultDepositDisposition(200)).toBe("apply_to_balance");
+    // Damage-only open balance (rent already cleared) must still allow apply.
+    expect(defaultDepositDisposition(400)).toBe("apply_to_balance");
+    expect(getDepositDispositionOptions(400).find((o) => o.value === "apply_to_balance")?.allowed).toBe(
+      true,
+    );
   });
 
   it("requires settlement step when net balance is non-zero", () => {

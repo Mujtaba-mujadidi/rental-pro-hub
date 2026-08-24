@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canStaffRecordPaymentAllocation,
   canTransitionPaymentStatus,
   driverCanSubmitPayment,
   nextStatusAfterApprovedAmountAmendment,
@@ -65,6 +66,40 @@ describe("canTransitionPaymentStatus", () => {
         actor: "company_staff",
       }),
     ).toBe(true);
+  });
+
+  it("allows staff to record payment on unpaid or partially approved rows", () => {
+    expect(
+      canStaffRecordPaymentAllocation({
+        workflowStatus: "not_received",
+        rowBalanceGbp: 1200,
+      }),
+    ).toBe(true);
+    expect(
+      canStaffRecordPaymentAllocation({
+        workflowStatus: "rejected",
+        rowBalanceGbp: 600,
+      }),
+    ).toBe(true);
+    // C02 — remaining deposit after partial approval
+    expect(
+      canStaffRecordPaymentAllocation({
+        workflowStatus: "approved",
+        rowBalanceGbp: 600,
+      }),
+    ).toBe(true);
+    expect(
+      canStaffRecordPaymentAllocation({
+        workflowStatus: "approved",
+        rowBalanceGbp: 0,
+      }),
+    ).toBe(false);
+    expect(
+      canStaffRecordPaymentAllocation({
+        workflowStatus: "pending_approval",
+        rowBalanceGbp: 600,
+      }),
+    ).toBe(false);
   });
 
   it("requires comment on company amend of approved row", () => {

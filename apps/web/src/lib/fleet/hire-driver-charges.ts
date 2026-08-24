@@ -48,6 +48,8 @@ export type HireDriverChargeLineItemRow = HireDriverChargeLineItemInput & {
   hireGroupId: string;
   balancePaymentId?: string | null;
   createdAt?: string;
+  paidGbp?: number | null;
+  collectionStatus?: string | null;
 };
 
 export type HireBalancePaymentIncomeRow = {
@@ -99,19 +101,23 @@ function roundGbp(n: number): number {
 export type RealisedDriverChargeIncomeInput = {
   charges: readonly Pick<HireDriverChargeLineItemInput, "amountGbp" | "resolution" | "chargeType">[];
   receipts?: readonly Pick<HireBalancePaymentIncomeRow, "amountGbp" | "direction" | "paymentCategory">[];
-  /** Remaining unpaid add_to_balance extras are realised when the hire is settled. */
+  /**
+   * @deprecated Ignored. Unpaid extras are never booked as vehicle income — only collected cash
+   * (`paid_now` and approved `driver_charge` receipts against `add_to_balance`).
+   */
   hireSettled?: boolean;
 };
 
 /**
- * Vehicle P&L income from driver charges: collected cash, or extras netted when the hire is settled.
- * Unpaid add_to_balance extras on an open hire are owed, not profit.
+ * Vehicle P&L income from driver charges: collected cash only.
+ * - `paid_now` posts are realised immediately (cash at charge time).
+ * - `add_to_balance` is realised only as approved `driver_charge` receipts arrive.
+ * Unpaid extras (even on a settled hire) remain receivables, not profit.
  */
 export function realisedDriverChargeIncomeGbp(input: RealisedDriverChargeIncomeInput): {
   totalGbp: number;
   byTypeGbp: Partial<Record<HireDriverChargeType, number>>;
 } {
-  const hireSettled = input.hireSettled === true;
   let paidNowGbp = 0;
   let addToBalanceGbp = 0;
   const paidNowByType: Partial<Record<HireDriverChargeType, number>> = {};
@@ -140,10 +146,9 @@ export function realisedDriverChargeIncomeGbp(input: RealisedDriverChargeIncomeI
     if (!Number.isFinite(amount) || amount <= 0) continue;
     driverChargeReceivedGbp += amount;
   }
-  const collectedAgainstExtrasGbp = roundGbp(
+  const extrasRealisedGbp = roundGbp(
     Math.min(addToBalanceGbp, Math.max(0, roundGbp(driverChargeReceivedGbp) - paidNowGbp)),
   );
-  const extrasRealisedGbp = hireSettled ? addToBalanceGbp : collectedAgainstExtrasGbp;
 
   const byTypeGbp: Partial<Record<HireDriverChargeType, number>> = { ...paidNowByType };
   const extrasByType = allocateGbpByWeight(extrasRealisedGbp, addToBalanceByType);
@@ -274,6 +279,8 @@ export type DriverChargeLineItemDbRow = {
   balance_payment_id?: string | null;
   charged_on?: string | null;
   created_at?: string;
+  paid_gbp?: number | string | null;
+  collection_status?: string | null;
 };
 
 export function isHireDriverChargeType(value: string): value is HireDriverChargeType {
@@ -308,6 +315,8 @@ export function mapDriverChargeLineItemFromDb(
     balancePaymentId: row.balance_payment_id ?? null,
     chargedOn: row.charged_on ?? null,
     createdAt: row.created_at,
+    paidGbp: row.paid_gbp != null ? Number(row.paid_gbp) : null,
+    collectionStatus: row.collection_status ?? null,
   };
 }
 
@@ -326,6 +335,9 @@ export function mapDriverChargeLineItemsFromDb(
  * Extra charges still owed on an active hire (or still outstanding at terminate).
  * Check-in `paid_now` cash is linked to those lines; those receipts must not reduce
  * `add_to_balance` extras.
+ *
+ * Prefer `outstandingExtraChargesFromTimedPaymentsGbp` when payment timestamps are available
+ * so cash cannot settle charges posted after the payment.
  */
 export function outstandingExtraChargesGbp(
   charges: readonly Pick<HireDriverChargeLineItemRow, "amountGbp" | "resolution">[],
@@ -373,6 +385,9 @@ export type HireDriverChargeWorkspaceView = {
   createdAt: string;
   chargedOn: string | null;
   sourceKind: string;
+  balancePaymentId: string | null;
+  paidGbp: number | null;
+  collectionStatus: string | null;
   canMutate: boolean;
 };
 
@@ -392,6 +407,9 @@ export function toHireDriverChargeWorkspaceView(
     createdAt: item.createdAt ?? "",
     chargedOn: item.chargedOn ?? null,
     sourceKind: item.sourceKind,
+    balancePaymentId: item.balancePaymentId ?? null,
+    paidGbp: item.paidGbp ?? null,
+    collectionStatus: item.collectionStatus ?? null,
     canMutate: allowMutate && isStaffManualChargeMutable(item),
   };
 }

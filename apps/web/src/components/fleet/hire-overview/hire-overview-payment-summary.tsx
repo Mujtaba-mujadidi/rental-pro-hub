@@ -27,13 +27,15 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
 function EndedContractPaymentSummary({
   summary,
   terminationSummary,
+  depositReceivedGbp,
 }: {
   summary: HirePaymentSummary;
   terminationSummary: HireTerminationAccountsSummary;
+  depositReceivedGbp: number;
 }) {
   const account = buildHireAccountPositionFromTerminationSummary(terminationSummary, {
     depositDisposition: "hold_pending",
-    depositReceivedGbp: terminationSummary.depositGbp,
+    depositReceivedGbp,
     lifecycle: "ended",
   });
   // Rent card: schedule paid vs due — deposit apply shown via account when disposition applied later.
@@ -112,13 +114,22 @@ export function HireOverviewPaymentSummary({
   summary,
   contractEnded,
   terminationSummary,
+  depositReceivedGbp = 0,
 }: {
   summary: HirePaymentSummary;
   contractEnded: boolean;
   terminationSummary?: HireTerminationAccountsSummary | null;
+  /** Actual deposit cash received (may be less than contractual). */
+  depositReceivedGbp?: number;
 }) {
   if (contractEnded && terminationSummary) {
-    return <EndedContractPaymentSummary summary={summary} terminationSummary={terminationSummary} />;
+    return (
+      <EndedContractPaymentSummary
+        summary={summary}
+        terminationSummary={terminationSummary}
+        depositReceivedGbp={depositReceivedGbp}
+      />
+    );
   }
 
   const rentDueGbp = summary.totalDueGbp;

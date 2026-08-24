@@ -36,6 +36,7 @@ import { computeHireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspac
 import { ukTodayYmd } from "@/lib/datetime/uk";
 import { computeVehiclePnl, type VehiclePnlBreakdown } from "@/lib/fleet/vehicle-pnl";
 import { revalidateVehicleWorkspaceCache } from "@/lib/fleet/vehicle-workspace-cache";
+import { rebuildHireFinancialSummary } from "@/lib/fleet/hire-finance-rebuild";
 import { createClient } from "@/lib/supabase/server";
 import { parseUkDate } from "@/lib/validation/driver-signup";
 import { ensureDefaultPaymentMethodsAction } from "@/app/actions/rental-payment-settings";
@@ -51,6 +52,11 @@ function revalidateFinancials(vehicleId: string) {
 export async function revalidateVehicleFinancialsForHireGroup(hireGroupId: string): Promise<void> {
   const id = hireGroupId.trim();
   if (!id) return;
+  try {
+    await rebuildHireFinancialSummary(id);
+  } catch (error) {
+    console.error("revalidateVehicleFinancialsForHireGroup: rebuild", error);
+  }
   const supabase = await createClient();
   const { data } = await supabase.from("vehicle_hire_groups").select("vehicle_id").eq("id", id).maybeSingle();
   const vehicleId = (data?.vehicle_id as string | null) ?? null;

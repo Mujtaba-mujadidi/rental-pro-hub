@@ -37,20 +37,25 @@ export function settlementStepRequired(netSettlementGbp: number): boolean {
   return Math.abs(netSettlementGbp) > 0.005;
 }
 
-export function getDepositDispositionOptions(signedRentBalanceGbp: number): DepositDispositionOption[] {
-  const driverOwesRent = signedRentBalanceGbp > 0.005;
-  const companyOwesRent = signedRentBalanceGbp < -0.005;
+/**
+ * Deposit action choices for termination / post-end resolve.
+ * Pass the **current signed settlement** (rent + extras + charges), not rent-only —
+ * otherwise “use deposit against balance” is wrongly disabled when only damage is owed.
+ */
+export function getDepositDispositionOptions(signedSettlementGbp: number): DepositDispositionOption[] {
+  const driverOwes = signedSettlementGbp > 0.005;
+  const companyOwes = signedSettlementGbp < -0.005;
 
   return HIRE_DEPOSIT_DISPOSITIONS.map((value) => {
     let allowed = true;
     let disabledReason: string | undefined;
 
     if (value === "apply_to_balance") {
-      allowed = driverOwesRent;
+      allowed = driverOwes;
       if (!allowed) {
-        disabledReason = companyOwesRent
-          ? "Driver paid too much rent — you owe them, so the deposit cannot pay rent"
-          : "No rent is owed — deposit cannot be used to pay rent";
+        disabledReason = companyOwes
+          ? "Company already owes the driver — deposit cannot be used to pay a balance"
+          : "Nothing is owed — deposit cannot be used to pay a balance";
       }
     }
 
@@ -65,14 +70,14 @@ export function getDepositDispositionOptions(signedRentBalanceGbp: number): Depo
 
 export function isDepositDispositionAllowed(
   disposition: HireDepositDisposition,
-  signedRentBalanceGbp: number,
+  signedSettlementGbp: number,
 ): boolean {
-  return getDepositDispositionOptions(signedRentBalanceGbp).find((option) => option.value === disposition)
+  return getDepositDispositionOptions(signedSettlementGbp).find((option) => option.value === disposition)
     ?.allowed ?? false;
 }
 
-export function defaultDepositDisposition(signedRentBalanceGbp: number): HireDepositDisposition {
-  if (signedRentBalanceGbp > 0.005) return "apply_to_balance";
+export function defaultDepositDisposition(signedSettlementGbp: number): HireDepositDisposition {
+  if (signedSettlementGbp > 0.005) return "apply_to_balance";
   return "refund_full";
 }
 

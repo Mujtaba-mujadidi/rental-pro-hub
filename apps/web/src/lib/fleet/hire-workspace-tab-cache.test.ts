@@ -6,9 +6,9 @@ import {
 } from "@/lib/fleet/hire-workspace-tab-cache";
 
 describe("hire workspace tab cache policy", () => {
-  it("subscribes to payment changes only while the hire is active", () => {
+  it("keeps payment realtime enabled for active and ended hires", () => {
     expect(hireWorkspacePaymentRealtimeEnabled(false)).toBe(true);
-    expect(hireWorkspacePaymentRealtimeEnabled(true)).toBe(false);
+    expect(hireWorkspacePaymentRealtimeEnabled(true)).toBe(true);
   });
 
   it("invalidates money tabs together, not inspections", () => {

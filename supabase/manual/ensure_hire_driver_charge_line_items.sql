@@ -71,3 +71,19 @@ alter table public.vehicle_hire_driver_charge_line_items
   alter column charged_on set not null;
 
 alter table public.vehicle_hire_driver_charge_line_items replica identity full;
+
+-- Realtime publication (add/amend/void extras without a balance payment row).
+alter table public.vehicle_hire_driver_charge_line_items replica identity full;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'vehicle_hire_driver_charge_line_items'
+  ) then
+    alter publication supabase_realtime add table public.vehicle_hire_driver_charge_line_items;
+  end if;
+end $$;

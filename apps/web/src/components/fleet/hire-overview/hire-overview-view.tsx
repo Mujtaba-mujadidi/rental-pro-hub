@@ -55,6 +55,7 @@ export function HireOverviewView({
         summary={data.summary}
         contractEnded={contractEnded}
         terminationSummary={data.terminationSummary}
+        depositReceivedGbp={data.depositGbp ?? 0}
       />
 
       {contractEnded ? (

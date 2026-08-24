@@ -14,7 +14,8 @@ export type HireWorkspaceSection =
   | "settlement"
   | "documents"
   | "details"
-  | "activity";
+  | "activity"
+  | "end-hire";
 
 export function hireWorkspaceNav(groupId: string): HireWorkspaceNavItem[] {
   const base = `/rental/hires/${groupId}`;
@@ -24,6 +25,7 @@ export function hireWorkspaceNav(groupId: string): HireWorkspaceNavItem[] {
     { href: `${base}/payments`, label: "Payments & balance", mobileLabel: "Payments", match: "prefix" },
     { href: `${base}/details`, label: "Details & documents", mobileLabel: "Details", match: "prefix" },
     { href: `${base}/activity`, label: "Activity", match: "prefix" },
+    { href: `${base}/end-hire`, label: "End hire", mobileLabel: "End", match: "prefix" },
   ];
 }
 
@@ -43,7 +45,8 @@ export function parseHireWorkspaceSection(pathname: string, groupId: string): Hi
     segment === "settlement" ||
     segment === "documents" ||
     segment === "details" ||
-    segment === "activity"
+    segment === "activity" ||
+    segment === "end-hire"
   ) {
     return segment;
   }

@@ -3,6 +3,7 @@ export const HIRE_GROUP_STATUSES = [
   "pending_signature",
   "reserved",
   "active",
+  "ending",
   "completed",
   "terminated",
   "cancelled",
@@ -31,6 +32,7 @@ export const ACTIVE_HIRE_GROUP_STATUSES: readonly HireGroupStatus[] = [
   "pending_signature",
   "reserved",
   "active",
+  "ending",
 ];
 
 /** Hire group statuses that block the vehicle from another hire (includes in-progress drafts). */
@@ -39,5 +41,6 @@ export const HIRE_VEHICLE_BLOCKING_STATUSES: readonly HireGroupStatus[] = [
   "pending_signature",
   "reserved",
   "active",
+  "ending",
   "terminated",
 ];

@@ -503,6 +503,12 @@ html {
 .hire-ws-tab-active {
   @apply border-rph-rail font-semibold text-rph-fg dark:border-rph-rail-softer dark:text-white;
 }
+.hire-ws-tab-end-hire {
+  @apply font-semibold text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300;
+}
+.hire-ws-tab-end-hire.hire-ws-tab-active {
+  @apply border-red-600 text-red-700 dark:border-red-400 dark:text-red-300;
+}
 .hire-ws-progress {
   @apply h-2.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700;
 }

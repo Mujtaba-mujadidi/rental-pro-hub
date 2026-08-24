@@ -4,9 +4,35 @@ import {
   type HireDriverChargeType,
 } from "@/lib/fleet/hire-driver-charges";
 
-const CHARGE_ALLOWED_HIRE_STATUSES = new Set(["active", "terminated", "completed"]);
+const CHARGE_ALLOWED_HIRE_STATUSES = new Set(["active", "ending", "terminated", "completed"]);
 
 export type StaffManualChargeAction = "add" | "amend" | "void";
+
+/** How a staff-manual charge is posted when added. */
+export type StaffManualChargeResolution = "add_to_balance" | "paid_now";
+
+export const STAFF_MANUAL_CHARGE_RESOLUTION_OPTIONS: {
+  value: StaffManualChargeResolution;
+  label: string;
+  hint: string;
+}[] = [
+  {
+    value: "add_to_balance",
+    label: "Add to balance",
+    hint: "Leave unpaid on the hire account until a payment is recorded or approved.",
+  },
+  {
+    value: "paid_now",
+    label: "Charged now (paid)",
+    hint: "Record the charge and take payment immediately. It will not stay outstanding.",
+  },
+];
+
+export function parseStaffManualChargeResolution(value: string): StaffManualChargeResolution | null {
+  const trimmed = value.trim();
+  if (trimmed === "add_to_balance" || trimmed === "paid_now") return trimmed;
+  return null;
+}
 
 export function staffManualChargeMutationBlock(input: {
   canWriteRentals: boolean;
@@ -32,6 +58,23 @@ export function staffManualChargeMutationBlock(input: {
   }
   if (input.balancePaymentId) {
     return "This charge is tied to a recorded payment and cannot be edited.";
+  }
+  return null;
+}
+
+/**
+ * Block editing the charge itself once money is recognised or awaiting approval.
+ * Staff should Amend paid / Reject pending instead of changing the posted charge.
+ */
+export function staffManualExtraChargeEditBlock(input: {
+  paidGbp: number;
+  paymentPendingApproval: boolean;
+}): string | null {
+  if (input.paymentPendingApproval) {
+    return "A payment is pending approval against this charge. Reject it before editing.";
+  }
+  if (Number(input.paidGbp) > 0.005) {
+    return "This charge has an approved payment. Amend the paid amount or void the charge instead of editing.";
   }
   return null;
 }

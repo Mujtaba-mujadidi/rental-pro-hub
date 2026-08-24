@@ -10,11 +10,13 @@ import { can, canReadRentals } from "@/lib/auth/rental-permissions";
 import { assertStaffHireSubcompanyAccess } from "@/lib/auth/rental-subcompany-access";
 import { formatUkDate, formatUkDateRange, formatUkDateTimeSeconds, ukTodayYmd } from "@/lib/datetime/uk";
 import { hireContractEndYmd } from "@/lib/fleet/hire-income";
+import { isHirePaymentsWorkspaceOpen } from "@/lib/fleet/hire-lifecycle-attention";
 import {
   driverDocumentsRetentionWarning as getDriverDocumentsRetentionWarning,
 } from "@/lib/fleet/hire-document-retention";
 import { allocatePaymentAcrossRows } from "@/lib/fleet/hire-payment-allocation";
 import {
+  canStaffRecordPaymentAllocation,
   canTransitionPaymentStatus,
   nextStatusAfterApprovedAmountAmendment,
   resolveHirePaymentWorkflowStatus,
@@ -25,7 +27,7 @@ import {
   type HirePaymentScheduleRowInput,
 } from "@/lib/fleet/hire-payment-summary";
 import { computeHireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
-import { isDepositDispositionPending } from "@/lib/fleet/hire-deposit-resolution";
+import { isDepositDispositionPending, hireDepositHeldGbp } from "@/lib/fleet/hire-deposit-resolution";
 import { reconcileEndedHirePaymentsWithDepositCredit } from "@/lib/fleet/hire-deposit-schedule-allocation";
 import {
   signedSettlementBalanceGbp,
@@ -50,6 +52,7 @@ import {
 } from "@/lib/fleet/hire-driver-charges";
 import {
   EXTRA_CHARGE_PAYMENT_EVENT_TYPES,
+  outstandingExtraChargesFromTimedPaymentsGbp,
   resolveOpenExtraChargePayment,
 } from "@/lib/fleet/hire-driver-charge-payment";
 import type { HireDriverChargeWorkspaceRow } from "@/app/actions/rental-hire-termination";
@@ -58,7 +61,11 @@ import {
   mergeHirePaymentRowHistory,
   type HirePaymentRowEventDisplay,
 } from "@/lib/fleet/hire-payment-row-history";
-import { loadHireAuditActorDisplayNames } from "@/lib/fleet/hire-audit";
+import {
+  loadHireAuditActorDisplayNames,
+  logHireGroupEvent,
+  type HireGroupEventType,
+} from "@/lib/fleet/hire-audit";
 import { notifyCompanyHirePaymentReviewers, notifyHireDriver } from "@/lib/platform-notifications";
 import { revalidateVehicleFinancialsForHireGroup } from "@/app/actions/rental-vehicle-financials";
 import { parseStaffManualChargeDateYmd } from "@/lib/fleet/hire-driver-charge-mutation";
@@ -126,6 +133,11 @@ export type HirePaymentsPageData = {
   depositDispositionLabel: string | null;
   depositDisposition: string | null;
   depositPendingReview: boolean;
+  /**
+   * Deposit cash currently held pending disposition (amount received).
+   * Null when nothing is held. Not the contractual deposit requirement —
+   * use `terminationSummary.depositGbp` or the deposit schedule row for that.
+   */
   depositGbp: number | null;
   /** Confirmed deposit money received (0 if contractual deposit unpaid). */
   depositReceivedGbp: number;
@@ -144,6 +156,17 @@ export type HirePaymentsPageData = {
     amountGbp: number;
     paymentReference: string | null;
   } | null;
+  /** Payment recorded/approved events used to restore per-line allocations. */
+  extraChargeAllocationEvents: Array<{
+    eventType: string;
+    metadata: Record<string, unknown> | null;
+  }>;
+  /** Approved extra-charge receipts with timestamps for per-line allocation. */
+  extraChargeTimedPayments: Array<{
+    id: string;
+    amountGbp: number;
+    paidAt: string;
+  }>;
   canMutateExtraCharges: boolean;
   summary: ReturnType<typeof summarizeHirePayments>;
   rows: HirePaymentPageRow[];
@@ -513,14 +536,36 @@ async function buildPaymentsPageData(
   const mappedCharges = mapDriverChargeLineItemsFromDb(
     (chargeRows ?? []) as DriverChargeLineItemDbRow[],
   );
-  const extraChargesOutstandingGbp = outstandingExtraChargesGbp(
-    mappedCharges,
-    (balancePayments ?? []).map((payment) => ({
+  const driverChargeTimedPayments = (balancePayments ?? [])
+    .filter(
+      (payment) =>
+        (payment.payment_category as string | null) === "driver_charge" &&
+        (payment.direction as string | null) === "received_from_driver",
+    )
+    .map((payment) => ({
+      id: payment.id as string,
       amountGbp: Number(payment.amount_gbp ?? 0),
-      direction: (payment.direction as string | null) ?? null,
-      paymentCategory: (payment.payment_category as string | null) ?? "settlement",
-    })),
-  );
+      paidAt: (payment.paid_at as string) ?? "",
+    }))
+    .filter((payment) => payment.id && payment.paidAt && payment.amountGbp > 0);
+  const extraChargeAllocationEvents = (extraChargePaymentEvents ?? []).map((event) => ({
+    eventType: String(event.event_type ?? ""),
+    metadata: (event.metadata as Record<string, unknown> | null) ?? {},
+  }));
+  const extraChargesOutstandingGbp = driverChargeTimedPayments.length
+    ? outstandingExtraChargesFromTimedPaymentsGbp({
+        charges: mappedCharges,
+        payments: driverChargeTimedPayments,
+        allocationEvents: extraChargeAllocationEvents,
+      })
+    : outstandingExtraChargesGbp(
+        mappedCharges,
+        (balancePayments ?? []).map((payment) => ({
+          amountGbp: Number(payment.amount_gbp ?? 0),
+          direction: (payment.direction as string | null) ?? null,
+          paymentCategory: (payment.payment_category as string | null) ?? "settlement",
+        })),
+      );
   const extraChargePendingPayment = resolveOpenExtraChargePayment(
     (extraChargePaymentEvents ?? []).map((event) => ({
       eventType: String(event.event_type ?? ""),
@@ -585,6 +630,7 @@ async function buildPaymentsPageData(
       notes: null,
       paidAt: payment.paid_at as string,
       direction: payment.direction as "received_from_driver" | "paid_to_driver",
+      paymentCategory: (payment.payment_category as string | null) ?? "settlement",
     }),
   );
 
@@ -593,7 +639,8 @@ async function buildPaymentsPageData(
     canApprovePayments = can(profile, "billing.pay") && !contractEndedYmd;
     canSubmitPayment = can(profile, "rentals.write") && !contractEndedYmd;
     canApplyDiscount = can(profile, "rentals.write") && !contractEndedYmd;
-    canMutateExtraCharges = can(profile, "rentals.write") && !contractEndedYmd && hireStatus === "active";
+    canMutateExtraCharges =
+      can(profile, "rentals.write") && !contractEndedYmd && isHirePaymentsWorkspaceOpen(hireStatus);
 
     canResolveDeposit =
       canFinalizeSettlement &&
@@ -655,8 +702,12 @@ async function buildPaymentsPageData(
       ? rawTerminationSummary
       : null;
   const depositDisposition = (group.deposit_disposition as string | null) ?? null;
+  const depositHeldGbp = hireDepositHeldGbp({
+    depositDisposition,
+    depositReceivedGbp,
+  });
   const depositPendingReview =
-    isDepositDispositionPending(depositDisposition) && depositReceivedGbp > 0.005;
+    isDepositDispositionPending(depositDisposition) && depositHeldGbp > 0.005;
   const settlementResolution = (group.settlement_resolution as string | null) ?? null;
 
   const settlementPaymentsToDriverGbp = roundGbpSum(
@@ -758,14 +809,14 @@ async function buildPaymentsPageData(
         : null,
       depositDisposition,
       depositPendingReview,
-      depositGbp: terminationSummary?.depositGbp ?? null,
+      /** Amount currently held pending disposition (received cash), not contractual requirement. */
+      depositGbp: depositHeldGbp > 0.005 ? depositHeldGbp : null,
       depositReceivedGbp,
       accountPosition,
       currentSignedSettlementGbp,
       checkinCompleted,
       canFinalizeSettlement,
-      canResolveDeposit:
-        canResolveDeposit && (terminationSummary?.depositGbp ?? 0) > 0.005,
+      canResolveDeposit: canResolveDeposit && depositHeldGbp > 0.005,
       settlementResolutionLabel:
         settlementResolution &&
         (["paid_now", "open_balance", "written_off"] as const).includes(
@@ -785,6 +836,8 @@ async function buildPaymentsPageData(
             paymentReference: extraChargePendingPayment.paymentReference,
           }
         : null,
+      extraChargeAllocationEvents,
+      extraChargeTimedPayments: driverChargeTimedPayments,
       canMutateExtraCharges,
       summary,
       rows,
@@ -993,11 +1046,18 @@ async function submitHirePaymentAllocation(input: SubmitPaymentInput): Promise<
       ) {
         return { ok: false, error: `Cannot apply payment to row ${row.periodLabel}.` };
       }
-    } else if (workflowFromStatus !== "not_received" && workflowFromStatus !== "rejected") {
+    } else if (
+      !canStaffRecordPaymentAllocation({
+        workflowStatus: workflowFromStatus,
+        rowBalanceGbp: row.balanceGbp,
+      })
+    ) {
       return { ok: false, error: `Cannot record payment on row ${row.periodLabel}.` };
     }
 
-    const { error: eventErr } = await supabase.from("vehicle_hire_payment_status_events").insert({
+    const { data: statusEvent, error: eventErr } = await supabase
+      .from("vehicle_hire_payment_status_events")
+      .insert({
       schedule_row_id: line.rowId,
       event_kind: "status_change",
       from_status: workflowFromStatus,
@@ -1019,7 +1079,9 @@ async function submitHirePaymentAllocation(input: SubmitPaymentInput): Promise<
       },
       actor_user_id: input.userId,
       actor_role: actorRole,
-    });
+    })
+      .select("id")
+      .maybeSingle();
     if (eventErr) return { ok: false, error: eventErr.message };
 
     const updatePayload: Record<string, unknown> = {
@@ -1040,6 +1102,26 @@ async function submitHirePaymentAllocation(input: SubmitPaymentInput): Promise<
     if (!updatedRow) {
       return { ok: false, error: "Could not update the payment schedule. Please try again." };
     }
+
+    await logSchedulePaymentGroupActivity({
+      hireGroupId,
+      eventType:
+        input.actor === "driver" ? "schedule_payment_submitted" : "schedule_payment_recorded",
+      summary:
+        input.actor === "driver"
+          ? `Submitted £${line.allocatedGbp.toFixed(2)} for ${row.periodLabel}.`
+          : `Recorded £${line.allocatedGbp.toFixed(2)} for ${row.periodLabel}.`,
+      actorRole: actorRole,
+      actorUserId: input.userId,
+      metadata: {
+        scheduleRowId: line.rowId,
+        rowKind: row.rowKind,
+        amountGbp: line.allocatedGbp,
+        submissionId,
+        scheduleTarget,
+        paymentStatusEventId: (statusEvent?.id as string | undefined) ?? null,
+      },
+    });
   }
 
   // Staff recording payment skips inbox; drivers notify finance.
@@ -1092,6 +1174,45 @@ async function assertHirePaymentScheduleEditable(
     return { ok: false, error: "This contract has ended. The payment schedule is read-only." };
   }
   return { ok: true };
+}
+
+
+function scheduleActivityRowLabel(input: {
+  rowKind?: string | null;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  periodLabel?: string | null;
+}): string {
+  if (input.periodLabel?.trim()) return input.periodLabel.trim();
+  if ((input.rowKind ?? "") === "deposit") return "Deposit";
+  const start = (input.periodStart ?? "").trim();
+  const end = (input.periodEnd ?? "").trim();
+  if (start && end && start !== end) return formatUkDateRange(start, end);
+  if (start) return formatUkDate(start);
+  return "Rent period";
+}
+
+async function logSchedulePaymentGroupActivity(input: {
+  hireGroupId: string;
+  eventType: HireGroupEventType;
+  summary: string;
+  actorRole: "company_staff" | "driver";
+  actorUserId: string;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    const admin = createSupabaseAdminClient();
+    await logHireGroupEvent(admin, {
+      hireGroupId: input.hireGroupId,
+      eventType: input.eventType,
+      summary: input.summary,
+      actorRole: input.actorRole,
+      actorUserId: input.actorUserId,
+      metadata: input.metadata ?? {},
+    });
+  } catch (error) {
+    console.error("logSchedulePaymentGroupActivity", input.eventType, error);
+  }
 }
 
 async function refreshVehicleFinancialsForHire(hireGroupId: string): Promise<void> {
@@ -1163,7 +1284,7 @@ export async function recordStaffHirePaymentRowAction(
   const { data: scheduleRow, error } = await supabase
     .from("vehicle_hire_payment_schedule")
     .select(
-      "id, hire_group_id, payment_status, approved_amount_gbp, base_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp)",
+      "id, hire_group_id, row_kind, period_start, period_end, payment_status, approved_amount_gbp, base_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp)",
     )
     .eq("id", scheduleRowId.trim())
     .maybeSingle();
@@ -1189,7 +1310,9 @@ export async function recordStaffHirePaymentRowAction(
   const fromStatus = row.paymentStatus;
   const approvedAmount = Math.round((row.paidGbp + row.balanceGbp) * 100) / 100;
 
-  const { error: eventErr } = await supabase.from("vehicle_hire_payment_status_events").insert({
+  const { data: statusEvent, error: eventErr } = await supabase
+    .from("vehicle_hire_payment_status_events")
+    .insert({
     schedule_row_id: scheduleRowId,
     event_kind: "status_change",
     from_status: fromStatus,
@@ -1202,7 +1325,9 @@ export async function recordStaffHirePaymentRowAction(
     },
     actor_user_id: user.id,
     actor_role: "company_staff",
-  });
+  })
+    .select("id")
+    .maybeSingle();
   if (eventErr) return { ok: false, error: eventErr.message };
 
   const { error: updErr } = await supabase
@@ -1210,6 +1335,21 @@ export async function recordStaffHirePaymentRowAction(
     .update({ payment_status: "approved", approved_amount_gbp: approvedAmount })
     .eq("id", scheduleRowId);
   if (updErr) return { ok: false, error: updErr.message };
+
+  await logSchedulePaymentGroupActivity({
+    hireGroupId: scheduleRow.hire_group_id as string,
+    eventType: "schedule_payment_recorded",
+    summary: `Recorded £${Number(row.balanceGbp).toFixed(2)} for ${row.periodLabel}.`,
+    actorRole: "company_staff",
+    actorUserId: user.id,
+    metadata: {
+      scheduleRowId,
+      rowKind: row.rowKind,
+      amountGbp: row.balanceGbp,
+      directRowPayment: true,
+      paymentStatusEventId: (statusEvent?.id as string | undefined) ?? null,
+    },
+  });
 
   await refreshVehicleFinancialsForHire(scheduleRow.hire_group_id as string);
   return { ok: true };
@@ -1228,7 +1368,7 @@ export async function approveHirePaymentRowAction(
   const { data: row, error } = await supabase
     .from("vehicle_hire_payment_schedule")
     .select(
-      "id, hire_group_id, payment_status, approved_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp), base_amount_gbp",
+      "id, hire_group_id, row_kind, period_start, period_end, payment_status, approved_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp), base_amount_gbp",
     )
     .eq("id", scheduleRowId)
     .maybeSingle();
@@ -1258,7 +1398,9 @@ export async function approveHirePaymentRowAction(
   const priorApproved = row.approved_amount_gbp != null ? Number(row.approved_amount_gbp) : 0;
   const approvedAmount = Math.round((priorApproved + submitted) * 100) / 100;
 
-  const { error: eventErr } = await supabase.from("vehicle_hire_payment_status_events").insert({
+  const { data: statusEvent, error: eventErr } = await supabase
+    .from("vehicle_hire_payment_status_events")
+    .insert({
     schedule_row_id: scheduleRowId,
     event_kind: "status_change",
     from_status: workflowFromStatus,
@@ -1266,7 +1408,9 @@ export async function approveHirePaymentRowAction(
     amendment_payload: { approvedAmountGbp: approvedAmount },
     actor_user_id: user.id,
     actor_role: "company_staff",
-  });
+  })
+    .select("id")
+    .maybeSingle();
   if (eventErr) return { ok: false, error: eventErr.message };
 
   const { error: updErr } = await supabase
@@ -1274,6 +1418,25 @@ export async function approveHirePaymentRowAction(
     .update({ payment_status: "approved", approved_amount_gbp: approvedAmount })
     .eq("id", scheduleRowId);
   if (updErr) return { ok: false, error: updErr.message };
+
+  const approveLabel = scheduleActivityRowLabel({
+    rowKind: row.row_kind as string,
+    periodStart: row.period_start as string,
+    periodEnd: row.period_end as string,
+  });
+  await logSchedulePaymentGroupActivity({
+    hireGroupId: row.hire_group_id as string,
+    eventType: "schedule_payment_approved",
+    summary: `Approved £${Number(submitted).toFixed(2)} for ${approveLabel}.`,
+    actorRole: "company_staff",
+    actorUserId: user.id,
+    metadata: {
+      scheduleRowId,
+      rowKind: row.row_kind,
+      amountGbp: submitted,
+      paymentStatusEventId: (statusEvent?.id as string | undefined) ?? null,
+    },
+  });
 
   await notifyDriverHirePaymentOutcome(row.hire_group_id as string, "hire_payment_approved", {
     amountGbp: submitted,
@@ -1299,7 +1462,7 @@ export async function rejectHirePaymentRowAction(input: {
   const supabase = await createClient();
   const { data: row, error } = await supabase
     .from("vehicle_hire_payment_schedule")
-    .select("id, hire_group_id, payment_status, period_start")
+    .select("id, hire_group_id, row_kind, period_start, period_end, payment_status")
     .eq("id", input.scheduleRowId)
     .maybeSingle();
   if (error) return { ok: false, error: error.message };
@@ -1327,7 +1490,9 @@ export async function rejectHirePaymentRowAction(input: {
     return { ok: false, error: "This payment cannot be rejected." };
   }
 
-  const { error: eventErr } = await supabase.from("vehicle_hire_payment_status_events").insert({
+  const { data: statusEvent, error: eventErr } = await supabase
+    .from("vehicle_hire_payment_status_events")
+    .insert({
     schedule_row_id: input.scheduleRowId,
     event_kind: "status_change",
     from_status: workflowFromStatus,
@@ -1335,7 +1500,9 @@ export async function rejectHirePaymentRowAction(input: {
     comment,
     actor_user_id: user.id,
     actor_role: "company_staff",
-  });
+  })
+    .select("id")
+    .maybeSingle();
   if (eventErr) return { ok: false, error: eventErr.message };
 
   const storedStatusAfterReject =
@@ -1347,6 +1514,28 @@ export async function rejectHirePaymentRowAction(input: {
   if (updErr) return { ok: false, error: updErr.message };
 
   const pendingAmount = state?.pendingSubmittedGbp;
+  const rejectLabel = scheduleActivityRowLabel({
+    rowKind: row.row_kind as string,
+    periodStart: row.period_start as string,
+    periodEnd: row.period_end as string,
+  });
+  await logSchedulePaymentGroupActivity({
+    hireGroupId: row.hire_group_id as string,
+    eventType: "schedule_payment_rejected",
+    summary: comment.trim()
+      ? `Rejected ${rejectLabel} payment: ${comment.trim()}`
+      : `Rejected ${rejectLabel} payment.`,
+    actorRole: "company_staff",
+    actorUserId: user.id,
+    metadata: {
+      scheduleRowId: input.scheduleRowId,
+      rowKind: row.row_kind,
+      comment: comment.trim(),
+      amountGbp: pendingAmount ?? null,
+      paymentStatusEventId: (statusEvent?.id as string | undefined) ?? null,
+    },
+  });
+
   await notifyDriverHirePaymentOutcome(row.hire_group_id as string, "hire_payment_rejected", {
     amountGbp: pendingAmount ?? undefined,
     comment,
@@ -1379,7 +1568,7 @@ export async function amendApprovedHirePaymentRowAction(input: {
   const { data: row, error } = await supabase
     .from("vehicle_hire_payment_schedule")
     .select(
-      "id, hire_group_id, payment_status, approved_amount_gbp, base_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp)",
+      "id, hire_group_id, row_kind, period_start, period_end, payment_status, approved_amount_gbp, base_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp)",
     )
     .eq("id", input.scheduleRowId.trim())
     .maybeSingle();
@@ -1419,7 +1608,9 @@ export async function amendApprovedHirePaymentRowAction(input: {
   }
 
   const clearingApproval = nextStatus === "not_received";
-  const { error: eventErr } = await supabase.from("vehicle_hire_payment_status_events").insert({
+  const { data: statusEvent, error: eventErr } = await supabase
+    .from("vehicle_hire_payment_status_events")
+    .insert({
     schedule_row_id: input.scheduleRowId,
     event_kind: clearingApproval ? "status_change" : "amendment",
     from_status: fromStatus,
@@ -1431,7 +1622,9 @@ export async function amendApprovedHirePaymentRowAction(input: {
     },
     actor_user_id: user.id,
     actor_role: "company_staff",
-  });
+  })
+    .select("id")
+    .maybeSingle();
   if (eventErr) return { ok: false, error: eventErr.message };
 
   const { error: updErr } = await supabase
@@ -1443,6 +1636,27 @@ export async function amendApprovedHirePaymentRowAction(input: {
     )
     .eq("id", input.scheduleRowId);
   if (updErr) return { ok: false, error: updErr.message };
+
+  const amendLabel = scheduleActivityRowLabel({
+    rowKind: row.row_kind as string,
+    periodStart: row.period_start as string,
+    periodEnd: row.period_end as string,
+  });
+  await logSchedulePaymentGroupActivity({
+    hireGroupId: row.hire_group_id as string,
+    eventType: "schedule_payment_amended",
+    summary: `Amended ${amendLabel} payment from £${Number(priorApproved).toFixed(2)} to £${Number(newAmount).toFixed(2)}.`,
+    actorRole: "company_staff",
+    actorUserId: user.id,
+    metadata: {
+      scheduleRowId: input.scheduleRowId,
+      rowKind: row.row_kind,
+      previousApprovedAmountGbp: priorApproved,
+      newApprovedAmountGbp: newAmount,
+      comment: reason,
+      paymentStatusEventId: (statusEvent?.id as string | undefined) ?? null,
+    },
+  });
 
   await notifyDriverHirePaymentOutcome(row.hire_group_id as string, "hire_payment_amended", {
     amountGbp: newAmount,
@@ -1517,7 +1731,7 @@ export async function applyHirePaymentDiscountAction(input: {
   const { data: row, error } = await supabase
     .from("vehicle_hire_payment_schedule")
     .select(
-      "id, hire_group_id, row_kind, payment_status, base_amount_gbp, approved_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp)",
+      "id, hire_group_id, row_kind, period_start, period_end, payment_status, base_amount_gbp, approved_amount_gbp, vehicle_hire_schedule_discounts(amount_gbp)",
     )
     .eq("id", scheduleRowId)
     .maybeSingle();
@@ -1587,7 +1801,7 @@ export async function replaceHirePaymentDiscountAction(input: {
   const { data: row, error } = await supabase
     .from("vehicle_hire_payment_schedule")
     .select(
-      "id, hire_group_id, row_kind, payment_status, base_amount_gbp, vehicle_hire_schedule_discounts(id, amount_gbp)",
+      "id, hire_group_id, row_kind, period_start, period_end, payment_status, base_amount_gbp, vehicle_hire_schedule_discounts(id, amount_gbp)",
     )
     .eq("id", scheduleRowId)
     .maybeSingle();
@@ -1641,7 +1855,9 @@ export async function replaceHirePaymentDiscountAction(input: {
     if (insertErr) return { ok: false, error: insertErr.message };
   }
 
-  const { error: auditErr } = await supabase.from("vehicle_hire_payment_status_events").insert({
+  const { data: discountStatusEvent, error: auditErr } = await supabase
+    .from("vehicle_hire_payment_status_events")
+    .insert({
     schedule_row_id: scheduleRowId,
     event_kind: "amendment",
     from_status: status,
@@ -1654,8 +1870,32 @@ export async function replaceHirePaymentDiscountAction(input: {
     },
     actor_user_id: user.id,
     actor_role: "company_staff",
-  });
+  })
+    .select("id")
+    .maybeSingle();
   if (auditErr) return { ok: false, error: auditErr.message };
+
+  const discountLabel = scheduleActivityRowLabel({
+    rowKind: row.row_kind as string,
+    periodStart: row.period_start as string,
+    periodEnd: row.period_end as string,
+  });
+  await logSchedulePaymentGroupActivity({
+    hireGroupId: row.hire_group_id as string,
+    eventType: "schedule_discount_changed",
+    summary: `Discount on ${discountLabel} changed from £${Number(existingTotal).toFixed(2)} to £${Number(amount).toFixed(2)}.`,
+    actorRole: "company_staff",
+    actorUserId: user.id,
+    metadata: {
+      scheduleRowId,
+      rowKind: row.row_kind,
+      previousDiscountGbp: existingTotal,
+      newDiscountGbp: amount,
+      discountChange: true,
+      comment: reason,
+      paymentStatusEventId: (discountStatusEvent?.id as string | undefined) ?? null,
+    },
+  });
 
   await refreshVehicleFinancialsForHire(row.hire_group_id as string);
   return { ok: true };

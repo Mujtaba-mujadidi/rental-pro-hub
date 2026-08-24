@@ -541,9 +541,9 @@ describe("computeVehicleHireIncomeGbp", () => {
     });
 
     expect(result.depositRetentionGbp).toBe(0);
-    expect(result.grossApprovedGbp).toBe(257.14);
-    expect(result.netIncomeGbp).toBe(257.14);
-    expect(result.driverChargeIncomeGbp).toBe(100);
+    expect(result.grossApprovedGbp).toBe(157.14);
+    expect(result.netIncomeGbp).toBe(157.14);
+    expect(result.driverChargeIncomeGbp).toBe(0);
   });
 
   it("includes realised driver charges in gross and net income", () => {

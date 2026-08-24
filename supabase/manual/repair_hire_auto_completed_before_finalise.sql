@@ -1,0 +1,22 @@
+-- Repair hires auto-completed by check-in before explicit "Finalise contract termination".
+-- Safe when end_hire_draft.started = true, finalizedAt IS NULL, status = completed, check-in exists.
+--
+-- Example (replace hire id):
+-- UPDATE vehicle_hire_groups g
+-- SET
+--   status = 'terminated',
+--   ended_at = NULL,
+--   end_hire_draft = jsonb_set(
+--     COALESCE(g.end_hire_draft, '{}'::jsonb),
+--     '{step}',
+--     '"final_account"'::jsonb,
+--     true
+--   )
+-- WHERE g.id = '0fe9e195-....'
+--   AND g.status = 'completed'
+--   AND (g.end_hire_draft->>'started') = 'true'
+--   AND (g.end_hire_draft->>'finalizedAt') IS NULL
+--   AND EXISTS (
+--     SELECT 1 FROM vehicle_hire_inspections i
+--     WHERE i.hire_group_id = g.id AND i.kind = 'checkin' AND i.status = 'completed'
+--   );

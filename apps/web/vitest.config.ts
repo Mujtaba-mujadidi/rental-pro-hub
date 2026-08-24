@@ -21,6 +21,7 @@ const PURE_LIB_COVERAGE = [
   "src/lib/esign/crypto.ts",
   "src/lib/esign/datetime.ts",
   "src/lib/esign/roles.ts",
+  "src/lib/fleet/hire-finance.ts",
   "src/lib/fleet/maintenance.ts",
   "src/lib/fleet/vehicle-pnl.ts",
   "src/lib/fleet/vehicle-purchase.ts",
@@ -36,6 +37,7 @@ const PURE_LIB_COVERAGE = [
 export default defineConfig({
   test: {
     environment: "node",
+    // Includes Excel golden hire-finance cases: src/lib/fleet/hire-finance-golden.test.ts
     include: ["src/**/*.test.ts"],
     globals: false,
     coverage: {

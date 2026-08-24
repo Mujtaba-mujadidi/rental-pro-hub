@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   parseStaffManualChargeFields,
+  parseStaffManualChargeResolution,
   staffManualChargeMutationBlock,
+  staffManualExtraChargeEditBlock,
 } from "./hire-driver-charge-mutation";
 
 describe("staffManualChargeMutationBlock", () => {
@@ -151,5 +153,33 @@ describe("parseStaffManualChargeFields", () => {
         requireReason: false,
       }).ok,
     ).toBe(false);
+  });
+});
+
+describe("staffManualExtraChargeEditBlock", () => {
+  it("blocks edit when a payment is pending approval", () => {
+    expect(
+      staffManualExtraChargeEditBlock({ paidGbp: 0, paymentPendingApproval: true }),
+    ).toMatch(/pending approval/i);
+  });
+
+  it("blocks edit when the charge already has approved paid money", () => {
+    expect(
+      staffManualExtraChargeEditBlock({ paidGbp: 40, paymentPendingApproval: false }),
+    ).toMatch(/approved payment/i);
+  });
+
+  it("allows edit when unpaid and not pending", () => {
+    expect(
+      staffManualExtraChargeEditBlock({ paidGbp: 0, paymentPendingApproval: false }),
+    ).toBeNull();
+  });
+});
+
+describe("parseStaffManualChargeResolution", () => {
+  it("accepts add_to_balance and paid_now only", () => {
+    expect(parseStaffManualChargeResolution("add_to_balance")).toBe("add_to_balance");
+    expect(parseStaffManualChargeResolution("paid_now")).toBe("paid_now");
+    expect(parseStaffManualChargeResolution("waived")).toBeNull();
   });
 });

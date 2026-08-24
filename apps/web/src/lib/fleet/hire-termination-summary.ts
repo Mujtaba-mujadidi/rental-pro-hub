@@ -135,14 +135,16 @@ export function netSettlementAfterDeposit(input: {
     return balance;
   }
 
-  if (
-    input.disposition === "apply_to_balance" ||
-    input.disposition === "refund_full"
-  ) {
+  if (input.disposition === "apply_to_balance") {
+    return Math.round((balance - deposit) * 100) / 100;
+  }
+  if (input.disposition === "refund_full") {
+    if (balance > 0.005) return balance;
     return Math.round((balance - deposit) * 100) / 100;
   }
   if (input.disposition === "refund_partial") {
     const refund = Math.max(0, Math.min(deposit, input.refundAmountGbp ?? 0));
+    if (balance > 0.005) return balance;
     return Math.round((balance - refund) * 100) / 100;
   }
   return balance;
@@ -227,14 +229,14 @@ export function hireDepositDispositionLabel(
   audience: HireUiAudience = "staff",
 ): string {
   const staffLabels: Record<HireDepositDisposition, string> = {
-    apply_to_balance: "Use deposit to pay rent owed",
+    apply_to_balance: "Use deposit to pay amount owed",
     refund_full: "Return full deposit",
     refund_partial: "Return part of deposit",
     forfeit: "Keep deposit (no refund)",
     hold_pending: "Hold deposit — decide later on Payments",
   };
   const driverLabels: Record<HireDepositDisposition, string> = {
-    apply_to_balance: "Deposit used to pay rent you owed",
+    apply_to_balance: "Deposit used to pay what you owed",
     refund_full: "Full deposit returned to you",
     refund_partial: "Part of deposit returned to you",
     forfeit: "Deposit retained by rental company",

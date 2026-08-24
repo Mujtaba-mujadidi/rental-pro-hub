@@ -35,6 +35,15 @@ export const HIRE_GROUP_EVENT_TYPES = [
   "driver_charge_payment_submitted",
   "driver_charge_payment_approved",
   "driver_charge_payment_rejected",
+  "driver_charge_payment_recorded",
+  "driver_charge_payment_amended",
+  "schedule_payment_submitted",
+  "schedule_payment_recorded",
+  "schedule_payment_approved",
+  "schedule_payment_rejected",
+  "schedule_payment_amended",
+  "schedule_discount_changed",
+  "settlement_balance_payment_recorded",
 ] as const;
 
 export type HireGroupEventType = (typeof HIRE_GROUP_EVENT_TYPES)[number];

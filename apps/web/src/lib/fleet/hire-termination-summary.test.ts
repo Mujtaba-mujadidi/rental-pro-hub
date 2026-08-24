@@ -57,6 +57,13 @@ describe("hire-termination-summary", () => {
     ).toBe(50);
     expect(
       netSettlementAfterDeposit({
+        balanceGbp: 200,
+        depositGbp: 150,
+        disposition: "refund_full",
+      }),
+    ).toBe(200);
+    expect(
+      netSettlementAfterDeposit({
         balanceGbp: 0,
         depositGbp: 150,
         disposition: "refund_full",

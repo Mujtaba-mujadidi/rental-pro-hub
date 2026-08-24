@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
+import { useHirePaymentsRealtime } from "@/hooks/use-hire-realtime";
 import Link from "next/link";
 import {
   addHireBalanceNoteAction,
@@ -46,6 +47,9 @@ export function HireSettlementWorkspacePanel({
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // Company sheet owns its payload (unlike tab-cache invalidation alone).
+  useHirePaymentsRealtime(hireGroupId, reload, { channelPrefix: "hire-payments-settlement" });
 
   if (!data && pending) {
     return (

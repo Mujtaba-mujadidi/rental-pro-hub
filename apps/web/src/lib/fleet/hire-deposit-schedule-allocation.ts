@@ -33,8 +33,7 @@ export function depositRentScheduleCreditGbp(input: {
   }
 
   if (disposition === "refund_full") {
-    // Net settlement already offsets outstanding rent by the deposit; align the schedule for display.
-    return roundGbp(Math.min(deposit, owed));
+    return 0;
   }
 
   if (disposition === "refund_partial") {

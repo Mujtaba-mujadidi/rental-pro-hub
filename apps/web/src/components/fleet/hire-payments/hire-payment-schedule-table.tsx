@@ -14,6 +14,7 @@ import {
   deriveHirePaymentDisplayStatus,
   HIRE_PAYMENT_DISPLAY_STATUSES,
   hirePaymentDisplayStatusMeta,
+  hirePaymentPendingApprovalAmountGbp,
   type HirePaymentDisplayAudience,
   type HirePaymentDisplayOptions,
   type HirePaymentDisplayStatus,
@@ -342,12 +343,10 @@ export function HirePaymentScheduleTable({
                       >
                         {statusMeta.label}
                       </span>
-                      {row.pendingSubmittedGbp != null ? (
+                      {row.paymentStatus === "pending_approval" ? (
                         <p className="mt-1 text-xs font-medium text-rph-fg-secondary">
-                          {formatGbp(row.pendingSubmittedGbp)} submitted — awaiting approval
+                          {formatGbp(hirePaymentPendingApprovalAmountGbp(row))} submitted — awaiting approval
                         </p>
-                      ) : row.paymentStatus === "pending_approval" ? (
-                        <p className="rph-meta mt-1 text-xs">Awaiting company approval</p>
                       ) : null}
                     </div>
                   )}

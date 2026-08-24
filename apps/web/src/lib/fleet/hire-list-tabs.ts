@@ -31,6 +31,8 @@ export type HireListRowLike = {
   activated_at: string | null;
   terminated_at: string | null;
   ended_at: string | null;
+  /** End-hire wizard in progress — keep on Active tab until explicit finalisation. */
+  end_hire_in_progress?: boolean;
   rent_amount_gbp: number;
   rent_cadence: string;
   lifecycle_label: string | null;
@@ -48,8 +50,9 @@ export function isHireListScheduledStatus(status: string): boolean {
   return status === "reserved" || status === "pending_signature";
 }
 
-export function isHireListEndedStatus(status: string): boolean {
-  return status === "completed" || status === "terminated";
+export function isHireListEndedStatus(row: Pick<HireListRowLike, "status" | "end_hire_in_progress">): boolean {
+  if (row.end_hire_in_progress) return false;
+  return row.status === "completed" || row.status === "terminated";
 }
 
 /**
@@ -82,9 +85,11 @@ export function hireListNeedsAction(row: HireListRowLike): boolean {
 export function hireListMatchesTab(row: HireListRowLike, tab: HireListTab): boolean {
   if (tab === "all") return true;
   if (tab === "needs_action") return hireListNeedsAction(row);
-  if (tab === "active") return row.status === "active";
+  if (tab === "active") {
+    return row.status === "active" || row.status === "ending" || row.end_hire_in_progress === true;
+  }
   if (tab === "scheduled") return isHireListScheduledStatus(row.status);
-  if (tab === "ended") return isHireListEndedStatus(row.status);
+  if (tab === "ended") return isHireListEndedStatus(row);
   return false;
 }
 
@@ -118,9 +123,9 @@ export function buildHireListStats(
   let completedThisMonthCount = 0;
   let needsActionCount = 0;
   for (const row of rows) {
-    if (row.status === "active") activeCount += 1;
+    if (row.status === "active" || row.status === "ending" || row.end_hire_in_progress) activeCount += 1;
     if (isHireListScheduledStatus(row.status)) scheduledCount += 1;
-    if (isHireListEndedStatus(row.status)) {
+    if (isHireListEndedStatus(row)) {
       const end = endedYmd(row);
       if (end && end.startsWith(month)) completedThisMonthCount += 1;
     }
@@ -138,11 +143,11 @@ export function hireListPeriodLabel(row: HireListRowLike): string {
   const startRaw = row.activated_at?.slice(0, 10) ?? row.start_date;
   const start = startRaw ? formatUkDateText(startRaw) : null;
 
-  if (row.status === "active") {
+  if (row.status === "active" || row.end_hire_in_progress) {
     return start ? `${start} — Ongoing` : "Ongoing";
   }
 
-  if (isHireListEndedStatus(row.status)) {
+  if (isHireListEndedStatus(row)) {
     const endRaw = endedYmd(row);
     const end = endRaw ? formatUkDateText(endRaw) : null;
     if (start && end) return `${start} — ${end}`;
@@ -224,6 +229,10 @@ export function hireListProgress(row: HireListRowLike): HireListProgress {
 
   if (row.status === "active" || row.status === "reserved") {
     return { label: "Ready", tone: "success", detail };
+  }
+
+  if (row.end_hire_in_progress) {
+    return { label: "Ending hire", tone: "warning", detail };
   }
 
   const status = hireGroupTableStatus(row.status, { wizardStep: row.wizard_step });

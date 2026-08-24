@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
+import { repairAutoCompletedEndHireOnLoadAction } from "@/app/actions/hire-end-hire";
 import { getAppProfile } from "@/lib/auth/profile";
-import { canReadRentals } from "@/lib/auth/rental-permissions";
+import { canReadRentals, canWriteRentals } from "@/lib/auth/rental-permissions";
 import { getStaffHireWorkspaceChrome } from "@/lib/fleet/load-hire-workspace-chrome";
 import { getHireWorkspaceShell, loadHireSwitcherList } from "@/lib/fleet/load-hire-workspace-shell";
 import { HireWorkspaceProvider } from "./hire-workspace-provider";
@@ -17,6 +18,10 @@ export default async function HireWorkspaceLayout({
   if (!profile || !canReadRentals(profile)) notFound();
 
   const { groupId } = await params;
+  if (canWriteRentals(profile)) {
+    await repairAutoCompletedEndHireOnLoadAction(groupId);
+  }
+
   const [shell, chrome, hiresList] = await Promise.all([
     getHireWorkspaceShell(groupId),
     getStaffHireWorkspaceChrome(groupId),

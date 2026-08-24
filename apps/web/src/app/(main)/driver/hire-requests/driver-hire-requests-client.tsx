@@ -132,7 +132,10 @@ export function DriverHireRequestsClient() {
         setError(res.error);
         return;
       }
-      window.location.href = res.signingPath;
+      const opened = window.open(res.signingPath, "_blank", "noopener,noreferrer");
+      if (!opened) {
+        window.location.href = res.signingPath;
+      }
     });
   }
 

@@ -90,6 +90,21 @@ export function driverCanSubmitPayment(workflowStatus: HirePaymentStatus): boole
   );
 }
 
+/**
+ * Staff “Record payment” may hit unpaid / rejected rows, or top up a partially
+ * approved deposit/rent row that still has outstanding balance (Excel C02).
+ * Fully paid approved rows are not eligible (balance ≤ 0).
+ */
+export function canStaffRecordPaymentAllocation(input: {
+  workflowStatus: HirePaymentStatus;
+  rowBalanceGbp: number;
+}): boolean {
+  if (input.workflowStatus === "not_received" || input.workflowStatus === "rejected") {
+    return true;
+  }
+  return input.workflowStatus === "approved" && input.rowBalanceGbp > 0.005;
+}
+
 export type PaymentRowEventState = {
   latestToStatus: string | null;
   pendingSubmittedGbp: number | null;

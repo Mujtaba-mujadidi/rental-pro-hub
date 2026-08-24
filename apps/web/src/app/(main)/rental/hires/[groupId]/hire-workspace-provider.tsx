@@ -58,7 +58,10 @@ export function HireWorkspaceProvider({
   useHirePaymentsRealtime(
     shell.hireGroupId,
     () => invalidateCache(hireWorkspaceKeysInvalidatedByPaymentChange()),
-    { enabled: hireWorkspacePaymentRealtimeEnabled(chrome.contractEnded) },
+    {
+      enabled: hireWorkspacePaymentRealtimeEnabled(chrome.contractEnded),
+      channelPrefix: "hire-payments-cache",
+    },
   );
 
   const value = useMemo(

@@ -22,7 +22,7 @@ import {
   selectFeaturedOutstandingExtraCharge,
 } from "@/lib/fleet/hire-active-balance-display";
 import { buildActiveHirePaymentPositionFromPage } from "@/lib/fleet/hire-active-payments-display";
-import { buildExtraChargePaymentTableRowsFromWorkspace } from "@/lib/fleet/hire-driver-charge-payment";
+import { computeHireExtraChargePaymentTableRowsFromWorkspace } from "@/lib/fleet/hire-finance";
 import {
   formatEndedChargeCardDisplay,
   formatEndedChargeEvidenceHref,
@@ -91,7 +91,7 @@ export function HireActiveBalanceWorkspaceView({
 
   const extraChargeRows = useMemo(
     () =>
-      buildExtraChargePaymentTableRowsFromWorkspace({
+      computeHireExtraChargePaymentTableRowsFromWorkspace({
         hireGroupId,
         items: data.driverChargeLineItems,
         outstandingGbp: data.extraChargesOutstandingGbp,
@@ -495,6 +495,8 @@ export function HireActiveBalanceWorkspaceView({
             ? `${data.vehicleVrm} · ${formatGbp(openBalanceGbp)} currently owed`.toUpperCase()
             : data.vehicleVrm?.toUpperCase() ?? null
         }
+        paymentAccounts={payments.settlementPaymentAccounts}
+        defaultPaymentAccountId={payments.defaultSettlementPaymentAccountId}
         onClose={() => setAddOpen(false)}
         onSaved={onReload}
       />

@@ -5,7 +5,7 @@ import type { HirePaymentsPageData } from "@/app/actions/hire-payments";
 import { HirePaymentComposer } from "@/components/fleet/hire-payments/hire-payment-composer";
 import type { HirePaymentApplyTo } from "@/lib/fleet/hire-active-balance-display";
 import { submitAllocatedHirePayment } from "@/lib/fleet/hire-allocated-payment-submit";
-import { buildExtraChargePaymentTableRowsFromWorkspace } from "@/lib/fleet/hire-driver-charge-payment";
+import { computeHireExtraChargePaymentTableRowsFromWorkspace } from "@/lib/fleet/hire-finance";
 
 export function HireAllocatedPaymentComposer({
   hireGroupId,
@@ -32,7 +32,7 @@ export function HireAllocatedPaymentComposer({
 }) {
   const extraChargeRows = useMemo(
     () =>
-      buildExtraChargePaymentTableRowsFromWorkspace({
+      computeHireExtraChargePaymentTableRowsFromWorkspace({
         hireGroupId,
         items: payments.driverChargeLineItems,
         outstandingGbp: payments.extraChargesOutstandingGbp,

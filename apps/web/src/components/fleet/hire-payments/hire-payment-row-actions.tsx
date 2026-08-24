@@ -2,13 +2,12 @@
 
 import type { HirePaymentPageRow } from "@/app/actions/hire-payments";
 import {
-  approveHirePaymentRowAction,
   recordStaffHirePaymentRowAction,
 } from "@/app/actions/hire-payments";
 import { HirePaymentAmendModal } from "@/components/fleet/hire-payments/hire-payment-amend-modal";
 import { HirePaymentDiscountModal } from "@/components/fleet/hire-payments/hire-payment-discount-modal";
+import { HirePaymentReviewModal } from "@/components/fleet/hire-payments/hire-payment-review-modal";
 import { HirePaymentRowHistoryModal } from "@/components/fleet/hire-payments/hire-payment-row-history-modal";
-import { HirePaymentRejectModal } from "@/components/fleet/hire-payments/hire-payment-reject-modal";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useState, useTransition } from "react";
 
@@ -51,7 +50,7 @@ export function HirePaymentRowActions({
   const [pending, startTransition] = useTransition();
   const [discountOpen, setDiscountOpen] = useState(false);
   const [discountMode, setDiscountMode] = useState<"apply" | "amend">("apply");
-  const [rejectOpen, setRejectOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [amendOpen, setAmendOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
 
@@ -131,17 +130,6 @@ export function HirePaymentRowActions({
     });
   }
 
-  function approveRow() {
-    startTransition(async () => {
-      const res = await approveHirePaymentRowAction(row.id);
-      if (!res.ok) {
-        onError(res.error);
-        return;
-      }
-      onRefresh();
-    });
-  }
-
   return (
     <>
       <DropdownMenu.Root modal={false}>
@@ -183,14 +171,9 @@ export function HirePaymentRowActions({
               </DropdownMenu.Item>
             ) : null}
             {canApproveRow ? (
-              <>
-                <DropdownMenu.Item className={itemClass} disabled={pending} onSelect={approveRow}>
-                  Approve
-                </DropdownMenu.Item>
-                <DropdownMenu.Item className={itemClass} disabled={pending} onSelect={() => setRejectOpen(true)}>
-                  Reject…
-                </DropdownMenu.Item>
-              </>
+              <DropdownMenu.Item className={itemClass} disabled={pending} onSelect={() => setReviewOpen(true)}>
+                Review payment…
+              </DropdownMenu.Item>
             ) : null}
             {canAmendRow ? (
               <DropdownMenu.Item className={itemClass} disabled={pending} onSelect={() => setAmendOpen(true)}>
@@ -208,10 +191,10 @@ export function HirePaymentRowActions({
         onClose={() => setDiscountOpen(false)}
         onSuccess={onRefresh}
       />
-      <HirePaymentRejectModal
-        row={row}
-        open={rejectOpen}
-        onClose={() => setRejectOpen(false)}
+      <HirePaymentReviewModal
+        target={{ kind: "schedule", row }}
+        open={reviewOpen}
+        onClose={() => setReviewOpen(false)}
         onSuccess={onRefresh}
       />
       <HirePaymentAmendModal

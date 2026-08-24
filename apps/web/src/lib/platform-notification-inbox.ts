@@ -56,6 +56,9 @@ export function platformNotificationGroupingKey(item: {
   if (hireGroupId && item.type.startsWith("hire_payment_")) {
     return `hire-payment:${hireGroupId}`;
   }
+  if (hireGroupId && (item.type === "hire_insurance_expiry" || item.type === "hire_contract_expiry")) {
+    return `${item.type}:${hireGroupId}`;
+  }
   const href = item.display.href?.trim();
   if (href && item.type.startsWith("hire_payment_")) return `hire-payment-href:${href.split("?")[0]}`;
   return item.id;

@@ -1,22 +1,21 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import {
-  approveDriverExtraChargePaymentAction,
-  rejectDriverExtraChargePaymentAction,
-} from "@/app/actions/hire-driver-charges";
+import { useMemo, useState } from "react";
 import type { HirePaymentsPageData } from "@/app/actions/hire-payments";
 import type { HireDriverChargeWorkspaceRow } from "@/app/actions/rental-hire-termination";
 import { HireAddChargeModal } from "@/components/fleet/hire-charges/hire-add-charge-modal";
 import { HireChargeHistoryModal } from "@/components/fleet/hire-charges/hire-charge-history-modal";
 import { HireVoidChargeModal } from "@/components/fleet/hire-charges/hire-void-charge-modal";
+import { HireExtraChargeAmendPaymentModal } from "@/components/fleet/hire-charges/hire-extra-charge-amend-payment-modal";
 import { HireExtraChargeRowActions } from "@/components/fleet/hire-charges/hire-extra-charge-row-actions";
 import { HireAllocatedPaymentComposer } from "@/components/fleet/hire-payments/hire-allocated-payment-composer";
+import { HirePaymentReviewModal } from "@/components/fleet/hire-payments/hire-payment-review-modal";
 import { formatUkDate } from "@/lib/datetime/uk";
 import { balanceRentScheduleAdjustmentLabel } from "@/lib/fleet/hire-active-balance-display";
 import {
   buildExtraChargePaymentTableRowsFromWorkspace,
   extraChargePaymentStatusClass,
+  type ExtraChargePaymentTableRow,
 } from "@/lib/fleet/hire-driver-charge-payment";
 import { formatGbp } from "@/lib/fleet/maintenance";
 
@@ -56,14 +55,13 @@ export function HireExtraChargesPanel({
   busy?: boolean;
 }) {
   const [addOpen, setAddOpen] = useState(false);
-  const [rejectOpen, setRejectOpen] = useState(false);
-  const [rejectComment, setRejectComment] = useState("");
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [editing, setEditing] = useState<HireDriverChargeWorkspaceRow | null>(null);
   const [voiding, setVoiding] = useState<HireDriverChargeWorkspaceRow | null>(null);
   const [history, setHistory] = useState<HireDriverChargeWorkspaceRow | null>(null);
+  const [amending, setAmending] = useState<ExtraChargePaymentTableRow | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [highlightedRowIds, setHighlightedRowIds] = useState<string[]>([]);
-  const [pending, startTransition] = useTransition();
   const pendingPaymentOpen = pendingPayment ?? null;
   const showActions = audience === "staff";
   const showRecordPayment =
@@ -79,8 +77,18 @@ export function HireExtraChargesPanel({
         outstandingGbp,
         pendingAmountGbp: pendingPaymentOpen?.amountGbp,
         allowMutate: canMutate,
+        timedPayments: payments?.extraChargeTimedPayments,
+        allocationEvents: payments?.extraChargeAllocationEvents,
       }),
-    [canMutate, hireGroupId, items, outstandingGbp, pendingPaymentOpen?.amountGbp],
+    [
+      canMutate,
+      hireGroupId,
+      items,
+      outstandingGbp,
+      pendingPaymentOpen?.amountGbp,
+      payments?.extraChargeAllocationEvents,
+      payments?.extraChargeTimedPayments,
+    ],
   );
 
   const addChargeHeaderMeta = useMemo(() => {
@@ -91,37 +99,6 @@ export function HireExtraChargesPanel({
     const parts = [headerMeta?.trim() || null, owed].filter(Boolean);
     return parts.length ? parts.join(" · ").toUpperCase() : null;
   }, [currentlyOwedGbp, headerMeta]);
-
-  function handleApprove() {
-    setActionError(null);
-    startTransition(async () => {
-      const res = await approveDriverExtraChargePaymentAction(hireGroupId);
-      if (!res.ok) {
-        setActionError(res.error);
-        return;
-      }
-      onReload();
-    });
-  }
-
-  function handleReject() {
-    const comment = rejectComment.trim();
-    if (!comment) {
-      setActionError("A reason is required when rejecting a payment.");
-      return;
-    }
-    setActionError(null);
-    startTransition(async () => {
-      const res = await rejectDriverExtraChargePaymentAction({ hireGroupId, comment });
-      if (!res.ok) {
-        setActionError(res.error);
-        return;
-      }
-      setRejectOpen(false);
-      setRejectComment("");
-      onReload();
-    });
-  }
 
   if (!canMutate && !showRecordPayment && !canSubmitDriverPayment && items.length === 0 && outstandingGbp <= 0.005) {
     return null;
@@ -162,7 +139,7 @@ export function HireExtraChargesPanel({
                   onAllocationChange?.(rowIds);
                 }}
                 onSuccess={onReload}
-                busy={busy || pending}
+                busy={busy}
               />
             ) : null}
           </div>
@@ -295,15 +272,17 @@ export function HireExtraChargesPanel({
                                 row={row}
                                 canMutate={canMutate}
                                 canApprove={canApprovePayments}
-                                busy={pending}
+                                busy={busy}
                                 onHistory={() => source && setHistory(source)}
                                 onEdit={() => source && setEditing(source)}
                                 onVoid={() => source && setVoiding(source)}
-                                onApprove={handleApprove}
-                                onReject={() => {
+                                onReview={() => {
                                   setActionError(null);
-                                  setRejectComment("");
-                                  setRejectOpen(true);
+                                  setReviewOpen(true);
+                                }}
+                                onAmend={() => {
+                                  setActionError(null);
+                                  setAmending(row);
                                 }}
                               />
                             </td>
@@ -340,6 +319,8 @@ export function HireExtraChargesPanel({
         open={addOpen || Boolean(editing)}
         charge={editing}
         headerMeta={addChargeHeaderMeta}
+        paymentAccounts={payments?.settlementPaymentAccounts ?? []}
+        defaultPaymentAccountId={payments?.defaultSettlementPaymentAccountId ?? null}
         onClose={() => {
           setAddOpen(false);
           setEditing(null);
@@ -363,63 +344,35 @@ export function HireExtraChargesPanel({
         />
       ) : null}
 
-      {rejectOpen ? (
-        <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 sm:p-6">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-[1px]" aria-hidden />
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="hire-extra-reject-title"
-            className="relative z-[1] flex max-h-[min(90vh,28rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-rph-border bg-rph-elevated shadow-2xl"
-          >
-            <div className="shrink-0 border-b border-rph-border px-5 py-4 sm:px-6">
-              <h2 id="hire-extra-reject-title" className="text-lg font-semibold text-rph-fg">
-                Reject extra charge payment
-              </h2>
-              <p className="mt-1 text-sm text-rph-fg-secondary">
-                The hirer will see your reason and can submit payment again.
-              </p>
-            </div>
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 sm:px-6">
-              {pendingPaymentOpen ? (
-                <div className="rounded-lg border border-rph-border bg-rph-page px-3 py-2 text-sm">
-                  <p className="font-medium text-rph-fg">Extra charges</p>
-                  <p className="rph-meta text-xs">Submitted {formatGbp(pendingPaymentOpen.amountGbp)}</p>
-                </div>
-              ) : null}
-              <label className="block space-y-1">
-                <span className="text-xs font-medium text-rph-fg-muted">Reason (required)</span>
-                <textarea
-                  className="rph-input min-h-[5rem] w-full text-sm"
-                  placeholder="Explain why this payment is being rejected…"
-                  value={rejectComment}
-                  disabled={pending}
-                  onChange={(e) => setRejectComment(e.target.value)}
-                />
-              </label>
-              {actionError ? <p className="rph-alert-error text-sm">{actionError}</p> : null}
-            </div>
-            <div className="flex shrink-0 justify-end gap-2 border-t border-rph-border px-5 py-4 sm:px-6">
-              <button
-                type="button"
-                className="rph-btn-ghost h-10 px-4"
-                disabled={pending}
-                onClick={() => setRejectOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="rph-btn-primary h-10 px-4"
-                disabled={pending || !rejectComment.trim()}
-                onClick={handleReject}
-              >
-                {pending ? "Rejecting…" : "Confirm reject"}
-              </button>
-            </div>
-          </div>
-        </div>
+      {amending ? (
+        <HireExtraChargeAmendPaymentModal
+          hireGroupId={hireGroupId}
+          row={amending}
+          open
+          onClose={() => setAmending(null)}
+          onSuccess={onReload}
+        />
       ) : null}
+
+      <HirePaymentReviewModal
+        target={
+          pendingPaymentOpen
+            ? {
+                kind: "extra_charges",
+                hireGroupId,
+                amountGbp: pendingPaymentOpen.amountGbp,
+                paymentReference: pendingPaymentOpen.paymentReference,
+                outstandingGbp,
+              }
+            : null
+        }
+        open={reviewOpen && pendingPaymentOpen != null}
+        onClose={() => setReviewOpen(false)}
+        onSuccess={() => {
+          setReviewOpen(false);
+          onReload();
+        }}
+      />
     </div>
   );
 }

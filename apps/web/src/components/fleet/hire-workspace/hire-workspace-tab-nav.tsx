@@ -45,6 +45,12 @@ function tabIcon(label: string) {
           <path d="M12 7v5l3 2" strokeLinecap="round" />
         </svg>
       );
+    case "End hire":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+        </svg>
+      );
     default:
       return null;
   }
@@ -72,7 +78,12 @@ export function HireWorkspaceTabNav({
               key={item.href}
               href={item.href}
               prefetch
-              className={active ? "hire-ws-tab hire-ws-tab-active" : "hire-ws-tab"}
+              className={[
+                active ? "hire-ws-tab hire-ws-tab-active" : "hire-ws-tab",
+                item.label === "End hire" ? "hire-ws-tab-end-hire" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
               aria-current={active ? "page" : undefined}
             >
               <span className="hidden sm:inline-flex">{tabIcon(item.label)}</span>

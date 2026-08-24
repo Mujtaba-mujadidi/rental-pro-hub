@@ -78,13 +78,22 @@ type Props = {
   open: boolean;
   hireGroupId: string | null;
   initialVehicleId?: string;
+  /** When set, vehicle search is limited to this subcompany (e.g. subcompany workspace). */
+  subcompanyId?: string;
   onClose: () => void;
   onSaved: () => void;
 };
 
 const PAYMENT_ACCOUNT_NONE = "__none__";
 
-export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, onClose, onSaved }: Props) {
+export function HireContractWizardModal({
+  open,
+  hireGroupId,
+  initialVehicleId,
+  subcompanyId,
+  onClose,
+  onSaved,
+}: Props) {
   const [pending, startTransition] = useTransition();
   const [draftLoading, setDraftLoading] = useState(false);
   const [overlay, setOverlay] = useState<ActionStatusOverlayState | null>(null);
@@ -116,9 +125,15 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
   const driverProfileCacheRef = useRef<{ hireId: string; profile: HireDriverReviewPayload } | null>(null);
   const profileHireIdRef = useRef<string | null>(null);
 
-  const busy = pending || overlay?.phase === "pending" || requestingDriverAccess;
-  const shellPending = busy;
-  const shellPendingMessage = "Saving…";
+  const isSaving = pending;
+  const isSendingAccessRequest = requestingDriverAccess;
+  /** Full-modal overlay for step saves and driver access requests. */
+  const shellPending = isSaving || isSendingAccessRequest;
+  const shellPendingMessage = isSendingAccessRequest ? "Sending access request…" : "Saving…";
+  const busy = shellPending || overlay?.phase === "pending";
+  const showDraftLoading = draftLoading && !shellPending;
+  const showVehicleLoading = vehiclesLoading && !shellPending && !showDraftLoading;
+  const showDriverProfileLoading = driverProfileLoading && !shellPending;
   const activeId = draftId ?? hireGroupId;
   const activeIdRef = useRef(activeId);
   const stepRef = useRef(step);
@@ -150,9 +165,9 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
     }
   }, []);
 
-  const loadDraft = useCallback(async (id: string, options?: { refreshStatus?: boolean }) => {
+  const loadDraft = useCallback(async (id: string, options?: { refreshStatus?: boolean; silent?: boolean }) => {
     if (options?.refreshStatus) setAccessStatusRefreshing(true);
-    else setDraftLoading(true);
+    else if (!options?.silent) setDraftLoading(true);
     try {
       const res = await loadHireDraftAction(id);
       if (!res.ok) {
@@ -168,7 +183,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
       setError(null);
     } finally {
       if (options?.refreshStatus) setAccessStatusRefreshing(false);
-      else setDraftLoading(false);
+      else if (!options?.silent) setDraftLoading(false);
     }
   }, []);
 
@@ -212,14 +227,14 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
   useHireDraftRealtime(open ? activeId : null, () => {
     const id = activeIdRef.current;
     if (!id) return;
-    loadDraft(id, { refreshStatus: stepRef.current === 4 });
+    loadDraft(id, { silent: true });
     if (stepRef.current === 5) loadDriverProfile(id);
   });
 
   useEffect(() => {
-    if (!open || step !== 5 || driverAccessStatus !== "approved" || !activeId) return;
+    if (!open || step !== 5 || driverAccessStatus !== "approved" || !activeId || shellPending) return;
     loadDriverProfile(activeId);
-  }, [open, step, driverAccessStatus, activeId, loadDriverProfile]);
+  }, [open, step, driverAccessStatus, activeId, loadDriverProfile, shellPending]);
 
   useEffect(() => {
     if (!open) return;
@@ -242,10 +257,13 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
   }, [open, hireGroupId, initialVehicleId, loadShell, clearDriverProfileCache]);
 
   useEffect(() => {
-    if (!open || step !== 1 || draftLoading) return;
+    if (!open || step !== 1 || draftLoading || shellPending) return;
     setVehiclesLoading(true);
     const t = window.setTimeout(() => {
-      void searchAvailableVehiclesAction(vehicleQuery, { forHireGroupId: activeId ?? hireGroupId ?? undefined })
+      void searchAvailableVehiclesAction(vehicleQuery, {
+        forHireGroupId: activeId ?? hireGroupId ?? undefined,
+        subcompanyId,
+      })
         .then((res) => {
           if (res.ok) setVehicles(res.rows);
         })
@@ -255,7 +273,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
       window.clearTimeout(t);
       setVehiclesLoading(false);
     };
-  }, [open, step, vehicleQuery, activeId, hireGroupId, draftLoading]);
+  }, [open, step, vehicleQuery, activeId, hireGroupId, subcompanyId, draftLoading, shellPending]);
 
   const stepAdvanceError = useMemo(() => {
     const formError = canAdvanceFromStep(step, form);
@@ -307,7 +325,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
 
   async function ensureDraftId(): Promise<string | null> {
     if (activeId) return activeId;
-    const res = await createHireDraftAction();
+    const res = await createHireDraftAction(subcompanyId);
     if (!res.ok) {
       setError(res.error);
       return null;
@@ -348,6 +366,14 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
     startTransition(async () => {
       const id = await ensureDraftId();
       if (!id) return;
+      if (step === 5) {
+        const confirmRes = await confirmDriverProfileForHireAction(id);
+        if (!confirmRes.ok) {
+          setError(confirmRes.error);
+          return;
+        }
+        setDriverProfileConfirmed(true);
+      }
       const res = contractTermsLocked
         ? await advanceHireWizardStepAction(id, next)
         : await saveHireDraftStepAction({ hireGroupId: id, step: next, form });
@@ -411,20 +437,6 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
     });
   }
 
-  function confirmProfile() {
-    startTransition(async () => {
-      const id = activeId;
-      if (!id) return;
-      const res = await confirmDriverProfileForHireAction(id);
-      if (!res.ok) setError(res.error);
-      else {
-        setDriverProfileConfirmed(true);
-        setStep(6);
-        loadDraft(id);
-      }
-    });
-  }
-
   function finalize() {
     setOverlay({ phase: "pending", title: "Creating contracts…", detail: "" });
     startTransition(async () => {
@@ -479,7 +491,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
       setAccessMessage(null);
       setStep(1);
       onSaved();
-      loadDraft(id);
+      await loadDraft(id, { silent: true });
     });
   }
 
@@ -560,14 +572,14 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
       >
         {error ? <p className="rph-alert-error mb-4 text-sm">{error}</p> : null}
 
-        {draftLoading ? (
+        {showDraftLoading ? (
           <div className="flex min-h-[12rem] flex-col items-center justify-center gap-3 text-sm text-rph-fg-muted">
             <InlineSpinner />
             <p>Loading draft…</p>
           </div>
         ) : null}
 
-        {!draftLoading && contractTermsLocked && step >= 4 ? (
+        {!showDraftLoading && contractTermsLocked && step >= 4 ? (
           <p className="rph-alert-warn mb-4 text-sm">
             The driver has approved access for this contract. Vehicle, rental terms, and driver details are locked.
             Use <strong>Amend contract</strong> if you need to change them — the driver must approve access again before
@@ -575,7 +587,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
           </p>
         ) : null}
 
-        {!draftLoading && step === 1 ? (
+        {!showDraftLoading && step === 1 ? (
           <div className="space-y-4">
             <p className="rph-meta text-sm">Select an available vehicle for this hire.</p>
             <FormModalField label="Search vehicles">
@@ -588,7 +600,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
               />
             </FormModalField>
             <div className="overflow-hidden rounded-xl border border-rph-border">
-              {vehiclesLoading ? (
+              {showVehicleLoading ? (
                 <VehicleTabLoader label="Loading available vehicles…" />
               ) : vehicles.length === 0 ? (
                 <p className="rph-muted px-4 py-8 text-center text-sm">No available vehicles match your search.</p>
@@ -624,7 +636,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
           </div>
         ) : null}
 
-        {!draftLoading && step === 2 ? (
+        {!showDraftLoading && step === 2 ? (
           <div className="grid gap-4 sm:grid-cols-2">
             <p className="rph-meta text-sm sm:col-span-2">Rental dates, rent, and contract lengths for this hire.</p>
             <FormModalField label="Start date" className="sm:col-span-1">
@@ -768,7 +780,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
           </div>
         ) : null}
 
-        {!draftLoading && step === 3 ? (
+        {!showDraftLoading && step === 3 ? (
           <div className="space-y-4">
             <p className="rph-meta text-sm">Published hire terms are included in the contract.</p>
             {terms.map((t) => (
@@ -790,7 +802,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
                 <button
                   type="button"
                   className="rph-btn-ghost h-9 shrink-0 px-3 text-xs"
-                  disabled={termsPreviewLoading}
+                  disabled={busy || termsPreviewLoading}
                   onClick={(e) => {
                     e.preventDefault();
                     void openTermsPreview(t.id);
@@ -801,7 +813,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
               </label>
             ))}
             {termsPreviewId ? (
-              termsPreviewLoading ? (
+              termsPreviewLoading && !shellPending ? (
                 <div className="flex items-center gap-2 rounded-xl border border-rph-border bg-rph-page p-4 text-sm text-rph-fg-muted">
                   <InlineSpinner small />
                   Loading preview…
@@ -816,7 +828,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
           </div>
         ) : null}
 
-        {!draftLoading && step === 4 ? (
+        {!showDraftLoading && step === 4 ? (
           <div className="space-y-4">
             <FormModalField label="Driving licence number">
               <input
@@ -837,8 +849,6 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
             <DriverAccessStatusPanel
               status={driverAccessStatus}
               resendReason={driverAccessResendReason}
-              sending={requestingDriverAccess}
-              refreshing={accessStatusRefreshing}
               message={accessMessage}
             />
             <div className="flex flex-wrap gap-2">
@@ -849,12 +859,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
                   disabled={busy}
                   onClick={requestAccess}
                 >
-                  {requestingDriverAccess ? (
-                    <>
-                      <InlineSpinner onDark />
-                      Sending request…
-                    </>
-                  ) : driverAccessStatus === "rejected" || driverAccessResendReason ? (
+                  {requestingDriverAccess ? "Sending request…" : driverAccessStatus === "rejected" || driverAccessResendReason ? (
                     "Send new access link"
                   ) : (
                     "Request driver access"
@@ -870,8 +875,12 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
                 <button
                   type="button"
                   className={`${formModalBtnGhost} inline-flex items-center gap-2`}
-                  disabled={busy}
-                  onClick={() => activeId && loadDraft(activeId, { refreshStatus: true })}
+                  disabled={busy || accessStatusRefreshing}
+                  onClick={() => {
+                    if (!activeId) return;
+                    setAccessStatusRefreshing(true);
+                    void loadDraft(activeId, { silent: true }).finally(() => setAccessStatusRefreshing(false));
+                  }}
                 >
                   {accessStatusRefreshing ? (
                     <>
@@ -887,7 +896,7 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
           </div>
         ) : null}
 
-        {!draftLoading && step === 5 ? (
+        {!showDraftLoading && step === 5 ? (
           <HireDriverReviewPanel
             profile={
               driverProfile ?? {
@@ -904,15 +913,15 @@ export function HireContractWizardModal({ open, hireGroupId, initialVehicleId, o
                 documents: [],
               }
             }
-            loading={driverProfileLoading}
+            loading={showDriverProfileLoading}
             error={driverProfileError}
             busy={busy}
             profileConfirmed={driverProfileConfirmed}
-            onConfirm={confirmProfile}
+            onProfileConfirmedChange={setDriverProfileConfirmed}
           />
         ) : null}
 
-        {!draftLoading && step === 6 ? (
+        {!showDraftLoading && step === 6 ? (
           <div className="space-y-4">
             <p className="text-sm text-rph-fg-secondary">
               This will generate contract PDFs, place signature fields, and open the e-sign designer. After you sign as
@@ -1000,35 +1009,12 @@ const DRIVER_ACCESS_STATUS_COPY: Record<
 function DriverAccessStatusPanel({
   status,
   resendReason,
-  sending,
-  refreshing,
   message,
 }: {
   status: string;
   resendReason?: DriverAccessResendReason | null;
-  sending: boolean;
-  refreshing: boolean;
   message: string | null;
 }) {
-  if (sending) {
-    return (
-      <div
-        className="flex items-start gap-3 rounded-xl border border-rph-border bg-rph-chrome/50 p-4"
-        role="status"
-        aria-live="polite"
-        aria-busy="true"
-      >
-        <StatusSpinner />
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-rph-fg">Sending access request…</p>
-          <p className="mt-0.5 text-sm text-rph-fg-secondary">
-            Saving the draft and emailing the driver. This may take a few seconds.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   const copy = DRIVER_ACCESS_STATUS_COPY[status] ?? {
     title: status.replace(/_/g, " "),
     detail: "Status updates live when the driver responds.",
@@ -1055,27 +1041,15 @@ function DriverAccessStatusPanel({
       className={`flex items-start gap-3 rounded-xl border p-4 ${toneClass}`}
       role="status"
       aria-live="polite"
-      aria-busy={refreshing || status === "pending"}
+      aria-busy={status === "pending"}
     >
-      {status === "pending" || refreshing ? <StatusSpinner /> : null}
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold capitalize text-rph-fg">{title}</p>
         <p className="mt-0.5 text-sm text-rph-fg-secondary">{detail}</p>
         {status === "pending" ? (
-          <p className="mt-2 text-xs font-medium text-rph-fg-muted">
-            {refreshing ? "Checking for driver response…" : "Waiting for driver response · updates live"}
-          </p>
+          <p className="mt-2 text-xs font-medium text-rph-fg-muted">Waiting for driver response · updates live</p>
         ) : null}
       </div>
     </div>
-  );
-}
-
-function StatusSpinner() {
-  return (
-    <span
-      className="mt-0.5 h-5 w-5 shrink-0 animate-spin rounded-full border-[3px] border-rph-border border-t-rph-rail"
-      aria-hidden
-    />
   );
 }

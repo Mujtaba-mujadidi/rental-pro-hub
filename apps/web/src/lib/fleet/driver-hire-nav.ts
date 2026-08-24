@@ -3,7 +3,11 @@ import type { HireTableStatusTone } from "@/lib/fleet/hire-contract-table-displa
 import type { DriverHireSigningPhase } from "@/lib/fleet/driver-hire-request-display";
 
 /** Hire groups shown on the driver "My hire" page and nav item. */
-export const DRIVER_CURRENT_HIRE_STATUSES = ["reserved", "active"] as const satisfies readonly HireGroupStatus[];
+export const DRIVER_CURRENT_HIRE_STATUSES = [
+  "reserved",
+  "active",
+  "ending",
+] as const satisfies readonly HireGroupStatus[];
 
 export type DriverCurrentHireStatus = (typeof DRIVER_CURRENT_HIRE_STATUSES)[number];
 
@@ -20,6 +24,7 @@ export type DriverHireHistoryStatus = (typeof DRIVER_HIRE_HISTORY_STATUSES)[numb
 export const DRIVER_HIRE_WORKSPACE_STATUSES = [
   "reserved",
   "active",
+  "ending",
   "terminated",
   "completed",
   "cancelled",
@@ -41,12 +46,13 @@ export function isDriverHireHistoryStatus(status: string): status is DriverHireH
 
 /** Vehicle compliance documents (MOT, logbook, PHV): drivers may view only while the hire is on rent. */
 export function driverCanAccessVehicleDocuments(hireStatus: string): boolean {
-  return hireStatus === "active";
+  return hireStatus === "active" || hireStatus === "ending";
 }
 
 const DRIVER_HIRE_STATUS_LABELS: Record<string, string> = {
   reserved: "Reserved",
   active: "On rent",
+  ending: "Ending hire",
   completed: "Completed",
   terminated: "Terminated",
   cancelled: "Cancelled",
@@ -60,7 +66,7 @@ export function driverHireStatusTone(status: string): HireTableStatusTone {
   if (status === "active") return "success";
   if (status === "reserved") return "pending";
   if (status === "completed") return "neutral";
-  if (status === "terminated" || status === "cancelled") return "warning";
+  if (status === "ending" || status === "terminated" || status === "cancelled") return "warning";
   return "neutral";
 }
 

@@ -450,9 +450,7 @@ export function buildHireAccountPositionFromTerminationSummary(
 
   let refundCalculatedGbp = 0;
   if (disposition === "refund_full") {
-    refundCalculatedGbp = clampNonNegativeGbp(
-      subGbp(depositReceivedGbp, depositAppliedToRentGbp),
-    );
+    refundCalculatedGbp = depositReceivedGbp;
   } else if (disposition === "refund_partial") {
     refundCalculatedGbp = clampNonNegativeGbp(
       safeGbp(options?.depositRefundAmountGbp),

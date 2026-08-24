@@ -25,6 +25,7 @@ export function isCheckoutDue(input: {
     !input.checkoutCompleted &&
     (input.status === "reserved" ||
       input.status === "active" ||
+      input.status === "ending" ||
       input.status === "terminated")
   );
 }
@@ -37,7 +38,18 @@ export function canStartCheckout(input: {
 }
 
 export function canTerminateHire(status: string): boolean {
-  return status === "active";
+  return status === "active" || status === "ending";
+}
+
+/** Active hire or end-hire wizard in progress — Payments & balance UI stays open. */
+export function isHirePaymentsWorkspaceOpen(status: string): boolean {
+  return status === "active" || status === "ending";
+}
+
+/** End hire wizard started but Final account not finished — cancel reverses the close-out. */
+export function canCancelEndHire(status: string, draftFinalized = false): boolean {
+  if (draftFinalized) return false;
+  return status === "ending" || status === "terminated";
 }
 
 export function canStartCheckin(input: {
@@ -102,7 +114,7 @@ export function buildHireLifecycleAttentionItems(input: {
       kind: "awaiting_termination",
       title: "Hire is active",
       detail: "End the contract when the rental period finishes to settle accounts and unlock check-in.",
-      href: base,
+      href: `${base}/end-hire`,
     });
   }
 
@@ -114,7 +126,7 @@ export function buildHireLifecycleAttentionItems(input: {
         input.audience === "driver"
           ? "Your contract has ended. Complete check-in when you return the vehicle."
           : "The contract has ended. Complete check-in when the vehicle is returned.",
-      href: `${base}/checkin`,
+      href: input.audience === "driver" ? `${base}/checkin` : `${base}/end-hire`,
     });
   }
 

@@ -1,5 +1,6 @@
 import type { HirePaymentStatus } from "@/lib/fleet/hire-types";
 import type { HireTableStatusTone } from "@/lib/fleet/hire-contract-table-display";
+import { roundGbp } from "@/lib/fleet/hire-money";
 
 /** User-facing payment row status for tables and filters. */
 export type HirePaymentDisplayStatus =
@@ -146,4 +147,16 @@ export function hirePaymentDisplayStatusLabel(
 ): string {
   const status = deriveHirePaymentDisplayStatus(row, todayYmd, options);
   return hirePaymentDisplayStatusMeta(status, options).label;
+}
+
+/** Driver/staff submission awaiting approval — falls back to row balance when amount is missing. */
+export function hirePaymentPendingApprovalAmountGbp(
+  row: Pick<HirePaymentDisplayStatusInput, "paymentStatus" | "pendingSubmittedGbp" | "balanceGbp">,
+): number {
+  if (row.paymentStatus !== "pending_approval") return 0;
+  const submitted = row.pendingSubmittedGbp;
+  if (submitted != null && Number.isFinite(submitted) && submitted > 0.005) {
+    return roundGbp(submitted);
+  }
+  return roundGbp(Math.max(0, row.balanceGbp));
 }

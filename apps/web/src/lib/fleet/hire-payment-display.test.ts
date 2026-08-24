@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   deriveHirePaymentDisplayStatus,
   hirePaymentDisplayStatusMeta,
+  hirePaymentPendingApprovalAmountGbp,
 } from "@/lib/fleet/hire-payment-display";
 
 const base = {
@@ -159,5 +160,27 @@ describe("hirePaymentDisplayStatusMeta", () => {
 
   it("labels settled prepaid rows consistently", () => {
     expect(hirePaymentDisplayStatusMeta("prepaid_settled").label).toBe("Settled");
+  });
+});
+
+describe("hirePaymentPendingApprovalAmountGbp", () => {
+  it("falls back to balance when submitted amount is missing", () => {
+    expect(
+      hirePaymentPendingApprovalAmountGbp({
+        paymentStatus: "pending_approval",
+        pendingSubmittedGbp: null,
+        balanceGbp: 100,
+      }),
+    ).toBe(100);
+  });
+
+  it("prefers submitted amount when present", () => {
+    expect(
+      hirePaymentPendingApprovalAmountGbp({
+        paymentStatus: "pending_approval",
+        pendingSubmittedGbp: 40,
+        balanceGbp: 100,
+      }),
+    ).toBe(40);
   });
 });

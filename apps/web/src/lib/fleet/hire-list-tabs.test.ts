@@ -73,6 +73,18 @@ describe("hireListMatchesTab / stats", () => {
     expect(hireListMatchesTab(row({ status: "pending_signature" }), "scheduled")).toBe(true);
     expect(hireListMatchesTab(row({ status: "completed" }), "ended")).toBe(true);
     expect(hireListMatchesTab(row({ status: "terminated" }), "ended")).toBe(true);
+    expect(
+      hireListMatchesTab(
+        row({ status: "terminated", terminated_at: "2026-08-20T12:00:00.000Z", end_hire_in_progress: true }),
+        "active",
+      ),
+    ).toBe(true);
+    expect(
+      hireListMatchesTab(
+        row({ status: "terminated", terminated_at: "2026-08-20T12:00:00.000Z", end_hire_in_progress: true }),
+        "ended",
+      ),
+    ).toBe(false);
     expect(hireListMatchesTab(row({ status: "draft" }), "all")).toBe(true);
     expect(hireListMatchesTab(row({ status: "draft" }), "needs_action")).toBe(true);
   });
@@ -118,13 +130,18 @@ describe("hireListMatchesTab / stats", () => {
         }),
         row({
           status: "terminated",
+          terminated_at: "2026-08-20T12:00:00.000Z",
+          end_hire_in_progress: true,
+        }),
+        row({
+          status: "terminated",
           terminated_at: "2026-07-20T12:00:00.000Z",
         }),
         row({ status: "draft" }),
       ],
       "2026-08-16",
     );
-    expect(stats.activeCount).toBe(1);
+    expect(stats.activeCount).toBe(2);
     expect(stats.scheduledCount).toBe(1);
     expect(stats.completedThisMonthCount).toBe(1);
     expect(stats.needsActionCount).toBe(1);

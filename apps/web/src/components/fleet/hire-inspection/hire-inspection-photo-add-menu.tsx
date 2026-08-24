@@ -90,9 +90,9 @@ export function HireInspectionPhotoAddMenu({ disabled, onFiles }: HireInspection
         <DropdownMenu.Portal>
           <DropdownMenu.Content
             side="bottom"
-            align="start"
+            align="end"
             sideOffset={6}
-            avoidCollisions={false}
+            collisionPadding={12}
             className={contentClass}
           >
             <DropdownMenu.Item

@@ -27,7 +27,7 @@ type Props = {
   error?: string | null;
   busy?: boolean;
   profileConfirmed: boolean;
-  onConfirm: () => void;
+  onProfileConfirmedChange: (confirmed: boolean) => void;
 };
 
 export function HireDriverReviewPanel({
@@ -36,7 +36,7 @@ export function HireDriverReviewPanel({
   error = null,
   busy = false,
   profileConfirmed,
-  onConfirm,
+  onProfileConfirmedChange,
 }: Props) {
   if (loading) {
     return (
@@ -120,26 +120,24 @@ export function HireDriverReviewPanel({
         </ul>
       </section>
 
+      <label className={`rph-card flex items-start gap-3 p-4 ${loading || error ? "opacity-60" : ""}`}>
+        <input
+          type="checkbox"
+          className="mt-1"
+          checked={profileConfirmed}
+          disabled={busy || loading || Boolean(error)}
+          onChange={(e) => onProfileConfirmedChange(e.target.checked)}
+        />
+        <span className="text-sm text-rph-fg-secondary">
+          I have reviewed this driver&apos;s profile and documents and confirm the information is correct to proceed
+          with the hire contract.
+        </span>
+      </label>
       {profileConfirmed ? (
-        <p className="rounded-xl border border-emerald-300/80 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-100">
-          Driver profile confirmed. Continue to create and send contracts for signature.
+        <p className="px-1 text-xs text-rph-fg-muted">
+          Driver profile confirmed. Use Continue to create and send contracts for signature.
         </p>
-      ) : (
-        <label className={`rph-card flex items-start gap-3 p-4 ${loading || error ? "opacity-60" : ""}`}>
-          <input
-            type="checkbox"
-            className="mt-1"
-            disabled={busy || loading || Boolean(error)}
-            onChange={(e) => {
-              if (e.target.checked) onConfirm();
-            }}
-          />
-          <span className="text-sm text-rph-fg-secondary">
-            I have reviewed this driver&apos;s profile and documents and confirm the information is correct to proceed
-            with the hire contract.
-          </span>
-        </label>
-      )}
+      ) : null}
     </div>
   );
 }

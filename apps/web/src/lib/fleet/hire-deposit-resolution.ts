@@ -10,14 +10,32 @@ import {
   signedSettlementBalanceGbp,
 } from "@/lib/fleet/hire-open-balance";
 import {
+  availableSettlementResolutions,
+  getDepositDispositionOptions,
   resolveTerminationBalanceState,
+  settlementStepRequired,
+  type DepositDispositionOption,
   type HireSettlementResolution,
 } from "@/lib/fleet/hire-settlement-resolution";
-import { roundGbp } from "@/lib/fleet/hire-money";
+import { clampNonNegativeGbp, roundGbp } from "@/lib/fleet/hire-money";
+import type { SettlementBalanceDirection } from "@/lib/fleet/hire-termination-summary";
+
+/**
+ * Cash deposit currently held pending staff disposition.
+ * Always the amount actually received — never the contractual deposit required.
+ */
+export function hireDepositHeldGbp(input: {
+  depositDisposition: string | null | undefined;
+  depositReceivedGbp: number;
+}): number {
+  if (!isDepositDispositionPending(input.depositDisposition)) return 0;
+  return clampNonNegativeGbp(input.depositReceivedGbp);
+}
 
 /**
  * Apply a deposit disposition to the current signed settlement position.
  * Used when staff resolves a deposit held pending review after contract end.
+ * `depositGbp` must be the amount actually received (held), not the contractual requirement.
  */
 export function computeDepositResolutionSettlement(input: {
   currentSignedSettlementGbp: number;
@@ -34,16 +52,89 @@ export function computeDepositResolutionSettlement(input: {
     return balance;
   }
 
-  if (input.disposition === "apply_to_balance" || input.disposition === "refund_full") {
+  if (input.disposition === "apply_to_balance") {
+    return roundGbp(balance - deposit);
+  }
+
+  // Returning deposit cash does not reduce an outstanding charge balance — refund is separate.
+  if (input.disposition === "refund_full") {
+    if (balance > 0.005) return balance;
     return roundGbp(balance - deposit);
   }
 
   if (input.disposition === "refund_partial") {
     const refund = Math.max(0, Math.min(deposit, input.refundAmountGbp ?? 0));
+    if (balance > 0.005) return balance;
     return roundGbp(balance - refund);
   }
 
   return balance;
+}
+
+export type DepositResolutionPreview = {
+  currentSignedSettlementGbp: number;
+  currentDirection: SettlementBalanceDirection;
+  afterSignedSettlementGbp: number;
+  afterDirection: SettlementBalanceDirection;
+  /** Held deposit applied against the open charge balance (apply / forfeit only). */
+  depositAppliedToBalanceGbp: number;
+  /** Deposit cash to return to the driver (refund dispositions). */
+  depositRefundDueGbp: number;
+  needsSettlementStep: boolean;
+  settlementResolutions: HireSettlementResolution[];
+  depositOptions: DepositDispositionOption[];
+};
+
+function settlementDirectionFromSigned(signedGbp: number): SettlementBalanceDirection {
+  if (signedGbp > 0.005) return "driver_owes_company";
+  if (signedGbp < -0.005) return "company_owes_driver";
+  return "settled";
+}
+
+/** Preview deposit resolution using live signed settlement + held deposit facts. */
+export function buildDepositResolutionPreview(input: {
+  currentSignedSettlementGbp: number;
+  depositHeldGbp: number;
+  disposition: HireDepositDisposition;
+  refundAmountGbp?: number | null;
+}): DepositResolutionPreview {
+  const currentSignedSettlementGbp = roundGbp(input.currentSignedSettlementGbp);
+  const depositHeldGbp = roundGbp(input.depositHeldGbp);
+  const afterSignedSettlementGbp = computeDepositResolutionSettlement({
+    currentSignedSettlementGbp,
+    depositGbp: depositHeldGbp,
+    disposition: input.disposition,
+    refundAmountGbp: input.refundAmountGbp,
+  });
+
+  let depositAppliedToBalanceGbp = 0;
+  let depositRefundDueGbp = 0;
+
+  if (input.disposition === "apply_to_balance" || input.disposition === "forfeit") {
+    depositAppliedToBalanceGbp = roundGbp(
+      Math.min(depositHeldGbp, Math.max(0, currentSignedSettlementGbp)),
+    );
+  } else if (input.disposition === "refund_full") {
+    depositRefundDueGbp = depositHeldGbp;
+  } else if (input.disposition === "refund_partial") {
+    depositRefundDueGbp = roundGbp(
+      Math.min(depositHeldGbp, Math.max(0, input.refundAmountGbp ?? 0)),
+    );
+  }
+
+  return {
+    currentSignedSettlementGbp,
+    currentDirection: settlementDirectionFromSigned(currentSignedSettlementGbp),
+    afterSignedSettlementGbp,
+    afterDirection: settlementDirectionFromSigned(afterSignedSettlementGbp),
+    depositAppliedToBalanceGbp,
+    depositRefundDueGbp,
+    needsSettlementStep: settlementStepRequired(afterSignedSettlementGbp),
+    settlementResolutions: availableSettlementResolutions(afterSignedSettlementGbp),
+    depositOptions: getDepositDispositionOptions(currentSignedSettlementGbp).filter(
+      (option) => option.value !== "hold_pending",
+    ),
+  };
 }
 
 /** Preview settlement fields after resolving a held deposit. */
@@ -136,5 +227,5 @@ export function parseTerminationAccountsSummary(
 }
 
 export function depositResolutionHelpText(): string {
-  return "The deposit was held when the contract ended. Choose whether to return it, keep it, or use it to pay rent. This updates the money owed on this hire.";
+  return "The deposit was held when the contract ended. Choose whether to return it, keep it, or use it to pay what is still owed. Returning the deposit does not reduce an outstanding charge balance.";
 }

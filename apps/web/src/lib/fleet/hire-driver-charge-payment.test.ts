@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   allocateExtraChargePaymentAcrossRows,
+  allocateExtraChargeReceiptPaymentsToLines,
   allocateExtraChargeReceiptsToLines,
+  planExtraChargePaidAmendment,
+  resolveExtraChargeReceiptAllocationSlices,
   buildExtraChargePaymentTableRows,
   buildExtraChargePaymentTableRowsFromWorkspace,
+  outstandingExtraChargesFromTimedPaymentsGbp,
   extraChargeSubmitBlock,
   resolveOpenExtraChargePayment,
 } from "./hire-driver-charge-payment";
@@ -127,6 +131,49 @@ describe("allocateExtraChargePaymentAcrossRows", () => {
   });
 });
 
+describe("allocateExtraChargeReceiptPaymentsToLines", () => {
+  it("returns one slice per payment when two receipts pay the same charge", () => {
+    const slices = allocateExtraChargeReceiptPaymentsToLines(
+      [charge({ id: "c1", amountGbp: 50, chargedOn: "2026-08-11", createdAt: "2026-08-11T09:00:00.000Z" })],
+      [
+        { id: "p1", amountGbp: 20, paidAt: "2026-08-17T10:00:00.000Z" },
+        { id: "p2", amountGbp: 30, paidAt: "2026-08-17T11:00:00.000Z" },
+      ],
+    );
+    expect(slices).toEqual([
+      { paymentId: "p1", chargeLineItemId: "c1", allocatedGbp: 20 },
+      { paymentId: "p2", chargeLineItemId: "c1", allocatedGbp: 30 },
+    ]);
+  });
+
+  it("does not allocate a payment onto a charge posted after the payment", () => {
+    const slices = allocateExtraChargeReceiptPaymentsToLines(
+      [
+        charge({
+          id: "early",
+          amountGbp: 30,
+          chargedOn: "2026-08-23",
+          createdAt: "2026-08-23T10:00:00.000Z",
+        }),
+        charge({
+          id: "late",
+          amountGbp: 100,
+          chargedOn: "2026-08-23",
+          createdAt: "2026-08-23T19:20:00.000Z",
+        }),
+      ],
+      [
+        { id: "p60", amountGbp: 60, paidAt: "2026-08-23T13:00:00.000Z" },
+        { id: "p10", amountGbp: 10, paidAt: "2026-08-23T19:25:00.000Z" },
+      ],
+    );
+    expect(slices).toEqual([
+      { paymentId: "p60", chargeLineItemId: "early", allocatedGbp: 30 },
+      { paymentId: "p10", chargeLineItemId: "late", allocatedGbp: 10 },
+    ]);
+  });
+});
+
 describe("allocateExtraChargeReceiptsToLines", () => {
   it("fills paid_now in full and pours remaining receipts FIFO", () => {
     const paid = allocateExtraChargeReceiptsToLines(
@@ -140,6 +187,28 @@ describe("allocateExtraChargeReceiptsToLines", () => {
     expect(paid.get("now")).toBe(20);
     expect(paid.get("a")).toBe(30);
     expect(paid.get("b")).toBe(5);
+  });
+
+  it("pours by creation order when charges share the same chargedOn date (D03)", () => {
+    const paid = allocateExtraChargeReceiptsToLines(
+      [
+        charge({
+          id: "pcn",
+          amountGbp: 30,
+          chargedOn: "2026-08-24",
+          createdAt: "2026-08-24T11:00:00.000Z",
+        }),
+        charge({
+          id: "pco",
+          amountGbp: 100,
+          chargedOn: "2026-08-24",
+          createdAt: "2026-08-24T10:00:00.000Z",
+        }),
+      ],
+      40,
+    );
+    expect(paid.get("pco")).toBe(40);
+    expect(paid.get("pcn")).toBe(0);
   });
 });
 
@@ -155,6 +224,7 @@ describe("buildExtraChargePaymentTableRows", () => {
       balanceGbp: 40,
       status: "pending_approval",
       statusLabel: "Pending approval",
+      canEdit: false,
     });
   });
 
@@ -221,6 +291,46 @@ describe("buildExtraChargePaymentTableRowsFromWorkspace", () => {
     });
   });
 
+  it("does not re-apply paid_now cash onto a later add_to_balance charge", () => {
+    const rows = buildExtraChargePaymentTableRowsFromWorkspace({
+      hireGroupId: "g1",
+      items: [
+        {
+          id: "admin",
+          chargeType: "administration",
+          amountGbp: 30,
+          resolution: "paid_now",
+          sourceKind: "staff_manual",
+          description: "Admin fee",
+          chargedOn: "2026-08-10",
+          createdAt: "2026-08-10T10:00:00.000Z",
+        },
+        {
+          id: "damage",
+          chargeType: "damage",
+          amountGbp: 100,
+          resolution: "add_to_balance",
+          sourceKind: "staff_manual",
+          description: null,
+          chargedOn: "2026-08-11",
+          createdAt: "2026-08-11T10:00:00.000Z",
+        },
+      ],
+      // Outstanding extras only — paid_now is already collected.
+      outstandingGbp: 100,
+    });
+    expect(rows.find((row) => row.id === "admin")).toMatchObject({
+      paidGbp: 30,
+      balanceGbp: 0,
+      status: "paid",
+    });
+    expect(rows.find((row) => row.id === "damage")).toMatchObject({
+      paidGbp: 0,
+      balanceGbp: 100,
+      status: "due",
+    });
+  });
+
   it("shows voided charges with zero charged/balance and a void adjustment", () => {
     const rows = buildExtraChargePaymentTableRows({
       charges: [
@@ -244,5 +354,212 @@ describe("buildExtraChargePaymentTableRowsFromWorkspace", () => {
       statusLabel: "Voided",
       canMutate: false,
     });
+  });
+});
+
+describe("buildExtraChargePaymentTableRows with real receipts", () => {
+  it("keeps paid_now receipt off later add_to_balance lines", () => {
+    const rows = buildExtraChargePaymentTableRows({
+      charges: [
+        charge({
+          id: "admin",
+          amountGbp: 30,
+          resolution: "paid_now",
+          chargedOn: "2026-08-10",
+          createdAt: "2026-08-10T10:00:00.000Z",
+          balancePaymentId: "p-now",
+        }),
+        charge({
+          id: "damage",
+          amountGbp: 100,
+          chargedOn: "2026-08-11",
+          createdAt: "2026-08-11T10:00:00.000Z",
+        }),
+      ],
+      receipts: [
+        { amountGbp: 30, direction: "received_from_driver", paymentCategory: "driver_charge" },
+      ],
+      timedPayments: [
+        { id: "p-now", amountGbp: 30, paidAt: "2026-08-10T12:00:00.000Z" },
+      ],
+    });
+    expect(rows.find((row) => row.id === "admin")?.paidGbp).toBe(30);
+    expect(rows.find((row) => row.id === "damage")?.paidGbp).toBe(0);
+  });
+
+  it("does not mark a later charge paid from cash taken before it existed", () => {
+    const rows = buildExtraChargePaymentTableRows({
+      charges: [
+        charge({
+          id: "pcn",
+          amountGbp: 30,
+          chargedOn: "2026-08-23",
+          createdAt: "2026-08-23T10:00:00.000Z",
+        }),
+        charge({
+          id: "pco",
+          amountGbp: 100,
+          chargedOn: "2026-08-23",
+          createdAt: "2026-08-23T19:20:00.000Z",
+        }),
+      ],
+      receipts: [],
+      timedPayments: [
+        { id: "p60", amountGbp: 60, paidAt: "2026-08-23T13:00:00.000Z" },
+        { id: "p10", amountGbp: 10, paidAt: "2026-08-23T19:25:00.000Z" },
+      ],
+    });
+    expect(rows.find((row) => row.id === "pcn")).toMatchObject({
+      paidGbp: 30,
+      balanceGbp: 0,
+      status: "paid",
+    });
+    expect(rows.find((row) => row.id === "pco")).toMatchObject({
+      paidGbp: 10,
+      balanceGbp: 90,
+      status: "partially_paid",
+    });
+    expect(
+      outstandingExtraChargesFromTimedPaymentsGbp({
+        charges: [
+          charge({
+            id: "pcn",
+            amountGbp: 30,
+            chargedOn: "2026-08-23",
+            createdAt: "2026-08-23T10:00:00.000Z",
+          }),
+          charge({
+            id: "pco",
+            amountGbp: 100,
+            chargedOn: "2026-08-23",
+            createdAt: "2026-08-23T19:20:00.000Z",
+          }),
+        ],
+        payments: [
+          { id: "p60", amountGbp: 60, paidAt: "2026-08-23T13:00:00.000Z" },
+          { id: "p10", amountGbp: 10, paidAt: "2026-08-23T19:25:00.000Z" },
+        ],
+      }),
+    ).toBe(90);
+  });
+});
+
+describe("planExtraChargePaidAmendment", () => {
+  it("reduces paid on one charge without moving cash onto a later charge", () => {
+    const charges = [
+      charge({
+        id: "pco",
+        amountGbp: 100,
+        chargedOn: "2026-08-24",
+        createdAt: "2026-08-24T10:00:00.000Z",
+      }),
+      charge({
+        id: "pcn",
+        amountGbp: 30,
+        chargedOn: "2026-08-24",
+        createdAt: "2026-08-24T11:00:00.000Z",
+      }),
+    ];
+    const payments = [{ id: "pay40", amountGbp: 40, paidAt: "2026-08-24T12:00:00.000Z" }];
+    const allocationEvents = [
+      {
+        eventType: "driver_charge_payment_approved",
+        metadata: {
+          balancePaymentId: "pay40",
+          allocations: [{ chargeLineItemId: "pco", amountGbp: 40 }],
+        },
+      },
+    ];
+
+    const plan = planExtraChargePaidAmendment({
+      chargeLineItemId: "pco",
+      newPaidGbp: 0,
+      charges,
+      payments,
+      allocationEvents,
+    });
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.previousPaidGbp).toBe(40);
+    expect(plan.newPaidGbp).toBe(0);
+    expect(plan.paymentUpdates).toEqual([
+      {
+        paymentId: "pay40",
+        previousAmountGbp: 40,
+        newAmountGbp: 0,
+        allocations: [],
+      },
+    ]);
+  });
+});
+
+describe("resolveExtraChargeReceiptAllocationSlices amended metadata", () => {
+  it("prefers amended allocations over the original approve split (D03 defence)", () => {
+    const charges = [
+      charge({
+        id: "pco",
+        amountGbp: 100,
+        chargedOn: "2026-08-24",
+        createdAt: "2026-08-24T10:00:00.000Z",
+      }),
+      charge({
+        id: "pcn",
+        amountGbp: 30,
+        chargedOn: "2026-08-24",
+        createdAt: "2026-08-24T11:00:00.000Z",
+      }),
+    ];
+    const slices = resolveExtraChargeReceiptAllocationSlices({
+      charges,
+      payments: [{ id: "pay40", amountGbp: 40, paidAt: "2026-08-24T12:00:00.000Z" }],
+      allocationEvents: [
+        {
+          eventType: "driver_charge_payment_approved",
+          metadata: {
+            balancePaymentId: "pay40",
+            allocations: [
+              { chargeLineItemId: "pcn", amountGbp: 30 },
+              { chargeLineItemId: "pco", amountGbp: 10 },
+            ],
+          },
+        },
+        {
+          eventType: "driver_charge_payment_amended",
+          metadata: {
+            balancePaymentId: "pay40",
+            allocations: [{ chargeLineItemId: "pco", amountGbp: 40 }],
+          },
+        },
+      ],
+    });
+    expect(slices).toEqual([
+      { paymentId: "pay40", chargeLineItemId: "pco", allocatedGbp: 40 },
+    ]);
+  });
+});
+
+describe("extra charge canEdit", () => {
+  it("canEdit is false once paid or pending", () => {
+    const unpaid = buildExtraChargePaymentTableRows({
+      charges: [charge({ id: "a", amountGbp: 40, chargedOn: "2026-08-11" })],
+      receipts: [],
+      allowMutate: true,
+    });
+    expect(unpaid[0]?.canEdit).toBe(true);
+
+    const paid = buildExtraChargePaymentTableRows({
+      charges: [charge({ id: "a", amountGbp: 40, chargedOn: "2026-08-11" })],
+      receipts: [{ amountGbp: 40, direction: "received_from_driver", paymentCategory: "driver_charge" }],
+      allowMutate: true,
+    });
+    expect(paid[0]).toMatchObject({ status: "paid", canEdit: false, canMutate: true });
+
+    const pending = buildExtraChargePaymentTableRows({
+      charges: [charge({ id: "a", amountGbp: 40, chargedOn: "2026-08-11" })],
+      receipts: [],
+      pendingAmountGbp: 40,
+      allowMutate: true,
+    });
+    expect(pending[0]).toMatchObject({ status: "pending_approval", canEdit: false, canMutate: true });
   });
 });

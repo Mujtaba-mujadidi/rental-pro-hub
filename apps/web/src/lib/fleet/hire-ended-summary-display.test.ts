@@ -109,6 +109,7 @@ function payments(overrides: Partial<HirePaymentsPageData> = {}): HirePaymentsPa
     ],
     extraChargesOutstandingGbp: 0,
     extraChargePendingPayment: null,
+    extraChargeAllocationEvents: [],
     canMutateExtraCharges: false,
     summary: {
       rentGrossAccruedGbp: 200,
@@ -198,7 +199,7 @@ function dashboard(overrides: Partial<HireDashboardData> = {}): HireDashboardDat
 describe("hire-ended-summary-display", () => {
   it("computes deposit applied to rent only after disposition (not while hold_pending)", () => {
     expect(hireDepositAppliedToRentGbp(terminationSummary(), "hold_pending")).toBe(0);
-    expect(hireDepositAppliedToRentGbp(terminationSummary(), "refund_full")).toBe(57.14);
+    expect(hireDepositAppliedToRentGbp(terminationSummary(), "refund_full")).toBe(0);
     expect(hireDepositAppliedToRentGbp(terminationSummary(), "apply_to_balance")).toBe(57.14);
   });
 
@@ -238,7 +239,7 @@ describe("hire-ended-summary-display", () => {
     });
     expect(refund).toMatchObject({
       originalDepositGbp: 500,
-      rentFromDepositGbp: 57.14,
+      rentFromDepositGbp: 0,
       driverChargesGbp: 100,
       advanceRentToRefundGbp: 0,
       advanceRentRefundedGbp: 0,

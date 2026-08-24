@@ -8,9 +8,8 @@
  *   of the schedule (avoids double-counting schedule + settlement for the same rent).
  * - Plus deposit retention when staff forfeit or partially retain the deposit after contract end
  *   (deposit applied to rent at contract end counts as rent income, not deposit retention).
- * - Plus realised driver charges: charged-now cash, extra-charge receipts, and unpaid extras
- *   once the hire is settled (netted into settlement). Unpaid extras on an open hire are owed,
- *   not vehicle profit.
+ * - Plus realised driver charges: charged-now cash and approved extra-charge receipts only.
+ *   Unpaid extras remain receivables and are never booked as vehicle profit (even when settled).
  * - Minus settlement write-offs only (balance-ledger refunds return deposits/prepaid
  *   rent and are not contra-revenue when that rent was never recognised on the vehicle).
  */
@@ -61,7 +60,10 @@ export type HireIncomeGroupContext = {
   /** Persisted at contract end — preferred over raw schedule paid for ended hires. */
   accruedRentPaidGbp?: number | null;
   accruedRentDueGbp?: number | null;
-  /** Unpaid extras count as P&L income only after the hire is settled. */
+  /**
+   * Whether settlement is closed. Kept for callers; driver-charge income no longer
+   * realises unpaid extras from this flag (cash receipts only).
+   */
   settlementSettled?: boolean;
 };
 

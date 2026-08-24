@@ -149,10 +149,11 @@ export function HireEndedCompanyPaymentsView({
         checkinCompleted={data.checkinCompleted}
       />
 
-      {data.canResolveDeposit && data.terminationSummary && data.depositGbp != null && data.depositGbp > 0 ? (
+      {data.canResolveDeposit && data.terminationSummary && data.depositReceivedGbp > 0.005 ? (
         <HireDepositDispositionResolveCard
           hireGroupId={hireGroupId}
           terminationSummary={data.terminationSummary}
+          depositHeldGbp={data.depositReceivedGbp}
           currentSignedSettlementGbp={data.currentSignedSettlementGbp}
           onSuccess={onReload}
         />

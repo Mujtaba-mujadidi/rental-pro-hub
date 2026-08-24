@@ -65,5 +65,33 @@ describe("formatPlatformNotification", () => {
     expect(platformNotificationGroups("hire_payment_approved")).toEqual(["payments"]);
     expect(platformNotificationGroups("contract_signed")).toEqual(["documents"]);
     expect(platformNotificationGroups("payment_validated")).toEqual(["payments"]);
+    expect(platformNotificationGroups("vehicle_expiry_mot")).toEqual(["compliance"]);
+    expect(platformNotificationGroups("hire_insurance_expiry")).toEqual(["compliance"]);
+  });
+
+  it("formats vehicle expiry notifications", () => {
+    const display = formatPlatformNotification("vehicle_expiry_mot", {
+      vehicleVrm: "AB12 CDE",
+      summary: "MOT expires in 2 days",
+      href: "/rental/vehicles/abc",
+      tone: "expiring",
+    });
+    expect(display.title).toContain("expiring");
+    expect(display.body).toContain("MOT expires in 2 days");
+    expect(display.actionLabel).toBe("View vehicle");
+  });
+
+  it("formats driver licence expiry notifications for staff", () => {
+    const display = formatPlatformNotification("driver_licence_expiry", {
+      audience: "staff",
+      driverLabel: "Jane Driver",
+      licenceKind: "driving",
+      daysUntil: 3,
+      tone: "expiring",
+      href: "/rental/drivers/driver-1",
+    });
+    expect(display.title).toContain("expiring");
+    expect(display.body).toContain("Jane Driver");
+    expect(display.actionLabel).toBe("View driver");
   });
 });

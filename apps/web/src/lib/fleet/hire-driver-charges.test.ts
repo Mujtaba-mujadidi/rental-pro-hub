@@ -34,14 +34,24 @@ describe("sumDriverChargeIncomeGbp", () => {
     ).toBe(70);
   });
 
-  it("counts unpaid extras once the hire is settled", () => {
+  it("does not book unpaid extras as income when the hire is settled", () => {
     expect(
       sumDriverChargeIncomeGbp(
         [{ chargeType: "damage", amountGbp: 100, resolution: "add_to_balance" }],
         [],
         { hireSettled: true },
       ),
-    ).toBe(100);
+    ).toBe(0);
+  });
+
+  it("books only collected cash against settled unpaid extras", () => {
+    expect(
+      sumDriverChargeIncomeGbp(
+        [{ chargeType: "damage", amountGbp: 100, resolution: "add_to_balance" }],
+        [{ amountGbp: 10, direction: "received_from_driver", paymentCategory: "driver_charge" }],
+        { hireSettled: true },
+      ),
+    ).toBe(10);
   });
 });
 
