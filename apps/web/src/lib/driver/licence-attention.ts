@@ -18,6 +18,19 @@ export type LicenceReviewReason = {
 /** Upper bound (inclusive) for days-until-expiry when we treat a licence as expiring soon. */
 export const LICENCE_EXPIRING_SOON_MAX_DAYS = 30;
 
+export type DriverLicenceExpiryInput = Pick<
+  NonNullable<DriverOnboardingRow>,
+  "driving_licence_expiry" | "phv_licence_expiry"
+>;
+
+/** Expiry-only licence review reasons (no address / revalidation flags). */
+export function driverLicenceExpiryReviewReasons(row: DriverLicenceExpiryInput): LicenceReviewReason[] {
+  const reasons: LicenceReviewReason[] = [];
+  pushExpiryReasons(row.driving_licence_expiry, "driving", reasons);
+  pushExpiryReasons(row.phv_licence_expiry, "phv", reasons);
+  return reasons;
+}
+
 export { daysFromTodayToExpiry };
 
 function pushExpiryReasons(

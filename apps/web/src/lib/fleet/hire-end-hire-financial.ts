@@ -1,6 +1,7 @@
 import { formatUkDateAtTime } from "@/lib/datetime/uk";
 import { formatGbp } from "@/lib/fleet/maintenance";
 import { addGbp, clampNonNegativeGbp, roundGbp, subGbp } from "@/lib/fleet/hire-money";
+import type { HirePaymentStatus } from "@/lib/fleet/hire-types";
 
 export type HireEndHireFinancialLine = {
   id: string;
@@ -143,14 +144,14 @@ export function buildHireEndHirePendingApprovalItems(input: {
     id: string;
     rowKind: "rent" | "deposit";
     periodLabel: string;
-    paymentStatus: string;
+    paymentStatus: HirePaymentStatus;
     pendingSubmittedGbp: number | null;
     netDueGbp: number;
     paidGbp: number;
     balanceGbp: number;
   }[];
   pendingAmountForRow: (row: {
-    paymentStatus: string;
+    paymentStatus: HirePaymentStatus;
     pendingSubmittedGbp: number | null;
     balanceGbp: number;
   }) => number;

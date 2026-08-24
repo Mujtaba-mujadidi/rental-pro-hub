@@ -1,5 +1,5 @@
 import { ukLondonDayYmd, ukTodayYmd, daysFromCalendarDateToExpiry } from "@/lib/datetime/uk";
-import { driverLicenceReviewReasons, type LicenceReviewReason } from "@/lib/driver/licence-attention";
+import { driverLicenceExpiryReviewReasons, type LicenceReviewReason } from "@/lib/driver/licence-attention";
 import {
   deriveHireInsuranceDocumentStatus,
   isHireInsuranceProvidedBy,
@@ -39,8 +39,8 @@ type VehicleRow = {
 
 type DriverProfileRow = {
   user_id: string;
-  driving_licence_expiry?: string | null;
-  phv_licence_expiry?: string | null;
+  driving_licence_expiry: string | null;
+  phv_licence_expiry: string | null;
   licence_revalidation_due_at?: string | null;
   first_name?: string | null;
   last_name?: string | null;
@@ -172,7 +172,7 @@ export function buildDriverLicenceExpiryNotifications(input: {
   const rows: PendingPlatformNotification[] = [];
 
   for (const profile of input.profiles) {
-    const reasons = driverLicenceReviewReasons(profile).filter((reason) => licenceReasonKind(reason));
+    const reasons = driverLicenceExpiryReviewReasons(profile).filter((reason) => licenceReasonKind(reason));
     for (const reason of reasons) {
       const kind = licenceReasonKind(reason);
       if (!kind) continue;
@@ -202,7 +202,7 @@ export function buildDriverLicenceExpiryNotifications(input: {
     const staffIds = input.staffByCompany.get(pair.parent_company_id) ?? [];
     if (!staffIds.length) continue;
     const label = driverLabelFromProfile(profile);
-    const reasons = driverLicenceReviewReasons(profile).filter((reason) => licenceReasonKind(reason));
+    const reasons = driverLicenceExpiryReviewReasons(profile).filter((reason) => licenceReasonKind(reason));
     for (const reason of reasons) {
       const kind = licenceReasonKind(reason);
       if (!kind) continue;
@@ -440,7 +440,16 @@ export function buildCompanySettingsMap(
   companies: readonly CompanyRow[],
 ): Map<string, CompanyNotificationSettings> {
   return new Map(
-    companies.map((company) => [company.id, parseCompanyNotificationSettings(company)]),
+    companies.map((company) => [
+      company.id,
+      parseCompanyNotificationSettings({
+        notify_mot_days_before: company.notify_mot_days_before ?? undefined,
+        notify_tax_days_before: company.notify_tax_days_before ?? undefined,
+        notify_phv_licence_days_before: company.notify_phv_licence_days_before ?? undefined,
+        notify_contract_expiry_days_before: company.notify_contract_expiry_days_before ?? undefined,
+        notify_insurance_days_before: company.notify_insurance_days_before ?? undefined,
+      }),
+    ]),
   );
 }
 
