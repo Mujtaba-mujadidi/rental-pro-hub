@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { HirePaymentsPageData } from "@/app/actions/hire-payments";
 import type { HireDriverChargeWorkspaceRow } from "@/app/actions/rental-hire-termination";
 import { HireAddChargeModal } from "@/components/fleet/hire-charges/hire-add-charge-modal";
@@ -69,6 +69,12 @@ export function HireExtraChargesPanel({
   const [amending, setAmending] = useState<ExtraChargePaymentTableRow | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [highlightedRowIds, setHighlightedRowIds] = useState<string[]>([]);
+  const handleAllocationHighlightChange = useCallback((rowIds: string[]) => {
+    setHighlightedRowIds((prev) =>
+      prev.length === rowIds.length && prev.every((id, i) => id === rowIds[i]) ? prev : rowIds,
+    );
+    onAllocationChange?.(rowIds);
+  }, [onAllocationChange]);
   const pendingPaymentOpen = pendingPayment ?? null;
   const showActions = audience === "staff";
   const showRecordPayment =
@@ -175,10 +181,7 @@ export function HireExtraChargesPanel({
                 submitLabel="Record payment"
                 triggerLabel="Record payment"
                 triggerClassName="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-raised px-4 text-sm font-medium text-rph-fg transition-colors hover:bg-rph-chrome disabled:pointer-events-none disabled:opacity-50"
-                onAllocationChange={(rowIds) => {
-                  setHighlightedRowIds(rowIds);
-                  onAllocationChange?.(rowIds);
-                }}
+                onAllocationChange={handleAllocationHighlightChange}
                 onSuccess={onReload}
                 busy={busy}
               />

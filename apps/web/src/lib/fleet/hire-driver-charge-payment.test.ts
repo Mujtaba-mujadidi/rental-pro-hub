@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allocateExtraChargePaymentAcrossRows,
+  selectedExtraChargeRowIdsAreValid,
   allocateExtraChargeReceiptPaymentsToLines,
   allocateExtraChargeReceiptsToLines,
   planExtraChargePaidAmendment,
@@ -129,6 +130,98 @@ describe("allocateExtraChargePaymentAcrossRows", () => {
     ]);
     expect(result.allocations.map((line) => line.rowId)).toEqual(["due"]);
     expect(result.allocations[0]?.allocatedGbp).toBe(20);
+  });
+
+  it("pours only across ordered selected rows in that order", () => {
+    const rows = [
+      {
+        id: "admin",
+        periodLabel: "Administration",
+        chargeTypeLabel: "Administration",
+        description: null,
+        balanceGbp: 40,
+        status: "due" as const,
+      },
+      {
+        id: "wash",
+        periodLabel: "Cleaning",
+        chargeTypeLabel: "Cleaning",
+        description: "Car wash",
+        balanceGbp: 25,
+        status: "due" as const,
+      },
+      {
+        id: "damage",
+        periodLabel: "Damage",
+        chargeTypeLabel: "Damage",
+        description: null,
+        balanceGbp: 30,
+        status: "due" as const,
+      },
+    ];
+    const result = allocateExtraChargePaymentAcrossRows(30, rows, {
+      orderedRowIds: ["wash", "damage"],
+    });
+    expect(result.allocations.map((line) => line.rowId)).toEqual(["wash", "damage"]);
+    expect(result.allocations[0]).toMatchObject({ allocatedGbp: 25, fullyAllocated: true });
+    expect(result.allocations[1]).toMatchObject({ allocatedGbp: 5, fullyAllocated: false });
+    expect(result.totalOutstandingGbp).toBe(55);
+    expect(result.unallocatedGbp).toBe(0);
+  });
+
+  it("ignores unknown or ineligible ids in ordered selection", () => {
+    const result = allocateExtraChargePaymentAcrossRows(10, [
+      {
+        id: "due",
+        periodLabel: "Damage",
+        chargeTypeLabel: "Damage",
+        description: null,
+        balanceGbp: 15,
+        status: "due",
+      },
+      {
+        id: "paid",
+        periodLabel: "Administration",
+        chargeTypeLabel: "Administration",
+        description: null,
+        balanceGbp: 20,
+        status: "paid",
+      },
+    ], { orderedRowIds: ["missing", "paid", "due"] });
+    expect(result.allocations.map((line) => line.rowId)).toEqual(["due"]);
+    expect(result.allocations[0]?.allocatedGbp).toBe(10);
+  });
+});
+
+describe("selectedExtraChargeRowIdsAreValid", () => {
+  const rows = [
+    {
+      id: "wash",
+      periodLabel: "Cleaning",
+      chargeTypeLabel: "Cleaning",
+      description: null,
+      balanceGbp: 25,
+      status: "due" as const,
+    },
+    {
+      id: "pending",
+      periodLabel: "Administration",
+      chargeTypeLabel: "Administration",
+      description: null,
+      balanceGbp: 10,
+      status: "pending_approval" as const,
+    },
+  ];
+
+  it("accepts unique open payable ids", () => {
+    expect(selectedExtraChargeRowIdsAreValid(["wash"], rows)).toBe(true);
+  });
+
+  it("rejects empty, duplicate, unknown, or non-payable ids", () => {
+    expect(selectedExtraChargeRowIdsAreValid([], rows)).toBe(false);
+    expect(selectedExtraChargeRowIdsAreValid(["wash", "wash"], rows)).toBe(false);
+    expect(selectedExtraChargeRowIdsAreValid(["missing"], rows)).toBe(false);
+    expect(selectedExtraChargeRowIdsAreValid(["pending"], rows)).toBe(false);
   });
 });
 

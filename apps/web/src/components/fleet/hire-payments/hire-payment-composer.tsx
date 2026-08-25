@@ -16,6 +16,7 @@ import {
 } from "@/lib/fleet/hire-active-payments-display";
 import {
   allocateExtraChargePaymentAcrossRows,
+  extraChargeAllocationLabel,
   type ExtraChargePaymentAllocationRow,
 } from "@/lib/fleet/hire-driver-charge-payment";
 import type { HirePaymentScheduleRowInput } from "@/lib/fleet/hire-payment-summary";
@@ -62,7 +63,26 @@ export type HirePaymentComposerSubmitInput = {
   allocationKind: HirePaymentApplyTo;
   /** When applying to the schedule and deposit is still owed, deposit vs rent. */
   scheduleTarget?: HireSchedulePaymentTarget;
+  /**
+   * Extra charges only: selected open charge line ids in pour order.
+   * Omit / empty = auto FIFO across all open extras.
+   */
+  selectedExtraChargeLineItemIds?: string[];
 };
+
+type ExtraChargeAllocateMode = "auto" | "manual";
+
+const EMPTY_HIGHLIGHT_IDS: string[] = [];
+
+function isOpenExtraChargeRow(row: ExtraChargePaymentAllocationRow): boolean {
+  return (
+    row.balanceGbp > 0.005 &&
+    row.status !== "paid" &&
+    row.status !== "waived" &&
+    row.status !== "voided" &&
+    row.status !== "pending_approval"
+  );
+}
 
 export function HirePaymentComposer({
   scheduleRows = [],
@@ -144,23 +164,38 @@ export function HirePaymentComposer({
   const [scheduleTarget, setScheduleTarget] = useState<HireSchedulePaymentTarget>(() =>
     defaultHireSchedulePaymentTarget(depositDueGbp),
   );
+  const [extraAllocateMode, setExtraAllocateMode] = useState<ExtraChargeAllocateMode>("auto");
+  const [selectedExtraChargeIds, setSelectedExtraChargeIds] = useState<string[]>([]);
 
   const allocationInputs = useMemo(() => toAllocationInputs(scheduleRows), [scheduleRows]);
   const effectiveKind = allowAllocationChoice ? chosenKind : allocationKind;
   const isExtraCharges = effectiveKind === "extra_charges";
+  const openExtraChargeRows = useMemo(
+    () => extraChargeRows.filter(isOpenExtraChargeRow),
+    [extraChargeRows],
+  );
+  const selectedExtraOutstandingGbp = useMemo(() => {
+    if (extraAllocateMode !== "manual") return extraOutstandingGbp;
+    return Math.round(
+      selectedExtraChargeIds.reduce((sum, id) => {
+        const row = openExtraChargeRows.find((candidate) => candidate.id === id);
+        return sum + (row?.balanceGbp ?? 0);
+      }, 0) * 100,
+    ) / 100;
+  }, [extraAllocateMode, extraOutstandingGbp, openExtraChargeRows, selectedExtraChargeIds]);
   const effectiveScheduleTarget: HireSchedulePaymentTarget = showDepositRentChoice
     ? scheduleTarget
     : "rent";
   const balanceShortcutGbp = useMemo(() => {
-    if (isExtraCharges) return extraOutstandingGbp;
+    if (isExtraCharges) return selectedExtraOutstandingGbp;
     if (showDepositRentChoice && effectiveScheduleTarget === "deposit") return depositDueGbp;
     return payBalanceToDateGbp(scheduleRows, { includeDeposit: false });
   }, [
     depositDueGbp,
     effectiveScheduleTarget,
-    extraOutstandingGbp,
     isExtraCharges,
     scheduleRows,
+    selectedExtraOutstandingGbp,
     showDepositRentChoice,
   ]);
   const scheduleAllocation = useMemo(() => {
@@ -176,13 +211,26 @@ export function HirePaymentComposer({
     if (!open || !isExtraCharges) return null;
     const parsed = parseAmountInput(amount);
     if (!parsed) return null;
+    if (extraAllocateMode === "manual") {
+      if (selectedExtraChargeIds.length === 0) return null;
+      return allocateExtraChargePaymentAcrossRows(parsed, extraChargeRows, {
+        orderedRowIds: selectedExtraChargeIds,
+      });
+    }
     return allocateExtraChargePaymentAcrossRows(parsed, extraChargeRows);
-  }, [amount, extraChargeRows, isExtraCharges, open]);
+  }, [
+    amount,
+    extraAllocateMode,
+    extraChargeRows,
+    isExtraCharges,
+    open,
+    selectedExtraChargeIds,
+  ]);
   const highlightedIds = useMemo(
     () =>
       isExtraCharges
-        ? extraAllocation?.allocations.map((line) => line.rowId) ?? []
-        : scheduleAllocation?.allocations.map((line) => line.rowId) ?? [],
+        ? extraAllocation?.allocations.map((line) => line.rowId) ?? EMPTY_HIGHLIGHT_IDS
+        : scheduleAllocation?.allocations.map((line) => line.rowId) ?? EMPTY_HIGHLIGHT_IDS,
     [extraAllocation, isExtraCharges, scheduleAllocation],
   );
 
@@ -199,8 +247,19 @@ export function HirePaymentComposer({
     setSubmitError(null);
     setChosenKind(defaultApplyTo);
     setScheduleTarget(defaultHireSchedulePaymentTarget(depositDueGbp));
-    onAllocationChange?.([]);
+    setExtraAllocateMode("auto");
+    setSelectedExtraChargeIds([]);
+    onAllocationChange?.(EMPTY_HIGHLIGHT_IDS);
   }, [defaultApplyTo, defaultStaffPaymentAccountId, depositDueGbp, onAllocationChange, staffPaymentAccounts]);
+
+  useEffect(() => {
+    if (!isExtraCharges || extraAllocateMode !== "manual") return;
+    setSelectedExtraChargeIds((prev) => {
+      const next = prev.filter((id) => openExtraChargeRows.some((row) => row.id === id));
+      if (next.length === prev.length && next.every((id, i) => id === prev[i])) return prev;
+      return next;
+    });
+  }, [extraAllocateMode, isExtraCharges, openExtraChargeRows]);
 
   useEffect(() => {
     if (!showDepositRentChoice && scheduleTarget !== "rent") {
@@ -220,7 +279,7 @@ export function HirePaymentComposer({
   useEffect(() => {
     if (!open) return;
     if (!highlightedIds.length) {
-      onAllocationChange?.([]);
+      onAllocationChange?.(EMPTY_HIGHLIGHT_IDS);
       return;
     }
     const highlightTimer = setTimeout(() => {
@@ -236,6 +295,8 @@ export function HirePaymentComposer({
     paymentMethod !== "bank_transfer" ||
     paidOn !== ukTodayYmd() ||
     (allowAllocationChoice && chosenKind !== defaultApplyTo) ||
+    (isExtraCharges &&
+      (extraAllocateMode !== "auto" || selectedExtraChargeIds.length > 0)) ||
     (showDepositRentChoice &&
       !isExtraCharges &&
       scheduleTarget !== defaultHireSchedulePaymentTarget(depositDueGbp));
@@ -265,8 +326,16 @@ export function HirePaymentComposer({
       return;
     }
     if (isExtraCharges) {
-      if (parsed - extraOutstandingGbp > 0.005) {
-        setSubmitError("Amount exceeds outstanding extra charges.");
+      if (extraAllocateMode === "manual" && selectedExtraChargeIds.length === 0) {
+        setSubmitError("Select at least one extra charge to allocate this payment to.");
+        return;
+      }
+      if (parsed - selectedExtraOutstandingGbp > 0.005) {
+        setSubmitError(
+          extraAllocateMode === "manual"
+            ? `Amount exceeds the selected total (${formatGbp(selectedExtraOutstandingGbp)}). Reduce the amount or select more charges.`
+            : "Amount exceeds outstanding extra charges.",
+        );
         return;
       }
       if (!extraAllocation?.allocations.length) {
@@ -288,6 +357,9 @@ export function HirePaymentComposer({
         paymentReference: reference,
         allocationKind: effectiveKind,
         ...(!isExtraCharges ? { scheduleTarget: effectiveScheduleTarget } : {}),
+        ...(isExtraCharges && extraAllocateMode === "manual"
+          ? { selectedExtraChargeLineItemIds: selectedExtraChargeIds }
+          : {}),
         ...(asDriver
           ? {}
           : {
@@ -310,8 +382,23 @@ export function HirePaymentComposer({
 
   const fieldsDisabled = busy || submitPending || !canSubmit;
   const parsedAmount = parseAmountInput(amount);
+  const manualNeedsSelection =
+    isExtraCharges &&
+    extraAllocateMode === "manual" &&
+    selectedExtraChargeIds.length === 0 &&
+    parsedAmount != null;
+  const manualAmountOverSelected =
+    isExtraCharges &&
+    extraAllocateMode === "manual" &&
+    selectedExtraChargeIds.length > 0 &&
+    parsedAmount != null &&
+    parsedAmount - selectedExtraOutstandingGbp > 0.005;
   const submitDisabled = isExtraCharges
-    ? fieldsDisabled || parsedAmount == null || !extraAllocation?.allocations.length
+    ? fieldsDisabled ||
+      parsedAmount == null ||
+      (extraAllocateMode === "manual" && selectedExtraChargeIds.length === 0) ||
+      (parsedAmount != null && parsedAmount - selectedExtraOutstandingGbp > 0.005) ||
+      !extraAllocation?.allocations.length
     : fieldsDisabled || !scheduleAllocation?.allocations.length;
   const triggerDisabled =
     fieldsDisabled ||
@@ -324,9 +411,13 @@ export function HirePaymentComposer({
   if (!canSubmit) return null;
 
   const description = isExtraCharges
-    ? asDriver
-      ? "Enter the amount paid — we allocate it to outstanding extra charges in date order. The company will review this before it is marked paid."
-      : "Enter the amount paid — we allocate it to outstanding extra charges in date order, including partial cover on the last charge."
+    ? extraAllocateMode === "manual"
+      ? asDriver
+        ? "Choose which extra charges this payment covers (in order), then enter the amount. The company will review this before it is marked paid."
+        : "Choose which extra charges this payment covers (in order), then enter the amount — including partial cover on the last selected charge."
+      : asDriver
+        ? "Enter the amount paid — we allocate it to outstanding extra charges in date order. The company will review this before it is marked paid."
+        : "Enter the amount paid — we allocate it to outstanding extra charges in date order, including partial cover on the last charge."
     : showDepositRentChoice
       ? "Choose whether this payment counts towards the deposit or rent, then enter the amount."
       : "Enter the amount paid — we allocate it to outstanding periods in date order, including future periods where the payment covers them in full or in part.";
@@ -385,6 +476,8 @@ export function HirePaymentComposer({
             ]}
             onValueChange={(value) => {
               setChosenKind(value as HirePaymentApplyTo);
+              setExtraAllocateMode("auto");
+              setSelectedExtraChargeIds([]);
               setSubmitError(null);
             }}
           />
@@ -436,6 +529,101 @@ export function HirePaymentComposer({
         </FormModalField>
       ) : null}
 
+      {isExtraCharges && openExtraChargeRows.length > 1 ? (
+        <FormModalField label="Allocate extra charges">
+          <div className="flex flex-col gap-2 rounded-lg border border-rph-border bg-rph-page px-3 py-3">
+            <label className="flex cursor-pointer items-start gap-2.5 text-sm text-rph-fg">
+              <input
+                type="radio"
+                className="mt-0.5"
+                name="hire-extra-allocate-mode"
+                checked={extraAllocateMode === "auto"}
+                disabled={fieldsDisabled}
+                onChange={() => {
+                  setExtraAllocateMode("auto");
+                  setSelectedExtraChargeIds([]);
+                  setSubmitError(null);
+                }}
+              />
+              <span>
+                <span className="font-medium">Auto (oldest first)</span>
+                <span className="mt-0.5 block text-xs text-rph-fg-secondary">
+                  Pour across all open extras in date order
+                </span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2.5 text-sm text-rph-fg">
+              <input
+                type="radio"
+                className="mt-0.5"
+                name="hire-extra-allocate-mode"
+                checked={extraAllocateMode === "manual"}
+                disabled={fieldsDisabled}
+                onChange={() => {
+                  setExtraAllocateMode("manual");
+                  setSubmitError(null);
+                }}
+              />
+              <span>
+                <span className="font-medium">Choose charges</span>
+                <span className="mt-0.5 block text-xs text-rph-fg-secondary">
+                  Pick which charges to cover — selection order is the pour order
+                </span>
+              </span>
+            </label>
+          </div>
+        </FormModalField>
+      ) : null}
+
+      {isExtraCharges && extraAllocateMode === "manual" ? (
+        <FormModalField label="Charges to cover">
+          <div className="flex flex-col gap-2 rounded-lg border border-rph-border bg-rph-page px-3 py-3">
+            {openExtraChargeRows.length === 0 ? (
+              <p className="text-sm text-rph-fg-secondary">No open extra charges.</p>
+            ) : (
+              openExtraChargeRows.map((row) => {
+                const checked = selectedExtraChargeIds.includes(row.id);
+                const order = checked ? selectedExtraChargeIds.indexOf(row.id) + 1 : null;
+                return (
+                  <label
+                    key={row.id}
+                    className="flex cursor-pointer items-start gap-2.5 text-sm text-rph-fg"
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={checked}
+                      disabled={fieldsDisabled}
+                      onChange={() => {
+                        setSelectedExtraChargeIds((prev) =>
+                          prev.includes(row.id)
+                            ? prev.filter((id) => id !== row.id)
+                            : [...prev, row.id],
+                        );
+                        setSubmitError(null);
+                      }}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="font-medium">
+                        {order != null ? (
+                          <span className="mr-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-rph-border bg-rph-raised px-1 text-[10px] tabular-nums text-rph-fg-secondary">
+                            {order}
+                          </span>
+                        ) : null}
+                        {extraChargeAllocationLabel(row)}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-rph-fg-secondary tabular-nums">
+                        {formatGbp(row.balanceGbp)} outstanding
+                      </span>
+                    </span>
+                  </label>
+                );
+              })
+            )}
+          </div>
+        </FormModalField>
+      ) : null}
+
       {paymentAccount ? (
         <div className="rounded-lg border border-rph-border bg-rph-page px-3 py-2 text-sm">
           <p className="font-medium text-rph-fg">Pay to: {paymentAccount.name}</p>
@@ -470,13 +658,41 @@ export function HirePaymentComposer({
         >
           Pay{" "}
           {isExtraCharges
-            ? "outstanding extras"
+            ? extraAllocateMode === "manual"
+              ? "selected extras"
+              : "outstanding extras"
             : showDepositRentChoice && effectiveScheduleTarget === "deposit"
               ? "outstanding deposit"
               : "balance to date"}{" "}
           ({formatGbp(balanceShortcutGbp)})
         </button>
       </div>
+
+      {manualNeedsSelection ? (
+        <p className="rph-alert-warn text-sm">
+          Select at least one charge before submitting this payment.
+        </p>
+      ) : null}
+
+      {manualAmountOverSelected ? (
+        <div className="rph-alert-warn flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <p>
+            Selected total is {formatGbp(selectedExtraOutstandingGbp)}. Reduce the amount or select
+            more charges — leftover is not applied to unselected charges.
+          </p>
+          <button
+            type="button"
+            className="rph-btn-ghost h-9 shrink-0 px-3 text-xs"
+            disabled={fieldsDisabled || selectedExtraOutstandingGbp <= 0}
+            onClick={() => {
+              setAmount(selectedExtraOutstandingGbp.toFixed(2));
+              setSubmitError(null);
+            }}
+          >
+            Use selected total ({formatGbp(selectedExtraOutstandingGbp)})
+          </button>
+        </div>
+      ) : null}
 
       <FormModalField label="Payment reference (optional)">
         <input
@@ -557,6 +773,8 @@ export function HirePaymentComposer({
         onClick={() => {
           setChosenKind(defaultApplyTo);
           setScheduleTarget(defaultHireSchedulePaymentTarget(depositDueGbp));
+          setExtraAllocateMode("auto");
+          setSelectedExtraChargeIds([]);
           setOpen(true);
           if (defaultApplyTo === "extra_charges" && extraOutstandingGbp > 0.005 && !amount) {
             setAmount(extraOutstandingGbp.toFixed(2));
@@ -673,8 +891,9 @@ function AllocationPreview({
       </ul>
       {unallocatedGbp > 0.005 ? (
         <p className="rph-meta text-xs text-amber-800 dark:text-amber-200">
-          {formatGbp(unallocatedGbp)} exceeds the outstanding {kind === "extra_charges" ? "extra charges" : "sheet balance"} (
-          {formatGbp(totalOutstandingGbp)}) and will not be allocated.
+          {kind === "extra_charges"
+            ? `${formatGbp(unallocatedGbp)} is above the selected / outstanding extras (${formatGbp(totalOutstandingGbp)}) and will not be allocated. Reduce the amount or cover more charges.`
+            : `${formatGbp(unallocatedGbp)} exceeds the outstanding sheet balance (${formatGbp(totalOutstandingGbp)}) and will not be allocated.`}
         </p>
       ) : null}
     </div>

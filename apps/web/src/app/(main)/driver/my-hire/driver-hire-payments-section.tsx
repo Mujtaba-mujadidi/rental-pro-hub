@@ -21,6 +21,11 @@ export function DriverHirePaymentsSection({
   const [data, setData] = useState<HirePaymentsPageData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [highlightedRowIds, setHighlightedRowIds] = useState<string[]>([]);
+  const handleHighlightedRowIdsChange = useCallback((rowIds: string[]) => {
+    setHighlightedRowIds((prev) =>
+      prev.length === rowIds.length && prev.every((id, i) => id === rowIds[i]) ? prev : rowIds,
+    );
+  }, []);
 
   const reload = useCallback(() => {
     startTransition(async () => {
@@ -61,7 +66,7 @@ export function DriverHirePaymentsSection({
         data={data}
         chrome={chrome}
         highlightedRowIds={highlightedRowIds}
-        onHighlightedRowIdsChange={setHighlightedRowIds}
+        onHighlightedRowIdsChange={handleHighlightedRowIdsChange}
         onReload={reload}
         busy={pending}
       />

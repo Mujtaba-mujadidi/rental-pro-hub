@@ -54,6 +54,41 @@ describe("submitAllocatedHirePayment", () => {
     expect(submitStaffHirePaymentAction).toHaveBeenCalledOnce();
   });
 
+  it("passes manual extra-charge selection through to staff and driver actions", async () => {
+    const selected = ["wash-1", "admin-2"];
+    await submitAllocatedHirePayment({
+      hireGroupId: "hire-1",
+      asDriver: false,
+      payment: {
+        ...payment,
+        allocationKind: "extra_charges",
+        selectedExtraChargeLineItemIds: selected,
+      },
+    });
+    expect(recordHireDriverChargePaymentAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hireGroupId: "hire-1",
+        selectedExtraChargeLineItemIds: selected,
+      }),
+    );
+
+    await submitAllocatedHirePayment({
+      hireGroupId: "hire-1",
+      asDriver: true,
+      payment: {
+        ...payment,
+        allocationKind: "extra_charges",
+        selectedExtraChargeLineItemIds: selected,
+      },
+    });
+    expect(submitDriverExtraChargePaymentAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hireGroupId: "hire-1",
+        selectedExtraChargeLineItemIds: selected,
+      }),
+    );
+  });
+
   it("routes driver submissions to rent or extra-charge actions", async () => {
     await submitAllocatedHirePayment({
       hireGroupId: "hire-1",

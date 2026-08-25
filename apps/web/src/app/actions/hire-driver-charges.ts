@@ -36,6 +36,7 @@ import {
   extraChargeSubmitBlock,
   planExtraChargePaidAmendment,
   resolveOpenExtraChargePayment,
+  selectedExtraChargeRowIdsAreValid,
   submittedExtraChargeAllocationsAreValid,
   type OpenExtraChargePayment,
 } from "@/lib/fleet/hire-driver-charge-payment";
@@ -230,6 +231,46 @@ function parsePaymentMethod(value: string): (typeof HIRE_DEPOSIT_REFUND_METHODS)
   return (HIRE_DEPOSIT_REFUND_METHODS as readonly string[]).includes(value.trim())
     ? (value.trim() as (typeof HIRE_DEPOSIT_REFUND_METHODS)[number])
     : null;
+}
+
+/** Empty / omitted → auto FIFO. Non-empty → manual pour order (validated separately). */
+function normalizeSelectedExtraChargeLineItemIds(
+  value: string[] | null | undefined,
+): string[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  return value.map((id) => (typeof id === "string" ? id.trim() : "")).filter(Boolean);
+}
+
+function mapDriverChargeTimedPayments(
+  paymentRows: readonly {
+    id?: unknown;
+    amount_gbp?: unknown;
+    direction?: unknown;
+    payment_category?: unknown;
+    paid_at?: unknown;
+  }[],
+): Array<{ id: string; amountGbp: number; paidAt: string }> {
+  return paymentRows
+    .filter(
+      (payment) =>
+        (payment.payment_category as string | null) === "driver_charge" &&
+        (payment.direction as string | null) === "received_from_driver",
+    )
+    .map((payment) => ({
+      id: String(payment.id ?? ""),
+      amountGbp: Number(payment.amount_gbp ?? 0),
+      paidAt: (payment.paid_at as string) ?? "",
+    }))
+    .filter((payment) => payment.id && payment.paidAt && payment.amountGbp > 0);
+}
+
+function mapExtraChargeAllocationEvents(
+  eventRows: readonly { event_type?: unknown; metadata?: unknown }[],
+): Array<{ eventType: string; metadata: Record<string, unknown> | null }> {
+  return eventRows.map((event) => ({
+    eventType: String(event.event_type ?? ""),
+    metadata: (event.metadata as Record<string, unknown> | null) ?? {},
+  }));
 }
 
 export async function addHireDriverChargeAction(input: {
@@ -646,6 +687,8 @@ export async function recordHireDriverChargePaymentAction(input: {
   paidOnYmd: string;
   paymentReference?: string | null;
   notes?: string | null;
+  /** Manual allocate: open charge line ids in pour order. Server recomputes amounts. */
+  selectedExtraChargeLineItemIds?: string[] | null;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const authorized = await loadAuthorizedHireForChargeWrite(input.hireGroupId);
   if (!authorized.ok) return authorized;
@@ -678,7 +721,7 @@ export async function recordHireDriverChargePaymentAction(input: {
   if (!account.ok) return account;
 
   const supabase = await createClient();
-  const [{ data: chargeRows }, { data: receipts }] = await Promise.all([
+  const [{ data: chargeRows }, { data: receipts }, { data: eventRows }] = await Promise.all([
     supabase
       .from("vehicle_hire_driver_charge_line_items")
       .select(CHARGE_LINE_SELECT)
@@ -686,8 +729,14 @@ export async function recordHireDriverChargePaymentAction(input: {
       .eq("parent_company_id", hire.parentCompanyId),
     supabase
       .from("vehicle_hire_balance_payments")
-      .select("amount_gbp, direction, payment_category")
+      .select("id, amount_gbp, direction, payment_category, paid_at")
       .eq("hire_group_id", hire.id),
+    supabase
+      .from("vehicle_hire_group_events")
+      .select("event_type, metadata")
+      .eq("hire_group_id", hire.id)
+      .in("event_type", [...EXTRA_CHARGE_PAYMENT_EVENT_TYPES])
+      .order("created_at", { ascending: true }),
   ]);
 
   const { user } = await requireRentalCompanyArea();
@@ -704,11 +753,36 @@ export async function recordHireDriverChargePaymentAction(input: {
     return { ok: false, error: "Amount exceeds outstanding extra charges." };
   }
 
+  const timedPayments = mapDriverChargeTimedPayments(receipts ?? []);
+  const allocationEvents = mapExtraChargeAllocationEvents(eventRows ?? []);
   const tableRows = buildExtraChargePaymentTableRows({
     charges: mappedCharges,
     receipts: receiptRows,
+    timedPayments,
+    allocationEvents,
   });
-  const allocation = allocateExtraChargePaymentAcrossRows(amount, tableRows);
+  const orderedRowIds = normalizeSelectedExtraChargeLineItemIds(input.selectedExtraChargeLineItemIds);
+  if (orderedRowIds) {
+    if (!selectedExtraChargeRowIdsAreValid(orderedRowIds, tableRows)) {
+      return { ok: false, error: "Select valid open extra charges to allocate this payment to." };
+    }
+  }
+  const allocation = allocateExtraChargePaymentAcrossRows(
+    amount,
+    tableRows,
+    orderedRowIds ? { orderedRowIds } : undefined,
+  );
+  if (!allocation.allocations.length) {
+    return { ok: false, error: "No outstanding extra charges to allocate this payment to." };
+  }
+  if (amount - allocation.totalOutstandingGbp > 0.005) {
+    return {
+      ok: false,
+      error: orderedRowIds
+        ? "Amount exceeds the selected extra charges. Reduce the amount or select more charges."
+        : "Amount exceeds outstanding extra charges.",
+    };
+  }
 
   const { data: insertedPayment, error } = await supabase
     .from("vehicle_hire_balance_payments")
@@ -921,6 +995,8 @@ export async function submitDriverExtraChargePaymentAction(input: {
   hireGroupId: string;
   amountGbp: number;
   paymentReference?: string | null;
+  /** Manual allocate: open charge line ids in pour order. Server recomputes amounts. */
+  selectedExtraChargeLineItemIds?: string[] | null;
 }): Promise<{ ok: true; submissionId: string } | { ok: false; error: string }> {
   const user = await getSessionUser();
   if (!user) return { ok: false, error: "Sign in required." };
@@ -963,16 +1039,23 @@ export async function submitDriverExtraChargePaymentAction(input: {
 
   const submissionId = randomUUID();
   const paymentReference = input.paymentReference?.trim() || null;
-  const [{ data: submitChargeRows }, { data: submitReceiptRows }] = await Promise.all([
-    admin
-      .from("vehicle_hire_driver_charge_line_items")
-      .select(CHARGE_LINE_SELECT)
-      .eq("hire_group_id", hireGroupId),
-    admin
-      .from("vehicle_hire_balance_payments")
-      .select("amount_gbp, direction, payment_category")
-      .eq("hire_group_id", hireGroupId),
-  ]);
+  const [{ data: submitChargeRows }, { data: submitReceiptRows }, { data: submitEventRows }] =
+    await Promise.all([
+      admin
+        .from("vehicle_hire_driver_charge_line_items")
+        .select(CHARGE_LINE_SELECT)
+        .eq("hire_group_id", hireGroupId),
+      admin
+        .from("vehicle_hire_balance_payments")
+        .select("id, amount_gbp, direction, payment_category, paid_at")
+        .eq("hire_group_id", hireGroupId),
+      admin
+        .from("vehicle_hire_group_events")
+        .select("event_type, metadata")
+        .eq("hire_group_id", hireGroupId)
+        .in("event_type", [...EXTRA_CHARGE_PAYMENT_EVENT_TYPES])
+        .order("created_at", { ascending: true }),
+    ]);
   const submitCharges = (submitChargeRows ?? [])
     .map((row) => mapDriverChargeLineItemFromDb(row as DriverChargeLineItemDbRow))
     .filter((row): row is NonNullable<typeof row> => row != null);
@@ -984,8 +1067,31 @@ export async function submitDriverExtraChargePaymentAction(input: {
   const submitTableRows = buildExtraChargePaymentTableRows({
     charges: submitCharges,
     receipts: submitReceipts,
+    timedPayments: mapDriverChargeTimedPayments(submitReceiptRows ?? []),
+    allocationEvents: mapExtraChargeAllocationEvents(submitEventRows ?? []),
   });
-  const submitAllocation = allocateExtraChargePaymentAcrossRows(amount, submitTableRows);
+  const orderedRowIds = normalizeSelectedExtraChargeLineItemIds(input.selectedExtraChargeLineItemIds);
+  if (orderedRowIds) {
+    if (!selectedExtraChargeRowIdsAreValid(orderedRowIds, submitTableRows)) {
+      return { ok: false, error: "Select valid open extra charges to allocate this payment to." };
+    }
+  }
+  const submitAllocation = allocateExtraChargePaymentAcrossRows(
+    amount,
+    submitTableRows,
+    orderedRowIds ? { orderedRowIds } : undefined,
+  );
+  if (!submitAllocation.allocations.length) {
+    return { ok: false, error: "No outstanding extra charges to allocate this payment to." };
+  }
+  if (amount - submitAllocation.totalOutstandingGbp > 0.005) {
+    return {
+      ok: false,
+      error: orderedRowIds
+        ? "Amount exceeds the selected extra charges. Reduce the amount or select more charges."
+        : "Amount exceeds outstanding extra charges.",
+    };
+  }
   const logged = await logHireGroupEvent(admin, {
     hireGroupId,
     eventType: "driver_charge_payment_submitted",
@@ -1100,15 +1206,21 @@ export async function approveDriverExtraChargePaymentAction(
     return { ok: false, error: e instanceof Error ? e.message : "Server error." };
   }
 
-  const [{ data: chargeRows }, { data: receiptRows }] = await Promise.all([
+  const [{ data: chargeRows }, { data: receiptRows }, { data: eventRows }] = await Promise.all([
     admin
       .from("vehicle_hire_driver_charge_line_items")
       .select(CHARGE_LINE_SELECT)
       .eq("hire_group_id", hire.id),
     admin
       .from("vehicle_hire_balance_payments")
-      .select("amount_gbp, direction, payment_category")
+      .select("id, amount_gbp, direction, payment_category, paid_at")
       .eq("hire_group_id", hire.id),
+    admin
+      .from("vehicle_hire_group_events")
+      .select("event_type, metadata")
+      .eq("hire_group_id", hire.id)
+      .in("event_type", [...EXTRA_CHARGE_PAYMENT_EVENT_TYPES])
+      .order("created_at", { ascending: true }),
   ]);
   const mappedCharges = (chargeRows ?? [])
     .map((row) => mapDriverChargeLineItemFromDb(row as DriverChargeLineItemDbRow))
@@ -1121,6 +1233,8 @@ export async function approveDriverExtraChargePaymentAction(
   const tableRows = buildExtraChargePaymentTableRows({
     charges: mappedCharges,
     receipts: mappedReceipts,
+    timedPayments: mapDriverChargeTimedPayments(receiptRows ?? []),
+    allocationEvents: mapExtraChargeAllocationEvents(eventRows ?? []),
   });
   const submittedAllocations = snapshot.pending.allocations ?? [];
   const allocation = submittedExtraChargeAllocationsAreValid(

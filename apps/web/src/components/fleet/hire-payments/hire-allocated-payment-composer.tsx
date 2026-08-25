@@ -38,12 +38,16 @@ export function HireAllocatedPaymentComposer({
         outstandingGbp: payments.extraChargesOutstandingGbp,
         pendingAmountGbp: payments.extraChargePendingPayment?.amountGbp,
         allowMutate: payments.canMutateExtraCharges,
+        timedPayments: payments.extraChargeTimedPayments,
+        allocationEvents: payments.extraChargeAllocationEvents,
       }),
     [
       hireGroupId,
       payments.canMutateExtraCharges,
       payments.driverChargeLineItems,
+      payments.extraChargeAllocationEvents,
       payments.extraChargePendingPayment?.amountGbp,
+      payments.extraChargeTimedPayments,
       payments.extraChargesOutstandingGbp,
     ],
   );

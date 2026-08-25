@@ -11,12 +11,14 @@ export async function submitAllocatedHirePayment(input: {
 }): Promise<{ ok: boolean; error?: string }> {
   const allocationKind: HirePaymentApplyTo = input.payment.allocationKind;
   const scheduleTarget: HireSchedulePaymentTarget | undefined = input.payment.scheduleTarget;
+  const selectedExtraChargeLineItemIds = input.payment.selectedExtraChargeLineItemIds;
   if (input.asDriver) {
     if (allocationKind === "extra_charges") {
       return submitDriverExtraChargePaymentAction({
         hireGroupId: input.hireGroupId,
         amountGbp: input.payment.amountGbp,
         paymentReference: input.payment.paymentReference,
+        selectedExtraChargeLineItemIds,
       });
     }
     return submitDriverHirePaymentAction({
@@ -38,6 +40,7 @@ export async function submitAllocatedHirePayment(input: {
       paymentAccountId: input.payment.paymentAccountId,
       paidOnYmd,
       notes: input.payment.notes,
+      selectedExtraChargeLineItemIds,
     });
   }
   return submitStaffHirePaymentAction({

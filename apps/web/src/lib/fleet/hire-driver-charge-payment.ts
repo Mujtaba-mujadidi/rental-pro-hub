@@ -221,12 +221,14 @@ export function extraChargeAllocationLabel(
 }
 
 /**
- * Pour a payment across outstanding extra-charge lines, oldest first (same FIFO as rent).
- * Paid, waived, and pending-approval lines are skipped.
+ * Pour a payment across outstanding extra-charge lines.
+ * Default order is the row list order (callers usually sort oldest first).
+ * Pass `orderedRowIds` to restrict and reorder (manual allocate).
  */
 export function allocateExtraChargePaymentAcrossRows(
   paymentAmountGbp: number,
   rows: readonly ExtraChargePaymentAllocationRow[],
+  options?: { orderedRowIds?: readonly string[] },
 ): ExtraChargePaymentAllocationResult {
   const amount = roundGbp(Math.max(0, paymentAmountGbp));
   const eligible = rows.filter(
@@ -237,13 +239,24 @@ export function allocateExtraChargePaymentAcrossRows(
       row.status !== "voided" &&
       row.status !== "pending_approval",
   );
+  const orderedIds = options?.orderedRowIds?.map((id) => id.trim()).filter(Boolean) ?? null;
+  const orderedEligible = orderedIds
+    ? orderedIds
+        .map((id) => eligible.find((row) => row.id === id))
+        .filter((row): row is ExtraChargePaymentAllocationRow => row != null)
+    : eligible;
 
   let remaining = amount;
   const allocations: ExtraChargePaymentAllocationLine[] = [];
   let totalOutstandingGbp = 0;
+  // Manual mode: outstanding is the selected open balances only.
+  const outstandingRows = orderedIds ? orderedEligible : eligible;
 
-  for (const row of eligible) {
+  for (const row of outstandingRows) {
     totalOutstandingGbp = roundGbp(totalOutstandingGbp + row.balanceGbp);
+  }
+
+  for (const row of orderedEligible) {
     if (remaining <= 0.005) continue;
 
     const allocatedGbp = roundGbp(Math.min(remaining, row.balanceGbp));
@@ -264,6 +277,32 @@ export function allocateExtraChargePaymentAcrossRows(
     unallocatedGbp: remaining,
     totalOutstandingGbp,
   };
+}
+
+/** True when every id is an open, payable extra-charge row on this hire. */
+export function selectedExtraChargeRowIdsAreValid(
+  selectedRowIds: readonly string[],
+  rows: readonly ExtraChargePaymentAllocationRow[],
+): boolean {
+  if (selectedRowIds.length === 0) return false;
+  const seen = new Set<string>();
+  for (const rawId of selectedRowIds) {
+    const id = typeof rawId === "string" ? rawId.trim() : "";
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    const row = rows.find((candidate) => candidate.id === id);
+    if (
+      !row ||
+      row.balanceGbp <= 0.005 ||
+      row.status === "paid" ||
+      row.status === "waived" ||
+      row.status === "voided" ||
+      row.status === "pending_approval"
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**

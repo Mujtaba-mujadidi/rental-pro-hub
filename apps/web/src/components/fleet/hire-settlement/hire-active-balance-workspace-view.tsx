@@ -53,6 +53,11 @@ export function HireActiveBalanceWorkspaceView({
   const metrics = data.activeBalanceMetrics;
   const [tab, setTab] = useState<BalanceTab>("overview");
   const [highlightedRowIds, setHighlightedRowIds] = useState<string[]>([]);
+  const handleHighlightedRowIdsChange = useCallback((rowIds: string[]) => {
+    setHighlightedRowIds((prev) =>
+      prev.length === rowIds.length && prev.every((id, i) => id === rowIds[i]) ? prev : rowIds,
+    );
+  }, []);
   const [addOpen, setAddOpen] = useState(false);
 
   const headerPeriod = activeBalanceHeaderPeriod(data.activatedAt);
@@ -215,7 +220,7 @@ export function HireActiveBalanceWorkspaceView({
               submitLabel="Record payment"
               triggerLabel="Record payment"
               triggerClassName="rph-btn-primary h-10 w-full"
-              onAllocationChange={setHighlightedRowIds}
+              onAllocationChange={handleHighlightedRowIdsChange}
               onSuccess={onReload}
             />
           ) : null}
@@ -256,7 +261,7 @@ export function HireActiveBalanceWorkspaceView({
                       submitLabel="Record payment"
                       triggerLabel="Record payment"
                       triggerClassName="hire-balance-hero-cta"
-                      onAllocationChange={setHighlightedRowIds}
+                      onAllocationChange={handleHighlightedRowIdsChange}
                       onSuccess={onReload}
                     />
                   </div>
@@ -446,7 +451,7 @@ export function HireActiveBalanceWorkspaceView({
           canRecordPayment={canRecordPayment}
           pending={false}
           onReload={onReload}
-          onAllocationChange={setHighlightedRowIds}
+          onAllocationChange={handleHighlightedRowIdsChange}
         />
       ) : null}
 
@@ -462,7 +467,7 @@ export function HireActiveBalanceWorkspaceView({
           currentlyOwedGbp={openBalanceGbp}
           headerMeta={data.vehicleVrm}
           onReload={onReload}
-          onAllocationChange={setHighlightedRowIds}
+          onAllocationChange={handleHighlightedRowIdsChange}
         />
       ) : null}
 
