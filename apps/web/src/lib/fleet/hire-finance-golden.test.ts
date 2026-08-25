@@ -687,6 +687,41 @@ describe("hire finance golden cases (Excel → Vitest)", () => {
       });
     });
 
+    it("X02b — amending charged-now paid amount reduces extras paid and vehicle income", () => {
+      const ledger = freshLedger();
+      ledger.charges = [
+        charge({
+          id: "pcn",
+          amountGbp: 30,
+          resolution: "add_to_balance",
+          createdAt: "2026-08-24T01:56:00.000Z",
+        }),
+        charge({
+          id: "later",
+          amountGbp: 50,
+          resolution: "add_to_balance",
+          createdAt: "2026-08-24T12:00:00.000Z",
+        }),
+      ];
+      ledger.timedPayments = [{ id: "pay-now", amountGbp: 10, paidAt: "2026-08-24T01:56:00.000Z" }];
+      const ui = projectHireFinanceUi(ledger);
+      expect(ui.extras.lines.find((l) => l.id === "pcn")).toMatchObject({
+        collectionStatus: "partially_paid",
+        paidGbp: 10,
+        balanceGbp: 20,
+      });
+      expect(ui.extras.lines.find((l) => l.id === "later")).toMatchObject({
+        collectionStatus: "due",
+        paidGbp: 0,
+      });
+      expectPnl(ui, {
+        rentIncomeGbp: 0,
+        driverChargeIncomeGbp: 10,
+        netHireIncomeGbp: 10,
+        extrasOutstandingGbp: 70,
+      });
+    });
+
     it("X03 — amend approved rent to £0 removes rent income", () => {
       const ledger = freshLedger();
       const row = ledger.schedule.find((r) => r.id === "rent-0801")!;

@@ -97,8 +97,9 @@ export function HireExtraChargeAmendPaymentModal({
             Amend paid amount
           </h2>
           <p className="mt-1 text-sm text-rph-fg-secondary">
-            Adjust how much of this extra charge is marked paid. Setting it to £0.00 clears the paid
-            amount. The previous value stays in the audit trail.
+            Adjust how much of this extra charge is marked paid. Any remainder stays on the hire
+            balance. Setting it to £0.00 clears the paid amount. The previous value stays in the
+            audit trail.
           </p>
         </div>
 

@@ -15,6 +15,7 @@ import { balanceRentScheduleAdjustmentLabel } from "@/lib/fleet/hire-active-bala
 import {
   buildExtraChargePaymentTableRowsFromWorkspace,
   extraChargePaymentStatusClass,
+  previewExtraChargePendingAllocation,
   type ExtraChargePaymentTableRow,
 } from "@/lib/fleet/hire-driver-charge-payment";
 import { formatGbp } from "@/lib/fleet/maintenance";
@@ -42,6 +43,11 @@ export function HireExtraChargesPanel({
     submissionId: string;
     amountGbp: number;
     paymentReference: string | null;
+    allocations?: Array<{
+      chargeLineItemId: string;
+      amountGbp: number;
+      label?: string;
+    }>;
   } | null;
   canMutate: boolean;
   canApprovePayments?: boolean;
@@ -56,6 +62,7 @@ export function HireExtraChargesPanel({
 }) {
   const [addOpen, setAddOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewRow, setReviewRow] = useState<ExtraChargePaymentTableRow | null>(null);
   const [editing, setEditing] = useState<HireDriverChargeWorkspaceRow | null>(null);
   const [voiding, setVoiding] = useState<HireDriverChargeWorkspaceRow | null>(null);
   const [history, setHistory] = useState<HireDriverChargeWorkspaceRow | null>(null);
@@ -90,6 +97,40 @@ export function HireExtraChargesPanel({
       payments?.extraChargeTimedPayments,
     ],
   );
+
+  const pendingReviewTarget = useMemo(() => {
+    if (!pendingPaymentOpen) return null;
+    const preview = previewExtraChargePendingAllocation({
+      amountGbp: pendingPaymentOpen.amountGbp,
+      rows,
+      storedAllocations: pendingPaymentOpen.allocations,
+    });
+    const focus = reviewRow;
+    const chargeLabel = focus
+      ? focus.description
+        ? `${focus.chargeTypeLabel} · ${focus.description}`
+        : focus.chargeTypeLabel
+      : "Extra charges";
+    return {
+      kind: "extra_charges" as const,
+      hireGroupId,
+      amountGbp: pendingPaymentOpen.amountGbp,
+      paymentReference: pendingPaymentOpen.paymentReference,
+      outstandingGbp,
+      focusChargeLineItemId: focus?.id,
+      title: chargeLabel,
+      chargedGbp: focus?.chargedGbp,
+      paidGbp: focus?.paidGbp,
+      balanceGbp: focus?.balanceGbp,
+      allocations: preview.allocations.map((line) => ({
+        rowId: line.rowId,
+        label: line.label,
+        allocatedGbp: line.allocatedGbp,
+        rowBalanceAfterGbp: line.rowBalanceAfterGbp,
+        fullyAllocated: line.fullyAllocated,
+      })),
+    };
+  }, [hireGroupId, outstandingGbp, pendingPaymentOpen, reviewRow, rows]);
 
   const addChargeHeaderMeta = useMemo(() => {
     const owed =
@@ -278,6 +319,7 @@ export function HireExtraChargesPanel({
                                 onVoid={() => source && setVoiding(source)}
                                 onReview={() => {
                                   setActionError(null);
+                                  setReviewRow(row);
                                   setReviewOpen(true);
                                 }}
                                 onAmend={() => {
@@ -355,21 +397,15 @@ export function HireExtraChargesPanel({
       ) : null}
 
       <HirePaymentReviewModal
-        target={
-          pendingPaymentOpen
-            ? {
-                kind: "extra_charges",
-                hireGroupId,
-                amountGbp: pendingPaymentOpen.amountGbp,
-                paymentReference: pendingPaymentOpen.paymentReference,
-                outstandingGbp,
-              }
-            : null
-        }
-        open={reviewOpen && pendingPaymentOpen != null}
-        onClose={() => setReviewOpen(false)}
+        target={pendingReviewTarget}
+        open={reviewOpen && pendingReviewTarget != null}
+        onClose={() => {
+          setReviewOpen(false);
+          setReviewRow(null);
+        }}
         onSuccess={() => {
           setReviewOpen(false);
+          setReviewRow(null);
           onReload();
         }}
       />

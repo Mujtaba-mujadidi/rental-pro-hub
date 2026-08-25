@@ -83,6 +83,21 @@ describe("realisedDriverChargeIncomeGbp", () => {
     ).toBe(40);
   });
 
+  it("drops vehicle income when a charged-now extra is amended onto the balance", () => {
+    expect(
+      realisedDriverChargeIncomeGbp({
+        charges: [{ chargeType: "administration", amountGbp: 30, resolution: "paid_now" }],
+        receipts: [{ amountGbp: 30, direction: "received_from_driver", paymentCategory: "driver_charge" }],
+      }).totalGbp,
+    ).toBe(30);
+    expect(
+      realisedDriverChargeIncomeGbp({
+        charges: [{ chargeType: "administration", amountGbp: 30, resolution: "add_to_balance" }],
+        receipts: [{ amountGbp: 10, direction: "received_from_driver", paymentCategory: "driver_charge" }],
+      }).totalGbp,
+    ).toBe(10);
+  });
+
   it("caps extra-charge receipts at billed add_to_balance", () => {
     expect(
       realisedDriverChargeIncomeGbp({

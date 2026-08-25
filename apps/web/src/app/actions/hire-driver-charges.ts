@@ -1316,8 +1316,8 @@ export async function amendExtraChargePaidAmountAction(input: {
     .filter((row): row is NonNullable<typeof row> => row != null);
   const charge = mappedCharges.find((row) => row.id === chargeLineItemId);
   if (!charge) return { ok: false, error: "Charge not found." };
-  if (charge.resolution !== "add_to_balance") {
-    return { ok: false, error: "Only balance extra charges can have payments amended." };
+  if (charge.resolution !== "add_to_balance" && charge.resolution !== "paid_now") {
+    return { ok: false, error: "Only collected extra charges can have payments amended." };
   }
 
   const timedPayments = (paymentRows ?? [])
@@ -1386,6 +1386,23 @@ export async function amendExtraChargePaidAmountAction(input: {
       },
     });
     if (!logged.ok) return logged;
+  }
+
+  if (plan.convertToAddToBalance) {
+    const { error: chargeError } = await admin
+      .from("vehicle_hire_driver_charge_line_items")
+      .update({
+        resolution: "add_to_balance",
+        balance_payment_id: null,
+      })
+      .eq("id", chargeLineItemId)
+      .eq("hire_group_id", hire.id)
+      .eq("parent_company_id", hire.parentCompanyId);
+    if (chargeError) return { ok: false, error: chargeError.message };
+
+    const remainderGbp = Math.round((plan.previousPaidGbp - plan.newPaidGbp) * 100) / 100;
+    const settled = await persistEndedSettlementDelta(hire, remainderGbp);
+    if (!settled.ok) return settled;
   }
 
   const { data: notifyGroup } = await admin

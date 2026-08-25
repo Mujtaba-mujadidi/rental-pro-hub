@@ -143,6 +143,15 @@ function pendingReviewTarget(
       outstandingGbp: data.extraChargesOutstandingGbp,
       chargedGbp: data.financialReview?.extraChargesPostedGbp,
       paidGbp: data.financialReview?.extraChargesReceivedGbp,
+      balanceGbp: data.extraChargesOutstandingGbp,
+      title: "Extra charges",
+      allocations: data.extraChargePendingPayment.allocations?.map((line) => ({
+        rowId: line.chargeLineItemId,
+        label: line.label ?? "Extra charge",
+        allocatedGbp: line.amountGbp,
+        rowBalanceAfterGbp: 0,
+        fullyAllocated: false,
+      })),
     };
   }
   const row = data.pendingScheduleRows.find((scheduleRow) => scheduleRow.id === item.scheduleRowId);

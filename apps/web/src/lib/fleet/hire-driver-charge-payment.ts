@@ -267,6 +267,46 @@ export function allocateExtraChargePaymentAcrossRows(
 }
 
 /**
+ * Rebuild the pending-payment allocation preview for staff review.
+ * Rows marked pending_approval are treated as still open so FIFO / stored splits replay correctly.
+ */
+export function previewExtraChargePendingAllocation(input: {
+  amountGbp: number;
+  rows: readonly ExtraChargePaymentAllocationRow[];
+  storedAllocations?: readonly OpenExtraChargePaymentAllocation[];
+}): ExtraChargePaymentAllocationResult {
+  const allocationRows = input.rows.map((row) => ({
+    ...row,
+    status: row.status === "pending_approval" ? ("due" as const) : row.status,
+  }));
+  const stored = input.storedAllocations ?? [];
+  if (submittedExtraChargeAllocationsAreValid(stored, allocationRows, input.amountGbp)) {
+    const allocations: ExtraChargePaymentAllocationLine[] = [];
+    let totalOutstandingGbp = 0;
+    for (const row of allocationRows) {
+      if (row.balanceGbp > 0.005) {
+        totalOutstandingGbp = roundGbp(totalOutstandingGbp + row.balanceGbp);
+      }
+    }
+    for (const line of stored) {
+      const row = allocationRows.find((item) => item.id === line.chargeLineItemId);
+      const balanceBefore = roundGbp(row?.balanceGbp ?? line.amountGbp);
+      const balanceAfter = roundGbp(Math.max(0, balanceBefore - line.amountGbp));
+      allocations.push({
+        rowId: line.chargeLineItemId,
+        label: line.label ?? (row ? extraChargeAllocationLabel(row) : "Extra charge"),
+        allocatedGbp: roundGbp(line.amountGbp),
+        rowBalanceBeforeGbp: balanceBefore,
+        rowBalanceAfterGbp: balanceAfter,
+        fullyAllocated: balanceAfter <= 0.005,
+      });
+    }
+    return { allocations, unallocatedGbp: 0, totalOutstandingGbp };
+  }
+  return allocateExtraChargePaymentAcrossRows(input.amountGbp, allocationRows);
+}
+
+/**
  * Apply approved extra-charge receipts to add_to_balance lines, oldest first.
  * `paid_now` lines are treated as already collected.
  */
@@ -710,6 +750,8 @@ export function planExtraChargePaidAmendment(input: {
       ok: true;
       previousPaidGbp: number;
       newPaidGbp: number;
+      /** Charged-now lines become add_to_balance so remaining cash and income follow receipts. */
+      convertToAddToBalance: boolean;
       paymentUpdates: Array<{
         paymentId: string;
         previousAmountGbp: number;
@@ -721,13 +763,46 @@ export function planExtraChargePaidAmendment(input: {
   const chargeId = input.chargeLineItemId.trim();
   const charge = input.charges.find((row) => row.id === chargeId);
   if (!charge) return { ok: false, error: "Charge not found." };
-  if (charge.resolution !== "add_to_balance") {
-    return { ok: false, error: "Only balance extra charges can have payments amended." };
+  if (charge.resolution !== "add_to_balance" && charge.resolution !== "paid_now") {
+    return { ok: false, error: "Only collected extra charges can have payments amended." };
   }
 
   const newPaidGbp = roundGbp(Math.max(0, input.newPaidGbp));
   if (newPaidGbp - charge.amountGbp > 0.005) {
     return { ok: false, error: "Paid amount cannot exceed the charge." };
+  }
+
+  if (charge.resolution === "paid_now") {
+    const paymentId = charge.balancePaymentId?.trim() || "";
+    const payment = paymentId ? input.payments.find((row) => row.id === paymentId) : undefined;
+    if (!paymentId || !payment) {
+      return { ok: false, error: "Could not find the charged-now payment to amend." };
+    }
+    const previousPaidGbp = roundGbp(charge.amountGbp);
+    if (Math.abs(previousPaidGbp - newPaidGbp) <= 0.005) {
+      return { ok: false, error: "Enter a different paid amount to amend this charge." };
+    }
+    if (newPaidGbp - previousPaidGbp > 0.005) {
+      return {
+        ok: false,
+        error: "Increasing paid amount is not supported here. Record a new payment instead.",
+      };
+    }
+    return {
+      ok: true,
+      previousPaidGbp,
+      newPaidGbp,
+      convertToAddToBalance: true,
+      paymentUpdates: [
+        {
+          paymentId,
+          previousAmountGbp: roundGbp(payment.amountGbp),
+          newAmountGbp: newPaidGbp,
+          allocations:
+            newPaidGbp > 0.005 ? [{ chargeLineItemId: chargeId, amountGbp: newPaidGbp }] : [],
+        },
+      ],
+    };
   }
 
   const slices = resolveExtraChargeReceiptAllocationSlices({
@@ -818,6 +893,7 @@ export function planExtraChargePaidAmendment(input: {
     ok: true,
     previousPaidGbp: currentPaidGbp,
     newPaidGbp,
+    convertToAddToBalance: false,
     paymentUpdates,
   };
 }

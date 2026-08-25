@@ -4,6 +4,7 @@ import {
   allocateExtraChargeReceiptPaymentsToLines,
   allocateExtraChargeReceiptsToLines,
   planExtraChargePaidAmendment,
+  previewExtraChargePendingAllocation,
   resolveExtraChargeReceiptAllocationSlices,
   buildExtraChargePaymentTableRows,
   buildExtraChargePaymentTableRowsFromWorkspace,
@@ -128,6 +129,66 @@ describe("allocateExtraChargePaymentAcrossRows", () => {
     ]);
     expect(result.allocations.map((line) => line.rowId)).toEqual(["due"]);
     expect(result.allocations[0]?.allocatedGbp).toBe(20);
+  });
+});
+
+describe("previewExtraChargePendingAllocation", () => {
+  it("replays stored allocations onto pending_approval rows for review", () => {
+    const preview = previewExtraChargePendingAllocation({
+      amountGbp: 10,
+      rows: [
+        {
+          id: "pcn",
+          periodLabel: "Administration",
+          chargeTypeLabel: "Administration",
+          description: "PCN challenge",
+          balanceGbp: 20,
+          status: "pending_approval",
+        },
+        {
+          id: "other",
+          periodLabel: "Damage",
+          chargeTypeLabel: "Damage",
+          description: null,
+          balanceGbp: 20,
+          status: "due",
+        },
+      ],
+      storedAllocations: [{ chargeLineItemId: "pcn", amountGbp: 10, label: "Administration · PCN challenge" }],
+    });
+    expect(preview.allocations).toHaveLength(1);
+    expect(preview.allocations[0]).toMatchObject({
+      rowId: "pcn",
+      allocatedGbp: 10,
+      rowBalanceAfterGbp: 10,
+      fullyAllocated: false,
+    });
+  });
+
+  it("falls back to FIFO including pending_approval rows", () => {
+    const preview = previewExtraChargePendingAllocation({
+      amountGbp: 10,
+      rows: [
+        {
+          id: "pcn",
+          periodLabel: "Administration",
+          chargeTypeLabel: "Administration",
+          description: "PCN challenge",
+          balanceGbp: 20,
+          status: "pending_approval",
+        },
+        {
+          id: "other",
+          periodLabel: "Damage",
+          chargeTypeLabel: "Damage",
+          description: null,
+          balanceGbp: 20,
+          status: "due",
+        },
+      ],
+    });
+    expect(preview.allocations[0]?.rowId).toBe("pcn");
+    expect(preview.allocations[0]?.allocatedGbp).toBe(10);
   });
 });
 
@@ -486,6 +547,70 @@ describe("planExtraChargePaidAmendment", () => {
       {
         paymentId: "pay40",
         previousAmountGbp: 40,
+        newAmountGbp: 0,
+        allocations: [],
+      },
+    ]);
+    expect(plan.convertToAddToBalance).toBe(false);
+  });
+
+  it("reduces a charged-now receipt and converts the line onto the balance", () => {
+    const plan = planExtraChargePaidAmendment({
+      chargeLineItemId: "pcn",
+      newPaidGbp: 10,
+      charges: [
+        charge({
+          id: "pcn",
+          amountGbp: 30,
+          resolution: "paid_now",
+          balancePaymentId: "pay-now",
+          chargedOn: "2026-08-24",
+          createdAt: "2026-08-24T01:56:00.000Z",
+        }),
+        charge({
+          id: "later",
+          amountGbp: 50,
+          chargedOn: "2026-08-24",
+          createdAt: "2026-08-24T12:00:00.000Z",
+        }),
+      ],
+      payments: [{ id: "pay-now", amountGbp: 30, paidAt: "2026-08-24T01:56:00.000Z" }],
+    });
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.previousPaidGbp).toBe(30);
+    expect(plan.newPaidGbp).toBe(10);
+    expect(plan.convertToAddToBalance).toBe(true);
+    expect(plan.paymentUpdates).toEqual([
+      {
+        paymentId: "pay-now",
+        previousAmountGbp: 30,
+        newAmountGbp: 10,
+        allocations: [{ chargeLineItemId: "pcn", amountGbp: 10 }],
+      },
+    ]);
+  });
+
+  it("clears a charged-now receipt when amended to zero", () => {
+    const plan = planExtraChargePaidAmendment({
+      chargeLineItemId: "pcn",
+      newPaidGbp: 0,
+      charges: [
+        charge({
+          id: "pcn",
+          amountGbp: 30,
+          resolution: "paid_now",
+          balancePaymentId: "pay-now",
+        }),
+      ],
+      payments: [{ id: "pay-now", amountGbp: 30, paidAt: "2026-08-24T01:56:00.000Z" }],
+    });
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.paymentUpdates).toEqual([
+      {
+        paymentId: "pay-now",
+        previousAmountGbp: 30,
         newAmountGbp: 0,
         allocations: [],
       },

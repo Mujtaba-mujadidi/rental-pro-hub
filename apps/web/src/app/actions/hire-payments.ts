@@ -155,6 +155,11 @@ export type HirePaymentsPageData = {
     submissionId: string;
     amountGbp: number;
     paymentReference: string | null;
+    allocations?: Array<{
+      chargeLineItemId: string;
+      amountGbp: number;
+      label?: string;
+    }>;
   } | null;
   /** Payment recorded/approved events used to restore per-line allocations. */
   extraChargeAllocationEvents: Array<{
@@ -834,6 +839,11 @@ async function buildPaymentsPageData(
             submissionId: extraChargePendingPayment.submissionId,
             amountGbp: extraChargePendingPayment.amountGbp,
             paymentReference: extraChargePendingPayment.paymentReference,
+            allocations: extraChargePendingPayment.allocations?.map((line) => ({
+              chargeLineItemId: line.chargeLineItemId,
+              amountGbp: line.amountGbp,
+              ...(line.label ? { label: line.label } : {}),
+            })),
           }
         : null,
       extraChargeAllocationEvents,

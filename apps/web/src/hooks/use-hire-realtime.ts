@@ -252,6 +252,36 @@ export function useHirePaymentsRealtime(
         },
         debouncedRefresh,
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "vehicle_hire_group_events",
+          filter: `hire_group_id=eq.${hireGroupId}`,
+        },
+        debouncedRefresh,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "vehicle_hire_financial_summary",
+          filter: `hire_group_id=eq.${hireGroupId}`,
+        },
+        debouncedRefresh,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "vehicle_hire_payment_allocations",
+          filter: `hire_group_id=eq.${hireGroupId}`,
+        },
+        debouncedRefresh,
+      )
       .subscribe();
 
     return () => {

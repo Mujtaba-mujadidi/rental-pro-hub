@@ -232,6 +232,11 @@ export type HireEndHirePageData = {
     submissionId: string;
     amountGbp: number;
     paymentReference: string | null;
+    allocations?: Array<{
+      chargeLineItemId: string;
+      amountGbp: number;
+      label?: string;
+    }>;
   } | null;
   extraChargesOutstandingGbp: number;
   canApprovePayments: boolean;

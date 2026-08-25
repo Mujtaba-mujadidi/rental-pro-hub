@@ -14,6 +14,14 @@ import { hirePaymentPendingApprovalAmountGbp } from "@/lib/fleet/hire-payment-di
 import { addGbp, roundGbp, subGbp } from "@/lib/fleet/hire-money";
 import { useEffect, useMemo, useState, useTransition } from "react";
 
+export type HirePaymentReviewAllocationLine = {
+  rowId: string;
+  label: string;
+  allocatedGbp: number;
+  rowBalanceAfterGbp: number;
+  fullyAllocated: boolean;
+};
+
 export type HirePaymentReviewTarget =
   | { kind: "schedule"; row: HirePaymentPageRow }
   | {
@@ -21,9 +29,15 @@ export type HirePaymentReviewTarget =
       hireGroupId: string;
       amountGbp: number;
       paymentReference: string | null;
+      /** Total outstanding extras on the hire (context only). */
       outstandingGbp: number;
+      /** Focused charge line when opened from a row action. */
+      focusChargeLineItemId?: string;
+      title?: string;
       chargedGbp?: number;
       paidGbp?: number;
+      balanceGbp?: number;
+      allocations?: readonly HirePaymentReviewAllocationLine[];
     };
 
 function scheduleSubmittedGbp(row: HirePaymentPageRow): number {
@@ -79,22 +93,48 @@ export function HirePaymentReviewModal({
         paidAfterApprove,
         balanceAfterApprove,
         paymentReference: null as string | null,
+        allocations: null as HirePaymentReviewAllocationLine[] | null,
+        hireOutstandingGbp: null as number | null,
+        allocatedToFocusGbp: null as number | null,
       };
     }
-    const chargedGbp = target.chargedGbp ?? target.outstandingGbp;
-    const paidGbp = target.paidGbp ?? roundGbp(Math.max(0, subGbp(chargedGbp, target.outstandingGbp)));
-    const paidAfterApprove = roundGbp(addGbp(paidGbp, target.amountGbp));
-    const balanceAfterApprove = roundGbp(Math.max(0, subGbp(chargedGbp, paidAfterApprove)));
+
+    const allocations = target.allocations?.length ? [...target.allocations] : null;
+    const focusId = target.focusChargeLineItemId?.trim() || null;
+    const focusAllocation = focusId
+      ? allocations?.find((line) => line.rowId === focusId) ?? null
+      : null;
+    const allocatedToFocusGbp = focusAllocation?.allocatedGbp ?? null;
+
+    const dueGbp =
+      target.chargedGbp ??
+      (focusId ? target.balanceGbp : null) ??
+      target.outstandingGbp;
+    const paidGbp =
+      target.paidGbp ??
+      roundGbp(Math.max(0, subGbp(dueGbp, target.balanceGbp ?? target.outstandingGbp)));
+    const balanceGbp = target.balanceGbp ?? target.outstandingGbp;
+
+    const appliedGbp = allocatedToFocusGbp ?? target.amountGbp;
+    const paidAfterApprove = roundGbp(addGbp(paidGbp, appliedGbp));
+    const balanceAfterApprove = roundGbp(Math.max(0, subGbp(dueGbp, paidAfterApprove)));
+
     return {
-      title: "Extra charges",
+      title: target.title?.trim() || "Extra charges",
       kindLabel: "Extra charges",
       submittedGbp: target.amountGbp,
-      dueGbp: chargedGbp,
+      dueGbp,
       paidGbp,
-      balanceGbp: target.outstandingGbp,
+      balanceGbp,
       paidAfterApprove,
       balanceAfterApprove,
       paymentReference: target.paymentReference,
+      allocations,
+      hireOutstandingGbp:
+        focusId && Math.abs(target.outstandingGbp - balanceGbp) > 0.005
+          ? target.outstandingGbp
+          : null,
+      allocatedToFocusGbp,
     };
   }, [target]);
 
@@ -165,6 +205,12 @@ export function HirePaymentReviewModal({
             <p className="mt-1 text-2xl font-semibold tabular-nums text-amber-950 dark:text-amber-100">
               {formatGbp(detail.submittedGbp)}
             </p>
+            {detail.allocatedToFocusGbp != null &&
+            Math.abs(detail.allocatedToFocusGbp - detail.submittedGbp) > 0.005 ? (
+              <p className="mt-1 text-xs text-amber-900 dark:text-amber-200">
+                {formatGbp(detail.allocatedToFocusGbp)} of this payment is allocated to this charge
+              </p>
+            ) : null}
             {detail.paymentReference ? (
               <p className="mt-1 text-xs text-amber-900 dark:text-amber-200">
                 Reference: {detail.paymentReference}
@@ -186,6 +232,34 @@ export function HirePaymentReviewModal({
               <dd className="mt-0.5 font-medium tabular-nums text-rph-fg">{formatGbp(detail.balanceGbp)}</dd>
             </div>
           </dl>
+
+          {detail.hireOutstandingGbp != null ? (
+            <p className="text-xs text-rph-fg-secondary">
+              All outstanding extras on this hire: {formatGbp(detail.hireOutstandingGbp)}
+            </p>
+          ) : null}
+
+          {detail.allocations?.length ? (
+            <div className="rounded-lg border border-rph-border bg-rph-page px-3 py-2">
+              <p className="text-xs font-medium text-rph-fg-muted">Allocation if approved</p>
+              <ul className="mt-2 space-y-1.5 text-sm">
+                {detail.allocations.map((line) => (
+                  <li key={line.rowId} className="flex items-start justify-between gap-3">
+                    <span className="min-w-0 text-rph-fg">
+                      {line.label}
+                      <span className="mt-0.5 block text-xs text-rph-fg-secondary">
+                        Balance after: {formatGbp(line.rowBalanceAfterGbp)}
+                        {line.fullyAllocated ? " · paid in full" : ""}
+                      </span>
+                    </span>
+                    <span className="shrink-0 tabular-nums font-medium text-rph-fg">
+                      {formatGbp(line.allocatedGbp)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           <p className="rounded-lg border border-rph-border bg-rph-page px-3 py-2 text-xs leading-relaxed text-rph-fg-secondary">
             If approved, paid will become {formatGbp(detail.paidAfterApprove)} and the balance will be{" "}

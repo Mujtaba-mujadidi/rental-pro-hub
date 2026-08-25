@@ -167,6 +167,80 @@ describe("mergeHireDriverChargeHistory", () => {
     expect(damageHistory.filter((row) => row.title === "Payment recorded")).toHaveLength(0);
   });
 
+  it("shows charged-now payment from the recorded audit event after amend", () => {
+    const events = mergeHireDriverChargeHistory({
+      chargeLineItemId: "pcn",
+      lifecycleEvents: [
+        {
+          id: "e1",
+          eventType: "driver_charge_added",
+          createdAt: "2026-08-24T00:56:00.000Z",
+          metadata: {
+            chargeLineItemId: "pcn",
+            amountGbp: 30,
+            chargeTypeLabel: "Administration",
+            description: "another PCN charge",
+          },
+        },
+      ],
+      charges: [
+        {
+          id: "pcn",
+          amountGbp: 30,
+          resolution: "add_to_balance",
+          chargedOn: "2026-08-24",
+          createdAt: "2026-08-24T00:56:00.000Z",
+        },
+      ],
+      payments: [
+        {
+          id: "pay-now",
+          amountGbp: 10,
+          paidAt: "2026-08-24T12:00:00.000Z",
+          paymentMethod: "bank_transfer",
+          paymentReference: null,
+          paymentAccountName: "Regal car hire limited",
+          notes: "Extra charge collected when posted (charged now).",
+        },
+      ],
+      paymentLifecycleEvents: [
+        {
+          id: "rec1",
+          eventType: "driver_charge_payment_recorded",
+          createdAt: "2026-08-24T00:56:00.000Z",
+          metadata: {
+            balancePaymentId: "pay-now",
+            amountGbp: 30,
+            paymentMethod: "bank_transfer",
+            paymentAccountName: "Regal car hire limited",
+            allocations: [{ chargeLineItemId: "pcn", amountGbp: 30 }],
+          },
+        },
+        {
+          id: "amd1",
+          eventType: "driver_charge_payment_amended",
+          createdAt: "2026-08-25T10:14:00.000Z",
+          metadata: {
+            chargeLineItemId: "pcn",
+            balancePaymentId: "pay-now",
+            previousPaidGbp: 30,
+            newPaidGbp: 10,
+            amountGbp: 10,
+            reason: "Only £10 was actually collected",
+            allocations: [{ chargeLineItemId: "pcn", amountGbp: 10 }],
+          },
+        },
+      ],
+    });
+
+    const recorded = events.find((row) => row.title === "Payment recorded");
+    const amended = events.find((row) => row.title === "Payment amended");
+    expect(recorded?.detailLines[0]).toBe("Amount: £30.00");
+    expect(recorded?.detailLines.some((line) => line.includes("01:56"))).toBe(true);
+    expect(amended?.detailLines[0]).toBe("Changed from £30.00 to £10.00");
+    expect(amended?.body).toBe("Only £10 was actually collected");
+  });
+
   it("does not attribute a pre-charge payment to a charge in history", () => {
     const events = mergeHireDriverChargeHistory({
       chargeLineItemId: "pco",

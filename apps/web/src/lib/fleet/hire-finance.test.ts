@@ -75,4 +75,34 @@ describe("computeHireExtraChargeLineMoney", () => {
       "partially_paid",
     );
   });
+
+  it("treats an amended charged-now line as partially paid against the remaining receipt", () => {
+    const result = computeHireExtraChargeLineMoney({
+      charges: [
+        charge({
+          id: "pcn",
+          amountGbp: 30,
+          resolution: "add_to_balance",
+          createdAt: "2026-08-24T01:56:00.000Z",
+        }),
+      ],
+      timedPayments: [{ id: "pay-now", amountGbp: 10, paidAt: "2026-08-24T01:56:00.000Z" }],
+      allocationEvents: [
+        {
+          eventType: "driver_charge_payment_amended",
+          metadata: {
+            balancePaymentId: "pay-now",
+            allocations: [{ chargeLineItemId: "pcn", amountGbp: 10 }],
+          },
+        },
+      ],
+    });
+    expect(result.paidGbp).toBe(10);
+    expect(result.outstandingGbp).toBe(20);
+    expect(result.lines[0]).toMatchObject({
+      collectionStatus: "partially_paid",
+      paidGbp: 10,
+      balanceGbp: 20,
+    });
+  });
 });

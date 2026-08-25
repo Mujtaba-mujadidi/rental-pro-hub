@@ -137,3 +137,26 @@ alter table public.vehicle_hire_driver_charge_line_items
 
 create index if not exists vehicle_hire_driver_charge_line_items_collection_idx
   on public.vehicle_hire_driver_charge_line_items (hire_group_id, collection_status);
+
+alter table public.vehicle_hire_financial_summary replica identity full;
+alter table public.vehicle_hire_payment_allocations replica identity full;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'vehicle_hire_financial_summary'
+  ) then
+    alter publication supabase_realtime add table public.vehicle_hire_financial_summary;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'vehicle_hire_payment_allocations'
+  ) then
+    alter publication supabase_realtime add table public.vehicle_hire_payment_allocations;
+  end if;
+end $$;
