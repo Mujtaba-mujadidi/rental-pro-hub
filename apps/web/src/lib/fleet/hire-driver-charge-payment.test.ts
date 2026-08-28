@@ -756,21 +756,39 @@ describe("resolveExtraChargeReceiptAllocationSlices amended metadata", () => {
   });
 });
 
-describe("extra charge canEdit", () => {
-  it("canEdit is false once paid or pending", () => {
+describe("extra charge canEdit and canVoid", () => {
+  it("canEdit and canVoid are false once paid or pending", () => {
     const unpaid = buildExtraChargePaymentTableRows({
       charges: [charge({ id: "a", amountGbp: 40, chargedOn: "2026-08-11" })],
       receipts: [],
       allowMutate: true,
     });
     expect(unpaid[0]?.canEdit).toBe(true);
+    expect(unpaid[0]?.canVoid).toBe(true);
 
     const paid = buildExtraChargePaymentTableRows({
       charges: [charge({ id: "a", amountGbp: 40, chargedOn: "2026-08-11" })],
       receipts: [{ amountGbp: 40, direction: "received_from_driver", paymentCategory: "driver_charge" }],
       allowMutate: true,
     });
-    expect(paid[0]).toMatchObject({ status: "paid", canEdit: false, canMutate: true });
+    expect(paid[0]).toMatchObject({
+      status: "paid",
+      canEdit: false,
+      canVoid: false,
+      canMutate: true,
+    });
+
+    const partial = buildExtraChargePaymentTableRows({
+      charges: [charge({ id: "a", amountGbp: 40, chargedOn: "2026-08-11" })],
+      receipts: [{ amountGbp: 15, direction: "received_from_driver", paymentCategory: "driver_charge" }],
+      allowMutate: true,
+    });
+    expect(partial[0]).toMatchObject({
+      status: "partially_paid",
+      canEdit: false,
+      canVoid: false,
+      canMutate: true,
+    });
 
     const pending = buildExtraChargePaymentTableRows({
       charges: [charge({ id: "a", amountGbp: 40, chargedOn: "2026-08-11" })],
@@ -778,6 +796,11 @@ describe("extra charge canEdit", () => {
       pendingAmountGbp: 40,
       allowMutate: true,
     });
-    expect(pending[0]).toMatchObject({ status: "pending_approval", canEdit: false, canMutate: true });
+    expect(pending[0]).toMatchObject({
+      status: "pending_approval",
+      canEdit: false,
+      canVoid: false,
+      canMutate: true,
+    });
   });
 });

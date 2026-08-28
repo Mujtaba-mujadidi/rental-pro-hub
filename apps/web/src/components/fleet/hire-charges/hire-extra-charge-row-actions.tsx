@@ -44,7 +44,7 @@ export function HireExtraChargeRowActions({
   onAmend: () => void;
 }) {
   const canReviewRow = canApprove && row.status === "pending_approval";
-  const canVoidRow = canMutate && row.canMutate;
+  const canVoidRow = canMutate && row.canVoid;
   const canEditRow = canMutate && row.canEdit;
   const canAmendPaid =
     canApprove &&

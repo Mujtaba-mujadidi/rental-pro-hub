@@ -4,6 +4,7 @@ import {
   parseStaffManualChargeResolution,
   staffManualChargeMutationBlock,
   staffManualExtraChargeEditBlock,
+  staffManualExtraChargeVoidBlock,
 } from "./hire-driver-charge-mutation";
 
 describe("staffManualChargeMutationBlock", () => {
@@ -166,12 +167,32 @@ describe("staffManualExtraChargeEditBlock", () => {
   it("blocks edit when the charge already has approved paid money", () => {
     expect(
       staffManualExtraChargeEditBlock({ paidGbp: 40, paymentPendingApproval: false }),
-    ).toMatch(/approved payment/i);
+    ).toMatch(/Amend the paid amount to £0 before editing/i);
   });
 
   it("allows edit when unpaid and not pending", () => {
     expect(
       staffManualExtraChargeEditBlock({ paidGbp: 0, paymentPendingApproval: false }),
+    ).toBeNull();
+  });
+});
+
+describe("staffManualExtraChargeVoidBlock", () => {
+  it("blocks void when a payment is pending approval", () => {
+    expect(
+      staffManualExtraChargeVoidBlock({ paidGbp: 0, paymentPendingApproval: true }),
+    ).toMatch(/pending approval/i);
+  });
+
+  it("blocks void when the charge already has approved paid money", () => {
+    expect(
+      staffManualExtraChargeVoidBlock({ paidGbp: 30, paymentPendingApproval: false }),
+    ).toMatch(/Amend the paid amount to £0 before voiding/i);
+  });
+
+  it("allows void when unpaid and not pending", () => {
+    expect(
+      staffManualExtraChargeVoidBlock({ paidGbp: 0, paymentPendingApproval: false }),
     ).toBeNull();
   });
 });

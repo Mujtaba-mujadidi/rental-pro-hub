@@ -17,6 +17,7 @@ import {
   parseStaffManualChargeResolution,
   staffManualChargeMutationBlock,
   staffManualExtraChargeEditBlock,
+  staffManualExtraChargeVoidBlock,
 } from "@/lib/fleet/hire-driver-charge-mutation";
 import {
   mergeHireDriverChargeHistory,
@@ -641,6 +642,53 @@ export async function voidHireDriverChargeAction(input: {
     balancePaymentId: mapped.balancePaymentId ?? null,
   });
   if (mutationBlock) return { ok: false, error: mutationBlock };
+
+  const [{ data: allChargeRows }, { data: receiptRowsForVoid }, { data: eventRowsForVoid }] =
+    await Promise.all([
+      supabase
+        .from("vehicle_hire_driver_charge_line_items")
+        .select(CHARGE_LINE_SELECT)
+        .eq("hire_group_id", hire.id)
+        .eq("parent_company_id", hire.parentCompanyId),
+      supabase
+        .from("vehicle_hire_balance_payments")
+        .select("id, amount_gbp, direction, payment_category, paid_at")
+        .eq("hire_group_id", hire.id),
+      supabase
+        .from("vehicle_hire_group_events")
+        .select("event_type, metadata")
+        .eq("hire_group_id", hire.id)
+        .in("event_type", [...EXTRA_CHARGE_PAYMENT_EVENT_TYPES])
+        .order("created_at", { ascending: true }),
+    ]);
+  const voidSnapshot = await extraChargePaymentSnapshot(hire.id);
+  const allMappedCharges = (allChargeRows ?? [])
+    .map((chargeRow) => mapDriverChargeLineItemFromDb(chargeRow as DriverChargeLineItemDbRow))
+    .filter((chargeRow): chargeRow is NonNullable<typeof chargeRow> => chargeRow != null);
+  const voidRows = buildExtraChargePaymentTableRows({
+    charges: allMappedCharges,
+    receipts: (receiptRowsForVoid ?? []).map((payment) => ({
+      amountGbp: Number(payment.amount_gbp ?? 0),
+      direction: (payment.direction as string | null) ?? null,
+      paymentCategory: (payment.payment_category as string | null) ?? "settlement",
+    })),
+    timedPayments: mapDriverChargeTimedPayments(receiptRowsForVoid ?? []),
+    allocationEvents: mapExtraChargeAllocationEvents(eventRowsForVoid ?? []),
+    pendingAmountGbp: voidSnapshot.pending?.amountGbp,
+  });
+  const voidRow = voidRows.find((candidate) => candidate.id === mapped.id);
+  const pendingCoversCharge =
+    voidRow?.status === "pending_approval" ||
+    Boolean(
+      voidSnapshot.pending?.allocations?.some(
+        (line) => line.chargeLineItemId === mapped.id,
+      ),
+    );
+  const voidBlock = staffManualExtraChargeVoidBlock({
+    paidGbp: voidRow?.paidGbp ?? 0,
+    paymentPendingApproval: pendingCoversCharge,
+  });
+  if (voidBlock) return { ok: false, error: voidBlock };
 
   const { error: updateError } = await supabase
     .from("vehicle_hire_driver_charge_line_items")

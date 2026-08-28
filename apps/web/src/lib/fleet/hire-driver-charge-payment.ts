@@ -65,6 +65,8 @@ export type ExtraChargePaymentTableRow = {
   canMutate: boolean;
   /** Edit charge fields — blocked once paid or pending approval. */
   canEdit: boolean;
+  /** Void charge — blocked once paid or pending approval (clear money first). */
+  canVoid: boolean;
 };
 
 function roundGbp(n: number): number {
@@ -668,6 +670,13 @@ export function buildExtraChargePaymentTableRows(input: {
         !item.balancePaymentId &&
         !voided,
       canEdit:
+        input.allowMutate === true &&
+        item.sourceKind === "staff_manual" &&
+        !item.balancePaymentId &&
+        !voided &&
+        paidGbp <= 0.005 &&
+        status !== "pending_approval",
+      canVoid:
         input.allowMutate === true &&
         item.sourceKind === "staff_manual" &&
         !item.balancePaymentId &&

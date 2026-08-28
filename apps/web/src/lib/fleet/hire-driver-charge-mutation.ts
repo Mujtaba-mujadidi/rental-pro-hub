@@ -74,7 +74,24 @@ export function staffManualExtraChargeEditBlock(input: {
     return "A payment is pending approval against this charge. Reject it before editing.";
   }
   if (Number(input.paidGbp) > 0.005) {
-    return "This charge has an approved payment. Amend the paid amount or void the charge instead of editing.";
+    return "This charge has an approved payment. Amend the paid amount to £0 before editing.";
+  }
+  return null;
+}
+
+/**
+ * Block void while approved money still sits on the charge, or while a pending
+ * submission covers it. Clear paid (Amend) / reject pending first, then void.
+ */
+export function staffManualExtraChargeVoidBlock(input: {
+  paidGbp: number;
+  paymentPendingApproval: boolean;
+}): string | null {
+  if (input.paymentPendingApproval) {
+    return "A payment is pending approval against this charge. Reject it before voiding.";
+  }
+  if (Number(input.paidGbp) > 0.005) {
+    return "This charge has an approved payment. Amend the paid amount to £0 before voiding.";
   }
   return null;
 }
