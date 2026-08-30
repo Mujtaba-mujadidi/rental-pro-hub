@@ -1,3 +1,5 @@
+import type { RequiredVehicleDocType } from "@/lib/fleet/vehicles";
+
 /** Raw file size cap per file before server-side PDF compression. */
 export const VEHICLE_DOCUMENT_UPLOAD_MAX_FILE_BYTES = 12 * 1024 * 1024;
 
@@ -5,6 +7,22 @@ export const VEHICLE_DOCUMENT_UPLOAD_MAX_FILE_BYTES = 12 * 1024 * 1024;
 export const VEHICLE_DOCUMENT_UPLOAD_MAX_REQUEST_BYTES = 12 * 1024 * 1024;
 
 export const VEHICLE_DOCUMENT_UPLOAD_MAX_LABEL = "12 MB";
+
+export type VehicleDocUploadErrors = Partial<Record<RequiredVehicleDocType, string>>;
+
+export function nextVehicleDocUploadErrors(
+  prev: VehicleDocUploadErrors,
+  docType: RequiredVehicleDocType,
+  message: string | null,
+): VehicleDocUploadErrors {
+  if (!message) {
+    if (!prev[docType]) return prev;
+    const next = { ...prev };
+    delete next[docType];
+    return next;
+  }
+  return { ...prev, [docType]: message };
+}
 
 export function formatVehicleDocumentUploadBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

@@ -28,7 +28,11 @@ import {
   type RequiredVehicleDocType,
   type VehicleStatus,
 } from "@/lib/fleet/vehicles";
-import { validateVehicleDocumentUploadFiles } from "@/lib/fleet/vehicle-document-upload-limits";
+import {
+  nextVehicleDocUploadErrors,
+  validateVehicleDocumentUploadFiles,
+  type VehicleDocUploadErrors,
+} from "@/lib/fleet/vehicle-document-upload-limits";
 import { VehicleDocAddMenu } from "./vehicle-doc-add-menu";
 
 const STEP_LABELS = ["Basics", "Specs", "Documents", "Purchase", "Review"] as const;
@@ -179,6 +183,7 @@ export function AddVehicleModal({
   const [step, setStep] = useState(0);
   const [fields, setFields] = useState<VehicleDraftFields>(() => emptyFields(primarySub));
   const [bundles, setBundles] = useState<DocBundles>(() => emptyBundles());
+  const [docUploadErrors, setDocUploadErrors] = useState<VehicleDocUploadErrors>({});
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodRow[]>([]);
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccountRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -247,6 +252,7 @@ export function AddVehicleModal({
       setStep(Math.min(typeof s.step === "number" ? s.step : 0, maxStep));
       setFields(mergedFields);
       setBundles(emptyBundles());
+      setDocUploadErrors({});
       setError(
         s.pendingMeta?.length
           ? "Draft restored. Re-attach MOT / logbook / PHV/Taxi licence paper on the Documents step — files are not kept in drafts."
@@ -281,6 +287,7 @@ export function AddVehicleModal({
     onClose: () => onOpenChange(false),
     onAfterClear: () => {
       setBundles(emptyBundles());
+      setDocUploadErrors({});
     },
   });
 
@@ -295,16 +302,20 @@ export function AddVehicleModal({
     return true;
   }
 
+  function setDocUploadError(docType: RequiredVehicleDocType, message: string | null) {
+    setDocUploadErrors((prev) => nextVehicleDocUploadErrors(prev, docType, message));
+  }
+
   function addFiles(docType: RequiredVehicleDocType, fileList: FileList | null) {
     if (!fileList?.length) return;
     const files = Array.from(fileList);
     const nextFiles = [...bundles[docType].files, ...files];
     const sizeCheck = validateVehicleDocumentUploadFiles(nextFiles);
     if (!sizeCheck.ok) {
-      setError(sizeCheck.error);
+      setDocUploadError(docType, sizeCheck.error);
       return;
     }
-    setError(null);
+    setDocUploadError(docType, null);
     setBundles((prev) => ({
       ...prev,
       [docType]: { files: nextFiles },
@@ -312,6 +323,7 @@ export function AddVehicleModal({
   }
 
   function clearBundle(docType: RequiredVehicleDocType) {
+    setDocUploadError(docType, null);
     setBundles((prev) => ({ ...prev, [docType]: { files: [] } }));
   }
 
@@ -335,7 +347,8 @@ export function AddVehicleModal({
         if (!bundle.files.length) continue;
         const sizeCheck = validateVehicleDocumentUploadFiles(bundle.files);
         if (!sizeCheck.ok) {
-          setError(`${VEHICLE_DOC_TYPE_LABELS[docType]}: ${sizeCheck.error}`);
+          setDocUploadError(docType, sizeCheck.error);
+          setStep(2);
           return;
         }
       }
@@ -383,6 +396,7 @@ export function AddVehicleModal({
 
       clearAfterSuccess();
       setBundles(emptyBundles());
+      setDocUploadErrors({});
       setSaveOverlay(null);
       onOpenChange(false);
       onCreated?.({
@@ -705,6 +719,11 @@ export function AddVehicleModal({
                       <li key={`${f.name}-${i}`}>{f.name}</li>
                     ))}
                   </ul>
+                ) : null}
+                {docUploadErrors[docType] ? (
+                  <p className="rph-alert-error text-sm" role="alert">
+                    {docUploadErrors[docType]}
+                  </p>
                 ) : null}
               </div>
             );

@@ -35,7 +35,11 @@ import {
   type VehicleStatus,
   type VehicleTransferRow,
 } from "@/lib/fleet/vehicles";
-import { validateVehicleDocumentUploadFiles } from "@/lib/fleet/vehicle-document-upload-limits";
+import {
+  nextVehicleDocUploadErrors,
+  validateVehicleDocumentUploadFiles,
+  type VehicleDocUploadErrors,
+} from "@/lib/fleet/vehicle-document-upload-limits";
 import { vehicleDocumentHistoryLabel } from "@/lib/fleet/vehicle-historic-access";
 import {
   openTransferRequirementForVehicleDocType,
@@ -363,6 +367,7 @@ export function VehicleDetailsView({
   const [editSection, setEditSection] = useState<EditSection | null>(null);
   const [discardConfirm, setDiscardConfirm] = useState(false);
   const [uploadBundles, setUploadBundles] = useState<DocUploadBundles>(emptyUploadBundles);
+  const [docUploadErrors, setDocUploadErrors] = useState<VehicleDocUploadErrors>({});
   const [transferOpen, setTransferOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [removeDocConfirm, setRemoveDocConfirm] = useState<{ id: string; label: string } | null>(null);
@@ -458,16 +463,20 @@ export function VehicleDetailsView({
     });
   }
 
+  function setDocUploadError(docType: RequiredVehicleDocType, message: string | null) {
+    setDocUploadErrors((prev) => nextVehicleDocUploadErrors(prev, docType, message));
+  }
+
   function addUploadFiles(docType: RequiredVehicleDocType, fileList: FileList | null) {
     if (!fileList?.length) return;
     const files = Array.from(fileList);
     const nextFiles = [...uploadBundles[docType].files, ...files];
     const sizeCheck = validateVehicleDocumentUploadFiles(nextFiles);
     if (!sizeCheck.ok) {
-      setError(sizeCheck.error);
+      setDocUploadError(docType, sizeCheck.error);
       return;
     }
-    setError(null);
+    setDocUploadError(docType, null);
     setUploadBundles((prev) => ({
       ...prev,
       [docType]: { files: nextFiles },
@@ -475,6 +484,7 @@ export function VehicleDetailsView({
   }
 
   function clearUploadBundle(docType: RequiredVehicleDocType) {
+    setDocUploadError(docType, null);
     setUploadBundles((prev) => ({ ...prev, [docType]: { files: [] } }));
   }
 
@@ -498,10 +508,10 @@ export function VehicleDetailsView({
     }
     const sizeCheck = validateVehicleDocumentUploadFiles(bundle.files);
     if (!sizeCheck.ok) {
-      setError(sizeCheck.error);
+      setDocUploadError(docType, sizeCheck.error);
       return;
     }
-    setError(null);
+    setDocUploadError(docType, null);
     const fd = new FormData();
     fd.set("vehicle_id", vehicle.id);
     fd.set("doc_type", docType);
@@ -519,14 +529,20 @@ export function VehicleDetailsView({
       try {
         const res = await uploadVehicleDocumentAction(fd);
         if (!res.ok) {
-          setError(res.error);
+          setDocUploadError(docType, res.error);
+          setDocUploadExpiryConfirm(null);
           return;
         }
+        setDocUploadError(docType, null);
         clearUploadBundle(docType);
         setDocUploadExpiryConfirm(null);
         await refresh();
       } catch (error) {
-        setError(error instanceof Error ? error.message : "Could not upload document.");
+        setDocUploadError(
+          docType,
+          error instanceof Error ? error.message : "Could not upload document.",
+        );
+        setDocUploadExpiryConfirm(null);
       }
     });
   }
@@ -846,10 +862,15 @@ export function VehicleDetailsView({
                                 : undefined
                             }
                             onFiles={canManage ? (files) => addUploadFiles(docType, files) : undefined}
-                            onError={setError}
+                            onError={(message) => setDocUploadError(docType, message)}
                           />
                         </div>
                       </div>
+                      {docUploadErrors[docType] ? (
+                        <p className="rph-alert-error mt-3 text-sm" role="alert">
+                          {docUploadErrors[docType]}
+                        </p>
+                      ) : null}
                       {canManage && ready ? (
                         <div className="mt-3 flex flex-wrap items-center gap-2">
                           <ul className="rph-meta flex-1">
