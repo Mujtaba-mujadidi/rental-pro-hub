@@ -19,6 +19,7 @@ import {
   type VehicleTransferRow,
 } from "@/lib/fleet/vehicles";
 import { prepareVehicleDocumentPdf } from "@/lib/fleet/vehicle-document-pdf";
+import { validateVehicleDocumentUploadFiles } from "@/lib/fleet/vehicle-document-upload-limits";
 import { getVehicleWorkspaceShell, type VehicleWorkspaceShellResult } from "@/lib/fleet/load-vehicle-workspace-shell";
 import {
   getCachedVehicleSwitcherList,
@@ -382,173 +383,185 @@ export async function uploadVehicleDocumentAction(formData: FormData): Promise<V
   const parentCompanyId = profile.company_id?.trim();
   if (!parentCompanyId) return { ok: false, error: "No active company." };
 
-  const vehicleId = nullIfEmpty(formData.get("vehicle_id"));
-  let docTypeRaw = nullIfEmpty(formData.get("doc_type")) ?? "other";
-  if (!vehicleId) return { ok: false, error: "Missing vehicle." };
-  if (!isVehicleDocType(docTypeRaw)) return { ok: false, error: "Invalid document type." };
-  // Normalize legacy keys to the canonical PHV/Taxi licence paper type.
-  if (docTypeRaw === "pco_paper" || docTypeRaw === "phv_licence") {
-    docTypeRaw = "phv_taxi_licence_paper";
-  }
-
-  const collected: File[] = [];
-  const multi = formData.getAll("files");
-  for (const entry of multi) {
-    if (entry instanceof File && entry.size > 0) collected.push(entry);
-  }
-  const single = formData.get("file");
-  if (single instanceof File && single.size > 0) collected.push(single);
-
-  if (!collected.length) return { ok: false, error: "Choose a PDF or one or more images." };
-
-  const MAX_INPUT = 12 * 1024 * 1024;
-  for (const file of collected) {
-    if (file.size > MAX_INPUT) {
-      return { ok: false, error: `${file.name || "A file"} is over 12 MB before compression.` };
+  try {
+    const vehicleId = nullIfEmpty(formData.get("vehicle_id"));
+    let docTypeRaw = nullIfEmpty(formData.get("doc_type")) ?? "other";
+    if (!vehicleId) return { ok: false, error: "Missing vehicle." };
+    if (!isVehicleDocType(docTypeRaw)) return { ok: false, error: "Invalid document type." };
+    // Normalize legacy keys to the canonical PHV/Taxi licence paper type.
+    if (docTypeRaw === "pco_paper" || docTypeRaw === "phv_licence") {
+      docTypeRaw = "phv_taxi_licence_paper";
     }
-    const allowed = file.type === "application/pdf" || file.type.startsWith("image/");
-    if (!allowed) return { ok: false, error: "Use a PDF or images (JPEG, PNG, WebP)." };
-  }
 
-  const supabase = await createClient();
-  const { data: vehicle, error: gErr } = await supabase
-    .from("vehicles")
-    .select("id, parent_company_id")
-    .eq("id", vehicleId)
-    .maybeSingle();
-  if (gErr) return { ok: false, error: gErr.message };
-  if (!vehicle || vehicle.parent_company_id !== parentCompanyId) {
-    return { ok: false, error: "Vehicle not found." };
-  }
-
-  const filePayloads = await Promise.all(
-    collected.map(async (file) => ({
-      bytes: Buffer.from(await file.arrayBuffer()),
-      contentType: file.type || "application/octet-stream",
-      fileName: file.name || "upload",
-    })),
-  );
-
-  const prepared = await prepareVehicleDocumentPdf(
-    filePayloads,
-    VEHICLE_DOC_TYPE_LABELS[docTypeRaw as VehicleDocType] ?? docTypeRaw,
-  );
-  if (!prepared.ok) return prepared;
-
-  // One current PDF per doc type — supersede previous uploads (keep historical files).
-  const replaceTypes = isPhvTaxiLicencePaperDocType(docTypeRaw)
-    ? (["phv_taxi_licence_paper", "pco_paper", "phv_licence"] as const)
-    : ([docTypeRaw] as const);
-  const { data: existing } = await supabase
-    .from("vehicle_documents")
-    .select("id, file_path")
-    .eq("vehicle_id", vehicleId)
-    .in("doc_type", [...replaceTypes])
-    .eq("version_status", "current");
-  const supersededId = existing?.[0]?.id ?? null;
-  if (existing?.length) {
-    await supabase
-      .from("vehicle_documents")
-      .update({ version_status: "superseded" })
-      .in(
-        "id",
-        existing.map((r) => r.id),
-      );
-  }
-
-  const vehicleTransferId = nullIfEmpty(formData.get("vehicle_transfer_id"));
-
-  const path = `${parentCompanyId}/${vehicleId}/${prepared.pdf.fileName}`;
-  const { error: upErr } = await supabase.storage.from("vehicle-documents").upload(path, prepared.pdf.bytes, {
-    contentType: prepared.pdf.contentType,
-    upsert: false,
-  });
-  if (upErr) return { ok: false, error: upErr.message };
-
-  const { error: insErr } = await supabase.from("vehicle_documents").insert({
-    vehicle_id: vehicleId,
-    parent_company_id: parentCompanyId,
-    doc_type: docTypeRaw as VehicleDocType,
-    file_path: path,
-    file_name: prepared.pdf.fileName,
-    content_type: prepared.pdf.contentType,
-    expiry_date: null,
-    issued_date: nullIfEmpty(formData.get("issued_date")),
-    notes:
-      nullIfEmpty(formData.get("notes")) ??
-      (prepared.pdf.pageCount > 1 ? `${prepared.pdf.pageCount} pages` : null),
-    uploaded_by: user.id,
-    version_status: "current",
-    supersedes_document_id: supersededId,
-    vehicle_transfer_id: vehicleTransferId,
-  });
-  if (insErr) {
-    await supabase.storage.from("vehicle-documents").remove([path]);
-    return { ok: false, error: insErr.message };
-  }
-
-  // Clear MOT / PHV document attention and optionally update expiry when uploading renewed docs.
-  const vehiclePatch: Record<string, string | null> = {};
-  if (docTypeRaw === "mot") {
-    const expiryRaw = nullIfEmpty(formData.get("mot_expiry"));
-    if (expiryRaw) {
-      const parsed = parseVehicleExpiryYmd(expiryRaw, "MOT expiry");
-      if (!parsed.ok) return parsed;
-      vehiclePatch.mot_expiry = parsed.value;
+    const collected: File[] = [];
+    const multi = formData.getAll("files");
+    for (const entry of multi) {
+      if (entry instanceof File && entry.size > 0) collected.push(entry);
     }
-    vehiclePatch.mot_doc_attention_at = null;
-  } else if (isPhvTaxiLicencePaperDocType(docTypeRaw)) {
-    const expiryRaw = nullIfEmpty(formData.get("phv_licence_expiry"));
-    if (expiryRaw) {
-      const parsed = parseVehicleExpiryYmd(expiryRaw, "PHV/Taxi licence expiry");
-      if (!parsed.ok) return parsed;
-      vehiclePatch.phv_licence_expiry = parsed.value;
+    const single = formData.get("file");
+    if (single instanceof File && single.size > 0) collected.push(single);
+
+    if (!collected.length) return { ok: false, error: "Choose a PDF or one or more images." };
+
+    const sizeCheck = validateVehicleDocumentUploadFiles(collected);
+    if (!sizeCheck.ok) return sizeCheck;
+
+    for (const file of collected) {
+      const allowed =
+        file.type === "application/pdf" ||
+        file.type.startsWith("image/") ||
+        /\.pdf$/i.test(file.name || "");
+      if (!allowed) return { ok: false, error: "Use a PDF or images (JPEG, PNG, WebP)." };
     }
-    vehiclePatch.phv_doc_attention_at = null;
-  }
-  if (Object.keys(vehiclePatch).length) {
-    const { error: vehiclePatchErr } = await supabase
+
+    const supabase = await createClient();
+    const { data: vehicle, error: gErr } = await supabase
       .from("vehicles")
-      .update(vehiclePatch)
+      .select("id, parent_company_id")
       .eq("id", vehicleId)
-      .eq("parent_company_id", parentCompanyId);
-    if (vehiclePatchErr) return { ok: false, error: vehiclePatchErr.message };
-  }
-
-  const requirementId = nullIfEmpty(formData.get("transfer_requirement_id"));
-  if (requirementId) {
-    const fleetKind = vehicleTransferFleetDocKindForVehicleDocType(docTypeRaw);
-    if (!fleetKind) {
-      return { ok: false, error: "This upload does not match the flagged transfer document." };
-    }
-    const { data: requirement, error: reqLoadErr } = await supabase
-      .from("vehicle_transfer_document_requirements")
-      .select("id, vehicle_id, document_kind, status")
-      .eq("id", requirementId)
       .maybeSingle();
-    if (reqLoadErr) return { ok: false, error: reqLoadErr.message };
-    if (
-      !requirement ||
-      requirement.vehicle_id !== vehicleId ||
-      requirement.status !== "required" ||
-      requirement.document_kind !== fleetKind
-    ) {
-      return { ok: false, error: "Transfer document flag not found." };
+    if (gErr) return { ok: false, error: gErr.message };
+    if (!vehicle || vehicle.parent_company_id !== parentCompanyId) {
+      return { ok: false, error: "Vehicle not found." };
     }
-    const { error: reqErr } = await supabase
-      .from("vehicle_transfer_document_requirements")
-      .update({
-        status: "completed",
-        completed_at: new Date().toISOString(),
-        completed_by: user.id,
-      })
-      .eq("id", requirementId)
-      .eq("status", "required");
-    if (reqErr) return { ok: false, error: reqErr.message };
-  }
 
-  revalidateVehiclePaths(vehicleId, parentCompanyId);
-  return { ok: true, id: vehicleId };
+    const filePayloads = await Promise.all(
+      collected.map(async (file) => ({
+        bytes: Buffer.from(await file.arrayBuffer()),
+        contentType: file.type || "application/octet-stream",
+        fileName: file.name || "upload",
+      })),
+    );
+
+    const prepared = await prepareVehicleDocumentPdf(
+      filePayloads,
+      VEHICLE_DOC_TYPE_LABELS[docTypeRaw as VehicleDocType] ?? docTypeRaw,
+    );
+    if (!prepared.ok) return prepared;
+
+    // One current PDF per doc type — supersede previous uploads (keep historical files).
+    const replaceTypes = isPhvTaxiLicencePaperDocType(docTypeRaw)
+      ? (["phv_taxi_licence_paper", "pco_paper", "phv_licence"] as const)
+      : ([docTypeRaw] as const);
+    const { data: existing } = await supabase
+      .from("vehicle_documents")
+      .select("id, file_path")
+      .eq("vehicle_id", vehicleId)
+      .in("doc_type", [...replaceTypes])
+      .eq("version_status", "current");
+    const supersededId = existing?.[0]?.id ?? null;
+    if (existing?.length) {
+      await supabase
+        .from("vehicle_documents")
+        .update({ version_status: "superseded" })
+        .in(
+          "id",
+          existing.map((r) => r.id),
+        );
+    }
+
+    const vehicleTransferId = nullIfEmpty(formData.get("vehicle_transfer_id"));
+
+    const path = `${parentCompanyId}/${vehicleId}/${prepared.pdf.fileName}`;
+    const { error: upErr } = await supabase.storage.from("vehicle-documents").upload(path, prepared.pdf.bytes, {
+      contentType: prepared.pdf.contentType,
+      upsert: false,
+    });
+    if (upErr) return { ok: false, error: upErr.message };
+
+    const { error: insErr } = await supabase.from("vehicle_documents").insert({
+      vehicle_id: vehicleId,
+      parent_company_id: parentCompanyId,
+      doc_type: docTypeRaw as VehicleDocType,
+      file_path: path,
+      file_name: prepared.pdf.fileName,
+      content_type: prepared.pdf.contentType,
+      expiry_date: null,
+      issued_date: nullIfEmpty(formData.get("issued_date")),
+      notes:
+        nullIfEmpty(formData.get("notes")) ??
+        (prepared.pdf.pageCount > 1 ? `${prepared.pdf.pageCount} pages` : null),
+      uploaded_by: user.id,
+      version_status: "current",
+      supersedes_document_id: supersededId,
+      vehicle_transfer_id: vehicleTransferId,
+    });
+    if (insErr) {
+      await supabase.storage.from("vehicle-documents").remove([path]);
+      return { ok: false, error: insErr.message };
+    }
+
+    // Clear MOT / PHV document attention and optionally update expiry when uploading renewed docs.
+    const vehiclePatch: Record<string, string | null> = {};
+    if (docTypeRaw === "mot") {
+      const expiryRaw = nullIfEmpty(formData.get("mot_expiry"));
+      if (expiryRaw) {
+        const parsed = parseVehicleExpiryYmd(expiryRaw, "MOT expiry");
+        if (!parsed.ok) return parsed;
+        vehiclePatch.mot_expiry = parsed.value;
+      }
+      vehiclePatch.mot_doc_attention_at = null;
+    } else if (isPhvTaxiLicencePaperDocType(docTypeRaw)) {
+      const expiryRaw = nullIfEmpty(formData.get("phv_licence_expiry"));
+      if (expiryRaw) {
+        const parsed = parseVehicleExpiryYmd(expiryRaw, "PHV/Taxi licence expiry");
+        if (!parsed.ok) return parsed;
+        vehiclePatch.phv_licence_expiry = parsed.value;
+      }
+      vehiclePatch.phv_doc_attention_at = null;
+    }
+    if (Object.keys(vehiclePatch).length) {
+      const { error: vehiclePatchErr } = await supabase
+        .from("vehicles")
+        .update(vehiclePatch)
+        .eq("id", vehicleId)
+        .eq("parent_company_id", parentCompanyId);
+      if (vehiclePatchErr) return { ok: false, error: vehiclePatchErr.message };
+    }
+
+    const requirementId = nullIfEmpty(formData.get("transfer_requirement_id"));
+    if (requirementId) {
+      const fleetKind = vehicleTransferFleetDocKindForVehicleDocType(docTypeRaw);
+      if (!fleetKind) {
+        return { ok: false, error: "This upload does not match the flagged transfer document." };
+      }
+      const { data: requirement, error: reqLoadErr } = await supabase
+        .from("vehicle_transfer_document_requirements")
+        .select("id, vehicle_id, document_kind, status")
+        .eq("id", requirementId)
+        .maybeSingle();
+      if (reqLoadErr) return { ok: false, error: reqLoadErr.message };
+      if (
+        !requirement ||
+        requirement.vehicle_id !== vehicleId ||
+        requirement.status !== "required" ||
+        requirement.document_kind !== fleetKind
+      ) {
+        return { ok: false, error: "Transfer document flag not found." };
+      }
+      const { error: reqErr } = await supabase
+        .from("vehicle_transfer_document_requirements")
+        .update({
+          status: "completed",
+          completed_at: new Date().toISOString(),
+          completed_by: user.id,
+        })
+        .eq("id", requirementId)
+        .eq("status", "required");
+      if (reqErr) return { ok: false, error: reqErr.message };
+    }
+
+    try {
+      revalidateVehiclePaths(vehicleId, parentCompanyId);
+    } catch (revalidateError) {
+      console.error("vehicle document upload revalidate failed", vehicleId, revalidateError);
+    }
+    return { ok: true, id: vehicleId };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not upload document.";
+    console.error("uploadVehicleDocumentAction failed", message, error);
+    return { ok: false, error: message };
+  }
 }
 
 export async function deleteVehicleDocumentAction(documentId: string): Promise<VehicleActionResult> {
@@ -701,8 +714,10 @@ export async function loadVehicleSwitcherList(): Promise<VehicleSwitcherOption[]
 
   try {
     return await getCachedVehicleSwitcherList(parentCompanyId);
-  } catch {
-    return { error: "Could not load fleet list." };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not load fleet list.";
+    console.error("vehicle switcher list load failed", parentCompanyId, message);
+    return { error: message };
   }
 }
 

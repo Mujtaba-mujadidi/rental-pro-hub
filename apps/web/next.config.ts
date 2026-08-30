@@ -1,11 +1,15 @@
 import type { NextConfig } from "next";
 
+/** Headroom above app upload cap for multipart boundaries and field metadata. */
+const UPLOAD_BODY_LIMIT = "14mb";
+
 const nextConfig: NextConfig = {
   transpilePackages: ["@rph/shared"],
-  /** Default ~1MB breaks multipart server actions with two licence photos (5MB each cap in app). */
   experimental: {
+    /** Middleware buffers the full request body (default 10MB truncates server-action uploads). */
+    middlewareClientMaxBodySize: UPLOAD_BODY_LIMIT,
     serverActions: {
-      bodySizeLimit: "12mb",
+      bodySizeLimit: UPLOAD_BODY_LIMIT,
     },
   },
 };

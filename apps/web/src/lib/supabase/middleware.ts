@@ -53,10 +53,8 @@ export async function updateSession(request: NextRequest) {
 
   // Cookie/session parse only — no Auth/JWKS round-trip on every navigation.
   // RSC layouts still verify via getClaims/getUser before rendering protected UI.
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  const hasSession = Boolean(session?.user?.id);
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const hasSession = Boolean(claimsData?.claims?.sub);
 
   const path = request.nextUrl.pathname;
 

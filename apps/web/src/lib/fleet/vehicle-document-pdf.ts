@@ -74,22 +74,26 @@ export async function prepareVehicleDocumentPdf(
 
   if (pageCount < 1) return { ok: false, error: "No pages were produced from the uploads." };
 
-  const pdfBytes = Buffer.from(await out.save({ useObjectStreams: true }));
-  if (pdfBytes.length > MAX_OUTPUT_BYTES) {
-    return {
-      ok: false,
-      error: `Document is still too large after compression (${Math.ceil(pdfBytes.length / (1024 * 1024))} MB). Try fewer or smaller images.`,
-    };
-  }
+  try {
+    const pdfBytes = Buffer.from(await out.save({ useObjectStreams: true }));
+    if (pdfBytes.length > MAX_OUTPUT_BYTES) {
+      return {
+        ok: false,
+        error: `Document is still too large after compression (${Math.ceil(pdfBytes.length / (1024 * 1024))} MB). Try fewer or smaller images.`,
+      };
+    }
 
-  const safeLabel = docTypeLabel.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "document";
-  return {
-    ok: true,
-    pdf: {
-      bytes: pdfBytes,
-      contentType: "application/pdf",
-      fileName: `${safeLabel}-${Date.now()}.pdf`,
-      pageCount,
-    },
-  };
+    const safeLabel = docTypeLabel.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "document";
+    return {
+      ok: true,
+      pdf: {
+        bytes: pdfBytes,
+        contentType: "application/pdf",
+        fileName: `${safeLabel}-${Date.now()}.pdf`,
+        pageCount,
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not finalise PDF for upload." };
+  }
 }

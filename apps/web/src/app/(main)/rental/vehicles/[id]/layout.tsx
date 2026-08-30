@@ -17,7 +17,15 @@ export default async function VehicleWorkspaceLayout({
   const profile = await getAppProfile();
   const { id } = await params;
   const [data, fleet] = await Promise.all([getVehicleWorkspaceShell(id), loadVehicleSwitcherList()]);
-  if (!data.ok) notFound();
+  if (!data.ok) {
+    if (data.error === "Vehicle not found.") notFound();
+    return (
+      <div className="rph-alert-error mx-auto max-w-2xl p-4 text-sm">
+        <p className="font-semibold">Could not open this vehicle</p>
+        <p className="mt-1">{data.error}</p>
+      </div>
+    );
+  }
   if ("error" in fleet) {
     return <p className="rph-alert-error text-sm">{fleet.error}</p>;
   }

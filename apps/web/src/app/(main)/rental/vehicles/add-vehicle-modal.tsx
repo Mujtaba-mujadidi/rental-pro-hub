@@ -28,6 +28,7 @@ import {
   type RequiredVehicleDocType,
   type VehicleStatus,
 } from "@/lib/fleet/vehicles";
+import { validateVehicleDocumentUploadFiles } from "@/lib/fleet/vehicle-document-upload-limits";
 import { VehicleDocAddMenu } from "./vehicle-doc-add-menu";
 
 const STEP_LABELS = ["Basics", "Specs", "Documents", "Purchase", "Review"] as const;
@@ -297,9 +298,16 @@ export function AddVehicleModal({
   function addFiles(docType: RequiredVehicleDocType, fileList: FileList | null) {
     if (!fileList?.length) return;
     const files = Array.from(fileList);
+    const nextFiles = [...bundles[docType].files, ...files];
+    const sizeCheck = validateVehicleDocumentUploadFiles(nextFiles);
+    if (!sizeCheck.ok) {
+      setError(sizeCheck.error);
+      return;
+    }
+    setError(null);
     setBundles((prev) => ({
       ...prev,
-      [docType]: { files: [...prev[docType].files, ...files] },
+      [docType]: { files: nextFiles },
     }));
   }
 
@@ -321,6 +329,17 @@ export function AddVehicleModal({
       }
     }
     const willUpload = REQUIRED_VEHICLE_DOC_TYPES.some((t) => bundles[t].files.length > 0);
+    if (willUpload) {
+      for (const docType of REQUIRED_VEHICLE_DOC_TYPES) {
+        const bundle = bundles[docType];
+        if (!bundle.files.length) continue;
+        const sizeCheck = validateVehicleDocumentUploadFiles(bundle.files);
+        if (!sizeCheck.ok) {
+          setError(`${VEHICLE_DOC_TYPE_LABELS[docType]}: ${sizeCheck.error}`);
+          return;
+        }
+      }
+    }
     setSaveOverlay({
       phase: "pending",
       title: "Saving vehicle…",

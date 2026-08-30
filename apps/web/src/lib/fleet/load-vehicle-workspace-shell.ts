@@ -24,10 +24,16 @@ async function fetchVehicleWorkspaceShell(vehicleId: string): Promise<VehicleWor
   const id = vehicleId.trim();
   if (!id) return { ok: false, error: "Missing vehicle." };
 
-  const [shell, accessibleSubcompanyIds] = await Promise.all([
-    getCachedVehicleWorkspaceShellData(id, parentCompanyId),
-    loadUserAccessibleSubcompanyIds(profile),
-  ]);
+  let shell;
+  try {
+    shell = await getCachedVehicleWorkspaceShellData(id, parentCompanyId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not load vehicle workspace.";
+    console.error("vehicle workspace shell load failed", id, message);
+    return { ok: false, error: message };
+  }
+
+  const accessibleSubcompanyIds = await loadUserAccessibleSubcompanyIds(profile);
   if (!shell) return { ok: false, error: "Vehicle not found." };
 
   const access = resolveVehicleWorkspaceAccess({

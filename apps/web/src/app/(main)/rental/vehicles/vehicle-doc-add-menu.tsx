@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { VEHICLE_DOCUMENT_UPLOAD_MAX_LABEL } from "@/lib/fleet/vehicle-document-upload-limits";
 import { useCanScanOrCaptureDocument } from "@/hooks/use-can-scan-or-capture-document";
 
 const triggerClass =
@@ -104,7 +105,9 @@ export function VehicleDocAddMenu({
               }}
             >
               <span className="font-medium">Choose files</span>
-              <span className="text-xs text-rph-fg-muted">PDF or images · multiple allowed</span>
+              <span className="text-xs text-rph-fg-muted">
+                PDF or images · multiple allowed · max {VEHICLE_DOCUMENT_UPLOAD_MAX_LABEL} per upload
+              </span>
             </DropdownMenu.Item>
 
             {canScanOrCapture ? (

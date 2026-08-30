@@ -35,6 +35,7 @@ import {
   type VehicleStatus,
   type VehicleTransferRow,
 } from "@/lib/fleet/vehicles";
+import { validateVehicleDocumentUploadFiles } from "@/lib/fleet/vehicle-document-upload-limits";
 import { vehicleDocumentHistoryLabel } from "@/lib/fleet/vehicle-historic-access";
 import {
   openTransferRequirementForVehicleDocType,
@@ -460,9 +461,16 @@ export function VehicleDetailsView({
   function addUploadFiles(docType: RequiredVehicleDocType, fileList: FileList | null) {
     if (!fileList?.length) return;
     const files = Array.from(fileList);
+    const nextFiles = [...uploadBundles[docType].files, ...files];
+    const sizeCheck = validateVehicleDocumentUploadFiles(nextFiles);
+    if (!sizeCheck.ok) {
+      setError(sizeCheck.error);
+      return;
+    }
+    setError(null);
     setUploadBundles((prev) => ({
       ...prev,
-      [docType]: { files: [...prev[docType].files, ...files] },
+      [docType]: { files: nextFiles },
     }));
   }
 
@@ -488,6 +496,11 @@ export function VehicleDetailsView({
       setError(docType === "mot" ? "Enter the MOT expiry date." : "Enter the PHV/Taxi licence expiry date.");
       return;
     }
+    const sizeCheck = validateVehicleDocumentUploadFiles(bundle.files);
+    if (!sizeCheck.ok) {
+      setError(sizeCheck.error);
+      return;
+    }
     setError(null);
     const fd = new FormData();
     fd.set("vehicle_id", vehicle.id);
@@ -503,14 +516,18 @@ export function VehicleDetailsView({
       fd.set("transfer_requirement_id", transferRequirement.id);
     }
     startTransition(async () => {
-      const res = await uploadVehicleDocumentAction(fd);
-      if (!res.ok) {
-        setError(res.error);
-        return;
+      try {
+        const res = await uploadVehicleDocumentAction(fd);
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
+        clearUploadBundle(docType);
+        setDocUploadExpiryConfirm(null);
+        await refresh();
+      } catch (error) {
+        setError(error instanceof Error ? error.message : "Could not upload document.");
       }
-      clearUploadBundle(docType);
-      setDocUploadExpiryConfirm(null);
-      await refresh();
     });
   }
 
@@ -542,7 +559,7 @@ export function VehicleDetailsView({
 
   return (
     <div className="space-y-4 sm:space-y-5">
-      {error && !editSection ? <p className="rph-alert-error text-sm">{error}</p> : null}
+      {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
 
       {readOnlyHistoric && historicTransfer ? (
         <div className="rph-alert-warn text-sm">
