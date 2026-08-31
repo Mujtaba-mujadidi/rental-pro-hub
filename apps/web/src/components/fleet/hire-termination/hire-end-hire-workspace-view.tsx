@@ -12,6 +12,14 @@ import {
 } from "@/app/actions/hire-end-hire";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { HireInspectionsWorkspaceClient } from "@/components/fleet/hire-inspection/hire-inspections-workspace-client";
+import { HireDepositDispositionResolveCard, type HireDepositFinalizePayload } from "@/components/fleet/hire-payments/hire-deposit-disposition-resolve-card";
+import { HireReturnChargesSection, type HireReturnChargesSectionHandle } from "@/components/fleet/hire-termination/hire-return-charges-section";
+import { defaultDepositDisposition } from "@/lib/fleet/hire-settlement-resolution";
+import {
+  hireDepositDispositionLabel,
+  settlementBalanceLabel,
+  type HireTerminationAccountsSummary,
+} from "@/lib/fleet/hire-termination-summary";
 import {
   HirePaymentReviewModal,
   type HirePaymentReviewTarget,
@@ -38,7 +46,7 @@ import {
 import { formatGbp } from "@/lib/fleet/maintenance";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 function stepStatus(
   current: HireEndHireStep,
@@ -67,6 +75,8 @@ function stepTransitionLabel(step: HireEndHireStep): string {
       return "Loading return details…";
     case "checkin":
       return "Loading check-in…";
+    case "return_charges":
+      return "Loading return charges…";
     case "final_account":
       return "Loading final account…";
     default:
@@ -178,6 +188,9 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
   const [startConfirmOpen, setStartConfirmOpen] = useState(false);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [finalizeConfirmOpen, setFinalizeConfirmOpen] = useState(false);
+  const [depositFinalizePayload, setDepositFinalizePayload] =
+    useState<HireDepositFinalizePayload | null>(null);
+  const returnChargesRef = useRef<HireReturnChargesSectionHandle>(null);
   const [paymentReviewTarget, setPaymentReviewTarget] = useState<HirePaymentReviewTarget | null>(null);
 
   const [returnDateYmd, setReturnDateYmd] = useState("");
@@ -275,8 +288,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
         needsFinancialReview &&
         hasCachedFinancialReview &&
         (targetStep === "financial_review" ||
-          (targetStep === "checkin" && currentStep === "financial_review") ||
-          (targetStep === "financial_review" && currentStep === "checkin"));
+          (targetStep === "checkin" && currentStep === "financial_review"));
 
       setData((prev) =>
         prev
@@ -297,7 +309,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
           : prev,
       );
 
-      if (targetStep === "return_details" || canUseCachedFinancialReview || targetStep === "checkin") {
+      if (targetStep === "return_details" || canUseCachedFinancialReview || targetStep === "checkin" || targetStep === "return_charges") {
         setTransitionMessage(null);
         return;
       }
@@ -306,6 +318,62 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
         return;
       }
       setTransitionMessage(null);
+    });
+  }
+
+  function continueToFinalAccount() {
+    startTransition(async () => {
+      setError(null);
+      setTransitionMessage("Saving return charges…");
+      const saveRes = await returnChargesRef.current?.saveDraft();
+      if (saveRes && !saveRes.ok) {
+        setError(saveRes.error);
+        setTransitionMessage(null);
+        return;
+      }
+
+      setTransitionMessage("Loading final account…");
+      const res = await saveHireEndHireDraftAction({
+        hireGroupId,
+        step: "final_account",
+        returnDateYmd,
+        returnTimeHm,
+        reason,
+        notes,
+        rentBillingMode: data?.draft.rentBillingMode,
+      });
+      if (!res.ok) {
+        setError(res.error);
+        setTransitionMessage(null);
+        return;
+      }
+      setSavedLabel("Saved just now");
+      setData((prev) => (prev ? { ...prev, draft: res.draft } : prev));
+      await refreshPageData("Loading final account…", { includeFinancialReview: true });
+    });
+  }
+
+  async function advanceToReturnChargesAfterCheckin() {
+    setTransitionMessage("Loading return charges…");
+    const res = await saveHireEndHireDraftAction({
+      hireGroupId,
+      step: "return_charges",
+      returnDateYmd,
+      returnTimeHm,
+      reason,
+      notes,
+      rentBillingMode: data?.draft.rentBillingMode,
+    });
+    if (!res.ok) {
+      setError(res.error);
+      setTransitionMessage(null);
+      return;
+    }
+    setSavedLabel("Saved just now");
+    router.refresh();
+    await refreshPageData("Loading return charges…", {
+      includeFinancialReview: true,
+      refreshShell: true,
     });
   }
 
@@ -392,7 +460,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
   function onConfirmFinalize() {
     startTransition(async () => {
       setTransitionMessage("Finalising contract termination…");
-      const res = await finalizeHireEndHireAction(hireGroupId);
+      const res = await finalizeHireEndHireAction(hireGroupId, depositFinalizePayload ?? undefined);
       if (!res.ok) {
         setError(res.error);
         setFinalizeConfirmOpen(false);
@@ -400,6 +468,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
         return;
       }
       setFinalizeConfirmOpen(false);
+      setDepositFinalizePayload(null);
       await refreshPageData("Updating final account…", { refreshShell: true });
     });
   }
@@ -411,6 +480,12 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
     return <p className="rph-alert-error text-sm">{error}</p>;
   }
   if (!data) return null;
+
+  const needsDepositOnConfirm =
+    !data.isEndHireFinalized &&
+    Boolean(data.depositResolution?.canResolveDeposit) &&
+    !data.depositResolution?.depositDisposition;
+  const finalizeBlockedByDeposit = needsDepositOnConfirm && !depositFinalizePayload;
 
   const showStepTransition = Boolean(transitionMessage);
 
@@ -503,7 +578,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
         </div>
       </header>
 
-      <nav className="grid gap-2 rounded-2xl border border-rph-border bg-rph-raised p-3 sm:grid-cols-4" aria-label="End hire stages">
+      <nav className="grid gap-2 rounded-2xl border border-rph-border bg-rph-raised p-3 sm:grid-cols-5" aria-label="End hire stages">
         {HIRE_END_HIRE_STEPS.map((item, index) => {
           const status = stepStatus(step, item);
           const canGoBack = status === "done" && !pending;
@@ -648,7 +723,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
           <EndHireStepFooter
             backLabel="Save and exit"
             onBack={onSaveAndExit}
-            stepLabel="Step 1 of 4"
+            stepLabel="Step 1 of 5"
             primaryLabel="Review financial position"
             onPrimary={() => saveDraft("financial_review")}
             primaryDisabled={!returnDateYmd || !returnTimeHm || !reason}
@@ -741,7 +816,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
           <EndHireStepFooter
             backLabel="Back"
             onBack={() => saveDraft("return_details")}
-            stepLabel="Step 2 of 4"
+            stepLabel="Step 2 of 5"
             primaryLabel={returnAlreadyConfirmed ? "Continue to check-in" : "Vehicle check-in"}
             onPrimary={
               returnAlreadyConfirmed ? () => saveDraft("checkin") : onConfirmReturn
@@ -758,8 +833,8 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
             <p className="driver-dash-section-label">Step 3</p>
             <h2 className="mt-1 text-lg font-semibold text-rph-fg">Vehicle check-in</h2>
             <p className="mt-1 text-sm text-rph-fg-secondary">
-              Record the return inspection. When check-in is complete, continue to the final account and
-              finalise contract termination when you are ready.
+              Record the return inspection. When check-in is complete, continue to return charges, then
+              review the final account.
             </p>
           </div>
           <div className="p-4 sm:p-5">
@@ -770,19 +845,62 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
               vehicleId={shell.vehicleId}
               focusKind="checkin"
               audience="staff"
+              onCheckinComplete={advanceToReturnChargesAfterCheckin}
             />
           </div>
           <EndHireStepFooter
             backLabel="Back to financial review"
             onBack={() => saveDraft("financial_review")}
-            stepLabel="Step 3 of 4"
+            stepLabel="Step 3 of 5"
             primaryLabel={
-              data.checkinCompleted ? "Continue to final account" : "Complete check-in above"
+              data.checkinCompleted ? "Continue to return charges" : "Complete check-in above"
             }
-            onPrimary={() => saveDraft("final_account")}
+            onPrimary={() => saveDraft("return_charges")}
             primaryDisabled={!data.checkinCompleted}
             pending={pending}
           />
+        </section>
+      ) : null}
+
+      {step === "return_charges" ? (
+        <section className="space-y-4">
+          <div className="overflow-hidden rounded-2xl border border-rph-border bg-rph-raised shadow-sm">
+            <div className="border-b border-rph-border px-4 py-4 sm:px-5">
+              <p className="driver-dash-section-label">Step 4</p>
+              <h2 className="mt-1 text-lg font-semibold text-rph-fg">Return charges</h2>
+              <p className="mt-1 text-sm text-rph-fg-secondary">
+                Review what check-in recorded and choose whether to charge. Your choices are applied to
+                the balance when you confirm the final account on the next step.
+              </p>
+            </div>
+            <div className="p-4 sm:p-5">
+              {data.returnCharges ? (
+                <HireReturnChargesSection
+                  ref={returnChargesRef}
+                  hireGroupId={hireGroupId}
+                  data={data.returnCharges}
+                  readOnly={data.isEndHireFinalized}
+                  embedded
+                  onSaved={() => {
+                    void refreshPageData("Refreshing return charges…", {
+                      includeFinancialReview: true,
+                    });
+                  }}
+                />
+              ) : (
+                <p className="text-sm text-rph-fg-secondary">Loading return charges…</p>
+              )}
+            </div>
+            <EndHireStepFooter
+              backLabel="Back to check-in"
+              onBack={() => saveDraft("checkin")}
+              stepLabel="Step 4 of 5"
+              primaryLabel="Continue to final account"
+              onPrimary={continueToFinalAccount}
+              primaryDisabled={pending}
+              pending={pending}
+            />
+          </div>
         </section>
       ) : null}
 
@@ -803,24 +921,42 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
           ) : (
             <div className="rounded-2xl border border-amber-300 bg-amber-50/80 px-4 py-4 dark:border-amber-900/50 dark:bg-amber-950/25 sm:px-5">
               <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">
-                Final account — termination not yet finalised
+                Final account — review balance, deposit, then confirm
               </p>
               <p className="mt-1 text-sm text-amber-900 dark:text-amber-200">
-                Review payments and adjustments below. You can still cancel the end-hire process until you
-                finalise contract termination. Once finalised, this step cannot be reversed.
+                Review the full account position below. Choose what to do with any held deposit, then
+                confirm to post return charges and deposit decisions to the balance sheet and close the
+                hire. Record any cash payments afterwards from Payments.
               </p>
             </div>
           )}
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rph-rail px-4 py-4 text-white sm:px-5">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-white/70">Current position</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-white/70">
+                Balance with company
+              </p>
               <p className="mt-1 text-xl font-semibold">
-                {data.openBalanceGbp > 0.005
-                  ? `Driver owes ${formatGbp(data.openBalanceGbp)}`
-                  : "Account is clear"}
+                {settlementBalanceLabel(
+                  data.settlementBalanceDirection === "company_owes_driver"
+                    ? "company_owes_driver"
+                    : data.settlementBalanceDirection === "driver_owes_company"
+                      ? "driver_owes_company"
+                      : data.openBalanceGbp > 0.005
+                        ? "driver_owes_company"
+                        : "settled",
+                  data.openBalanceGbp,
+                )}
               </p>
               <p className="mt-1 text-sm text-white/80">
-                Record payment now or leave this account open for collection on Balances.
+                {data.depositResolution && data.depositResolution.depositHeldGbp > 0.005
+                  ? `Deposit held with company: ${formatGbp(data.depositResolution.depositHeldGbp)}.`
+                  : review
+                    ? `Contract deposit: ${formatGbp(review.depositReceivedGbp)} received of ${formatGbp(review.depositRequiredGbp)}.`
+                    : "Review return charges and deposit before finalising."}
+                {data.depositResolution?.canResolveDeposit &&
+                data.depositResolution.currentSignedSettlementGbp > 0.005
+                  ? ` Recommended: ${hireDepositDispositionLabel(defaultDepositDisposition(data.depositResolution.currentSignedSettlementGbp))}.`
+                  : ""}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -828,76 +964,188 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
                 href={`/rental/hires/${hireGroupId}/payments`}
                 className="inline-flex h-10 items-center rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
               >
-                Record final payment
+                Record payment
               </Link>
               <Link
                 href={`/rental/balances/${hireGroupId}`}
                 className="inline-flex h-10 items-center rounded-lg border border-white/30 bg-transparent px-4 text-sm font-medium text-white hover:bg-white/10"
               >
-                Leave balance open
-              </Link>
-            </div>
-          </div>
-          <div className="rounded-2xl border border-rph-border bg-rph-raised p-4 shadow-sm sm:p-5">
-            {review ? (
-              <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <KpiCard
-                  label="Total charges"
-                  value={formatGbp(review.rentChargedGbp + review.extraChargesPostedGbp)}
-                  hint="Rent and extras"
-                />
-                <KpiCard
-                  label="Money received"
-                  value={formatGbp(review.rentReceivedGbp + review.extraChargesReceivedGbp)}
-                  hint="Rent and extra-charge payments"
-                />
-                <KpiCard
-                  label="Deposit received"
-                  value={formatGbp(review.depositReceivedGbp)}
-                  hint={review.depositUnpaid ? "Unpaid" : "Held"}
-                />
-                <KpiCard
-                  label="Current balance"
-                  value={formatGbp(data.openBalanceGbp)}
-                  hint={data.openBalanceGbp > 0.005 ? "Open" : "Clear"}
-                  tone={data.openBalanceGbp > 0.005 ? "warn" : "neutral"}
-                />
-              </div>
-            ) : null}
-            <p className="text-sm text-rph-fg-secondary">
-              Open balances stay on the company Balances list until settled. Use Payments & balance to
-              record settlement payments, resolve the deposit, or add adjustments.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Link href={`/rental/hires/${hireGroupId}/payments`} className="rph-btn-primary h-10 px-4">
-                Record payment
-              </Link>
-              <Link href={`/rental/hires/${hireGroupId}/payments`} className="rph-btn-ghost h-10 px-4">
-                Add adjustment
-              </Link>
-              <Link href={`/rental/balances/${hireGroupId}`} className="rph-btn-ghost h-10 px-4">
                 Open balances
               </Link>
             </div>
+          </div>
+          {data.returnCharges &&
+          !data.isEndHireFinalized &&
+          data.returnCharges.returnChargesDraftSavedAt &&
+          !data.returnCharges.returnChargesAppliedAt ? (
+            <div className="rounded-xl border border-sky-300 bg-sky-50/80 px-4 py-3 text-sm text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/25 dark:text-sky-100">
+              <p className="font-medium">Return charges ready to post</p>
+              <p className="mt-1 text-sky-900 dark:text-sky-200">
+                Saved on step 4 — confirming the final account will add these charges to the hire balance.
+              </p>
+            </div>
+          ) : null}
+          {data.returnCharges &&
+          (data.returnCharges.newDamages.some((d) => d.chargeResolution === "review_later") ||
+            data.returnCharges.fuelReviewLater ||
+            data.returnCharges.accessoryReviewsLater.length > 0) ? (
+            <div className="rounded-xl border border-amber-300 bg-amber-50/80 px-4 py-3 text-sm text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-100">
+              <p className="font-medium">Marked for later review</p>
+              <p className="mt-1 text-amber-900 dark:text-amber-200">
+                These items will not be charged now. Decide later from Payments & balance whether to bill
+                the driver.
+                {data.returnCharges.newDamages.filter((d) => d.chargeResolution === "review_later")
+                  .length > 0
+                  ? ` Damage: ${
+                      data.returnCharges.newDamages.filter((d) => d.chargeResolution === "review_later")
+                        .length
+                    }.`
+                  : ""}
+                {data.returnCharges.fuelReviewLater ? " Fuel difference." : ""}
+                {data.returnCharges.accessoryReviewsLater.length > 0
+                  ? ` Missing kit: ${data.returnCharges.accessoryReviewsLater.length}.`
+                  : ""}
+              </p>
+            </div>
+          ) : null}
+          {data.depositResolution?.canResolveDeposit &&
+          data.depositResolution.terminationSummary &&
+          !data.isEndHireFinalized ? (
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-rph-fg">Deposit decision</p>
+              {data.depositResolution.currentSignedSettlementGbp > 0.005 ? (
+                <p className="rounded-xl border border-emerald-300 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100">
+                  Recommended: use the held deposit (
+                  {formatGbp(data.depositResolution.depositHeldGbp)}) to clear what the driver owes.
+                </p>
+              ) : data.depositResolution.currentSignedSettlementGbp < -0.005 ? (
+                <p className="rounded-xl border border-rph-border bg-rph-raised px-4 py-3 text-sm text-rph-fg-secondary">
+                  Company holds a credit for the driver. Recommended default is to return the deposit
+                  unless you need to hold it.
+                </p>
+              ) : (
+                <p className="rounded-xl border border-rph-border bg-rph-raised px-4 py-3 text-sm text-rph-fg-secondary">
+                  Account is clear. Choose whether to return or hold the deposit.
+                </p>
+              )}
+              <HireDepositDispositionResolveCard
+                hireGroupId={hireGroupId}
+                terminationSummary={data.depositResolution.terminationSummary}
+                depositHeldGbp={data.depositResolution.depositHeldGbp}
+                currentSignedSettlementGbp={data.depositResolution.currentSignedSettlementGbp}
+                deferSubmit
+                onFinalizePayloadChange={setDepositFinalizePayload}
+                onSuccess={() => {
+                  void refreshPageData("Refreshing deposit decision…", {
+                    includeFinancialReview: true,
+                  });
+                }}
+              />
+            </div>
+          ) : data.depositResolution?.depositDisposition ? (
+            <div className="rounded-2xl border border-rph-border bg-rph-raised p-4 shadow-sm sm:p-5">
+              <p className="text-sm font-semibold text-rph-fg">Deposit</p>
+              <p className="mt-1 text-sm text-rph-fg-secondary">
+                {hireDepositDispositionLabel(
+                  data.depositResolution.depositDisposition as
+                    | "apply_to_balance"
+                    | "refund_full"
+                    | "refund_partial"
+                    | "forfeit"
+                    | "hold_pending",
+                )}
+                {data.depositResolution.depositHeldGbp > 0.005
+                  ? ` · Held ${formatGbp(data.depositResolution.depositHeldGbp)}`
+                  : ""}
+              </p>
+            </div>
+          ) : null}
+          <div className="rounded-2xl border border-rph-border bg-rph-raised p-4 shadow-sm sm:p-5">
+            {review ? (
+              <>
+                <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <KpiCard
+                    label="Total charges"
+                    value={formatGbp(review.rentChargedGbp + review.extraChargesPostedGbp)}
+                    hint="Rent and extras"
+                  />
+                  <KpiCard
+                    label="Money received"
+                    value={formatGbp(review.rentReceivedGbp + review.extraChargesReceivedGbp)}
+                    hint="Rent and extra-charge payments"
+                  />
+                  <KpiCard
+                    label="Deposit received"
+                    value={formatGbp(review.depositReceivedGbp)}
+                    hint={review.depositUnpaid ? "Unpaid" : "Held"}
+                  />
+                  <KpiCard
+                    label="Current balance"
+                    value={formatGbp(data.openBalanceGbp)}
+                    hint={data.openBalanceGbp > 0.005 ? "Open" : "Clear"}
+                    tone={data.openBalanceGbp > 0.005 ? "warn" : "neutral"}
+                  />
+                </div>
+
+                <div className="rounded-2xl border border-rph-border bg-rph-page/40 p-3 sm:p-4">
+                  <EndHireAccountBreakdownHeader review={review} />
+                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                    {orderedAccountSections(review.accountSections).map((section) => (
+                      <EndHireAccountSectionDetail
+                        key={section.id}
+                        section={section}
+                        paymentsHref={`/rental/hires/${hireGroupId}/payments`}
+                        layout={section.id === "rent" ? "split" : "stacked"}
+                        className={section.id === "rent" ? "lg:col-span-2" : undefined}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-rph-fg-secondary">Could not load the account breakdown.</p>
+            )}
+            <p className="mt-4 text-sm text-rph-fg-secondary">
+              Confirming posts return charges and deposit decisions to the balance. Record settlement
+              payments afterwards from Payments & balance.
+            </p>
           </div>
           {!data.isEndHireFinalized ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rph-border bg-rph-raised px-4 py-4 shadow-sm sm:px-5">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-rph-fg">Ready to close this hire?</p>
                 <p className="mt-1 text-sm text-rph-fg-secondary">
-                  Finalising marks the contract as completed. You can still record payments afterwards, but
-                  you cannot undo termination or return to an active hire.
+                  Confirming posts charges and deposit to the balance and marks the contract completed.
+                  You can still record payments afterwards, but you cannot undo termination.
+                  {!data.canFinalizeEndHire &&
+                  data.returnCharges &&
+                  !data.returnCharges.returnChargesReady
+                    ? " Go back to return charges and save your decisions first."
+                    : finalizeBlockedByDeposit
+                      ? " Choose a deposit action above before confirming."
+                      : ""}
                 </p>
               </div>
               <button
                 type="button"
                 className="inline-flex h-11 shrink-0 items-center justify-center rounded-lg bg-red-600 px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 disabled:opacity-50"
-                disabled={pending || !data.canFinalizeEndHire}
+                disabled={pending || !data.canFinalizeEndHire || finalizeBlockedByDeposit}
                 onClick={() => setFinalizeConfirmOpen(true)}
               >
-                Finalise contract termination
+                Confirm final account
               </button>
             </div>
+          ) : null}
+          {!data.isEndHireFinalized ? (
+            <EndHireStepFooter
+              backLabel="Back to return charges"
+              onBack={() => saveDraft("return_charges")}
+              stepLabel="Step 5 of 5"
+              primaryLabel="Confirm final account"
+              onPrimary={() => setFinalizeConfirmOpen(true)}
+              primaryDisabled={!data.canFinalizeEndHire || finalizeBlockedByDeposit}
+              pending={pending}
+            />
           ) : null}
         </section>
       ) : null}
@@ -925,9 +1173,9 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
       />
       <ConfirmDialog
         open={finalizeConfirmOpen}
-        title="Finalise contract termination?"
-        description="This marks the hire as completed and closes the end-hire process. Once finalised, contract termination cannot be reversed — you cannot cancel ending, undo check-in, or restore this hire to active. You can still record payments and settle any open balance afterwards."
-        confirmLabel="Finalise termination"
+        title="Confirm final account?"
+        description="This posts return charges and deposit decisions to the hire balance, marks the contract completed, and closes the end-hire process. Once confirmed, termination cannot be reversed — you cannot cancel ending or restore this hire to active. You can still record payments afterwards."
+        confirmLabel="Confirm final account"
         cancelLabel="Not yet"
         variant="danger"
         pending={pending}

@@ -8,6 +8,7 @@ export const HIRE_INSPECTION_DAMAGE_CHARGE_RESOLUTIONS = [
   "waived",
   "paid_now",
   "add_to_balance",
+  "review_later",
 ] as const;
 
 export type HireInspectionDamageChargeResolution =
@@ -73,7 +74,11 @@ export function validateInspectionDamageCharges(
     if (!isNewInspectionDamage(damage)) continue;
     const amount = parseDamageChargeGbp(damage.chargeGbp);
     if (amount == null || amount <= 0) {
-      if (damage.chargeResolution && damage.chargeResolution !== "waived") {
+      if (
+        damage.chargeResolution &&
+        damage.chargeResolution !== "waived" &&
+        damage.chargeResolution !== "review_later"
+      ) {
         return "Enter a charge amount for each new damage you want to bill.";
       }
       continue;

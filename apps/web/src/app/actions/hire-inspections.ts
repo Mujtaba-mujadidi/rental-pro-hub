@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getSessionUser, requireRentalCompanyArea } from "@/lib/auth/profile";
-import { formatUkDateTime, ukTodayYmd } from "@/lib/datetime/uk";
+import { formatUkDateTime } from "@/lib/datetime/uk";
 import { canReadRentals, canWriteRentals } from "@/lib/auth/rental-permissions";
 import { loadHireAuditActorDisplayNames, logHireGroupEvent } from "@/lib/fleet/hire-audit";
 import {
@@ -10,15 +10,7 @@ import {
   canCompleteHireCheckout,
   type HireInspectionDamageRow,
 } from "@/lib/fleet/hire-inspection-lifecycle";
-import {
-  applyDamageChargesToSettlementBalance,
-  isValidDamageChargeResolution,
-  parseDamageChargeGbp,
-  summarizeInspectionDamageCharges,
-  validateInspectionDamageCharges,
-} from "@/lib/fleet/hire-inspection-damage-charges";
-import { buildDriverChargeDraftsFromCheckinDamages } from "@/lib/fleet/hire-driver-charges";
-import { HIRE_DEPOSIT_REFUND_METHODS } from "@/lib/fleet/hire-termination-summary";
+import { isValidDamageChargeResolution, parseDamageChargeGbp } from "@/lib/fleet/hire-inspection-damage-charges";
 import {
   EMPTY_HIRE_INSPECTION_ACCESSORIES,
   type HireInspectionAccessories,
@@ -1094,11 +1086,6 @@ export async function completeHireCheckoutAction(
 
 export async function completeHireCheckinAction(
   hireGroupId: string,
-  input?: {
-    damagePaymentMethod?: string;
-    damagePaymentAccountId?: string;
-    damagePaymentReference?: string;
-  },
 ): Promise<ActionResult<null>> {
   const access = await assertHireWriteAccess(hireGroupId);
   if (!access.ok) return access;
@@ -1119,136 +1106,9 @@ export async function completeHireCheckinAction(
   });
   if (!guard.ok) return guard;
 
-  const damageChargeError = validateInspectionDamageCharges(payload.damages);
-  if (damageChargeError) return { ok: false, error: damageChargeError };
-
-  const chargeSummary = summarizeInspectionDamageCharges(payload.damages);
-
   const admin = createSupabaseAdminClient();
   const now = new Date().toISOString();
   const userId = access.profile.id;
-
-  const { data: hireGroup, error: hireGroupError } = await admin
-    .from("vehicle_hire_groups")
-    .select(
-      "settlement_balance_gbp, settlement_balance_direction, parent_company_id, default_payment_account_id",
-    )
-    .eq("id", hireGroupId)
-    .maybeSingle();
-  if (hireGroupError) return { ok: false, error: hireGroupError.message };
-  if (!hireGroup) return { ok: false, error: "Hire not found." };
-
-  const paymentMethod = input?.damagePaymentMethod?.trim() ?? "";
-  const paymentAccountId =
-    input?.damagePaymentAccountId?.trim() ||
-    ((hireGroup.default_payment_account_id as string | null) ?? null);
-
-  if (chargeSummary.paidNowGbp > 0) {
-    if (!(HIRE_DEPOSIT_REFUND_METHODS as readonly string[]).includes(paymentMethod)) {
-      return { ok: false, error: "Select how the on-the-spot damage payment was received." };
-    }
-    if (!paymentAccountId) {
-      return { ok: false, error: "Select the payment account for on-the-spot damage charges." };
-    }
-  }
-
-  if (chargeSummary.addToBalanceGbp > 0 || chargeSummary.paidNowGbp > 0) {
-    const initialDirection = hireGroup.settlement_balance_direction as
-      | "driver_owes_company"
-      | "company_owes_driver"
-      | "settled"
-      | null;
-    const initialAmountGbp = Number(hireGroup.settlement_balance_gbp ?? 0);
-
-    let balanceDirection = initialDirection ?? "settled";
-    let balanceAmountGbp = initialAmountGbp;
-    let damagePaymentId: string | null = null;
-
-    if (chargeSummary.addToBalanceGbp > 0) {
-      const balanceAfterCharges = applyDamageChargesToSettlementBalance({
-        settlementBalanceDirection: balanceDirection,
-        settlementBalanceGbp: balanceAmountGbp,
-        addToBalanceGbp: chargeSummary.addToBalanceGbp,
-      });
-      balanceDirection = balanceAfterCharges.settlementBalanceDirection;
-      balanceAmountGbp = balanceAfterCharges.settlementBalanceGbp;
-
-      const { error: balanceUpdateError } = await admin
-        .from("vehicle_hire_groups")
-        .update({
-          settlement_balance_direction: balanceDirection,
-          settlement_balance_gbp: balanceAmountGbp,
-        })
-        .eq("id", hireGroupId);
-      if (balanceUpdateError) return { ok: false, error: balanceUpdateError.message };
-    }
-
-    if (chargeSummary.paidNowGbp > 0) {
-      const accountId =
-        paymentAccountId || (hireGroup.default_payment_account_id as string | null);
-      const { data: account } = await admin
-        .from("company_payment_accounts")
-        .select("id")
-        .eq("id", accountId)
-        .eq("parent_company_id", hireGroup.parent_company_id as string)
-        .eq("is_active", true)
-        .maybeSingle();
-      if (!account?.id) return { ok: false, error: "Payment account not found." };
-
-      const { data: paymentRow, error: paymentError } = await admin
-        .from("vehicle_hire_balance_payments")
-        .insert({
-          hire_group_id: hireGroupId,
-          amount_gbp: chargeSummary.paidNowGbp,
-          payment_method: paymentMethod,
-          payment_account_id: account.id,
-          payment_reference: input?.damagePaymentReference?.trim() || null,
-          direction: "received_from_driver",
-          payment_category: "driver_charge",
-          notes: "Damage charge collected at vehicle check-in",
-          recorded_by_user_id: userId,
-        })
-        .select("id")
-        .single();
-      if (paymentError) return { ok: false, error: paymentError.message };
-      damagePaymentId = (paymentRow?.id as string | undefined) ?? null;
-      // paid_now is cash for that damage only — do not replay it against settlement open balance
-      // (that previously undid concurrent add_to_balance charges).
-    }
-
-    const chargeDrafts = buildDriverChargeDraftsFromCheckinDamages(
-      payload.damages.map((damage) => ({
-        id: damage.id,
-        panelId: damage.panelId,
-        panelLabel: damage.panelLabel,
-        damageType: damage.damageType,
-        severity: damage.severity,
-        checkoutDamageId: damage.checkoutDamageId,
-        chargeGbp: damage.chargeGbp,
-        chargeResolution: damage.chargeResolution,
-      })),
-    );
-    if (chargeDrafts.length > 0) {
-      const { error: lineItemsError } = await admin
-        .from("vehicle_hire_driver_charge_line_items")
-        .insert(
-          chargeDrafts.map((draft) => ({
-            hire_group_id: hireGroupId,
-            parent_company_id: hireGroup.parent_company_id as string,
-            charge_type: draft.chargeType,
-            amount_gbp: draft.amountGbp,
-            resolution: draft.resolution,
-            source_kind: draft.sourceKind,
-            source_id: draft.sourceId ?? null,
-            description: draft.description ?? null,
-            balance_payment_id: draft.resolution === "paid_now" ? damagePaymentId : null,
-            charged_on: ukTodayYmd(),
-            created_by_user_id: userId,
-          })),
-        );
-      if (lineItemsError) return { ok: false, error: lineItemsError.message };
-    }
-  }
 
   const { error: inspectionError } = await admin
     .from("vehicle_hire_inspections")
@@ -1266,9 +1126,7 @@ export async function completeHireCheckinAction(
     hireGroupId,
     eventType: "checkin_completed",
     summary:
-      chargeSummary.addToBalanceGbp > 0 || chargeSummary.paidNowGbp > 0
-        ? `Vehicle check-in completed — damage charges applied (£${(chargeSummary.addToBalanceGbp + chargeSummary.paidNowGbp).toFixed(2)}). Finalise contract termination on the End hire tab when ready.`
-        : "Vehicle check-in completed — continue to final account and finalise contract termination when ready.",
+      "Vehicle check-in completed — review return charges on the final account step when ready.",
     actorRole: "company_staff",
     actorUserId: userId,
   });

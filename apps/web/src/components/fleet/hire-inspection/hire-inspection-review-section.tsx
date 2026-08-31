@@ -1,16 +1,8 @@
 "use client";
 
-import type {
-  HireInspectionPaymentAccountOption,
-  HireInspectionPayload,
-} from "@/app/actions/hire-inspections";
-import { RphSelect } from "@/components/forms/rph-select";
+import type { HireInspectionPayload } from "@/app/actions/hire-inspections";
 import { buildHireInspectionDiff } from "@/lib/fleet/hire-inspection-lifecycle";
-import {
-  HIRE_INSPECTION_DAMAGE_CHARGE_RESOLUTIONS,
-  summarizeInspectionDamageCharges,
-  type HireInspectionDamageChargeResolution,
-} from "@/lib/fleet/hire-inspection-damage-charges";
+import type { HireInspectionDamageChargeResolution } from "@/lib/fleet/hire-inspection-damage-charges";
 import type { HireInspectionAccessories } from "@/lib/fleet/hire-inspection-accessories";
 import { summarizeCheckinVehicleChanges } from "@/lib/fleet/hire-inspection-checkin-summary";
 import type { HireInspectionDraftDamage } from "@/lib/fleet/hire-inspection-draft-damages";
@@ -23,18 +15,11 @@ import {
   type HireInspectionKind,
 } from "@/lib/fleet/vehicle-damage-panels";
 
-const PAYMENT_METHOD_LABELS: Record<string, string> = {
-  bank_transfer: "Bank transfer",
-  cash: "Cash",
-  card: "Card",
-  cheque: "Cheque",
-  other: "Other",
-};
-
 const RESOLUTION_LABELS: Record<HireInspectionDamageChargeResolution, string> = {
   waived: "No charge",
   paid_now: "Charge now",
-  add_to_balance: "Add to driver balance",
+  add_to_balance: "Added to driver balance",
+  review_later: "Review later",
 };
 
 type HireInspectionReviewSectionProps = {
@@ -47,18 +32,9 @@ type HireInspectionReviewSectionProps = {
   checkoutBaseline: HireInspectionPayload | null;
   generalNotes: string;
   onGeneralNotesChange: (value: string) => void;
-  onDamageChargeChange: (
-    damageId: string,
-    patch: { chargeGbp: number | null; chargeResolution: HireInspectionDamageChargeResolution | null },
-  ) => void;
-  paymentAccounts: HireInspectionPaymentAccountOption[];
-  damagePaymentMethod: string;
-  damagePaymentAccountId: string;
-  damagePaymentReference: string;
-  onDamagePaymentMethodChange: (value: string) => void;
-  onDamagePaymentAccountChange: (value: string) => void;
-  onDamagePaymentReferenceChange: (value: string) => void;
   readOnly?: boolean;
+  /** When true (check-in), damage pricing is deferred to the final account step. */
+  deferDamageCharges?: boolean;
 };
 
 function toDiffRows(damages: HireInspectionDraftDamage[]) {
@@ -87,15 +63,8 @@ export function HireInspectionReviewSection({
   checkoutBaseline,
   generalNotes,
   onGeneralNotesChange,
-  onDamageChargeChange,
-  paymentAccounts,
-  damagePaymentMethod,
-  damagePaymentAccountId,
-  damagePaymentReference,
-  onDamagePaymentMethodChange,
-  onDamagePaymentAccountChange,
-  onDamagePaymentReferenceChange,
   readOnly = false,
+  deferDamageCharges = false,
 }: HireInspectionReviewSectionProps) {
   const diff =
     kind === "checkin" && checkoutBaseline
@@ -116,11 +85,11 @@ export function HireInspectionReviewSection({
           checkinMediaCount: draftMediaCount,
         })
       : null;
-  const chargeSummary = summarizeInspectionDamageCharges(draftDamages);
-
   const changedVehicleRows = vehicleChanges
     ? [...vehicleChanges.rows.filter((row) => row.changed), ...vehicleChanges.accessoryChanges]
     : [];
+
+  const showDeferredDamageNotice = deferDamageCharges && !readOnly;
 
   return (
     <div className="space-y-4">
@@ -216,8 +185,16 @@ export function HireInspectionReviewSection({
           {diff.newDamages.length ? (
             <div className="space-y-2">
               <h3 className="text-xs font-medium uppercase tracking-wide text-rph-fg-secondary">
-                New damage — resolution
+                {deferDamageCharges && !readOnly ? "New damage" : "New damage — resolution"}
               </h3>
+              {showDeferredDamageNotice ? (
+                <p className="rounded-lg border border-rph-border bg-rph-chrome/40 px-3 py-2 text-sm text-rph-fg-secondary">
+                  {diff.newDamages.length === 1
+                    ? "1 new damage recorded"
+                    : `${diff.newDamages.length} new damages recorded`}
+                  . Pricing will be decided on the final account step after check-in.
+                </p>
+              ) : null}
               <ul className="space-y-3">
                 {diff.newDamages.map((damage) => (
                   <li key={damage.id} className="rounded-lg border border-rph-border p-3">
@@ -232,56 +209,10 @@ export function HireInspectionReviewSection({
                       <p className="mt-2 text-xs text-rph-fg-muted">
                         {damage.chargeResolution
                           ? RESOLUTION_LABELS[damage.chargeResolution]
-                          : "No charge recorded"}
+                          : "Pending office review"}
                         {damage.chargeGbp ? ` · ${formatGbp(damage.chargeGbp)}` : ""}
                       </p>
-                    ) : (
-                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                        <label className="space-y-1 text-xs">
-                          <span className="font-medium text-rph-fg-muted">Charge (£)</span>
-                          <input
-                            className="rph-input w-full"
-                            inputMode="decimal"
-                            placeholder="0.00"
-                            value={
-                              damage.chargeGbp != null && damage.chargeGbp > 0
-                                ? String(damage.chargeGbp)
-                                : ""
-                            }
-                            onChange={(event) => {
-                              const raw = event.target.value.trim();
-                              onDamageChargeChange(damage.id, {
-                                chargeGbp: raw ? Number(raw) : null,
-                                chargeResolution: damage.chargeResolution,
-                              });
-                            }}
-                          />
-                        </label>
-                        <label className="space-y-1 text-xs">
-                          <span className="font-medium text-rph-fg-muted">Resolution</span>
-                          <RphSelect
-                            value={damage.chargeResolution || "__none__"}
-                            placeholder="Select…"
-                            aria-label="Resolution"
-                            options={[
-                              { value: "__none__", label: "Select…" },
-                              ...HIRE_INSPECTION_DAMAGE_CHARGE_RESOLUTIONS.map((resolution) => ({
-                                value: resolution,
-                                label: RESOLUTION_LABELS[resolution],
-                              })),
-                            ]}
-                            onValueChange={(value) => {
-                              onDamageChargeChange(damage.id, {
-                                chargeGbp: damage.chargeGbp,
-                                chargeResolution: (value === "__none__"
-                                  ? null
-                                  : value) as HireInspectionDamageChargeResolution | null,
-                              });
-                            }}
-                          />
-                        </label>
-                      </div>
-                    )}
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -289,71 +220,6 @@ export function HireInspectionReviewSection({
           ) : (
             <p className="rph-muted text-sm">No new damage since checkout.</p>
           )}
-
-          {chargeSummary.paidNowGbp > 0 || chargeSummary.addToBalanceGbp > 0 ? (
-            <div className="rounded-lg border border-rph-border bg-rph-chrome/40 p-3 text-sm">
-              {chargeSummary.paidNowGbp > 0 ? (
-                <p>
-                  Collecting now: <span className="font-medium">{formatGbp(chargeSummary.paidNowGbp)}</span>
-                </p>
-              ) : null}
-              {chargeSummary.addToBalanceGbp > 0 ? (
-                <p className={chargeSummary.paidNowGbp > 0 ? "mt-1" : ""}>
-                  Adding to driver balance:{" "}
-                  <span className="font-medium">{formatGbp(chargeSummary.addToBalanceGbp)}</span>
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-
-          {!readOnly && chargeSummary.paidNowGbp > 0 ? (
-            <div className="space-y-2 rounded-lg border border-rph-border p-3">
-              <h3 className="text-xs font-medium uppercase tracking-wide text-rph-fg-secondary">
-                On-the-spot payment
-              </h3>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <label className="space-y-1 text-xs">
-                  <span className="font-medium text-rph-fg-muted">Method</span>
-                  <RphSelect
-                    value={damagePaymentMethod}
-                    aria-label="Payment method"
-                    options={Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => ({
-                      value,
-                      label,
-                    }))}
-                    onValueChange={onDamagePaymentMethodChange}
-                  />
-                </label>
-                <label className="space-y-1 text-xs">
-                  <span className="font-medium text-rph-fg-muted">Payment account</span>
-                  <RphSelect
-                    value={damagePaymentAccountId || "__none__"}
-                    placeholder="Select account…"
-                    aria-label="Payment account"
-                    options={[
-                      { value: "__none__", label: "Select account…" },
-                      ...paymentAccounts.map((account) => ({
-                        value: account.id,
-                        label: `${account.name}${account.isDefault ? " (hire default)" : ""}`,
-                      })),
-                    ]}
-                    onValueChange={(value) =>
-                      onDamagePaymentAccountChange(value === "__none__" ? "" : value)
-                    }
-                  />
-                </label>
-                <label className="space-y-1 text-xs sm:col-span-2">
-                  <span className="font-medium text-rph-fg-muted">Reference (optional)</span>
-                  <input
-                    className="rph-input w-full"
-                    value={damagePaymentReference}
-                    onChange={(event) => onDamagePaymentReferenceChange(event.target.value)}
-                    placeholder="Payment reference"
-                  />
-                </label>
-              </div>
-            </div>
-          ) : null}
         </div>
       ) : null}
 

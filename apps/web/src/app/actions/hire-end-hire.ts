@@ -47,6 +47,7 @@ import type { HireTerminationRentBillingMode } from "@/lib/fleet/hire-terminatio
 import type { RentCadence } from "@/lib/fleet/hire-types";
 import { canStartCheckin, canTerminateHire } from "@/lib/fleet/hire-lifecycle-attention";
 import { logHireGroupEvent } from "@/lib/fleet/hire-audit";
+import { HIRE_RETURN_CHARGE_SOURCE_KINDS } from "@/lib/fleet/hire-return-charges";
 import { PROVISIONAL_TERMINATION_DEPOSIT_DISPOSITION } from "@/lib/fleet/hire-settlement-finalization";
 import { syncVehicleStatusForHireGroup } from "@/lib/fleet/sync-vehicle-hire-status";
 import { revalidateHireWorkspaceCache } from "@/lib/fleet/hire-workspace-cache";
@@ -57,6 +58,13 @@ import {
   loadHireTerminationPreviewAction,
   terminateHireGroupAction,
 } from "@/app/actions/rental-hire-termination";
+import {
+  loadHireReturnChargesAction,
+  commitHireReturnChargesFromDraftAction,
+  type HireReturnChargesPageData,
+} from "@/app/actions/hire-return-charges";
+import { resolveHireDepositDispositionAction } from "@/app/actions/rental-hire-termination";
+import { areReturnChargesReady } from "@/lib/fleet/hire-return-charges";
 
 function londonTimeHmNow(): string {
   const parts = new Intl.DateTimeFormat("en-GB", {
@@ -141,6 +149,7 @@ async function authorizeEndHireWrite(hireGroupId: string): Promise<
         checkoutCompleted: boolean;
         checkinCompleted: boolean;
         settlementBalanceGbp: number;
+        settlementBalanceDirection: string | null;
         terminatedAt: string | null;
       };
     }
@@ -159,7 +168,9 @@ async function authorizeEndHireWrite(hireGroupId: string): Promise<
   const supabase = await createClient();
   const { data: group, error } = await supabase
     .from("vehicle_hire_groups")
-    .select("id, status, parent_company_id, subcompany_id, end_hire_draft, settlement_balance_gbp, terminated_at")
+    .select(
+      "id, status, parent_company_id, subcompany_id, end_hire_draft, settlement_balance_gbp, settlement_balance_direction, terminated_at",
+    )
     .eq("id", id)
     .eq("parent_company_id", companyId)
     .maybeSingle();
@@ -203,6 +214,7 @@ async function authorizeEndHireWrite(hireGroupId: string): Promise<
       checkoutCompleted,
       checkinCompleted,
       settlementBalanceGbp: Number(group.settlement_balance_gbp ?? 0),
+      settlementBalanceDirection: (group.settlement_balance_direction as string | null) ?? null,
       terminatedAt: (group.terminated_at as string | null) ?? null,
     },
   };
@@ -318,10 +330,20 @@ export type HireEndHirePageData = {
   extraChargesOutstandingGbp: number;
   canApprovePayments: boolean;
   openBalanceGbp: number;
+  settlementBalanceDirection: "driver_owes_company" | "company_owes_driver" | "settled" | null;
+  depositResolution: {
+    canResolveDeposit: boolean;
+    depositHeldGbp: number;
+    depositReceivedGbp: number;
+    currentSignedSettlementGbp: number;
+    depositDisposition: string | null;
+    terminationSummary: HireTerminationAccountsSummary | null;
+  } | null;
   contractEffectiveFromLabel: string;
   signedActivatedLabel: string;
   /** True when legacy check-in auto-complete was reverted on load — refresh workspace chrome. */
   repairedAutoComplete: boolean;
+  returnCharges: HireReturnChargesPageData | null;
 };
 
 export async function loadHireEndHirePageAction(
@@ -348,6 +370,12 @@ export async function loadHireEndHirePageAction(
   }
 
   const { hire } = authorized;
+  if (
+    (hire.status === "ending" || hire.status === "terminated") &&
+    !isHireEndHireFinalized({ status: hire.status, draft: hire.endHireDraft })
+  ) {
+    await syncVehicleStatusForHireGroup(createSupabaseAdminClient(), hire.id);
+  }
 
   const supabase = await createClient();
   const { data: group } = await supabase
@@ -374,6 +402,8 @@ export async function loadHireEndHirePageAction(
   let extraChargePendingPayment: HireEndHirePageData["extraChargePendingPayment"] = null;
   let extraChargesOutstandingGbp = 0;
   let canApprovePayments = false;
+  let returnCharges: HireReturnChargesPageData | null = null;
+  let depositResolution: HireEndHirePageData["depositResolution"] = null;
   const vehicle = group.vehicles as { vrm?: string } | null;
   const startDate = (group.start_date as string | null) ?? null;
   const startTime = (group.start_time as string | null)?.slice(0, 5) || "09:00";
@@ -395,6 +425,14 @@ export async function loadHireEndHirePageAction(
       canApprovePayments = payments.data.canApprovePayments;
       extraChargePendingPayment = payments.data.extraChargePendingPayment;
       extraChargesOutstandingGbp = payments.data.extraChargesOutstandingGbp;
+      depositResolution = {
+        canResolveDeposit: payments.data.canResolveDeposit,
+        depositHeldGbp: payments.data.depositReceivedGbp,
+        depositReceivedGbp: payments.data.depositReceivedGbp,
+        currentSignedSettlementGbp: payments.data.currentSignedSettlementGbp,
+        depositDisposition: payments.data.depositDisposition,
+        terminationSummary: payments.data.terminationSummary,
+      };
       pendingScheduleRows = payments.data.rows.filter(
         (row) => row.paymentStatus === "pending_approval",
       );
@@ -507,6 +545,30 @@ export async function loadHireEndHirePageAction(
     }
   }
 
+  if (
+    hire.checkinCompleted &&
+    (effectiveDraft.step === "return_charges" || effectiveDraft.step === "final_account")
+  ) {
+    const returnChargesRes = await loadHireReturnChargesAction(hire.id);
+    if (returnChargesRes.ok) {
+      returnCharges = returnChargesRes.data;
+    }
+  }
+
+  const hasReturnChargeWork = returnCharges
+    ? returnCharges.newDamages.length > 0 ||
+      returnCharges.fuelShortfall ||
+      returnCharges.missingAccessories.length > 0
+    : false;
+  const returnChargesReady = returnCharges
+    ? returnCharges.returnChargesReady
+    : areReturnChargesReady({
+        newDamages: [],
+        returnChargesDraftSavedAt: effectiveDraft.returnChargesDraftSavedAt ?? null,
+        returnChargesAppliedAt: effectiveDraft.returnChargesAppliedAt ?? null,
+        hasReturnChargeWork: false,
+      });
+
   return {
     ok: true,
     data: {
@@ -531,6 +593,7 @@ export async function loadHireEndHirePageAction(
         status: hire.status,
         checkinCompleted: hire.checkinCompleted,
         draft: effectiveDraft,
+        returnChargesReady,
       }),
       isEndHireFinalized: isHireEndHireFinalized({
         status: hire.status,
@@ -543,11 +606,16 @@ export async function loadHireEndHirePageAction(
       extraChargesOutstandingGbp,
       canApprovePayments,
       openBalanceGbp: Math.abs(hire.settlementBalanceGbp),
+      settlementBalanceDirection:
+        (hire.settlementBalanceDirection as HireEndHirePageData["settlementBalanceDirection"]) ??
+        null,
+      depositResolution,
       contractEffectiveFromLabel: formatUkDateAtTime(startDate, startTime),
       signedActivatedLabel: group.activated_at
         ? formatUkDateTime(group.activated_at as string)
         : "—",
       repairedAutoComplete,
+      returnCharges,
     },
   };
 }
@@ -637,7 +705,7 @@ export async function cancelHireEndHireAction(
       .from("vehicle_hire_driver_charge_line_items")
       .select("id, balance_payment_id")
       .eq("hire_group_id", hire.id)
-      .eq("source_kind", "checkin_inspection_damage");
+      .in("source_kind", [...HIRE_RETURN_CHARGE_SOURCE_KINDS]);
 
     const paymentIds = [
       ...new Set(
@@ -651,7 +719,7 @@ export async function cancelHireEndHireAction(
       .from("vehicle_hire_driver_charge_line_items")
       .delete()
       .eq("hire_group_id", hire.id)
-      .eq("source_kind", "checkin_inspection_damage");
+      .in("source_kind", [...HIRE_RETURN_CHARGE_SOURCE_KINDS]);
     if (chargeDeleteError) return { ok: false, error: chargeDeleteError.message };
 
     if (paymentIds.length > 0) {
@@ -663,13 +731,38 @@ export async function cancelHireEndHireAction(
       if (paymentDeleteError) return { ok: false, error: paymentDeleteError.message };
     }
 
-    // Also remove orphaned check-in damage receipts by note (paid_now may not link via charge row).
+    // Also remove orphaned return-charge receipts by note (paid_now may not link via charge row).
     await admin
       .from("vehicle_hire_balance_payments")
       .delete()
       .eq("hire_group_id", hire.id)
       .eq("payment_category", "driver_charge")
-      .ilike("notes", "%check-in%");
+      .or("notes.ilike.%check-in%,notes.ilike.%return charge%");
+
+    const { data: checkinInspections } = await admin
+      .from("vehicle_hire_inspections")
+      .select("id")
+      .eq("hire_group_id", hire.id)
+      .eq("kind", "checkin");
+    const checkinInspectionIds = (checkinInspections ?? [])
+      .map((row) => (row.id as string | null)?.trim() || "")
+      .filter(Boolean);
+    if (checkinInspectionIds.length > 0) {
+      const { data: checkinMedia } = await admin
+        .from("vehicle_hire_inspection_media")
+        .select("file_path")
+        .in("inspection_id", checkinInspectionIds);
+      const mediaPaths = [
+        ...new Set(
+          (checkinMedia ?? [])
+            .map((row) => (row.file_path as string | null)?.trim() || "")
+            .filter(Boolean),
+        ),
+      ];
+      if (mediaPaths.length > 0) {
+        await admin.storage.from("hire-inspection-media").remove(mediaPaths);
+      }
+    }
 
     const { error: inspectionDeleteError } = await admin
       .from("vehicle_hire_inspections")
@@ -759,6 +852,8 @@ export async function saveHireEndHireDraftAction(input: {
     updatedAt: nowIso,
     finalizedAt: previous.finalizedAt,
     explicitFinalization: previous.explicitFinalization,
+    returnChargesAppliedAt: previous.returnChargesAppliedAt ?? null,
+    pendingReturnReviews: previous.pendingReturnReviews ?? null,
   };
 
   const supabase = await createClient();
@@ -835,6 +930,14 @@ export async function confirmHireEndHireReturnAction(input: {
 
 export async function finalizeHireEndHireAction(
   hireGroupId: string,
+  input?: {
+    depositDisposition?: string;
+    depositDispositionReason?: string;
+    depositRefundAmountGbp?: number;
+    settlementResolution?: string;
+    settlementPaymentMethod?: string;
+    settlementPaymentReference?: string;
+  },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const authorized = await authorizeEndHireWrite(hireGroupId);
   if (!authorized.ok) return authorized;
@@ -844,19 +947,54 @@ export async function finalizeHireEndHireAction(
   const previous =
     hire.endHireDraft ?? emptyHireEndHireDraft(nowIso, ukTodayYmd(), londonTimeHmNow());
 
+  const returnChargesRes = await loadHireReturnChargesAction(hire.id);
+  const returnChargesReady = returnChargesRes.ok
+    ? returnChargesRes.data.returnChargesReady
+    : false;
+
   if (
     !canFinalizeHireEndHireProcess({
       status: hire.status,
       checkinCompleted: hire.checkinCompleted,
       draft: previous,
+      returnChargesReady,
     })
   ) {
     return {
       ok: false,
       error: isHireEndHireFinalized({ status: hire.status, draft: previous })
         ? "Contract termination is already finalised."
-        : "Complete check-in and review the final account before finalising.",
+        : returnChargesRes.ok && returnChargesRes.data.newDamages.length > 0
+          ? "Save return charges and resolve each new damage before finalising."
+          : returnChargesRes.ok &&
+              (returnChargesRes.data.fuelShortfall ||
+                returnChargesRes.data.missingAccessories.length > 0) &&
+              !returnChargesRes.data.returnChargesDraftSavedAt
+            ? "Save return charges before continuing to the final account."
+            : "Complete check-in and review the final account before finalising.",
     };
+  }
+
+  if (previous.returnChargesDraft && !previous.returnChargesAppliedAt?.trim()) {
+    const commitRes = await commitHireReturnChargesFromDraftAction(hire.id);
+    if (!commitRes.ok) return commitRes;
+  }
+
+  const paymentsAfterCharges = await loadHirePaymentsPageAction(hire.id);
+  if (paymentsAfterCharges.ok && paymentsAfterCharges.data.canResolveDeposit) {
+    if (!input?.depositDisposition?.trim()) {
+      return { ok: false, error: "Choose what to do with the held deposit before confirming." };
+    }
+    const depositRes = await resolveHireDepositDispositionAction({
+      hireGroupId: hire.id,
+      depositDisposition: input.depositDisposition,
+      depositDispositionReason: input.depositDispositionReason,
+      depositRefundAmountGbp: input.depositRefundAmountGbp,
+      settlementResolution: input.settlementResolution,
+      settlementPaymentMethod: input.settlementPaymentMethod,
+      settlementPaymentReference: input.settlementPaymentReference,
+    });
+    if (!depositRes.ok) return depositRes;
   }
 
   const { user } = await requireRentalCompanyArea();

@@ -5,11 +5,9 @@ import {
   completeHireCheckoutAction,
   loadDriverHireInspectionAction,
   loadHireInspectionAction,
-  loadHireInspectionPaymentAccountsAction,
   loadHireInspectionTrackerOdometerAction,
   saveHireInspectionDraftAction,
   syncHireInspectionMediaDraftAction,
-  type HireInspectionPaymentAccountOption,
   type HireInspectionPayload,
 } from "@/app/actions/hire-inspections";
 import { RphSelect } from "@/components/forms/rph-select";
@@ -33,7 +31,6 @@ import {
   seedCheckinDamagesFromCheckout,
   type HireInspectionDraftDamage,
 } from "@/lib/fleet/hire-inspection-draft-damages";
-import type { HireInspectionDamageChargeResolution } from "@/lib/fleet/hire-inspection-damage-charges";
 import {
   buildMediaDraftFormData,
   createDraftMediaFromFiles,
@@ -180,6 +177,8 @@ function HireInspectionDamageForm({
   );
 }
 
+const PHOTO_REQUIRED_MESSAGE = "Add at least one vehicle photo to continue.";
+
 type Props = {
   hireGroupId: string;
   kind: HireInspectionKind;
@@ -188,6 +187,8 @@ type Props = {
   vehicleId?: string | null;
   audience?: "staff" | "driver";
   embedded?: boolean;
+  /** When set, staff completion stays in-context (e.g. end-hire wizard) instead of navigating to hire summary. */
+  onStaffComplete?: () => void | Promise<void>;
 };
 
 export function HireInspectionWizard({
@@ -198,6 +199,7 @@ export function HireInspectionWizard({
   vehicleId,
   audience = "staff",
   embedded = false,
+  onStaffComplete,
 }: Props) {
   const router = useRouter();
   const workspaceCache = useHireWorkspaceCache();
@@ -233,10 +235,6 @@ export function HireInspectionWizard({
   const [diagramExpanded, setDiagramExpanded] = useState(false);
   const [draftDamages, setDraftDamages] = useState<HireInspectionDraftDamage[]>([]);
   const [draftMedia, setDraftMedia] = useState<HireInspectionDraftMedia[]>([]);
-  const [paymentAccounts, setPaymentAccounts] = useState<HireInspectionPaymentAccountOption[]>([]);
-  const [damagePaymentMethod, setDamagePaymentMethod] = useState("cash");
-  const [damagePaymentAccountId, setDamagePaymentAccountId] = useState("");
-  const [damagePaymentReference, setDamagePaymentReference] = useState("");
 
   const title = kind === "checkout" ? "Vehicle checkout" : "Vehicle check-in";
   const completeLabel = kind === "checkout" ? "Complete checkout" : "Complete check-in";
@@ -326,28 +324,6 @@ export function HireInspectionWizard({
       cancelled = true;
     };
   }, [audience, hireGroupId, readOnly, resolvedVehicleId]);
-
-  useEffect(() => {
-    if (audience !== "staff" || kind !== "checkin" || readOnly) return;
-    let cancelled = false;
-    void (async () => {
-      const res = await loadHireInspectionPaymentAccountsAction(hireGroupId);
-      if (cancelled || !res.ok) return;
-      setPaymentAccounts(res.accounts);
-      setDamagePaymentAccountId((current) => {
-        if (current) return current;
-        return (
-          res.defaultPaymentAccountId ??
-          res.accounts.find((account) => account.isDefault)?.id ??
-          res.accounts[0]?.id ??
-          ""
-        );
-      });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [audience, hireGroupId, kind, readOnly]);
 
   const diagramDamages = useMemo(() => {
     const rows = draftDamages.map((d) => ({
@@ -569,47 +545,32 @@ export function HireInspectionWizard({
     setAccessories((prev) => ({ ...prev, [key]: value }));
   }
 
-  function setDamageCharge(
-    damageId: string,
-    patch: { chargeGbp: number | null; chargeResolution: HireInspectionDamageChargeResolution | null },
-  ) {
-    setDraftDamages((prev) =>
-      prev.map((damage) =>
-        damage.id === damageId
-          ? {
-              ...damage,
-              chargeGbp:
-                patch.chargeGbp != null && Number.isFinite(patch.chargeGbp) && patch.chargeGbp > 0
-                  ? Math.round(patch.chargeGbp * 100) / 100
-                  : null,
-              chargeResolution: patch.chargeResolution,
-            }
-          : damage,
-      ),
-    );
+  function goToNextStep() {
+    if (step === 3 && draftMedia.length < 1) {
+      setError(PHOTO_REQUIRED_MESSAGE);
+      return;
+    }
+    setError(null);
+    setStep((s) => Math.min(4, s + 1));
   }
 
   function completeInspection() {
     startSaving(async () => {
-      if (draftMedia.length < 1) {
-        setError("Add at least one vehicle photo before completing.");
-        return;
-      }
       const saved = await persistDraft({ reload: false });
       if (!saved) return;
       const res =
         kind === "checkout"
           ? await completeHireCheckoutAction(hireGroupId)
-          : await completeHireCheckinAction(hireGroupId, {
-              damagePaymentMethod,
-              damagePaymentAccountId,
-              damagePaymentReference,
-            });
+          : await completeHireCheckinAction(hireGroupId);
       if (!res.ok) {
         setError(res.error);
         return;
       }
       workspaceCache?.invalidateCache(hireWorkspaceKeysInvalidatedByInspectionChange());
+      if (audience === "staff" && onStaffComplete) {
+        await onStaffComplete();
+        return;
+      }
       router.push(
         audience === "driver"
           ? `/driver/hires/${hireGroupId}`
@@ -712,7 +673,9 @@ export function HireInspectionWizard({
 
           <FormModalStepProgress step={step - 1} labels={STEP_LABELS} />
 
-          {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
+          {error && !(step === 3 && error === PHOTO_REQUIRED_MESSAGE) ? (
+            <p className="rph-alert-error text-sm">{error}</p>
+          ) : null}
 
           {step === 1 ? (
             <section className="rph-card space-y-3 p-4">
@@ -777,6 +740,7 @@ export function HireInspectionWizard({
                 onAddPhotos={onUploadPhotos}
                 onRemovePhoto={removePhoto}
                 disabled={saving || loading}
+                validationError={error === PHOTO_REQUIRED_MESSAGE ? error : null}
               />
             </section>
           ) : null}
@@ -793,14 +757,7 @@ export function HireInspectionWizard({
                 checkoutBaseline={checkoutBaseline}
                 generalNotes={generalNotes}
                 onGeneralNotesChange={setGeneralNotes}
-                onDamageChargeChange={setDamageCharge}
-                paymentAccounts={paymentAccounts}
-                damagePaymentMethod={damagePaymentMethod}
-                damagePaymentAccountId={damagePaymentAccountId}
-                damagePaymentReference={damagePaymentReference}
-                onDamagePaymentMethodChange={setDamagePaymentMethod}
-                onDamagePaymentAccountChange={setDamagePaymentAccountId}
-                onDamagePaymentReferenceChange={setDamagePaymentReference}
+                deferDamageCharges={kind === "checkin"}
               />
             </section>
           ) : null}
@@ -832,7 +789,7 @@ export function HireInspectionWizard({
               <button
                 type="button"
                 className="rph-btn-primary text-sm"
-                onClick={() => setStep((s) => Math.min(4, s + 1))}
+                onClick={goToNextStep}
                 disabled={saving || loading}
               >
                 Continue

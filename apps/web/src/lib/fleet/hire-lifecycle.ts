@@ -38,8 +38,9 @@ export function allAgreementsSigned(signedFlags: boolean[]): boolean {
 /** Map hire group status to vehicle status when hire drives fleet state. */
 export function vehicleStatusForHireGroup(status: HireGroupStatus): VehicleStatus | null {
   if (status === "draft" || status === "pending_signature" || status === "reserved") return "reserved";
-  if (status === "active") return "on_rent";
-  if (status === "completed" || status === "cancelled" || status === "terminated") return "available";
+  // ending / terminated are still cancellable until Step 4 finalise — keep the vehicle on hire.
+  if (status === "active" || status === "ending" || status === "terminated") return "on_rent";
+  if (status === "completed" || status === "cancelled") return "available";
   return null;
 }
 

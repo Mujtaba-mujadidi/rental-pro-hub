@@ -137,7 +137,7 @@ describe("hire-end-hire draft helpers", () => {
     ).toBe(true);
   });
 
-  it("allows finalise only on final account after check-in", () => {
+  it("allows finalise only on final account after check-in and return charges", () => {
     const baseDraft = {
       ...emptyHireEndHireDraft("t", "2026-08-20", "12:00"),
       started: true,
@@ -148,13 +148,23 @@ describe("hire-end-hire draft helpers", () => {
         status: "terminated",
         checkinCompleted: true,
         draft: baseDraft,
+        returnChargesReady: true,
       }),
     ).toBe(true);
     expect(
       canFinalizeHireEndHireProcess({
         status: "terminated",
+        checkinCompleted: true,
+        draft: baseDraft,
+        returnChargesReady: false,
+      }),
+    ).toBe(false);
+    expect(
+      canFinalizeHireEndHireProcess({
+        status: "terminated",
         checkinCompleted: false,
         draft: baseDraft,
+        returnChargesReady: true,
       }),
     ).toBe(false);
     expect(
@@ -162,6 +172,7 @@ describe("hire-end-hire draft helpers", () => {
         status: "completed",
         checkinCompleted: true,
         draft: baseDraft,
+        returnChargesReady: true,
       }),
     ).toBe(true);
     expect(
@@ -169,6 +180,7 @@ describe("hire-end-hire draft helpers", () => {
         status: "completed",
         checkinCompleted: true,
         draft: { ...baseDraft, finalizedAt: "2026-08-21T10:00:00.000Z", explicitFinalization: true },
+        returnChargesReady: true,
       }),
     ).toBe(false);
   });
@@ -258,7 +270,7 @@ describe("hire-end-hire draft helpers", () => {
         draft: { ...base, step: "financial_review" },
         nowIso: "t",
       }).step,
-    ).toBe("final_account");
+    ).toBe("return_charges");
   });
 });
 

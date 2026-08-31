@@ -8,6 +8,7 @@ export const HIRE_END_HIRE_STEPS = [
   "return_details",
   "financial_review",
   "checkin",
+  "return_charges",
   "final_account",
 ] as const;
 
@@ -24,6 +25,26 @@ export const HIRE_END_HIRE_RETURN_REASONS = [
 
 export type HireEndHireReturnReason = (typeof HIRE_END_HIRE_RETURN_REASONS)[number];
 
+export type HireEndHireReturnChargesDraft = {
+  damages: Array<{
+    id: string;
+    checkoutDamageId: string | null;
+    chargeGbp: number | null;
+    chargeResolution: string | null;
+  }>;
+  fuel: {
+    enabled: boolean;
+    amountGbp: number | null;
+    chargeResolution: string | null;
+  };
+  accessories: Array<{
+    key: string;
+    enabled: boolean;
+    amountGbp: number | null;
+    chargeResolution: string | null;
+  }>;
+};
+
 export type HireEndHireDraft = {
   started: boolean;
   step: HireEndHireStep;
@@ -38,6 +59,16 @@ export type HireEndHireDraft = {
   finalizedAt: string | null;
   /** Set when staff confirm Finalise contract termination (not check-in auto-complete). */
   explicitFinalization?: boolean;
+  /** Saved on return-charges step — committed to balance on final confirm. */
+  returnChargesDraft?: HireEndHireReturnChargesDraft | null;
+  returnChargesDraftSavedAt?: string | null;
+  /** Set when return charges are posted to the hire balance (on final confirm). */
+  returnChargesAppliedAt?: string | null;
+  /** Optional fuel/accessory items marked review-later (no charge posted yet). */
+  pendingReturnReviews?: {
+    fuel?: boolean;
+    accessories?: string[];
+  } | null;
 };
 
 export function hireEndHireDefaultRentBillingMode(): HireTerminationRentBillingMode {
@@ -58,6 +89,7 @@ export const HIRE_END_HIRE_STEP_LABELS: Record<HireEndHireStep, string> = {
   return_details: "Return details",
   financial_review: "Financial review",
   checkin: "Vehicle check-in",
+  return_charges: "Return charges",
   final_account: "Final account",
 };
 
@@ -102,6 +134,10 @@ export function emptyHireEndHireDraft(nowIso: string, todayYmd: string, timeHm: 
     updatedAt: nowIso,
     finalizedAt: null,
     explicitFinalization: false,
+    returnChargesDraft: null,
+    returnChargesDraftSavedAt: null,
+    returnChargesAppliedAt: null,
+    pendingReturnReviews: null,
   };
 }
 
@@ -126,13 +162,21 @@ export function resolveEffectiveHireEndHireDraft(input: {
 
   if (status === "ending") {
     const step =
-      draft.step === "checkin" || draft.step === "final_account" ? "return_details" : draft.step;
+      draft.step === "checkin" ||
+      draft.step === "return_charges" ||
+      draft.step === "final_account"
+        ? "return_details"
+        : draft.step;
     return withStep(step);
   }
 
   if (status === "terminated" || status === "completed") {
     if (checkinCompleted) {
-      return withStep("final_account");
+      const step: HireEndHireStep =
+        draft.step === "return_charges" || draft.step === "final_account"
+          ? draft.step
+          : "return_charges";
+      return withStep(step);
     }
     const step: HireEndHireStep =
       draft.step === "return_details" ||
@@ -165,6 +209,73 @@ export function parseHireEndHireDraft(raw: unknown): HireEndHireDraft | null {
     updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : "",
     finalizedAt: typeof row.finalizedAt === "string" ? row.finalizedAt : null,
     explicitFinalization: row.explicitFinalization === true,
+    returnChargesDraft: parseReturnChargesDraft(row.returnChargesDraft),
+    returnChargesDraftSavedAt:
+      typeof row.returnChargesDraftSavedAt === "string" ? row.returnChargesDraftSavedAt : null,
+    returnChargesAppliedAt:
+      typeof row.returnChargesAppliedAt === "string" ? row.returnChargesAppliedAt : null,
+    pendingReturnReviews: parsePendingReturnReviews(row.pendingReturnReviews),
+  };
+}
+
+function parseReturnChargesDraft(raw: unknown): HireEndHireReturnChargesDraft | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  if (!Array.isArray(row.damages) || !row.fuel || typeof row.fuel !== "object") return null;
+  const fuel = row.fuel as Record<string, unknown>;
+  return {
+    damages: row.damages
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+      .map((damage) => ({
+        id: typeof damage.id === "string" ? damage.id : "",
+        checkoutDamageId:
+          typeof damage.checkoutDamageId === "string" ? damage.checkoutDamageId : null,
+        chargeGbp:
+          typeof damage.chargeGbp === "number" && Number.isFinite(damage.chargeGbp)
+            ? damage.chargeGbp
+            : null,
+        chargeResolution:
+          typeof damage.chargeResolution === "string" ? damage.chargeResolution : null,
+      }))
+      .filter((damage) => damage.id),
+    fuel: {
+      enabled: fuel.enabled === true,
+      amountGbp:
+        typeof fuel.amountGbp === "number" && Number.isFinite(fuel.amountGbp)
+          ? fuel.amountGbp
+          : null,
+      chargeResolution:
+        typeof fuel.chargeResolution === "string" ? fuel.chargeResolution : null,
+    },
+    accessories: Array.isArray(row.accessories)
+      ? row.accessories
+          .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+          .map((accessory) => ({
+            key: typeof accessory.key === "string" ? accessory.key : "",
+            enabled: accessory.enabled === true,
+            amountGbp:
+              typeof accessory.amountGbp === "number" && Number.isFinite(accessory.amountGbp)
+                ? accessory.amountGbp
+                : null,
+            chargeResolution:
+              typeof accessory.chargeResolution === "string" ? accessory.chargeResolution : null,
+          }))
+          .filter((accessory) => accessory.key)
+      : [],
+  };
+}
+
+function parsePendingReturnReviews(
+  raw: unknown,
+): HireEndHireDraft["pendingReturnReviews"] {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const accessories = Array.isArray(row.accessories)
+    ? row.accessories.filter((value): value is string => typeof value === "string")
+    : [];
+  return {
+    fuel: row.fuel === true,
+    accessories,
   };
 }
 
@@ -202,17 +313,20 @@ export function canCancelHireEndHireProcess(input: {
   return false;
 }
 
-/** Final account step — check-in done, return confirmed, not yet finalised. */
+/** Final account step — check-in done, return confirmed, return charges applied when required. */
 export function canFinalizeHireEndHireProcess(input: {
   status: string;
   checkinCompleted: boolean;
   draft: HireEndHireDraft | null;
+  returnChargesReady?: boolean;
 }): boolean {
   if (isHireEndHireFinalized({ status: input.status, draft: input.draft })) return false;
   if (input.status !== "terminated" && input.status !== "completed") return false;
   if (!input.checkinCompleted) return false;
   if (!input.draft?.started) return false;
-  return input.draft.step === "final_account";
+  if (input.draft.step !== "final_account") return false;
+  if (input.returnChargesReady === false) return false;
+  return true;
 }
 
 /** Hire list: still in end-hire closeout — show under Active, not Completed. */

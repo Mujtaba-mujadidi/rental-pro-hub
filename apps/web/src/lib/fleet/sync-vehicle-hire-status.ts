@@ -108,7 +108,8 @@ export async function syncVehicleStatusForHireGroup(admin: Admin, hireGroupId: s
   const vehicleId = group.vehicle_id as string;
   const status = group.status as HireGroupStatus;
 
-  if (status === "cancelled" || status === "completed" || status === "terminated") {
+  // terminated is still an in-progress end-hire closeout (cancellable on Step 4).
+  if (status === "cancelled" || status === "completed") {
     await releaseVehicleIfNoBlockingHire(admin, vehicleId, hireGroupId);
     return;
   }

@@ -12,6 +12,7 @@ type HireInspectionPhotosSectionProps = {
   onRemovePhoto: (mediaId: string) => void;
   readOnly?: boolean;
   disabled?: boolean;
+  validationError?: string | null;
 };
 
 export function HireInspectionPhotosSection({
@@ -21,6 +22,7 @@ export function HireInspectionPhotosSection({
   onRemovePhoto,
   readOnly = false,
   disabled = false,
+  validationError = null,
 }: HireInspectionPhotosSectionProps) {
   return (
     <div className="space-y-3">
@@ -28,11 +30,14 @@ export function HireInspectionPhotosSection({
         <div>
           <h2 className="text-sm font-semibold text-rph-fg">Photos</h2>
           <p className="rph-muted mt-1 text-xs">
-            Photos are kept on this device until you save draft or complete the inspection.
+            Add at least one vehicle photo before continuing. Photos are kept on this device until you
+            save draft or complete the inspection.
           </p>
         </div>
         {!readOnly ? <HireInspectionPhotoAddMenu disabled={disabled} onFiles={onAddPhotos} /> : null}
       </div>
+
+      {validationError ? <p className="rph-alert-error text-sm">{validationError}</p> : null}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         {draftMedia.map((item) => (

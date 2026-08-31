@@ -7,6 +7,7 @@ import {
 } from "@/app/actions/rental-hire-termination";
 import { depositResolutionHelpText } from "@/lib/fleet/hire-deposit-resolution";
 import type { DepositResolutionPreview } from "@/lib/fleet/hire-deposit-resolution";
+import { openBalanceDirection } from "@/lib/fleet/hire-open-balance";
 import {
   defaultDepositDisposition,
   settlementResolutionLabel,
@@ -26,12 +27,23 @@ import {
 import { formatGbp } from "@/lib/fleet/maintenance";
 import { useEffect, useState, useTransition } from "react";
 
+export type HireDepositFinalizePayload = {
+  depositDisposition: HireDepositDisposition;
+  depositDispositionReason?: string;
+  depositRefundAmountGbp?: number;
+  settlementResolution?: HireSettlementResolution;
+  settlementPaymentMethod?: string;
+  settlementPaymentReference?: string;
+};
+
 export function HireDepositDispositionResolveCard({
   hireGroupId,
   terminationSummary,
   depositHeldGbp,
   currentSignedSettlementGbp,
   onSuccess,
+  deferSubmit = false,
+  onFinalizePayloadChange,
 }: {
   hireGroupId: string;
   terminationSummary: HireTerminationAccountsSummary;
@@ -39,6 +51,9 @@ export function HireDepositDispositionResolveCard({
   depositHeldGbp: number;
   currentSignedSettlementGbp: number;
   onSuccess: () => void;
+  /** When true, hide the resolve button — parent commits on final account confirm. */
+  deferSubmit?: boolean;
+  onFinalizePayloadChange?: (payload: HireDepositFinalizePayload | null) => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [previewPending, startPreviewTransition] = useTransition();
@@ -55,6 +70,21 @@ export function HireDepositDispositionResolveCard({
   const [settlementPaymentReference, setSettlementPaymentReference] = useState("");
 
   const heldGbp = Math.max(0, Number(depositHeldGbp) || 0);
+
+  useEffect(() => {
+    const recommended = defaultDepositDisposition(currentSignedSettlementGbp);
+    setDepositDisposition((prev) => {
+      // Keep the staff choice unless the live balance makes it invalid
+      // (e.g. after return charges change what the driver owes).
+      if (prev === "apply_to_balance" && currentSignedSettlementGbp <= 0.005) {
+        return recommended;
+      }
+      if (prev === "refund_full" && currentSignedSettlementGbp > 0.005) {
+        return recommended;
+      }
+      return prev;
+    });
+  }, [currentSignedSettlementGbp]);
 
   useEffect(() => {
     startPreviewTransition(async () => {
@@ -74,7 +104,13 @@ export function HireDepositDispositionResolveCard({
       }
       setPreview(res.preview);
     });
-  }, [hireGroupId, depositDisposition, depositRefundAmountGbp]);
+  }, [
+    hireGroupId,
+    depositDisposition,
+    depositRefundAmountGbp,
+    currentSignedSettlementGbp,
+    depositHeldGbp,
+  ]);
 
   const depositOptions = preview?.depositOptions ?? [];
   const effectiveSettlementResolution =
@@ -113,9 +149,39 @@ export function HireDepositDispositionResolveCard({
     (!needsSettlementStep ||
       (preview?.settlementResolutions.includes(effectiveSettlementResolution) ?? false));
 
-  const currentSigned =
-    preview?.currentSignedSettlementGbp ?? (Number(currentSignedSettlementGbp) || 0);
-  const currentDirection = preview?.currentDirection ?? "settled";
+  useEffect(() => {
+    if (!deferSubmit || !onFinalizePayloadChange) return;
+    if (!canSubmit || !preview) {
+      onFinalizePayloadChange(null);
+      return;
+    }
+    onFinalizePayloadChange({
+      depositDisposition,
+      depositDispositionReason: depositDispositionReason.trim() || undefined,
+      depositRefundAmountGbp:
+        depositDisposition === "refund_partial" && depositRefundAmountGbp.trim()
+          ? Number(depositRefundAmountGbp)
+          : undefined,
+      settlementResolution: needsSettlementStep ? effectiveSettlementResolution : undefined,
+      settlementPaymentMethod: needsSettlementStep ? settlementPaymentMethod : undefined,
+      settlementPaymentReference: settlementPaymentReference.trim() || undefined,
+    });
+  }, [
+    deferSubmit,
+    onFinalizePayloadChange,
+    canSubmit,
+    preview,
+    depositDisposition,
+    depositDispositionReason,
+    depositRefundAmountGbp,
+    needsSettlementStep,
+    effectiveSettlementResolution,
+    settlementPaymentMethod,
+    settlementPaymentReference,
+  ]);
+
+  const currentSigned = Number(currentSignedSettlementGbp) || 0;
+  const currentDirection = openBalanceDirection(currentSigned);
   const afterSigned = preview?.afterSignedSettlementGbp ?? currentSigned;
   const afterDirection = preview?.afterDirection ?? currentDirection;
 
@@ -274,14 +340,20 @@ export function HireDepositDispositionResolveCard({
 
       {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
 
-      <button
-        type="button"
-        className="rph-btn-primary"
-        onClick={submit}
-        disabled={pending || previewPending || !canSubmit || !preview}
-      >
-        Resolve deposit — {hireDepositDispositionLabel(depositDisposition)}
-      </button>
+      {!deferSubmit ? (
+        <button
+          type="button"
+          className="rph-btn-primary"
+          onClick={submit}
+          disabled={pending || previewPending || !canSubmit || !preview}
+        >
+          Resolve deposit — {hireDepositDispositionLabel(depositDisposition)}
+        </button>
+      ) : (
+        <p className="text-sm text-rph-fg-secondary">
+          Deposit will be resolved when you confirm the final account below.
+        </p>
+      )}
     </section>
   );
 }

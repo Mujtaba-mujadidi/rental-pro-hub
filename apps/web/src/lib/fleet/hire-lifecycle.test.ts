@@ -43,7 +43,9 @@ describe("vehicleStatusForHireGroup", () => {
     expect(vehicleStatusForHireGroup("pending_signature")).toBe("reserved");
     expect(vehicleStatusForHireGroup("reserved")).toBe("reserved");
     expect(vehicleStatusForHireGroup("active")).toBe("on_rent");
-    expect(vehicleStatusForHireGroup("terminated")).toBe("available");
+    expect(vehicleStatusForHireGroup("ending")).toBe("on_rent");
+    expect(vehicleStatusForHireGroup("terminated")).toBe("on_rent");
+    expect(vehicleStatusForHireGroup("completed")).toBe("available");
     expect(vehicleStatusForHireGroup("cancelled")).toBe("available");
   });
 });

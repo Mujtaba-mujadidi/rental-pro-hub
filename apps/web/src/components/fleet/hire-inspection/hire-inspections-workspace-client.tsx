@@ -56,6 +56,7 @@ export function HireInspectionsWorkspaceClient({
   vehicleId,
   focusKind = "checkout",
   audience = "staff",
+  onCheckinComplete,
 }: {
   hireGroupId: string;
   hireStatus: string;
@@ -63,6 +64,7 @@ export function HireInspectionsWorkspaceClient({
   vehicleId?: string | null;
   focusKind?: "checkout" | "checkin";
   audience?: "staff" | "driver";
+  onCheckinComplete?: () => void | Promise<void>;
 }) {
   const contractEnded = isContractEnded(hireStatus);
   const query = useHireWorkspaceCachedLoad<{
@@ -251,6 +253,7 @@ export function HireInspectionsWorkspaceClient({
               vehicleId={vehicleId}
               audience={audience}
               embedded
+              onStaffComplete={onCheckinComplete}
             />
           ) : null
         }

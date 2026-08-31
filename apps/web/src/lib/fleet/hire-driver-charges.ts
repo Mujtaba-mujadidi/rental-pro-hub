@@ -23,6 +23,8 @@ export type HireDriverChargeResolution = (typeof HIRE_DRIVER_CHARGE_RESOLUTIONS)
 
 export const HIRE_DRIVER_CHARGE_SOURCE_KINDS = [
   "checkin_inspection_damage",
+  "checkin_inspection_fuel",
+  "checkin_inspection_accessory",
   "staff_manual",
 ] as const;
 
@@ -74,13 +76,14 @@ export function hireDriverChargeTypeLabel(chargeType: HireDriverChargeType | str
 export function hireDriverChargeResolutionLabel(
   resolution: HireDriverChargeResolution | HireInspectionDamageChargeResolution | string,
 ): string {
-  const labels: Record<HireDriverChargeResolution, string> = {
+  const labels: Record<HireDriverChargeResolution | "review_later", string> = {
     waived: "No charge",
     paid_now: "Charged now",
     add_to_balance: "Added to balance",
     voided: "Voided",
+    review_later: "Review later",
   };
-  if (isHireDriverChargeResolution(resolution)) return labels[resolution];
+  if (resolution in labels) return labels[resolution as keyof typeof labels];
   return resolution;
 }
 
@@ -251,6 +254,7 @@ export function buildDriverChargeDraftsFromCheckinDamages(
   for (const damage of damages) {
     if (damage.checkoutDamageId != null) continue;
     if (!damage.chargeResolution || damage.chargeResolution === "waived") continue;
+    if (damage.chargeResolution === "review_later") continue;
     const amount = Number(damage.chargeGbp);
     if (!Number.isFinite(amount) || amount <= 0) continue;
 
@@ -340,7 +344,10 @@ export function mapDriverChargeLineItemsFromDb(
  * so cash cannot settle charges posted after the payment.
  */
 export function outstandingExtraChargesGbp(
-  charges: readonly Pick<HireDriverChargeLineItemRow, "amountGbp" | "resolution">[],
+  charges: readonly {
+    amountGbp: number;
+    resolution: HireDriverChargeResolution | HireInspectionDamageChargeResolution | string;
+  }[],
   receipts: readonly Pick<HireBalancePaymentIncomeRow, "amountGbp" | "direction" | "paymentCategory">[],
 ): number {
   let addToBalanceGbp = 0;
