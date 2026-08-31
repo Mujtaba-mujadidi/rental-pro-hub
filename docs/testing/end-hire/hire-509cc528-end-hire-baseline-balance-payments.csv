@@ -1,0 +1,9 @@
+id,amount_gbp,direction,payment_category,payment_method,payment_reference,paid_at,notes
+03a8c625-ffea-4552-984d-4a72e8d0179d,40,received_from_driver,driver_charge,bank_transfer,,2026-08-24T00:37:08.098+00:00,Driver extra-charge payment approved.
+21252ba6-cd3d-4abb-855e-ee0b73b80299,10,received_from_driver,driver_charge,bank_transfer,,2026-08-24T00:49:26.74+00:00,Driver extra-charge payment approved.
+e487bb09-7c4e-4674-829b-b6757d8620bb,10,received_from_driver,driver_charge,bank_transfer,,2026-08-24T12:00:00+00:00,Extra charge collected when posted (charged now).
+177edd17-da26-4e75-ae94-aa3ba597de91,60,received_from_driver,driver_charge,bank_transfer,,2026-08-24T12:00:00+00:00,
+b848e7b5-3562-4f75-b461-4c1bb5798d5a,30,received_from_driver,driver_charge,bank_transfer,,2026-08-25T12:00:00+00:00,
+506752a1-4b99-4c25-a683-a958ac741883,5,received_from_driver,driver_charge,bank_transfer,,2026-08-25T12:07:47.744+00:00,Driver extra-charge payment approved.
+9cc53383-aad6-4254-8033-acf5dff82b1f,35,received_from_driver,driver_charge,bank_transfer,,2026-08-25T13:08:57.665+00:00,Driver extra-charge payment approved.
+0c1ea8e4-07f3-4c76-8403-29c720ba53bf,40,received_from_driver,driver_charge,bank_transfer,PCN paid by us - cleared,2026-08-28T12:00:00+00:00,Driver cleared the PCN payment that was done by US

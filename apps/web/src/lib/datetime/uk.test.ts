@@ -7,6 +7,9 @@ import {
   formatUkDateRange,
   formatUkDateTime,
   formatUkDateTimeSeconds,
+  resolveUkTerminationAccrualYmd,
+  ukLondonDateTimeToIso,
+  ukLondonDayYmd,
 } from "@/lib/datetime/uk";
 
 describe("formatUkDate", () => {
@@ -109,5 +112,40 @@ describe("daysFromTodayToExpiry", () => {
 
   it("uses only the date portion of longer strings", () => {
     expect(daysFromTodayToExpiry("2026-07-20T23:59:59Z")).toBe(0);
+  });
+});
+
+describe("ukLondonDateTimeToIso", () => {
+  it("converts BST wall time to UTC", () => {
+    expect(ukLondonDateTimeToIso("2026-08-20", "23:52")).toBe("2026-08-20T22:52:00.000Z");
+  });
+
+  it("converts GMT wall time to UTC", () => {
+    expect(ukLondonDateTimeToIso("2026-01-15", "09:00")).toBe("2026-01-15T09:00:00.000Z");
+  });
+
+  it("rejects invalid input", () => {
+    expect(ukLondonDateTimeToIso("bad", "09:00")).toBeNull();
+    expect(ukLondonDateTimeToIso("2026-01-15", "25:00")).toBeNull();
+  });
+});
+
+describe("resolveUkTerminationAccrualYmd", () => {
+  it("prefers staff-entered UK return date", () => {
+    expect(
+      resolveUkTerminationAccrualYmd({
+        returnDateYmd: "2026-08-30",
+        returnedAtIso: "2026-08-30T22:55:00.000Z",
+      }),
+    ).toBe("2026-08-30");
+  });
+
+  it("derives UK calendar day from return instant when date omitted", () => {
+    expect(
+      resolveUkTerminationAccrualYmd({
+        returnedAtIso: "2026-08-20T22:52:00.000Z",
+      }),
+    ).toBe("2026-08-20");
+    expect(ukLondonDayYmd("2026-08-20T22:52:00.000Z")).toBe("2026-08-20");
   });
 });

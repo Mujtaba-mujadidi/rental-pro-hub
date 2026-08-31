@@ -1,0 +1,8 @@
+id,charge_type,amount_gbp,resolution,source_kind,description,charged_on,paid_gbp,collection_status,balance_payment_id
+fcd7a212-6128-486c-a8a3-a5c0e2952942,administration,100,add_to_balance,staff_manual,PCO help,2026-08-24,100,paid,
+0cfbad5d-b4a5-4803-90fd-5735b405426e,administration,30,add_to_balance,staff_manual,PCN Challange,2026-08-24,30,paid,
+a589af48-f99c-4740-a6fc-a43a89140e00,administration,30,add_to_balance,staff_manual,another PCN charge,2026-08-24,30,paid,
+0e26c82d-0dce-4452-911b-97f3027d84e8,other,50,add_to_balance,staff_manual,"this was for the car wash, the car needed a full vallet",2026-08-25,30,partially_paid,
+5ebfd159-5e0e-4d62-9e68-5b5f6259e1db,damage,200,voided,staff_manual,window damage,2026-08-25,0,voided,
+ef88b4e9-9641-4ac5-b786-ab5bc2f84e92,administration,30,add_to_balance,staff_manual,PCN challange,2026-08-28,0,due,
+163e0464-02f9-416c-bfca-5fdb754f59a1,other,40,add_to_balance,staff_manual,We paid for his PCN,2026-08-28,40,paid,

@@ -15,7 +15,7 @@ import {
   loadUserAccessibleSubcompanyIds,
   staffCanAccessHireSubcompany,
 } from "@/lib/auth/rental-subcompany-access";
-import { formatUkDate, ukTodayYmd } from "@/lib/datetime/uk";
+import { formatUkDate, resolveUkTerminationAccrualYmd, ukLondonNowIso, ukTodayYmd } from "@/lib/datetime/uk";
 import { logHireGroupEvent } from "@/lib/fleet/hire-audit";
 import { driverDocumentsRetainUntilYmd } from "@/lib/fleet/hire-document-retention";
 import {
@@ -34,6 +34,7 @@ import {
 import { depositRentScheduleCreditGbp } from "@/lib/fleet/hire-deposit-schedule-allocation";
 import {
   hirePaymentRowPaidGbp,
+  summarizeHirePayments,
   type HirePaymentScheduleRowInput,
 } from "@/lib/fleet/hire-payment-summary";
 import { persistDepositCreditToRentSchedule } from "@/lib/fleet/persist-hire-deposit-schedule-credit";
@@ -181,6 +182,8 @@ async function revalidateHireTermination(hireGroupId: string) {
   revalidatePath(`/rental/balances/${id}`);
   revalidatePath(`/rental/hires/${id}`);
   revalidatePath(`/rental/hires/${id}/details`);
+  revalidatePath(`/rental/hires/${id}/end-hire`);
+  revalidatePath(`/rental/hires/${id}/checkin`);
   revalidatePath(`/rental/hires/${id}/payments`);
   revalidatePath(`/rental/hires/${id}/settlement`);
   revalidatePath(`/driver/hires/${id}`);
@@ -239,6 +242,8 @@ export async function loadHireTerminationPreviewAction(
   depositRefundAmountGbp?: number | null,
   rentBillingMode: HireTerminationRentBillingMode = "end_of_period",
   returnedAtIso?: string | null,
+  returnDateYmd?: string | null,
+  preloadedPayments?: HirePaymentsPageData,
 ): Promise<{ ok: true; data: HireTerminationPreview } | { ok: false; error: string }> {
   const { profile } = await requireRentalCompanyArea();
   if (!canWriteRentals(profile)) return { ok: false, error: "You do not have permission." };
@@ -257,24 +262,32 @@ export async function loadHireTerminationPreviewAction(
     return { ok: false, error: "Only active hires can be ended." };
   }
 
-  const payments = await loadHirePaymentsPageAction(hireGroupId);
+  const payments = preloadedPayments
+    ? ({ ok: true, data: preloadedPayments } as const)
+    : await loadHirePaymentsPageAction(hireGroupId);
   if (!payments.ok) return payments;
 
-  const nowIso = returnedAtIso?.trim() || new Date().toISOString();
-  const terminatedYmd = nowIso.slice(0, 10);
+  const nowIso = returnedAtIso?.trim() || ukLondonNowIso();
+  const terminatedYmd = resolveUkTerminationAccrualYmd({
+    returnDateYmd,
+    returnedAtIso: nowIso,
+  });
   const rentCadence = group.rent_cadence as RentCadence;
   const depositGbp = group.include_deposit ? Number(group.deposit_gbp ?? 0) : 0;
-  const rentSettlement = summarizeHireRentSettlement(mapPaymentRows(payments.data.rows), terminatedYmd, {
+  const scheduleInputs = mapPaymentRows(payments.data.rows);
+  const paymentSummaryAtReturn = summarizeHirePayments(scheduleInputs, terminatedYmd);
+  const rentSettlement = summarizeHireRentSettlement(scheduleInputs, terminatedYmd, {
     billingMode: rentBillingMode,
     rentCadence,
   });
   const accounts = buildHireTerminationAccountsSummary({
     activatedAt: (group.activated_at as string | null) ?? null,
     terminatedAtIso: nowIso,
+    terminatedYmd,
     startDateYmd: group.start_date as string,
     rentCadence,
     rentAmountGbp: Number(group.rent_amount_gbp ?? 0),
-    paymentSummary: payments.data.summary,
+    paymentSummary: paymentSummaryAtReturn,
     rentSettlement,
     depositGbp,
     depositDisposition,
@@ -339,6 +352,7 @@ export async function terminateHireGroupAction(input: {
   settlementPaymentMethod?: string;
   settlementPaymentReference?: string;
   returnedAtIso?: string | null;
+  returnDateYmd?: string | null;
 }): Promise<{ ok: true; checkInHref: string } | { ok: false; error: string }> {
   const { profile, user } = await requireRentalCompanyArea();
   const writable = await assertRentalCompanyWritable(profile);
@@ -360,12 +374,17 @@ export async function terminateHireGroupAction(input: {
   const rentBillingMode = parseRentBillingMode((input.rentBillingMode ?? "end_of_period").trim());
   if (!rentBillingMode) return { ok: false, error: "Choose how rent should be billed." };
 
+  const paymentsPage = await loadHirePaymentsPageAction(input.hireGroupId);
+  if (!paymentsPage.ok) return paymentsPage;
+
   const preview = await loadHireTerminationPreviewAction(
     input.hireGroupId,
     disposition,
     input.depositRefundAmountGbp,
     rentBillingMode,
     input.returnedAtIso,
+    input.returnDateYmd,
+    paymentsPage.data,
   );
   if (!preview.ok) return preview;
 
@@ -423,9 +442,6 @@ export async function terminateHireGroupAction(input: {
         "Settlement payments are recorded after vehicle check-in. End the contract with the balance left open.",
     };
   }
-
-  const paymentsPage = await loadHirePaymentsPageAction(input.hireGroupId);
-  if (!paymentsPage.ok) return paymentsPage;
 
   const admin = createSupabaseAdminClient();
   const now = input.returnedAtIso?.trim() || new Date().toISOString();

@@ -1,0 +1,15 @@
+field,value
+hire_group_id,509cc528-af57-4385-bcb8-ec795db1307a
+hire_short_id,509cc528
+vehicle_vrm,KE18FSX
+status,active
+driver_email,mujtaba.ghulamfarooq@gmail.com
+activated_at,2026-08-23T18:15:04.959+00:00
+terminated_at,
+ended_at,
+settlement_balance_gbp,0
+settlement_balance_direction,
+deposit_disposition,
+end_hire_draft_step,
+end_hire_draft_started,false
+exported_at_utc,2026-08-28T15:59:22.290Z

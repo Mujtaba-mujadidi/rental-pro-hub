@@ -1,0 +1,41 @@
+event_type,created_at,summary
+draft_step_saved,2026-08-23T18:08:26.282672+00:00,Wizard step 4 saved (vehicle assigned).
+driver_access_requested,2026-08-23T18:08:28.454338+00:00,Driver access request sent by email.
+driver_access_approved,2026-08-23T18:09:18.311238+00:00,Driver approved profile access for this hire.
+driver_profile_confirmed,2026-08-23T18:09:32.001953+00:00,Rental staff confirmed driver profile for this hire.
+esign_prepared,2026-08-23T18:09:36.313335+00:00,Hire agreement prepared for e-signature.
+contracts_finalized,2026-08-23T18:09:36.583037+00:00,Hire contracts created and prepared for e-signature.
+hire_signing_bundle_sent,2026-08-23T18:10:36.520108+00:00,Hire agreement sent to hirer for signature.
+hire_status_changed,2026-08-23T18:11:47.840954+00:00,All agreements signed — hire status set to reserved.
+checkout_completed,2026-08-23T18:15:05.216921+00:00,Vehicle checkout completed — hire is now active.
+driver_charge_added,2026-08-23T23:08:29.610711+00:00,Damage charge of £100.00 added.
+driver_charge_amended,2026-08-23T23:09:16.708994+00:00,Wrong payment reference
+driver_charge_added,2026-08-23T23:11:09.190342+00:00,Administration charge of £30.00 added.
+driver_charge_payment_submitted,2026-08-23T23:32:37.321547+00:00,Driver submitted £40.00 against extra charges.
+driver_charge_payment_approved,2026-08-23T23:34:20.60276+00:00,Approved £40.00 extra-charge payment.
+driver_charge_payment_amended,2026-08-24T00:35:12.647402+00:00,Amended extra-charge payment on Administration from £40.00 to £0.00.
+driver_charge_payment_submitted,2026-08-24T00:36:22.282543+00:00,Driver submitted £40.00 against extra charges.
+driver_charge_payment_approved,2026-08-24T00:37:08.251113+00:00,Approved £40.00 extra-charge payment.
+driver_charge_payment_recorded,2026-08-24T00:37:45.880651+00:00,Recorded £60.00 against extra charges.
+driver_charge_payment_submitted,2026-08-24T00:38:26.680434+00:00,Driver submitted £30.00 against extra charges.
+driver_charge_payment_approved,2026-08-24T00:49:26.96282+00:00,Approved £30.00 extra-charge payment.
+driver_charge_added,2026-08-24T00:56:46.065987+00:00,Administration charge of £30.00 charged now (paid).
+driver_charge_payment_recorded,2026-08-24T00:56:46.128325+00:00,Recorded £30.00 against Administration (charged now).
+driver_charge_payment_amended,2026-08-25T10:14:40.838818+00:00,Amended extra-charge payment on Administration from £30.00 to £10.00.
+driver_charge_payment_amended,2026-08-25T10:23:44.791764+00:00,Amended extra-charge payment on Administration from £30.00 to £10.00.
+driver_charge_payment_submitted,2026-08-25T10:24:45.288505+00:00,Driver submitted £10.00 against extra charges.
+driver_charge_payment_approved,2026-08-25T12:07:48.176109+00:00,Approved £10.00 extra-charge payment.
+driver_charge_payment_amended,2026-08-25T12:09:26.202075+00:00,Amended extra-charge payment on Administration from £20.00 to £15.00.
+driver_charge_payment_amended,2026-08-25T12:09:26.362257+00:00,Amended extra-charge payment on Administration from £20.00 to £15.00.
+driver_charge_added,2026-08-25T12:10:37.2248+00:00,Other charge of £100.00 charged now (paid).
+driver_charge_payment_recorded,2026-08-25T12:10:37.29468+00:00,Recorded £100.00 against Other (charged now).
+driver_charge_payment_amended,2026-08-25T12:13:56.433868+00:00,Amended extra-charge payment on Other from £100.00 to £0.00.
+driver_charge_amended,2026-08-25T12:14:38.420438+00:00,making this 50
+driver_charge_payment_recorded,2026-08-25T12:43:38.92505+00:00,Recorded £30.00 against extra charges.
+driver_charge_payment_submitted,2026-08-25T13:08:15.367506+00:00,Driver submitted £35.00 against extra charges.
+driver_charge_payment_approved,2026-08-25T13:08:58.009608+00:00,Approved £35.00 extra-charge payment.
+driver_charge_added,2026-08-25T13:21:21.723745+00:00,Damage charge of £200.00 added.
+driver_charge_voided,2026-08-25T13:22:23.412546+00:00,added by mistake
+driver_charge_added,2026-08-28T11:04:43.270359+00:00,Administration charge of £30.00 added.
+driver_charge_added,2026-08-28T14:25:25.724112+00:00,Other charge of £40.00 added.
+driver_charge_payment_recorded,2026-08-28T14:27:44.642701+00:00,Recorded £40.00 against extra charges.

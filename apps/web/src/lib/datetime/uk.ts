@@ -47,9 +47,121 @@ const UK_DATETIME_TEXT: Intl.DateTimeFormatOptions = {
   hour12: false,
 };
 
+const UK_TIME_ZONE = "Europe/London";
+
 /** Today's calendar date in UK (YYYY-MM-DD) for hire start / fleet status logic. */
 export function ukTodayYmd(): string {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  return new Date().toLocaleDateString("en-CA", { timeZone: UK_TIME_ZONE });
+}
+
+function londonDateTimeFormatter(): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: UK_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function londonWallPartsFromMs(ms: number): {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+} | null {
+  const parts = londonDateTimeFormatter().formatToParts(new Date(ms));
+  const map: Record<string, string> = {};
+  for (const part of parts) {
+    if (part.type !== "literal") map[part.type] = part.value;
+  }
+  const year = Number(map.year);
+  const month = Number(map.month);
+  const day = Number(map.day);
+  let hour = Number(map.hour);
+  const minute = Number(map.minute);
+  if (hour === 24) hour = 0;
+  if (![year, month, day, hour, minute].every(Number.isFinite)) return null;
+  return { year, month, day, hour, minute };
+}
+
+function londonWallTimeToUtcMs(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+): number | null {
+  let ms = Date.UTC(year, month - 1, day, hour, minute);
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const actual = londonWallPartsFromMs(ms);
+    if (!actual) return null;
+    const targetMs = Date.UTC(year, month - 1, day, hour, minute);
+    const actualMs = Date.UTC(actual.year, actual.month - 1, actual.day, actual.hour, actual.minute);
+    const delta = targetMs - actualMs;
+    if (delta === 0) return ms;
+    ms += delta;
+  }
+  const actual = londonWallPartsFromMs(ms);
+  if (!actual) return null;
+  if (
+    actual.year === year &&
+    actual.month === month &&
+    actual.day === day &&
+    actual.hour === hour &&
+    actual.minute === minute
+  ) {
+    return ms;
+  }
+  return null;
+}
+
+/**
+ * Parse `YYYY-MM-DD` + `HH:mm` as Europe/London wall time and return a UTC ISO string.
+ * Staff-entered return dates/times are always interpreted in UK local time.
+ */
+export function ukLondonDateTimeToIso(dateYmd: string, timeHm: string): string | null {
+  const date = dateYmd.trim();
+  const time = timeHm.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  if (!/^\d{2}:\d{2}$/.test(time)) return null;
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  if (![year, month, day, hour, minute].every(Number.isFinite)) return null;
+  if (hour > 23 || minute > 59) return null;
+  const ms = londonWallTimeToUtcMs(year, month, day, hour, minute);
+  if (ms == null) return null;
+  return new Date(ms).toISOString();
+}
+
+/** Current instant as ISO, using the Europe/London wall clock for "now". */
+export function ukLondonNowIso(): string {
+  const today = ukTodayYmd();
+  const timeHm = new Date().toLocaleTimeString("en-GB", {
+    timeZone: UK_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return ukLondonDateTimeToIso(today, timeHm) ?? new Date().toISOString();
+}
+
+/**
+ * UK calendar day for hire termination accrual.
+ * Prefer the staff-entered return date; otherwise derive from the return instant.
+ */
+export function resolveUkTerminationAccrualYmd(input: {
+  returnDateYmd?: string | null;
+  returnedAtIso?: string | null;
+}): string {
+  const draftDate = input.returnDateYmd?.trim();
+  if (draftDate && /^\d{4}-\d{2}-\d{2}$/.test(draftDate)) return draftDate;
+  const iso = input.returnedAtIso?.trim();
+  if (iso) return ukLondonDayYmd(iso) ?? iso.slice(0, 10);
+  return ukTodayYmd();
 }
 
 function parseInstant(value: string | Date): Date | null {

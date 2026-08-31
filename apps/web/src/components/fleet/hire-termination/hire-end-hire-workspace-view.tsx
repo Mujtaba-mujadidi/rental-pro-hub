@@ -22,11 +22,17 @@ import {
   HIRE_END_HIRE_RETURN_REASON_OPTIONS,
   HIRE_END_HIRE_STEP_LABELS,
   HIRE_END_HIRE_STEPS,
+  hireEndHireDefaultRentBillingMode,
+  hireEndHireStepNeedsFinancialReview,
   type HireEndHireStep,
 } from "@/lib/fleet/hire-end-hire";
 import {
   formatHireEndHireSignedAmount,
+  formatHireEndHireSectionFooter,
+  type HireEndHireAccountSection,
   type HireEndHireCategoryCard,
+  type HireEndHireFinancialLine,
+  type HireEndHireFinancialReview,
   type HireEndHirePendingApprovalItem,
 } from "@/lib/fleet/hire-end-hire-financial";
 import { formatGbp } from "@/lib/fleet/maintenance";
@@ -115,7 +121,9 @@ function EndHireStepFooter({
         {backLabel}
       </button>
       <div className="rph-modal-footer-end">
-        <span className="text-center text-xs text-rph-fg-muted sm:text-left">{stepLabel}</span>
+        <span className="flex min-h-10 items-center text-center text-xs text-rph-fg-muted sm:text-left">
+          {stepLabel}
+        </span>
         <button
           type="button"
           className="rph-btn-primary h-10 w-full px-4 sm:w-auto"
@@ -188,11 +196,17 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
     }
   }
 
-  async function refreshPageData(message: string, options?: { refreshShell?: boolean }) {
+  async function refreshPageData(
+    message: string,
+    options?: { refreshShell?: boolean; includeFinancialReview?: boolean },
+  ) {
     setTransitionMessage(message);
     try {
       if (options?.refreshShell) router.refresh();
-      const res = await loadHireEndHirePageAction(hireGroupId);
+      const includeFinancialReview =
+        options?.includeFinancialReview ??
+        (data?.draft.step != null && hireEndHireStepNeedsFinancialReview(data.draft.step));
+      const res = await loadHireEndHirePageAction(hireGroupId, { includeFinancialReview });
       if (!res.ok) {
         setError(res.error);
         return false;
@@ -237,6 +251,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
     startTransition(async () => {
       const message = nextStep ? stepTransitionLabel(nextStep) : "Saving…";
       setTransitionMessage(message);
+      const currentStep = data?.draft.step ?? "return_details";
       const res = await saveHireEndHireDraftAction({
         hireGroupId,
         step: nextStep,
@@ -244,6 +259,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
         returnTimeHm,
         reason,
         notes,
+        rentBillingMode: data?.draft.rentBillingMode,
       });
       if (!res.ok) {
         setError(res.error);
@@ -251,12 +267,45 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
         return;
       }
       setSavedLabel("Saved just now");
-      setData((prev) => (prev ? { ...prev, draft: res.draft } : prev));
-      if (nextStep) {
-        await refreshPageData(message);
-      } else {
+
+      const targetStep = nextStep ?? res.draft.step;
+      const needsFinancialReview = hireEndHireStepNeedsFinancialReview(targetStep);
+      const hasCachedFinancialReview = Boolean(data?.financialReview);
+      const canUseCachedFinancialReview =
+        needsFinancialReview &&
+        hasCachedFinancialReview &&
+        (targetStep === "financial_review" ||
+          (targetStep === "checkin" && currentStep === "financial_review") ||
+          (targetStep === "financial_review" && currentStep === "checkin"));
+
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              draft: res.draft,
+              financialReview:
+                targetStep === "return_details"
+                  ? null
+                  : canUseCachedFinancialReview || (needsFinancialReview && prev.financialReview)
+                    ? prev.financialReview
+                    : needsFinancialReview
+                      ? prev.financialReview
+                      : targetStep === "checkin"
+                        ? prev.financialReview
+                        : null,
+            }
+          : prev,
+      );
+
+      if (targetStep === "return_details" || canUseCachedFinancialReview || targetStep === "checkin") {
         setTransitionMessage(null);
+        return;
       }
+      if (nextStep) {
+        await refreshPageData(message, { includeFinancialReview: needsFinancialReview });
+        return;
+      }
+      setTransitionMessage(null);
     });
   }
 
@@ -317,13 +366,26 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
         returnTimeHm,
         reason,
         notes,
+        rentBillingMode: data?.draft.rentBillingMode ?? hireEndHireDefaultRentBillingMode(),
       });
       if (!res.ok) {
         setError(res.error);
         setTransitionMessage(null);
         return;
       }
-      await refreshPageData(stepTransitionLabel("checkin"), { refreshShell: true });
+      setSavedLabel("Saved just now");
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "terminated",
+              draft: res.draft,
+              canConfirmReturn: false,
+            }
+          : prev,
+      );
+      setTransitionMessage(null);
+      void router.refresh();
     });
   }
 
@@ -397,6 +459,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
   }
 
   const review = data.financialReview;
+  const returnAlreadyConfirmed = data.status === "terminated" || data.status === "completed";
 
   return (
     <div className="space-y-4">
@@ -443,6 +506,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
       <nav className="grid gap-2 rounded-2xl border border-rph-border bg-rph-raised p-3 sm:grid-cols-4" aria-label="End hire stages">
         {HIRE_END_HIRE_STEPS.map((item, index) => {
           const status = stepStatus(step, item);
+          const canGoBack = status === "done" && !pending;
           return (
             <div
               key={item}
@@ -454,12 +518,33 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
                     : "border-rph-border bg-rph-page/40"
               }`}
             >
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-rph-fg-muted">
-                {status === "done" ? "✓" : index + 1} · {HIRE_END_HIRE_STEP_LABELS[item]}
-              </p>
-              <p className="mt-0.5 text-xs text-rph-fg-secondary">
-                {status === "locked" ? "Complete previous step" : status === "done" ? "Complete" : "Current"}
-              </p>
+              {canGoBack ? (
+                <button
+                  type="button"
+                  className="w-full text-left"
+                  onClick={() => saveDraft(item)}
+                >
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-rph-fg-muted">
+                    ✓ · {HIRE_END_HIRE_STEP_LABELS[item]}
+                  </p>
+                  <p className="mt-0.5 text-xs text-rph-link hover:text-rph-link-hover">
+                    Go back to this step
+                  </p>
+                </button>
+              ) : (
+                <>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-rph-fg-muted">
+                    {status === "done" ? "✓" : index + 1} · {HIRE_END_HIRE_STEP_LABELS[item]}
+                  </p>
+                  <p className="mt-0.5 text-xs text-rph-fg-secondary">
+                    {status === "locked"
+                      ? "Complete previous step"
+                      : status === "done"
+                        ? "Complete"
+                        : "Current"}
+                  </p>
+                </>
+              )}
             </div>
           );
         })}
@@ -481,6 +566,12 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
               This timestamp stops rent accrual when you confirm the return, but does not settle the
               account.
             </p>
+            {returnAlreadyConfirmed ? (
+              <p className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-relaxed text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-100">
+                Return was already confirmed. You can review these details here; changing them does not
+                alter the recorded contract end.
+              </p>
+            ) : null}
           </div>
           <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_20rem] sm:p-5">
             <div className="space-y-4">
@@ -620,80 +711,26 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
                 ))}
               </div>
 
-              <div className="rounded-xl border border-rph-border">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rph-border px-4 py-3">
-                  <div>
-                    <p className="driver-dash-section-label">Current account</p>
-                    <p className="mt-1 text-base font-semibold text-rph-fg">{review.positionLabel}</p>
-                    <p className="mt-1 text-xs text-rph-fg-secondary">
-                      Approved payments only. Pending amounts are shown for awareness and do not reduce
-                      the balance. Extra-charge line detail is on Payments &amp; balance.
-                    </p>
-                  </div>
-                  <span className="rph-pill">
-                    {review.positionDirection === "settled"
-                      ? "Clear before check-in"
-                      : review.positionDirection === "company_owes_driver"
-                        ? "Credit to driver"
-                        : "Balance remains open"}
-                  </span>
-                </div>
+              <div className="rounded-2xl border border-rph-border bg-rph-page/40 p-3 sm:p-4">
+                <EndHireAccountBreakdownHeader review={review} />
 
-                <div className="divide-y divide-rph-border">
-                  {review.accountSections.map((section) => (
-                    <div key={section.id} className="px-4 py-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-rph-fg-muted">
-                        {section.title}
-                      </p>
-                      <ul className="mt-2 space-y-2">
-                        {section.lines.map((line) => (
-                          <li
-                            key={line.id}
-                            className="flex items-center justify-between gap-3 text-sm"
-                          >
-                            <span
-                              className={
-                                line.pendingApproval
-                                  ? "text-amber-800 dark:text-amber-200"
-                                  : "text-rph-fg-secondary"
-                              }
-                            >
-                              {line.label}
-                            </span>
-                            <span
-                              className={`tabular-nums font-medium ${
-                                line.pendingApproval
-                                  ? "text-amber-900 dark:text-amber-100"
-                                  : "text-rph-fg"
-                              }`}
-                            >
-                              {line.pendingApproval
-                                ? formatGbp(line.amountGbp)
-                                : formatHireEndHireSignedAmount(line.amountGbp, line.signed)}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+                <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                  {orderedAccountSections(review.accountSections).map((section) => (
+                    <EndHireAccountSectionDetail
+                      key={section.id}
+                      section={section}
+                      paymentsHref={`/rental/hires/${hireGroupId}/payments`}
+                      layout={section.id === "rent" ? "split" : "stacked"}
+                      className={section.id === "rent" ? "lg:col-span-2" : undefined}
+                    />
                   ))}
                 </div>
 
-                <div className="flex items-center justify-between gap-3 border-t border-rph-border bg-rph-page/40 px-4 py-3 text-sm font-semibold">
-                  <span>
-                    {review.positionDirection === "company_owes_driver"
-                      ? "Company owes"
-                      : review.positionDirection === "driver_owes_company"
-                        ? "Driver owes"
-                        : "Balance"}
-                  </span>
-                  <span className="tabular-nums">{formatGbp(review.owedBeforeCheckinGbp)}</span>
-                </div>
-
                 {review.depositUnpaid ? (
-                  <p className="border-t border-red-200 bg-red-50 px-4 py-3 text-xs leading-relaxed text-red-950 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-100">
+                  <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] leading-snug text-red-950 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-100">
                     The {formatGbp(review.depositRequiredGbp)} contractual deposit was not paid. It
                     cannot be applied to rent, used for damage or refunded, and is not included in the
-                    amount above. The final account must show deposit received as {formatGbp(0)}.
+                    pre-check-in balance above.
                   </p>
                 ) : null}
               </div>
@@ -705,17 +742,19 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
             backLabel="Back"
             onBack={() => saveDraft("return_details")}
             stepLabel="Step 2 of 4"
-            primaryLabel="Vehicle check-in"
-            onPrimary={onConfirmReturn}
-            primaryDisabled={!data.canConfirmReturn}
+            primaryLabel={returnAlreadyConfirmed ? "Continue to check-in" : "Vehicle check-in"}
+            onPrimary={
+              returnAlreadyConfirmed ? () => saveDraft("checkin") : onConfirmReturn
+            }
+            primaryDisabled={returnAlreadyConfirmed ? false : !data.canConfirmReturn}
             pending={pending}
           />
         </section>
       ) : null}
 
       {step === "checkin" ? (
-        <section className="space-y-3">
-          <div className="rounded-2xl border border-rph-border bg-rph-raised px-4 py-4 shadow-sm sm:px-5">
+        <section className="overflow-hidden rounded-2xl border border-rph-border bg-rph-raised shadow-sm">
+          <div className="border-b border-rph-border px-4 py-4 sm:px-5">
             <p className="driver-dash-section-label">Step 3</p>
             <h2 className="mt-1 text-lg font-semibold text-rph-fg">Vehicle check-in</h2>
             <p className="mt-1 text-sm text-rph-fg-secondary">
@@ -723,26 +762,27 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
               finalise contract termination when you are ready.
             </p>
           </div>
-          <HireInspectionsWorkspaceClient
-            hireGroupId={hireGroupId}
-            hireStatus={shell.status}
-            vehicleLabel={`${shell.vehicleVrm} · ${shell.vehicleLabel}`}
-            vehicleId={shell.vehicleId}
-            focusKind="checkin"
-            audience="staff"
+          <div className="p-4 sm:p-5">
+            <HireInspectionsWorkspaceClient
+              hireGroupId={hireGroupId}
+              hireStatus={shell.status}
+              vehicleLabel={`${shell.vehicleVrm} · ${shell.vehicleLabel}`}
+              vehicleId={shell.vehicleId}
+              focusKind="checkin"
+              audience="staff"
+            />
+          </div>
+          <EndHireStepFooter
+            backLabel="Back to financial review"
+            onBack={() => saveDraft("financial_review")}
+            stepLabel="Step 3 of 4"
+            primaryLabel={
+              data.checkinCompleted ? "Continue to final account" : "Complete check-in above"
+            }
+            onPrimary={() => saveDraft("final_account")}
+            primaryDisabled={!data.checkinCompleted}
+            pending={pending}
           />
-          {data.checkinCompleted ? (
-            <div className="flex justify-end">
-              <button
-                type="button"
-                className="rph-btn-primary h-10 px-4"
-                disabled={pending}
-                onClick={() => saveDraft("final_account")}
-              >
-                Continue to final account
-              </button>
-            </div>
-          ) : null}
         </section>
       ) : null}
 
@@ -869,7 +909,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
         open={paymentReviewTarget != null}
         onClose={() => setPaymentReviewTarget(null)}
         onSuccess={() => {
-          void refreshPageData("Refreshing financial review…");
+          void refreshPageData("Refreshing financial review…", { includeFinancialReview: true });
         }}
       />
       <ConfirmDialog
@@ -898,9 +938,238 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
   );
 }
 
+function orderedAccountSections(
+  sections: HireEndHireAccountSection[],
+): HireEndHireAccountSection[] {
+  const order: HireEndHireAccountSection["id"][] = ["rent", "extra_charges", "deposit"];
+  return order
+    .map((id) => sections.find((section) => section.id === id))
+    .filter((section): section is HireEndHireAccountSection => Boolean(section));
+}
+
+function EndHireAccountBreakdownHeader({ review }: { review: HireEndHireFinancialReview }) {
+  const balanceLabel =
+    review.positionDirection === "company_owes_driver"
+      ? "Company owes"
+      : review.positionDirection === "driver_owes_company"
+        ? "Driver owes"
+        : "Balance";
+  const statusLabel =
+    review.positionDirection === "settled"
+      ? "Clear before check-in"
+      : review.positionDirection === "company_owes_driver"
+        ? "Credit to driver"
+        : "Balance remains open";
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-rph-border bg-rph-raised px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-rph-fg-muted">
+          Current account
+        </p>
+        <p className="text-sm font-semibold text-rph-fg">{review.positionLabel}</p>
+        <p className="text-[11px] leading-snug text-rph-fg-secondary">
+          Approved payments only · pending submissions shown separately
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+        <span className="rph-pill text-xs">{statusLabel}</span>
+        <p className="text-sm font-semibold tabular-nums text-rph-fg">
+          {balanceLabel}{" "}
+          <span className="text-rph-fg">{formatGbp(review.owedBeforeCheckinGbp)}</span>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function EndHireFinancialAmountLine({ line }: { line: HireEndHireFinancialLine }) {
+  const pending = Boolean(line.pendingApproval);
+  const emphasis = Boolean(line.subtotal);
+  return (
+    <li
+      className={`flex items-center justify-between gap-2 py-1 ${
+        emphasis ? "text-xs" : "text-[11px]"
+      }`}
+    >
+      <span
+        className={
+          pending
+            ? "text-amber-800 dark:text-amber-200"
+            : emphasis
+              ? "font-medium text-rph-fg"
+              : "text-rph-fg-secondary"
+        }
+      >
+        {line.label}
+      </span>
+      <span
+        className={`shrink-0 tabular-nums ${
+          pending
+            ? "font-medium text-amber-900 dark:text-amber-100"
+            : emphasis
+              ? "font-semibold text-rph-fg"
+              : "font-medium text-rph-fg"
+        }`}
+      >
+        {pending
+          ? formatGbp(line.amountGbp)
+          : formatHireEndHireSignedAmount(line.amountGbp, line.signed)}
+      </span>
+    </li>
+  );
+}
+
+function EndHireAccountContextFields({
+  sectionId,
+  fields,
+  compact,
+}: {
+  sectionId: string;
+  fields: { label: string; value: string }[];
+  compact?: boolean;
+}) {
+  if (fields.length === 0) return null;
+  if (compact) {
+    return (
+      <ul className="space-y-1">
+        {fields.map((field) => (
+          <li
+            key={`${sectionId}-${field.label}`}
+            className="flex items-baseline justify-between gap-2 text-[11px] leading-snug"
+          >
+            <span className="shrink-0 text-rph-fg-muted">{field.label}</span>
+            <span className="min-w-0 text-right font-medium text-rph-fg">{field.value}</span>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  return (
+    <dl className="grid gap-x-3 gap-y-1 sm:grid-cols-2 xl:grid-cols-3">
+      {fields.map((field) => (
+        <div key={`${sectionId}-${field.label}`} className="min-w-0">
+          <dt className="text-[11px] text-rph-fg-muted">{field.label}</dt>
+          <dd className="text-xs font-medium leading-snug text-rph-fg">{field.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function EndHireAccountLedger({ lines }: { lines: HireEndHireFinancialLine[] }) {
+  if (lines.length === 0) return null;
+  return (
+    <ul className="divide-y divide-rph-border rounded-lg border border-rph-border bg-rph-page/50 px-2.5 py-0.5">
+      {lines.map((line) => (
+        <EndHireFinancialAmountLine key={line.id} line={line} />
+      ))}
+    </ul>
+  );
+}
+
+function EndHireAccountSectionDetail({
+  section,
+  paymentsHref,
+  layout = "stacked",
+  className,
+}: {
+  section: HireEndHireAccountSection;
+  paymentsHref: string;
+  layout?: "split" | "stacked";
+  className?: string;
+}) {
+  const { detail } = section;
+  const footerValue = formatHireEndHireSectionFooter(section.footer);
+
+  const chargeLines =
+    detail.chargeLines && detail.chargeLines.length > 0 ? (
+      <ul className="space-y-0.5 rounded-lg border border-rph-border bg-rph-page/50 px-2 py-1.5">
+        {detail.chargeLines.map((charge) => (
+          <li key={charge.id} className="flex items-start justify-between gap-2 text-[11px] leading-snug">
+            <span className="min-w-0 text-rph-fg-secondary">{charge.label}</span>
+            <span className="shrink-0 tabular-nums font-medium text-rph-fg">
+              {formatGbp(charge.amountGbp)}
+            </span>
+          </li>
+        ))}
+        {detail.moreChargeLinesCount && detail.moreChargeLinesCount > 0 ? (
+          <li className="text-[11px] text-rph-fg-muted">
+            +{detail.moreChargeLinesCount} more on Payments &amp; balance
+          </li>
+        ) : null}
+      </ul>
+    ) : null;
+
+  const footnote = detail.footnote ? (
+    <p className="text-[11px] leading-snug text-rph-fg-secondary">{detail.footnote}</p>
+  ) : null;
+
+  const contextBlock = (
+    <EndHireAccountContextFields
+      sectionId={section.id}
+      fields={detail.context}
+      compact={layout === "stacked"}
+    />
+  );
+
+  const ledgerBlock = <EndHireAccountLedger lines={section.lines} />;
+
+  return (
+    <article
+      className={`flex h-full flex-col rounded-lg border border-rph-border bg-rph-raised px-3 py-2.5 shadow-sm ${className ?? ""}`}
+    >
+      <header className="flex items-start justify-between gap-2 border-b border-rph-border pb-2">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold text-rph-fg">{section.title}</h3>
+            {section.id === "extra_charges" ? (
+              <Link
+                href={paymentsHref}
+                className="text-[11px] font-medium text-rph-link hover:text-rph-link-hover"
+              >
+                Payments &amp; balance
+              </Link>
+            ) : null}
+          </div>
+          <p className="mt-0.5 text-[11px] text-rph-fg-muted">{section.footer.label}</p>
+        </div>
+        <p
+          className={`shrink-0 text-right text-sm font-semibold tabular-nums ${
+            section.id === "deposit" ? "text-rph-fg-secondary" : "text-rph-fg"
+          }`}
+        >
+          {footerValue}
+        </p>
+      </header>
+
+      {layout === "split" ? (
+        <div className="mt-2 grid flex-1 gap-3 md:grid-cols-2 md:items-start">
+          <div className="space-y-2">
+            {contextBlock}
+            {footnote}
+          </div>
+          <div className="space-y-2">
+            {chargeLines}
+            {ledgerBlock}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-1 flex-col gap-2">
+          {contextBlock}
+          {chargeLines}
+          {ledgerBlock}
+          {footnote}
+        </div>
+      )}
+    </article>
+  );
+}
+
 function CategorySummaryCard({ category }: { category: HireEndHireCategoryCard }) {
+  const isDeposit = category.id === "deposit";
   const toneClass =
-    category.balanceGbp > 0.005
+    !isDeposit && category.balanceGbp > 0.005
       ? "border-amber-200 bg-amber-50/80 dark:border-amber-900/40 dark:bg-amber-950/20"
       : "border-rph-border bg-rph-page/50";
   return (
@@ -908,11 +1177,11 @@ function CategorySummaryCard({ category }: { category: HireEndHireCategoryCard }
       <p className="text-sm font-semibold text-rph-fg">{category.title}</p>
       <dl className="mt-3 space-y-2 text-sm">
         <div className="flex items-center justify-between gap-3">
-          <dt className="text-rph-fg-secondary">Total charged</dt>
+          <dt className="text-rph-fg-secondary">{category.chargedLabel ?? "Total charged"}</dt>
           <dd className="tabular-nums font-medium text-rph-fg">{formatGbp(category.chargedGbp)}</dd>
         </div>
         <div className="flex items-center justify-between gap-3">
-          <dt className="text-rph-fg-secondary">Total received</dt>
+          <dt className="text-rph-fg-secondary">{category.receivedLabel ?? "Total received"}</dt>
           <dd className="tabular-nums font-medium text-rph-fg">{formatGbp(category.receivedGbp)}</dd>
         </div>
         {category.pendingApprovalGbp > 0.005 ? (
@@ -924,8 +1193,14 @@ function CategorySummaryCard({ category }: { category: HireEndHireCategoryCard }
           </div>
         ) : null}
         <div className="flex items-center justify-between gap-3 border-t border-rph-border pt-2">
-          <dt className="font-medium text-rph-fg">Balance</dt>
-          <dd className="tabular-nums font-semibold text-rph-fg">{formatGbp(category.balanceGbp)}</dd>
+          <dt className="font-medium text-rph-fg">{category.footer.label}</dt>
+          <dd
+            className={`tabular-nums font-semibold ${
+              isDeposit ? "text-rph-fg-secondary" : "text-rph-fg"
+            }`}
+          >
+            {formatHireEndHireSectionFooter(category.footer)}
+          </dd>
         </div>
       </dl>
       <p className="mt-2 text-xs text-rph-fg-secondary">{category.hint}</p>

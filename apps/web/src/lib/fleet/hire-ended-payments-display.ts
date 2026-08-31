@@ -7,7 +7,7 @@ import {
   sumDriverChargesGbp,
 } from "@/lib/fleet/hire-ended-summary-display";
 import { summarizeHireSettlementLedger } from "@/lib/fleet/hire-payments-ledger";
-import { hireProRataRentAdjustmentGbp, type HireTerminationAccountsSummary } from "@/lib/fleet/hire-termination-summary";
+import { hireRentTerminationAdjustmentDisplay, type HireTerminationAccountsSummary } from "@/lib/fleet/hire-termination-summary";
 import { roundGbp } from "@/lib/fleet/hire-money";
 
 /** Unused rent paid for periods after the end date, plus overpayment on accrued rent. */
@@ -71,21 +71,15 @@ export function buildHireEndedRentCalculation(
       paymentReceivedDuringHireGbp + advanceRentToRefundGbp,
     );
 
-    let cancelledPeriodNote: string | null = null;
-    const cancelledGbp = hireProRataRentAdjustmentGbp({
+    const adjustmentDisplay = hireRentTerminationAdjustmentDisplay({
+      rentCadence: termination.rentCadence,
+      rentBillingMode: termination.rentBillingMode,
+      billingPeriodBreakdown: termination.billingPeriodBreakdown,
       rentGrossAccruedGbp: payments.summary.rentGrossAccruedGbp,
       totalDiscountGbp: payments.summary.totalDiscountGbp,
       accruedRentDueGbp: termination.accruedRentDueGbp,
     });
-    if (cancelledGbp > 0.005) {
-      const periodWord =
-        termination.rentCadence === "weekly"
-          ? "week"
-          : termination.rentCadence === "monthly"
-            ? "month"
-            : "day";
-      cancelledPeriodNote = `${formatGbp(cancelledGbp)} of the final ${periodWord} was cancelled after early termination. It is not unpaid rent.`;
-    }
+    const cancelledPeriodNote = adjustmentDisplay?.footnote ?? null;
 
     let advanceRentNote: string | null = null;
     if (advanceRentToRefundGbp > 0.005) {

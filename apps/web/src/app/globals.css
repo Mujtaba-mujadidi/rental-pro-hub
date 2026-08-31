@@ -165,7 +165,7 @@ html {
   @apply flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between;
 }
 .rph-modal-footer-end {
-  @apply flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end;
+  @apply flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end;
 }
 .rph-link-inline {
   @apply font-medium text-rph-link underline decoration-rph-link/40 hover:text-rph-link-hover hover:decoration-rph-link-hover;

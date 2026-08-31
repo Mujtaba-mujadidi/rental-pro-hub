@@ -206,7 +206,31 @@ function fleetStatusLabel(status: VehicleStatus): string {
   return VEHICLE_STATUS_LABELS[status];
 }
 
-function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
+function DetailRow({
+  label,
+  value,
+  stackedFromSm,
+}: {
+  label: string;
+  value: React.ReactNode;
+  /** Full-width inline on mobile; label above value from sm up (for 2-column spec grids). */
+  stackedFromSm?: boolean;
+}) {
+  if (stackedFromSm) {
+    return (
+      <div className="min-w-0 border-b border-rph-border py-2.5 last:border-b-0">
+        <div className="flex items-baseline justify-between gap-3 sm:hidden">
+          <dt className="shrink-0 text-sm text-rph-fg-muted">{label}</dt>
+          <dd className="min-w-0 text-right text-sm font-semibold text-rph-fg">{value || "—"}</dd>
+        </div>
+        <div className="hidden sm:block">
+          <dt className="text-sm text-rph-fg-muted">{label}</dt>
+          <dd className="mt-0.5 text-sm font-semibold text-rph-fg">{value || "—"}</dd>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-baseline justify-between gap-3 border-b border-rph-border py-2.5 last:border-b-0">
       <dt className="shrink-0 text-sm text-rph-fg-muted">{label}</dt>
@@ -615,25 +639,22 @@ export function VehicleDetailsView({
               />
             ) : null}
           </div>
-          <div className="grid gap-x-8 px-4 py-4 sm:grid-cols-2 sm:px-5 sm:py-5">
-            <dl>
-              <DetailRow label="Registration" value={<span className="font-mono">{vehicle.vrm}</span>} />
-              <DetailRow label="Model" value={vehicle.model} />
-              <DetailRow label="Fuel type" value={vehicle.fuel_type || "—"} />
-              <DetailRow label="Year" value={yearFromDate(vehicle.first_reg_date)} />
-              <DetailRow label="PHV/Taxi licence no." value={vehicle.phv_licence_no || "—"} />
-            </dl>
-            <dl>
-              <DetailRow label="Make" value={vehicle.make} />
-              <DetailRow label="Colour" value={vehicle.colour || "—"} />
-              <DetailRow label="Seats" value={vehicle.seats != null ? String(vehicle.seats) : "—"} />
-              <DetailRow
-                label="Engine CC"
-                value={vehicle.cc != null ? `${vehicle.cc.toLocaleString("en-GB")} cc` : "—"}
-              />
-              <DetailRow label="Licensing authority" value={vehicle.licensing_authority_name || "—"} />
-            </dl>
-          </div>
+          <dl className="grid gap-x-8 px-4 py-4 sm:grid-cols-2 sm:px-5 sm:py-5">
+            <DetailRow stackedFromSm label="Registration" value={<span className="font-mono">{vehicle.vrm}</span>} />
+            <DetailRow stackedFromSm label="Make" value={vehicle.make} />
+            <DetailRow stackedFromSm label="Model" value={vehicle.model} />
+            <DetailRow stackedFromSm label="Colour" value={vehicle.colour || "—"} />
+            <DetailRow stackedFromSm label="Fuel type" value={vehicle.fuel_type || "—"} />
+            <DetailRow stackedFromSm label="Seats" value={vehicle.seats != null ? String(vehicle.seats) : "—"} />
+            <DetailRow stackedFromSm label="Year" value={yearFromDate(vehicle.first_reg_date)} />
+            <DetailRow
+              stackedFromSm
+              label="Engine CC"
+              value={vehicle.cc != null ? `${vehicle.cc.toLocaleString("en-GB")} cc` : "—"}
+            />
+            <DetailRow stackedFromSm label="PHV/Taxi licence no." value={vehicle.phv_licence_no || "—"} />
+            <DetailRow stackedFromSm label="Licensing authority" value={vehicle.licensing_authority_name || "—"} />
+          </dl>
         </section>
 
         <section className="rph-card overflow-hidden p-0">
@@ -746,8 +767,8 @@ export function VehicleDetailsView({
       </div>
 
       <section id="documents" className="rph-card scroll-mt-6 overflow-hidden p-0">
-        <div className="flex flex-col gap-3 border-b border-rph-border px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5">
-          <div>
+        <div className="flex items-start justify-between gap-3 border-b border-rph-border px-4 py-4 sm:px-5">
+          <div className="min-w-0 flex-1">
             <SectionKicker>Compliance</SectionKicker>
             <h2 className="mt-1 text-lg font-semibold text-rph-fg">
               {readOnlyHistoric ? "Historic documents" : "Documents & expiry dates"}
@@ -758,7 +779,7 @@ export function VehicleDetailsView({
                 : "Required: MOT, Logbook (V5C), and PHV/Taxi licence paper."}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2 self-start">
             {fleetTransferRequirements.length ? (
               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
                 {fleetTransferRequirements.length} update{fleetTransferRequirements.length === 1 ? "" : "s"} required
@@ -784,10 +805,6 @@ export function VehicleDetailsView({
         </div>
 
         <div className="px-4 py-4 sm:px-5 sm:py-5">
-        <dl className="max-w-md">
-          <DetailRow label="First UK registration" value={formatUkDateTextLong(vehicle.first_reg_uk_date)} />
-        </dl>
-
         {transferDocumentRequirements.length ? (
           <div className="rph-alert-warn mt-4 text-sm">
             <p className="font-semibold">

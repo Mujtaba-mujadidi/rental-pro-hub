@@ -1,5 +1,9 @@
 /** End hire workspace tab — draft shape, steps, and return reasons. */
 
+import { ukLondonDateTimeToIso } from "@/lib/datetime/uk";
+import type { HireTerminationRentBillingMode } from "@/lib/fleet/hire-termination-billing";
+import { HIRE_TERMINATION_RENT_BILLING_MODES } from "@/lib/fleet/hire-termination-billing";
+
 export const HIRE_END_HIRE_STEPS = [
   "return_details",
   "financial_review",
@@ -27,12 +31,28 @@ export type HireEndHireDraft = {
   returnTimeHm: string;
   reason: HireEndHireReturnReason | "";
   notes: string;
+  /** How rent for a partial final week/month is billed at return — chosen on Step 1. */
+  rentBillingMode: HireTerminationRentBillingMode;
   updatedAt: string;
   /** Set when Final account is finished — cancel no longer allowed. */
   finalizedAt: string | null;
   /** Set when staff confirm Finalise contract termination (not check-in auto-complete). */
   explicitFinalization?: boolean;
 };
+
+export function hireEndHireDefaultRentBillingMode(): HireTerminationRentBillingMode {
+  return "end_of_period";
+}
+
+export function parseHireEndHireRentBillingMode(value: unknown): HireTerminationRentBillingMode {
+  if (
+    typeof value === "string" &&
+    (HIRE_TERMINATION_RENT_BILLING_MODES as readonly string[]).includes(value)
+  ) {
+    return value as HireTerminationRentBillingMode;
+  }
+  return hireEndHireDefaultRentBillingMode();
+}
 
 export const HIRE_END_HIRE_STEP_LABELS: Record<HireEndHireStep, string> = {
   return_details: "Return details",
@@ -78,10 +98,52 @@ export function emptyHireEndHireDraft(nowIso: string, todayYmd: string, timeHm: 
     returnTimeHm: timeHm,
     reason: "",
     notes: "",
+    rentBillingMode: hireEndHireDefaultRentBillingMode(),
     updatedAt: nowIso,
     finalizedAt: null,
     explicitFinalization: false,
   };
+}
+
+export function hireEndHireStepNeedsFinancialReview(step: HireEndHireStep): boolean {
+  return step === "financial_review" || step === "final_account";
+}
+
+/** Map stored draft + hire status to the step the end-hire wizard should show. */
+export function resolveEffectiveHireEndHireDraft(input: {
+  status: string;
+  checkinCompleted: boolean;
+  draft: HireEndHireDraft;
+  nowIso: string;
+}): HireEndHireDraft {
+  const { status, checkinCompleted, draft, nowIso } = input;
+  const withStep = (step: HireEndHireStep): HireEndHireDraft => ({
+    ...draft,
+    started: true,
+    step,
+    updatedAt: draft.updatedAt || nowIso,
+  });
+
+  if (status === "ending") {
+    const step =
+      draft.step === "checkin" || draft.step === "final_account" ? "return_details" : draft.step;
+    return withStep(step);
+  }
+
+  if (status === "terminated" || status === "completed") {
+    if (checkinCompleted) {
+      return withStep("final_account");
+    }
+    const step: HireEndHireStep =
+      draft.step === "return_details" ||
+      draft.step === "financial_review" ||
+      draft.step === "checkin"
+        ? draft.step
+        : "checkin";
+    return withStep(step);
+  }
+
+  return draft;
 }
 
 export function parseHireEndHireDraft(raw: unknown): HireEndHireDraft | null {
@@ -99,6 +161,7 @@ export function parseHireEndHireDraft(raw: unknown): HireEndHireDraft | null {
     returnTimeHm: typeof row.returnTimeHm === "string" ? row.returnTimeHm : "",
     reason,
     notes: typeof row.notes === "string" ? row.notes : "",
+    rentBillingMode: parseHireEndHireRentBillingMode(row.rentBillingMode),
     updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : "",
     finalizedAt: typeof row.finalizedAt === "string" ? row.finalizedAt : null,
     explicitFinalization: row.explicitFinalization === true,
@@ -170,19 +233,10 @@ export function isHireListActiveCloseout(input: {
   });
 }
 
-/** Build a midday-safe ISO when only date is known; prefer date+time in Europe/London as UTC instant. */
+/** Return instant for contract end — always Europe/London wall date and time from staff input. */
 export function hireEndHireReturnedAtIso(returnDateYmd: string, returnTimeHm: string): string | null {
-  const date = returnDateYmd.trim();
   const time = returnTimeHm.trim() || "12:00";
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  if (!/^\d{2}:\d{2}$/.test(time)) return null;
-  const [hh, mm] = time.split(":").map((part) => Number(part));
-  if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh > 23 || mm > 59) return null;
-  // Interpret as Europe/London wall time via offset-free local construction then toISOString is wrong;
-  // store as explicit London noon-style: YYYY-MM-DDTHH:mm:00.000Z for UK BST-unaware ops is risky.
-  // Use calendarYmd + time as Z noon substitute — terminate already used UTC now.
-  // Prefer: date at given time as UTC for consistency with calendarYmdToUtcNoonIso pattern.
-  return `${date}T${time}:00.000Z`;
+  return ukLondonDateTimeToIso(returnDateYmd, time);
 }
 
 export function hireEndHireTabVisible(input: {

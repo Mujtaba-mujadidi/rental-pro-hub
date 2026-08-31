@@ -9,8 +9,9 @@ import {
   hireEndHireReturnedAtIso,
   hireEndHireTabVisible,
   parseHireEndHireDraft,
+  resolveEffectiveHireEndHireDraft,
 } from "./hire-end-hire";
-import { buildHireEndHireFinancialReview } from "./hire-end-hire-financial";
+import { buildHireEndHireFinancialReview, depositPreCheckinFooter } from "./hire-end-hire-financial";
 
 describe("hire-end-hire draft helpers", () => {
   it("parses a valid draft", () => {
@@ -172,8 +173,9 @@ describe("hire-end-hire draft helpers", () => {
     ).toBe(false);
   });
 
-  it("builds returned-at ISO from date and time", () => {
-    expect(hireEndHireReturnedAtIso("2026-08-20", "23:52")).toBe("2026-08-20T23:52:00.000Z");
+  it("stores return date/time as Europe/London wall clock", () => {
+    // August 2026 is BST (UTC+1): 23:52 London = 22:52 UTC
+    expect(hireEndHireReturnedAtIso("2026-08-20", "23:52")).toBe("2026-08-20T22:52:00.000Z");
     expect(hireEndHireReturnedAtIso("bad", "23:52")).toBeNull();
   });
 
@@ -234,6 +236,30 @@ describe("hire-end-hire draft helpers", () => {
     expect(draft.started).toBe(false);
     expect(draft.step).toBe("return_details");
   });
+
+  it("respects earlier wizard steps after return is confirmed", () => {
+    const base = {
+      ...emptyHireEndHireDraft("t", "2026-08-20", "12:00"),
+      started: true,
+      step: "financial_review" as const,
+    };
+    expect(
+      resolveEffectiveHireEndHireDraft({
+        status: "terminated",
+        checkinCompleted: false,
+        draft: base,
+        nowIso: "t",
+      }).step,
+    ).toBe("financial_review");
+    expect(
+      resolveEffectiveHireEndHireDraft({
+        status: "terminated",
+        checkinCompleted: true,
+        draft: { ...base, step: "financial_review" },
+        nowIso: "t",
+      }).step,
+    ).toBe("final_account");
+  });
 });
 
 describe("buildHireEndHireFinancialReview", () => {
@@ -271,6 +297,9 @@ describe("buildHireEndHireFinancialReview", () => {
     expect(review.accountSections.find((s) => s.id === "extra_charges")?.lines).toEqual([
       { id: "extra_total", label: "Total extra charges", amountGbp: 50, signed: true },
       { id: "extra_payments", label: "Approved extra-charge payments", amountGbp: 0, signed: false },
+    ]);
+    expect(review.accountSections.find((s) => s.id === "extra_charges")?.detail.chargeLines).toEqual([
+      { id: "a", label: "Administration — Missed appointment", amountGbp: 50 },
     ]);
     expect(review.lines.some((line) => line.id.startsWith("extra:"))).toBe(false);
     expect(review.categories.map((c) => c.id)).toEqual(["rent", "extra_charges", "deposit"]);
@@ -428,5 +457,83 @@ describe("buildHireEndHireFinancialReview", () => {
         }),
       ]),
     );
+  });
+
+  it("builds rent waterfall and context when gross, discount and pro-rata apply", () => {
+    const review = buildHireEndHireFinancialReview({
+      returnDateYmd: "2026-08-20",
+      returnTimeHm: "12:00",
+      rentChargedGbp: 430,
+      rentReceivedGbp: 200,
+      contractPeriodStartLabel: "01/07/2026, 09:00",
+      rentRateLabel: "£150.00 per week",
+      rentBillingLabel: "Charge for actual days (pro-rata current period)",
+      billedPeriodsLabel: "3 weeks (21 days)",
+      rentGrossAccruedGbp: 500,
+      rentDiscountGbp: 50,
+      proRataAdjustmentGbp: 20,
+      proRataLineLabel: "Pro-rata adjustment (final week)",
+      proRataNote:
+        "£20.00 was not charged because the vehicle was returned after 4 of 7 days in the final billing week. This is not unpaid rent.",
+      depositRequiredGbp: 0,
+      depositReceivedGbp: 0,
+      extraCharges: [],
+    });
+    const rentSection = review.accountSections.find((s) => s.id === "rent");
+    expect(rentSection?.balanceGbp).toBe(230);
+    expect(rentSection?.detail.context).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "Contract period" }),
+        expect.objectContaining({ label: "Rate", value: "£150.00 per week" }),
+        expect.objectContaining({ label: "Rent billed through return", value: "3 weeks (21 days)" }),
+      ]),
+    );
+    expect(rentSection?.lines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "rent_gross", amountGbp: 500, signed: true }),
+        expect.objectContaining({ id: "rent_discount", amountGbp: 50, signed: false }),
+        expect.objectContaining({
+          id: "rent_prorata",
+          label: "Pro-rata adjustment (final week)",
+          amountGbp: 20,
+          signed: false,
+        }),
+        expect.objectContaining({
+          id: "rent",
+          label: "Rent charged to return",
+          amountGbp: 430,
+          signed: true,
+          subtotal: true,
+        }),
+        expect.objectContaining({ id: "rent_paid", amountGbp: 200, signed: false }),
+      ]),
+    );
+    expect(rentSection?.detail.footnote).toContain("4 of 7 days");
+  });
+
+  it("describes unpaid deposit as contract status rather than a collectable balance", () => {
+    const review = buildHireEndHireFinancialReview({
+      returnDateYmd: "2026-08-30",
+      returnTimeHm: "23:55",
+      rentChargedGbp: 595,
+      rentReceivedGbp: 55,
+      depositRequiredGbp: 1200,
+      depositReceivedGbp: 0,
+      extraCharges: [],
+    });
+    const depositSection = review.accountSections.find((s) => s.id === "deposit");
+    const depositCard = review.categories.find((c) => c.id === "deposit");
+    expect(depositSection?.footer).toEqual({
+      label: "Contract status",
+      valueText: "Not yet received (£1,200.00 on contract)",
+    });
+    expect(depositCard?.footer).toEqual(depositSection?.footer);
+    expect(depositCard?.chargedLabel).toBe("Contract deposit");
+    expect(depositCard?.hint).toContain("not collected at this step");
+    expect(depositPreCheckinFooter({
+      requiredGbp: 1200,
+      receivedGbp: 1200,
+      pendingApprovalGbp: 0,
+    })).toEqual({ label: "Deposit held", valueGbp: 1200 });
   });
 });

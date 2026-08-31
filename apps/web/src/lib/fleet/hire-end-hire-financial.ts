@@ -1,6 +1,9 @@
 import { formatUkDateAtTime } from "@/lib/datetime/uk";
 import { formatGbp } from "@/lib/fleet/maintenance";
 import { addGbp, clampNonNegativeGbp, roundGbp, subGbp } from "@/lib/fleet/hire-money";
+import {
+  hireProRataRentAdjustmentGbp,
+} from "@/lib/fleet/hire-termination-summary";
 import type { HirePaymentStatus } from "@/lib/fleet/hire-types";
 
 export type HireEndHireFinancialLine = {
@@ -10,6 +13,32 @@ export type HireEndHireFinancialLine = {
   signed: boolean;
   /** Informational only — awaiting company approval; does not reduce balance. */
   pendingApproval?: boolean;
+  /** Subtotal row before payments (rent waterfall). */
+  subtotal?: boolean;
+};
+
+export type HireEndHireContextField = {
+  label: string;
+  value: string;
+};
+
+export type HireEndHireExtraChargeLine = {
+  id: string;
+  label: string;
+  amountGbp: number;
+};
+
+export type HireEndHireAccountSectionDetail = {
+  context: HireEndHireContextField[];
+  chargeLines?: HireEndHireExtraChargeLine[];
+  moreChargeLinesCount?: number;
+  footnote?: string | null;
+};
+
+export type HireEndHireSectionFooter = {
+  label: string;
+  valueGbp?: number;
+  valueText?: string;
 };
 
 export type HireEndHireCategoryCard = {
@@ -21,6 +50,9 @@ export type HireEndHireCategoryCard = {
   pendingApprovalGbp: number;
   /** Amount still outstanding on this category after approved payments. */
   balanceGbp: number;
+  chargedLabel?: string;
+  receivedLabel?: string;
+  footer: HireEndHireSectionFooter;
   hint: string;
 };
 
@@ -28,6 +60,10 @@ export type HireEndHireAccountSection = {
   id: "rent" | "extra_charges" | "deposit";
   title: string;
   lines: HireEndHireFinancialLine[];
+  detail: HireEndHireAccountSectionDetail;
+  /** Used for summary-card tone; not always shown as “Balance” in the UI. */
+  balanceGbp: number;
+  footer: HireEndHireSectionFooter;
 };
 
 export type HireEndHirePositionDirection =
@@ -108,6 +144,68 @@ function categoryBalanceHint(
   return parts.join(" · ");
 }
 
+function balanceFooter(balanceGbp: number): HireEndHireSectionFooter {
+  return { label: "Balance", valueGbp: balanceGbp };
+}
+
+/** Pre-check-in deposit is informational — not part of the collectable balance above. */
+export function depositPreCheckinFooter(input: {
+  requiredGbp: number;
+  receivedGbp: number;
+  pendingApprovalGbp: number;
+}): HireEndHireSectionFooter {
+  const required = clampNonNegativeGbp(input.requiredGbp);
+  const received = clampNonNegativeGbp(input.receivedGbp);
+  const pending = clampNonNegativeGbp(input.pendingApprovalGbp);
+
+  if (required <= 0.005) {
+    return { label: "Status", valueText: "No deposit on this hire" };
+  }
+  if (received >= required - 0.005) {
+    return { label: "Deposit held", valueGbp: received };
+  }
+  if (pending > 0.005 && received <= 0.005) {
+    return {
+      label: "Contract status",
+      valueText: `${formatGbp(pending)} submitted — awaiting approval`,
+    };
+  }
+  if (received > 0.005) {
+    return {
+      label: "Still to receive",
+      valueGbp: roundGbp(subGbp(required, received)),
+    };
+  }
+  return {
+    label: "Contract status",
+    valueText: `Not yet received (${formatGbp(required)} on contract)`,
+  };
+}
+
+function depositPreCheckinHint(input: {
+  requiredGbp: number;
+  receivedGbp: number;
+  pendingApprovalGbp: number;
+}): string {
+  const required = clampNonNegativeGbp(input.requiredGbp);
+  const received = clampNonNegativeGbp(input.receivedGbp);
+  const pending = clampNonNegativeGbp(input.pendingApprovalGbp);
+
+  if (required <= 0.005 && pending <= 0.005) {
+    return "No deposit on this hire";
+  }
+  if (received >= required - 0.005) {
+    return "Held on the hire — disposition is decided on the final account after check-in";
+  }
+  if (pending > 0.005 && received <= 0.005) {
+    return "Awaiting approval — deposit is not part of the pre-check-in balance";
+  }
+  if (received > 0.005) {
+    return "Partially held — remainder is resolved on the final account, not collected here";
+  }
+  return "Not yet received — record on the final account after check-in; not collected at this step";
+}
+
 function pushPendingLine(
   lines: HireEndHireFinancialLine[],
   id: string,
@@ -137,6 +235,79 @@ function pushPendingItems(
     if (item.kind !== kind || item.submittedGbp <= 0.005) continue;
     pushPendingLine(lines, `pending_${item.id}`, pendingLineLabel(item), item.submittedGbp);
   }
+}
+
+const EXTRA_CHARGE_LINE_CAP = 5;
+
+function formatExtraChargeLineLabel(charge: {
+  chargeType: string;
+  chargeTypeLabel?: string;
+  description: string | null;
+}): string {
+  const typeLabel = charge.chargeTypeLabel?.trim() || charge.chargeType.replace(/_/g, " ");
+  const description = charge.description?.trim();
+  return description ? `${typeLabel} — ${description}` : typeLabel;
+}
+
+function buildRentCalculationLines(input: {
+  rentThroughLabel: string;
+  rentChargedGbp: number;
+  rentReceivedGbp: number;
+  rentGrossAccruedGbp?: number | null;
+  rentDiscountGbp?: number | null;
+  proRataAdjustmentGbp?: number | null;
+  proRataLineLabel?: string | null;
+}): HireEndHireFinancialLine[] {
+  const rentChargedGbp = clampNonNegativeGbp(input.rentChargedGbp);
+  const rentReceivedGbp = clampNonNegativeGbp(input.rentReceivedGbp);
+  const rentGrossAccruedGbp =
+    input.rentGrossAccruedGbp != null ? clampNonNegativeGbp(input.rentGrossAccruedGbp) : null;
+  const rentDiscountGbp = clampNonNegativeGbp(input.rentDiscountGbp ?? 0);
+  const proRataAdjustmentGbp = clampNonNegativeGbp(input.proRataAdjustmentGbp ?? 0);
+  const showBreakdown =
+    (rentGrossAccruedGbp != null && rentGrossAccruedGbp > rentChargedGbp + 0.005) ||
+    rentDiscountGbp > 0.005 ||
+    proRataAdjustmentGbp > 0.005;
+
+  const lines: HireEndHireFinancialLine[] = [];
+  if (showBreakdown && rentGrossAccruedGbp != null) {
+    lines.push({
+      id: "rent_gross",
+      label: "Total rent (gross)",
+      amountGbp: rentGrossAccruedGbp,
+      signed: true,
+    });
+  }
+  if (rentDiscountGbp > 0.005) {
+    lines.push({
+      id: "rent_discount",
+      label: "Discount applied",
+      amountGbp: rentDiscountGbp,
+      signed: false,
+    });
+  }
+  if (proRataAdjustmentGbp > 0.005) {
+    lines.push({
+      id: "rent_prorata",
+      label: input.proRataLineLabel?.trim() || "Early return adjustment",
+      amountGbp: proRataAdjustmentGbp,
+      signed: false,
+    });
+  }
+  lines.push({
+    id: "rent",
+    label: showBreakdown ? "Rent charged to return" : input.rentThroughLabel,
+    amountGbp: rentChargedGbp,
+    signed: true,
+    subtotal: showBreakdown,
+  });
+  lines.push({
+    id: "rent_paid",
+    label: "Approved rent payments",
+    amountGbp: rentReceivedGbp,
+    signed: false,
+  });
+  return lines;
 }
 
 export function buildHireEndHirePendingApprovalItems(input: {
@@ -206,6 +377,18 @@ export function buildHireEndHireFinancialReview(input: {
   rentChargedGbp: number;
   rentDaysHint?: string | null;
   rentReceivedGbp: number;
+  contractPeriodStartLabel?: string | null;
+  contractActivatedLabel?: string | null;
+  hireLengthSinceActivationLabel?: string | null;
+  rentRateLabel?: string | null;
+  rentBillingLabel?: string | null;
+  rentBillingDetail?: string | null;
+  billedPeriodsLabel?: string | null;
+  rentGrossAccruedGbp?: number | null;
+  rentDiscountGbp?: number | null;
+  proRataAdjustmentGbp?: number | null;
+  proRataLineLabel?: string | null;
+  proRataNote?: string | null;
   depositRequiredGbp: number;
   depositReceivedGbp: number;
   extraCharges: readonly {
@@ -291,20 +474,74 @@ export function buildHireEndHireFinancialReview(input: {
     positionLabel = `Company owes ${formatGbp(positionAmountGbp)} before check-in`;
   }
 
-  const rentThroughLabel = `Rent through ${formatUkDateAtTime(input.returnDateYmd, input.returnTimeHm)}`;
-  const rentLines: HireEndHireFinancialLine[] = [
-    { id: "rent", label: rentThroughLabel, amountGbp: rentChargedGbp, signed: true },
-    {
-      id: "rent_paid",
-      label: "Approved rent payments",
-      amountGbp: rentReceivedGbp,
-      signed: false,
-    },
-  ];
+  const returnDateLabel = formatUkDateAtTime(input.returnDateYmd, input.returnTimeHm);
+  const rentThroughLabel = `Rent through ${returnDateLabel}`;
+  const rentGrossAccruedGbp =
+    input.rentGrossAccruedGbp != null ? clampNonNegativeGbp(input.rentGrossAccruedGbp) : null;
+  const rentDiscountGbp = clampNonNegativeGbp(input.rentDiscountGbp ?? 0);
+  const proRataAdjustmentGbp =
+    input.proRataAdjustmentGbp != null
+      ? clampNonNegativeGbp(input.proRataAdjustmentGbp)
+      : rentGrossAccruedGbp != null
+        ? hireProRataRentAdjustmentGbp({
+            rentGrossAccruedGbp,
+            totalDiscountGbp: rentDiscountGbp,
+            accruedRentDueGbp: rentChargedGbp,
+          })
+        : 0;
+
+  const rentContext: HireEndHireContextField[] = [];
+  if (input.contractPeriodStartLabel?.trim()) {
+    rentContext.push({
+      label: "Contract period",
+      value: `${input.contractPeriodStartLabel.trim()} → ${returnDateLabel}`,
+    });
+  }
+  if (input.rentRateLabel?.trim()) {
+    rentContext.push({ label: "Rate", value: input.rentRateLabel.trim() });
+  }
+  if (input.billedPeriodsLabel?.trim()) {
+    rentContext.push({
+      label: "Rent billed through return",
+      value: input.billedPeriodsLabel.trim(),
+    });
+  }
+  if (input.rentBillingLabel?.trim()) {
+    rentContext.push({ label: "Billing", value: input.rentBillingLabel.trim() });
+  }
+  if (input.rentBillingDetail?.trim()) {
+    rentContext.push({ label: "Current period", value: input.rentBillingDetail.trim() });
+  }
+
+  const rentLines = buildRentCalculationLines({
+    rentThroughLabel,
+    rentChargedGbp,
+    rentReceivedGbp,
+    rentGrossAccruedGbp,
+    rentDiscountGbp,
+    proRataAdjustmentGbp,
+    proRataLineLabel: input.proRataLineLabel,
+  });
   pushPendingItems(rentLines, pendingApprovalItems, "rent");
   if (!pendingApprovalItems.length) {
     pushPendingLine(rentLines, "rent_pending", "Pending approval (rent)", pendingRentGbp);
   }
+
+  const activeExtraCharges = input.extraCharges.filter(
+    (charge) => charge.resolution !== "voided" && charge.resolution !== "waived",
+  );
+  const extraChargeLines: HireEndHireExtraChargeLine[] = [];
+  for (const charge of activeExtraCharges) {
+    const amount = clampNonNegativeGbp(charge.amountGbp);
+    if (amount <= 0.005) continue;
+    extraChargeLines.push({
+      id: charge.id,
+      label: formatExtraChargeLineLabel(charge),
+      amountGbp: amount,
+    });
+  }
+  const visibleExtraChargeLines = extraChargeLines.slice(0, EXTRA_CHARGE_LINE_CAP);
+  const moreExtraChargeLinesCount = Math.max(0, extraChargeLines.length - visibleExtraChargeLines.length);
 
   const extraLines: HireEndHireFinancialLine[] = [
     {
@@ -349,10 +586,59 @@ export function buildHireEndHireFinancialReview(input: {
     pushPendingLine(depositLines, "deposit_pending", "Pending approval (deposit)", pendingDepositGbp);
   }
 
+  const depositFooter = depositPreCheckinFooter({
+    requiredGbp: depositRequiredGbp,
+    receivedGbp: depositReceivedGbp,
+    pendingApprovalGbp: pendingDepositGbp,
+  });
+
   const accountSections: HireEndHireAccountSection[] = [
-    { id: "rent", title: "Rent", lines: rentLines },
-    { id: "extra_charges", title: "Extra charges", lines: extraLines },
-    { id: "deposit", title: "Deposit", lines: depositLines },
+    {
+      id: "rent",
+      title: "Rent",
+      lines: rentLines,
+      balanceGbp: roundGbp(rentBalanceGbp),
+      footer: balanceFooter(roundGbp(rentBalanceGbp)),
+      detail: {
+        context: rentContext,
+        footnote: input.proRataNote?.trim() || null,
+      },
+    },
+    {
+      id: "extra_charges",
+      title: "Extra charges",
+      lines: extraLines,
+      balanceGbp: roundGbp(extrasOutstanding),
+      footer: balanceFooter(roundGbp(extrasOutstanding)),
+      detail: {
+        context: [{ label: "Posted on this hire", value: "Damage, admin, PCN and other billable extras" }],
+        chargeLines: visibleExtraChargeLines,
+        moreChargeLinesCount: moreExtraChargeLinesCount,
+        footnote: "Full line detail and receipts are on Payments & balance.",
+      },
+    },
+    {
+      id: "deposit",
+      title: "Deposit",
+      lines: depositLines,
+      balanceGbp: roundGbp(depositBalanceGbp),
+      footer: depositFooter,
+      detail: {
+        context:
+          depositRequiredGbp > 0.005
+            ? [
+                {
+                  label: "Contract deposit",
+                  value: formatGbp(depositRequiredGbp),
+                },
+              ]
+            : [{ label: "Contract deposit", value: "No deposit on this hire" }],
+        footnote:
+          depositRequiredGbp > 0.005
+            ? "For reference only. Deposit is not collected or applied during pre-check-in review — it is resolved on the final account after check-in."
+            : null,
+      },
+    },
   ];
   const lines = accountSections.flatMap((section) => section.lines);
 
@@ -374,6 +660,7 @@ export function buildHireEndHireFinancialReview(input: {
       receivedGbp: roundGbp(rentReceivedGbp),
       pendingApprovalGbp: roundGbp(pendingRentGbp),
       balanceGbp: roundGbp(rentBalanceGbp),
+      footer: balanceFooter(roundGbp(rentBalanceGbp)),
       hint: categoryBalanceHint(rentChargedGbp, rentReceivedGbp, rentBalanceGbp, pendingRentGbp),
     },
     {
@@ -383,6 +670,7 @@ export function buildHireEndHireFinancialReview(input: {
       receivedGbp: roundGbp(extrasReceived),
       pendingApprovalGbp: roundGbp(pendingExtraChargesGbp),
       balanceGbp: roundGbp(extrasOutstanding),
+      footer: balanceFooter(roundGbp(extrasOutstanding)),
       hint: extraChargesHint,
     },
     {
@@ -392,15 +680,14 @@ export function buildHireEndHireFinancialReview(input: {
       receivedGbp: roundGbp(depositReceivedGbp),
       pendingApprovalGbp: roundGbp(pendingDepositGbp),
       balanceGbp: roundGbp(depositBalanceGbp),
-      hint:
-        depositRequiredGbp <= 0.005 && pendingDepositGbp <= 0.005
-          ? "No deposit on this hire"
-          : categoryBalanceHint(
-              depositRequiredGbp,
-              depositReceivedGbp,
-              depositBalanceGbp,
-              pendingDepositGbp,
-            ),
+      chargedLabel: "Contract deposit",
+      receivedLabel: "Received",
+      footer: depositFooter,
+      hint: depositPreCheckinHint({
+        requiredGbp: depositRequiredGbp,
+        receivedGbp: depositReceivedGbp,
+        pendingApprovalGbp: pendingDepositGbp,
+      }),
     },
   ];
 
@@ -435,4 +722,9 @@ export function formatHireEndHireSignedAmount(amountGbp: number, signed: boolean
   const abs = formatGbp(Math.abs(amountGbp));
   if (amountGbp <= 0.005) return signed ? `+${formatGbp(0)}` : `−${formatGbp(0)}`;
   return signed ? `+${abs}` : `−${abs}`;
+}
+
+export function formatHireEndHireSectionFooter(footer: HireEndHireSectionFooter): string {
+  if (footer.valueText?.trim()) return footer.valueText.trim();
+  return formatGbp(footer.valueGbp ?? 0);
 }

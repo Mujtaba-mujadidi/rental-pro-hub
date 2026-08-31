@@ -7,16 +7,20 @@ import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-gua
 import { canWriteRentals } from "@/lib/auth/rental-permissions";
 import { assertStaffHireSubcompanyAccess } from "@/lib/auth/rental-subcompany-access";
 import { formatUkDateAtTime, formatUkDateTime, ukTodayYmd } from "@/lib/datetime/uk";
+import { formatRentLabel } from "@/lib/fleet/hire-access-display";
 import {
   canCancelHireEndHireProcess,
   canFinalizeHireEndHireProcess,
   emptyHireEndHireDraft,
   hireEndHireReturnedAtIso,
+  hireEndHireStepNeedsFinancialReview,
   isHireEndHireAutoCompletedBeforeFinalisation,
   isHireEndHireFinalized,
   isHireEndHireReturnReason,
   isHireEndHireStep,
   parseHireEndHireDraft,
+  parseHireEndHireRentBillingMode,
+  resolveEffectiveHireEndHireDraft,
   type HireEndHireDraft,
   type HireEndHireReturnReason,
   type HireEndHireStep,
@@ -29,6 +33,18 @@ import {
   type HireEndHirePendingApprovalItem,
 } from "@/lib/fleet/hire-end-hire-financial";
 import { hirePaymentPendingApprovalAmountGbp } from "@/lib/fleet/hire-payment-display";
+import {
+  hireTerminationRentBillingDetail,
+  hireTerminationRentBillingLabel,
+} from "@/lib/fleet/hire-termination-billing";
+import {
+  formatHireDurationWeeksAndDays,
+  formatRentBilledThroughReturnLabel,
+  hireRentTerminationAdjustmentDisplay,
+  type HireTerminationAccountsSummary,
+} from "@/lib/fleet/hire-termination-summary";
+import type { HireTerminationRentBillingMode } from "@/lib/fleet/hire-termination-billing";
+import type { RentCadence } from "@/lib/fleet/hire-types";
 import { canStartCheckin, canTerminateHire } from "@/lib/fleet/hire-lifecycle-attention";
 import { logHireGroupEvent } from "@/lib/fleet/hire-audit";
 import { PROVISIONAL_TERMINATION_DEPOSIT_DISPOSITION } from "@/lib/fleet/hire-settlement-finalization";
@@ -52,6 +68,66 @@ function londonTimeHmNow(): string {
   const hour = parts.find((part) => part.type === "hour")?.value ?? "12";
   const minute = parts.find((part) => part.type === "minute")?.value ?? "00";
   return `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
+}
+
+function rentDetailFromTerminationAccounts(
+  accounts: HireTerminationAccountsSummary,
+  billingMode: HireTerminationRentBillingMode,
+  contractStartYmd: string | null,
+  contractActivatedAt: string | null,
+): {
+  rentChargedGbp: number;
+  rentReceivedGbp: number;
+  rentGrossAccruedGbp: number;
+  rentDiscountGbp: number;
+  rentCadence: RentCadence;
+  billedPeriodsLabel: string;
+  rentBillingLabel: string;
+  rentBillingDetail: string | null;
+  proRataAdjustmentGbp: number | null;
+  proRataLineLabel: string | null;
+  proRataNote: string | null;
+  contractActivatedLabel: string | null;
+  hireLengthSinceActivationLabel: string | null;
+} {
+  const adjustment = hireRentTerminationAdjustmentDisplay({
+    rentCadence: accounts.rentCadence,
+    rentBillingMode: billingMode,
+    billingPeriodBreakdown: accounts.billingPeriodBreakdown,
+    rentGrossAccruedGbp: accounts.rentGrossAccruedGbp,
+    totalDiscountGbp: accounts.totalDiscountGbp,
+    accruedRentDueGbp: accounts.accruedRentDueGbp,
+  });
+  const activatedYmd = accounts.activatedAt?.slice(0, 10) ?? null;
+  const contractActivatedLabel =
+    contractActivatedAt && activatedYmd && contractStartYmd && activatedYmd !== contractStartYmd
+      ? formatUkDateTime(contractActivatedAt)
+      : null;
+
+  return {
+    rentChargedGbp: accounts.accruedRentDueGbp,
+    rentReceivedGbp: accounts.accruedRentPaidGbp,
+    rentGrossAccruedGbp: accounts.rentGrossAccruedGbp,
+    rentDiscountGbp: accounts.totalDiscountGbp,
+    rentCadence: accounts.rentCadence,
+    billedPeriodsLabel: formatRentBilledThroughReturnLabel(
+      accounts.rentCadence,
+      accounts.rentBilledPeriods,
+      accounts.rentBilledDurationDays,
+    ),
+    rentBillingLabel: hireTerminationRentBillingLabel(billingMode, accounts.rentCadence),
+    rentBillingDetail: hireTerminationRentBillingDetail(
+      billingMode,
+      accounts.rentCadence,
+      accounts.billingPeriodBreakdown,
+    ),
+    proRataAdjustmentGbp: adjustment?.adjustmentGbp ?? null,
+    proRataLineLabel: adjustment?.lineLabel ?? null,
+    proRataNote: adjustment?.footnote ?? null,
+    contractActivatedLabel,
+    hireLengthSinceActivationLabel:
+      contractActivatedLabel != null ? formatHireDurationWeeksAndDays(accounts.durationDays) : null,
+  };
 }
 
 async function authorizeEndHireWrite(hireGroupId: string): Promise<
@@ -218,6 +294,7 @@ export type HireEndHirePageData = {
   hireGroupIdShort: string;
   vehicleVrm: string;
   status: string;
+  rentCadence: RentCadence;
   draft: HireEndHireDraft;
   checkinCompleted: boolean;
   canStartCheckin: boolean;
@@ -249,6 +326,7 @@ export type HireEndHirePageData = {
 
 export async function loadHireEndHirePageAction(
   hireGroupId: string,
+  options?: { includeFinancialReview?: boolean },
 ): Promise<{ ok: true; data: HireEndHirePageData } | { ok: false; error: string }> {
   let authorized = await authorizeEndHireWrite(hireGroupId);
   if (!authorized.ok) return authorized;
@@ -274,7 +352,7 @@ export async function loadHireEndHirePageAction(
   const supabase = await createClient();
   const { data: group } = await supabase
     .from("vehicle_hire_groups")
-    .select("id, status, start_date, start_time, activated_at, vehicles(vrm)")
+    .select("id, status, start_date, start_time, activated_at, rent_amount_gbp, rent_cadence, vehicles(vrm)")
     .eq("id", hire.id)
     .maybeSingle();
   if (!group) return { ok: false, error: "Hire not found." };
@@ -283,31 +361,12 @@ export async function loadHireEndHirePageAction(
   const draft =
     hire.endHireDraft ?? emptyHireEndHireDraft(nowIso, ukTodayYmd(), londonTimeHmNow());
 
-  let effectiveDraft = draft;
-  if (hire.status === "ending") {
-    effectiveDraft = {
-      ...draft,
-      started: true,
-      step: draft.step === "checkin" || draft.step === "final_account" ? "return_details" : draft.step,
-      updatedAt: draft.updatedAt || nowIso,
-    };
-  } else if (hire.status === "terminated" || hire.status === "completed") {
-    if (hire.checkinCompleted) {
-      effectiveDraft = {
-        ...draft,
-        started: true,
-        step: "final_account",
-        updatedAt: draft.updatedAt || nowIso,
-      };
-    } else {
-      effectiveDraft = {
-        ...draft,
-        started: true,
-        step: "checkin",
-        updatedAt: draft.updatedAt || nowIso,
-      };
-    }
-  }
+  const effectiveDraft = resolveEffectiveHireEndHireDraft({
+    status: hire.status,
+    checkinCompleted: hire.checkinCompleted,
+    draft,
+    nowIso,
+  });
 
   let financialReview: HireEndHireFinancialReview | null = null;
   let pendingApprovalItems: HireEndHirePendingApprovalItem[] = [];
@@ -315,7 +374,17 @@ export async function loadHireEndHirePageAction(
   let extraChargePendingPayment: HireEndHirePageData["extraChargePendingPayment"] = null;
   let extraChargesOutstandingGbp = 0;
   let canApprovePayments = false;
-  if (effectiveDraft.started && effectiveDraft.returnDateYmd) {
+  const vehicle = group.vehicles as { vrm?: string } | null;
+  const startDate = (group.start_date as string | null) ?? null;
+  const startTime = (group.start_time as string | null)?.slice(0, 5) || "09:00";
+  const rentCadence = ((group.rent_cadence as RentCadence | null) ?? "weekly") as RentCadence;
+  const includeFinancialReview =
+    options?.includeFinancialReview ??
+    (effectiveDraft.started &&
+      Boolean(effectiveDraft.returnDateYmd) &&
+      hireEndHireStepNeedsFinancialReview(effectiveDraft.step));
+
+  if (includeFinancialReview && effectiveDraft.returnDateYmd) {
     const returnedAtIso =
       hireEndHireReturnedAtIso(
         effectiveDraft.returnDateYmd,
@@ -337,24 +406,86 @@ export async function loadHireEndHirePageAction(
       });
       let rentChargedGbp = payments.data.summary.totalDueGbp;
       let rentReceivedGbp = payments.data.summary.totalPaidGbp;
+      let rentGrossAccruedGbp = payments.data.summary.rentGrossAccruedGbp;
+      let rentDiscountGbp = payments.data.summary.totalDiscountGbp;
+      let billedPeriodsLabel: string | null = null;
+      let rentBillingLabel: string | null = null;
+      let rentBillingDetail: string | null = null;
+      let proRataAdjustmentGbp: number | null = null;
+      let proRataLineLabel: string | null = null;
+      let proRataNote: string | null = null;
+      let contractActivatedLabel: string | null = null;
+      let hireLengthSinceActivationLabel: string | null = null;
+      const billingMode =
+        canTerminateHire(hire.status) || hire.status === "ending"
+          ? effectiveDraft.rentBillingMode
+          : (payments.data.terminationSummary?.rentBillingMode ?? effectiveDraft.rentBillingMode);
       if (canTerminateHire(hire.status) && returnedAtIso) {
         const preview = await loadHireTerminationPreviewAction(
           hire.id,
           PROVISIONAL_TERMINATION_DEPOSIT_DISPOSITION,
           null,
-          "actual",
+          billingMode,
           returnedAtIso,
+          effectiveDraft.returnDateYmd,
         );
         if (preview.ok) {
-          rentChargedGbp = preview.data.accounts.accruedRentDueGbp;
-          rentReceivedGbp = preview.data.accounts.accruedRentPaidGbp;
+          const detail = rentDetailFromTerminationAccounts(
+            preview.data.accounts,
+            billingMode,
+            startDate,
+            (group.activated_at as string | null) ?? null,
+          );
+          rentChargedGbp = detail.rentChargedGbp;
+          rentReceivedGbp = detail.rentReceivedGbp;
+          rentGrossAccruedGbp = detail.rentGrossAccruedGbp;
+          rentDiscountGbp = detail.rentDiscountGbp;
+          billedPeriodsLabel = detail.billedPeriodsLabel;
+          rentBillingLabel = detail.rentBillingLabel;
+          rentBillingDetail = detail.rentBillingDetail;
+          proRataAdjustmentGbp = detail.proRataAdjustmentGbp;
+          proRataLineLabel = detail.proRataLineLabel;
+          proRataNote = detail.proRataNote;
+          contractActivatedLabel = detail.contractActivatedLabel;
+          hireLengthSinceActivationLabel = detail.hireLengthSinceActivationLabel;
         }
+      } else if (payments.data.terminationSummary) {
+        const detail = rentDetailFromTerminationAccounts(
+          payments.data.terminationSummary,
+          payments.data.terminationSummary.rentBillingMode,
+          startDate,
+          payments.data.terminationSummary.activatedAt,
+        );
+        rentChargedGbp = detail.rentChargedGbp;
+        rentReceivedGbp = detail.rentReceivedGbp;
+        rentGrossAccruedGbp = detail.rentGrossAccruedGbp;
+        rentDiscountGbp = detail.rentDiscountGbp;
+        billedPeriodsLabel = detail.billedPeriodsLabel;
+        rentBillingLabel = detail.rentBillingLabel;
+        rentBillingDetail = detail.rentBillingDetail;
+        proRataAdjustmentGbp = detail.proRataAdjustmentGbp;
+        proRataLineLabel = detail.proRataLineLabel;
+        proRataNote = detail.proRataNote;
+        contractActivatedLabel = detail.contractActivatedLabel;
+        hireLengthSinceActivationLabel = detail.hireLengthSinceActivationLabel;
       }
       financialReview = buildHireEndHireFinancialReview({
         returnDateYmd: effectiveDraft.returnDateYmd,
         returnTimeHm: effectiveDraft.returnTimeHm || "12:00",
         rentChargedGbp,
         rentReceivedGbp,
+        contractPeriodStartLabel: formatUkDateAtTime(startDate, startTime),
+        contractActivatedLabel,
+        hireLengthSinceActivationLabel,
+        rentRateLabel: formatRentLabel(group.rent_amount_gbp, rentCadence),
+        rentBillingLabel,
+        rentBillingDetail,
+        billedPeriodsLabel,
+        rentGrossAccruedGbp,
+        rentDiscountGbp,
+        proRataAdjustmentGbp,
+        proRataLineLabel,
+        proRataNote,
         depositRequiredGbp: Number(
           payments.data.terminationSummary?.depositGbp ??
             payments.data.rows.find((row) => row.rowKind === "deposit")?.netDueGbp ??
@@ -376,10 +507,6 @@ export async function loadHireEndHirePageAction(
     }
   }
 
-  const vehicle = group.vehicles as { vrm?: string } | null;
-  const startDate = (group.start_date as string | null) ?? null;
-  const startTime = (group.start_time as string | null)?.slice(0, 5) || "09:00";
-
   return {
     ok: true,
     data: {
@@ -387,6 +514,7 @@ export async function loadHireEndHirePageAction(
       hireGroupIdShort: hire.id.slice(0, 8),
       vehicleVrm: vehicle?.vrm?.trim() || "—",
       status: hire.status,
+      rentCadence,
       draft: effectiveDraft,
       checkinCompleted: hire.checkinCompleted,
       canStartCheckin: canStartCheckin({
@@ -602,6 +730,7 @@ export async function saveHireEndHireDraftAction(input: {
   returnTimeHm?: string;
   reason?: string;
   notes?: string;
+  rentBillingMode?: HireTerminationRentBillingMode;
 }): Promise<{ ok: true; draft: HireEndHireDraft } | { ok: false; error: string }> {
   const authorized = await authorizeEndHireWrite(input.hireGroupId);
   if (!authorized.ok) return authorized;
@@ -624,8 +753,12 @@ export async function saveHireEndHireDraftAction(input: {
     returnTimeHm: (input.returnTimeHm ?? previous.returnTimeHm).trim(),
     reason: (reasonRaw || "") as HireEndHireReturnReason | "",
     notes: (input.notes ?? previous.notes).trim(),
+    rentBillingMode: parseHireEndHireRentBillingMode(
+      input.rentBillingMode ?? previous.rentBillingMode,
+    ),
     updatedAt: nowIso,
     finalizedAt: previous.finalizedAt,
+    explicitFinalization: previous.explicitFinalization,
   };
 
   const supabase = await createClient();
@@ -636,7 +769,6 @@ export async function saveHireEndHireDraftAction(input: {
     .eq("parent_company_id", authorized.hire.parentCompanyId);
   if (error) return { ok: false, error: error.message };
 
-  await revalidateEndHire(authorized.hire.id, authorized.hire.parentCompanyId);
   return { ok: true, draft };
 }
 
@@ -646,7 +778,8 @@ export async function confirmHireEndHireReturnAction(input: {
   returnTimeHm: string;
   reason: string;
   notes?: string;
-}): Promise<{ ok: true; checkInHref: string } | { ok: false; error: string }> {
+  rentBillingMode: HireTerminationRentBillingMode;
+}): Promise<{ ok: true; draft: HireEndHireDraft } | { ok: false; error: string }> {
   const authorized = await authorizeEndHireWrite(input.hireGroupId);
   if (!authorized.ok) return authorized;
   if (!canTerminateHire(authorized.hire.status)) {
@@ -662,24 +795,18 @@ export async function confirmHireEndHireReturnAction(input: {
     .filter(Boolean)
     .join(" · ");
 
-  const preview = await loadHireTerminationPreviewAction(
-    authorized.hire.id,
-    PROVISIONAL_TERMINATION_DEPOSIT_DISPOSITION,
-    null,
-    "actual",
-    returnedAtIso,
-  );
-  if (!preview.ok) return preview;
+  const rentBillingMode = parseHireEndHireRentBillingMode(input.rentBillingMode);
 
   const terminated = await terminateHireGroupAction({
     hireGroupId: authorized.hire.id,
     confirmedIdentity: true,
     finalConfirmed: true,
-    rentBillingMode: "actual",
+    rentBillingMode,
     terminationNotes: notes,
     depositDisposition: PROVISIONAL_TERMINATION_DEPOSIT_DISPOSITION,
     settlementResolution: "open_balance",
     returnedAtIso,
+    returnDateYmd: input.returnDateYmd,
   });
   if (!terminated.ok) return terminated;
 
@@ -691,6 +818,7 @@ export async function confirmHireEndHireReturnAction(input: {
     returnTimeHm: input.returnTimeHm.trim(),
     reason: input.reason,
     notes: input.notes?.trim() || "",
+    rentBillingMode,
     updatedAt: nowIso,
     finalizedAt: null,
   };
@@ -702,8 +830,7 @@ export async function confirmHireEndHireReturnAction(input: {
     .eq("id", authorized.hire.id)
     .eq("parent_company_id", authorized.hire.parentCompanyId);
 
-  await revalidateEndHire(authorized.hire.id, authorized.hire.parentCompanyId);
-  return { ok: true, checkInHref: `/rental/hires/${authorized.hire.id}/end-hire` };
+  return { ok: true, draft };
 }
 
 export async function finalizeHireEndHireAction(

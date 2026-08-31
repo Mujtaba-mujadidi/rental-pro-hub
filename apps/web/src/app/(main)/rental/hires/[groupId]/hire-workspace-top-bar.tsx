@@ -122,7 +122,11 @@ export function HireWorkspaceTopBar({ hires }: { hires: HireSwitcherOption[] }) 
       </div>
 
       <section className="rph-card hire-ws-hero-card">
-        <HireWorkspaceHero chrome={chrome} status={shell.status} />
+        <HireWorkspaceHero
+          chrome={chrome}
+          status={shell.status}
+          hideCheckInShortcut={section === "end-hire" || section === "checkin"}
+        />
       </section>
 
       <HireWorkspaceTabNav items={items} />

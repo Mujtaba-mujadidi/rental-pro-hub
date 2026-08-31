@@ -9,10 +9,13 @@ export function HireWorkspaceHero({
   chrome,
   status,
   mode = "staff",
+  hideCheckInShortcut = false,
 }: {
   chrome: HireWorkspaceChromeData;
   status: string;
   mode?: "staff" | "driver";
+  /** Hide when check-in is already shown on the current page (end-hire wizard or check-in tab). */
+  hideCheckInShortcut?: boolean;
 }) {
   const statusTone = driverHireStatusTone(status);
   const chipTone =
@@ -21,20 +24,22 @@ export function HireWorkspaceHero({
   const partyLabel = mode === "driver" ? "Rental company" : "Driver";
   const partyValue = mode === "driver" ? chrome.companyName ?? "—" : chrome.driverName ?? "—";
 
+  const showCheckIn = chrome.canCheckIn && !hideCheckInShortcut;
+
   const endActions =
-    (mode === "staff" && chrome.canTerminate) || chrome.canCheckIn ? (
+    (mode === "staff" && chrome.canTerminate) || showCheckIn ? (
       <div className="hire-ws-hero-end-actions">
         {mode === "staff" && chrome.canTerminate ? (
           <Link href={`/rental/hires/${chrome.hireGroupId}/end-hire`} className="hire-ws-hero-end-hire">
             End hire
           </Link>
         ) : null}
-        {chrome.canCheckIn ? (
+        {showCheckIn ? (
           <Link
             href={
               mode === "driver"
                 ? `/driver/hires/${chrome.hireGroupId}/checkin`
-                : `/rental/hires/${chrome.hireGroupId}/end-hire`
+                : `/rental/hires/${chrome.hireGroupId}/checkin`
             }
             className="hire-ws-hero-checkin"
           >

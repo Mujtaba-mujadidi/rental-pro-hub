@@ -13,6 +13,8 @@ function termination(
     terminatedAt: "2026-08-20T12:00:00.000Z",
     durationDays: 20,
     billedPeriods: 3,
+    rentBilledDurationDays: 20,
+    rentBilledPeriods: 3,
     rentCadence: "weekly",
     rentAmountGbp: 140,
     accruedRentDueGbp: 400,

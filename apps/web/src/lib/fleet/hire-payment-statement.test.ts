@@ -12,6 +12,8 @@ function termination(): HireTerminationAccountsSummary {
     terminatedAt: "2026-08-08T12:00:00.000Z",
     durationDays: 11,
     billedPeriods: 2,
+    rentBilledDurationDays: 11,
+    rentBilledPeriods: 2,
     rentCadence: "weekly",
     rentAmountGbp: 100,
     accruedRentDueGbp: 157.14,

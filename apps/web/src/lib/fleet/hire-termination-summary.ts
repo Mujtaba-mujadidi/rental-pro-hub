@@ -1,13 +1,16 @@
+import { ukLondonDayYmd } from "@/lib/datetime/uk";
 import { calendarDaysInclusive } from "@/lib/fleet/hire-payment-analytics";
 import type { HirePaymentSummary } from "@/lib/fleet/hire-payment-summary";
 import type { HireRentSettlementSummary } from "@/lib/fleet/hire-rent-settlement";
-import type {
-  HireTerminationBillingPeriodBreakdown,
-  HireTerminationRentBillingMode,
+import {
+  supportsEndOfPeriodBilling,
+  type HireTerminationBillingPeriodBreakdown,
+  type HireTerminationRentBillingMode,
 } from "@/lib/fleet/hire-termination-billing";
 import type { RentCadence } from "@/lib/fleet/hire-types";
 import { addGbp, roundGbp } from "@/lib/fleet/hire-money";
 import { settlementCacheFromSignedGbp } from "@/lib/fleet/hire-open-balance";
+import { formatGbp } from "@/lib/fleet/maintenance";
 
 export const HIRE_DEPOSIT_DISPOSITIONS = [
   "apply_to_balance",
@@ -38,6 +41,9 @@ export type HireTerminationAccountsSummary = {
   terminatedAt: string;
   durationDays: number;
   billedPeriods: number;
+  /** Inclusive calendar days from contract effective start through termination (rent schedule basis). */
+  rentBilledDurationDays: number;
+  rentBilledPeriods: number;
   rentCadence: RentCadence;
   rentAmountGbp: number;
   /** Accrued rent before discounts (schedule base amounts). */
@@ -120,6 +126,68 @@ export function hireProRataRentAdjustmentGbp(input: {
   return Math.round(Math.max(0, fullPeriodNet - input.accruedRentDueGbp) * 100) / 100;
 }
 
+export type HireRentTerminationAdjustmentDisplay = {
+  adjustmentGbp: number;
+  lineLabel: string;
+  footnote: string;
+};
+
+/** Staff-facing label and footnote for rent not charged at termination (pro-rata or early return). */
+export function hireRentTerminationAdjustmentDisplay(input: {
+  rentCadence: RentCadence;
+  rentBillingMode: HireTerminationRentBillingMode;
+  billingPeriodBreakdown: HireTerminationBillingPeriodBreakdown | null;
+  rentGrossAccruedGbp: number;
+  totalDiscountGbp: number;
+  accruedRentDueGbp: number;
+}): HireRentTerminationAdjustmentDisplay | null {
+  const adjustmentGbp = hireProRataRentAdjustmentGbp({
+    rentGrossAccruedGbp: input.rentGrossAccruedGbp,
+    totalDiscountGbp: input.totalDiscountGbp,
+    accruedRentDueGbp: input.accruedRentDueGbp,
+  });
+  if (adjustmentGbp <= 0.005) return null;
+
+  if (
+    input.billingPeriodBreakdown &&
+    input.rentBillingMode === "actual" &&
+    supportsEndOfPeriodBilling(input.rentCadence)
+  ) {
+    const { daysUsed, daysInPeriod } = input.billingPeriodBreakdown;
+    const periodWord = input.rentCadence === "weekly" ? "week" : "month";
+    return {
+      adjustmentGbp,
+      lineLabel: `Pro-rata adjustment (final ${periodWord})`,
+      footnote: `${formatGbp(adjustmentGbp)} was not charged because the vehicle was returned after ${daysUsed} of ${daysInPeriod} days in the final billing ${periodWord}. This is not unpaid rent.`,
+    };
+  }
+
+  if (input.rentCadence === "daily") {
+    return {
+      adjustmentGbp,
+      lineLabel: "Rent not charged after return",
+      footnote: `${formatGbp(adjustmentGbp)} of schedule rent after the return date is not charged. This is not unpaid rent.`,
+    };
+  }
+
+  const periodWord = input.rentCadence === "weekly" ? "week" : "month";
+  return {
+    adjustmentGbp,
+    lineLabel: "Early return adjustment",
+    footnote: `${formatGbp(adjustmentGbp)} of the final ${periodWord} was not charged after early return. This is not unpaid rent.`,
+  };
+}
+
+export function formatRentBilledThroughReturnLabel(
+  rentCadence: RentCadence,
+  rentBilledPeriods: number,
+  rentBilledDurationDays: number,
+): string {
+  const unit =
+    rentBilledPeriods === 1 ? rentCadenceLabel(rentCadence) : rentCadencePluralLabel(rentCadence);
+  return `${rentBilledPeriods} ${unit} (${formatHireDurationWeeksAndDays(rentBilledDurationDays)})`;
+}
+
 export function netSettlementAfterDeposit(input: {
   balanceGbp: number;
   depositGbp: number;
@@ -153,6 +221,8 @@ export function netSettlementAfterDeposit(input: {
 export function buildHireTerminationAccountsSummary(input: {
   activatedAt: string | null;
   terminatedAtIso: string;
+  /** UK calendar day for termination accrual (staff return date when known). */
+  terminatedYmd?: string | null;
   startDateYmd: string;
   rentCadence: RentCadence;
   rentAmountGbp: number;
@@ -163,9 +233,14 @@ export function buildHireTerminationAccountsSummary(input: {
   depositRefundAmountGbp?: number | null;
   outstandingExtraChargesGbp?: number;
 }): HireTerminationAccountsSummary {
-  const terminatedYmd = input.terminatedAtIso.slice(0, 10);
-  const fromYmd = input.activatedAt?.slice(0, 10) ?? input.startDateYmd;
-  const durationDays = calendarDaysInclusive(fromYmd, terminatedYmd);
+  const terminatedYmd =
+    input.terminatedYmd?.trim() && /^\d{4}-\d{2}-\d{2}$/.test(input.terminatedYmd.trim())
+      ? input.terminatedYmd.trim()
+      : (ukLondonDayYmd(input.terminatedAtIso) ?? input.terminatedAtIso.slice(0, 10));
+  const hireLengthFromYmd = input.activatedAt?.slice(0, 10) ?? input.startDateYmd;
+  const durationDays = calendarDaysInclusive(hireLengthFromYmd, terminatedYmd);
+  const rentBilledDurationDays = calendarDaysInclusive(input.startDateYmd, terminatedYmd);
+  const rentBilledPeriods = billedPeriodsForDuration(input.rentCadence, rentBilledDurationDays);
   const disposition = input.depositDisposition ?? "hold_pending";
   const signedRentBalance = input.rentSettlement.signedRentSettlementGbp;
   const rentCreditGbp = Math.max(0, -signedRentBalance);
@@ -186,6 +261,8 @@ export function buildHireTerminationAccountsSummary(input: {
     terminatedAt: input.terminatedAtIso,
     durationDays,
     billedPeriods: billedPeriodsForDuration(input.rentCadence, durationDays),
+    rentBilledDurationDays,
+    rentBilledPeriods,
     rentCadence: input.rentCadence,
     rentAmountGbp: input.rentAmountGbp,
     rentGrossAccruedGbp:

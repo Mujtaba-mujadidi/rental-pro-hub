@@ -3,8 +3,10 @@ import {
   billedPeriodsForDuration,
   buildHireTerminationAccountsSummary,
   formatHireDurationWeeksAndDays,
+  formatRentBilledThroughReturnLabel,
   hireDepositDispositionLabel,
   hireProRataRentAdjustmentGbp,
+  hireRentTerminationAdjustmentDisplay,
   netSettlementAfterDeposit,
   overallTerminationPositionGbp,
   resolveSettlementBalanceDirection,
@@ -137,6 +139,8 @@ describe("hire-termination-summary", () => {
     });
 
     expect(summary.durationDays).toBe(15);
+    expect(summary.rentBilledDurationDays).toBe(15);
+    expect(summary.rentBilledPeriods).toBe(3);
     expect(summary.rentCreditGbp).toBe(300);
     expect(summary.netSettlementGbp).toBe(-800);
     expect(summary.outstandingExtraChargesGbp).toBe(0);
@@ -220,5 +224,78 @@ describe("hire-termination-summary", () => {
     expect(summary.outstandingExtraChargesGbp).toBe(90);
     expect(overallTerminationPositionGbp(summary)).toBe(90);
     expect(summary.balanceDirection).toBe("driver_owes_company");
+  });
+
+  it("uses contract start for rent billed periods when activation is later", () => {
+    const summary = buildHireTerminationAccountsSummary({
+      activatedAt: "2026-08-23T18:15:04.959+00:00",
+      terminatedAtIso: "2026-08-30T22:55:00.000Z",
+      terminatedYmd: "2026-08-30",
+      startDateYmd: "2026-08-01",
+      rentCadence: "daily",
+      rentAmountGbp: 20,
+      depositGbp: 0,
+      paymentSummary: {
+        rentGrossAccruedGbp: 600,
+        totalDueGbp: 595,
+        totalPaidGbp: 55,
+        balanceGbp: 540,
+        creditGbp: 0,
+        signedAccruedBalanceGbp: 540,
+        scheduleBalanceGbp: 540,
+        totalDiscountGbp: 5,
+        contractTotalGbp: 600,
+        nextDue: null,
+        nextFutureDue: null,
+      },
+      rentSettlement: {
+        accruedRentDueGbp: 595,
+        accruedRentPaidGbp: 55,
+        prepaidRentCreditGbp: 0,
+        accruedOverpaymentGbp: 0,
+        signedRentSettlementGbp: 540,
+        billingMode: "actual",
+        billingPeriodBreakdown: null,
+      },
+      depositDisposition: "hold_pending",
+    });
+
+    expect(summary.durationDays).toBe(8);
+    expect(summary.billedPeriods).toBe(8);
+    expect(summary.rentBilledDurationDays).toBe(30);
+    expect(summary.rentBilledPeriods).toBe(30);
+    expect(formatRentBilledThroughReturnLabel("daily", 30, 30)).toBe(
+      "30 days (4 weeks and 2 days)",
+    );
+    expect(
+      hireRentTerminationAdjustmentDisplay({
+        rentCadence: "daily",
+        rentBillingMode: "actual",
+        billingPeriodBreakdown: null,
+        rentGrossAccruedGbp: 600,
+        totalDiscountGbp: 5,
+        accruedRentDueGbp: 595,
+      }),
+    ).toBeNull();
+  });
+
+  it("describes weekly pro-rata adjustment with billing breakdown", () => {
+    const display = hireRentTerminationAdjustmentDisplay({
+      rentCadence: "weekly",
+      rentBillingMode: "actual",
+      billingPeriodBreakdown: {
+        periodStart: "2026-08-24",
+        periodEnd: "2026-08-30",
+        daysUsed: 4,
+        daysInPeriod: 7,
+        actualDueGbp: 57.14,
+        endOfPeriodDueGbp: 100,
+      },
+      rentGrossAccruedGbp: 200,
+      totalDiscountGbp: 0,
+      accruedRentDueGbp: 157.14,
+    });
+    expect(display?.lineLabel).toBe("Pro-rata adjustment (final week)");
+    expect(display?.footnote).toContain("4 of 7 days");
   });
 });

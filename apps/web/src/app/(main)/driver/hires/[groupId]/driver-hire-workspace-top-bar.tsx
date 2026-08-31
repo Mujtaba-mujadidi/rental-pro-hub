@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { HireWorkspaceHero } from "@/components/fleet/hire-workspace/hire-workspace-hero";
 import { HireWorkspaceTabNav } from "@/components/fleet/hire-workspace/hire-workspace-tab-nav";
 import {
@@ -11,7 +12,9 @@ import { useDriverHireWorkspace } from "./driver-hire-workspace-provider";
 
 export function DriverHireWorkspaceTopBar() {
   const { shell, chrome } = useDriverHireWorkspace();
+  const pathname = usePathname();
   const items = driverHireWorkspaceNav(shell.hireGroupId);
+  const onCheckInPage = pathname.includes("/checkin");
 
   const backLink =
     shell.status === "reserved" || shell.status === "active"
@@ -27,7 +30,12 @@ export function DriverHireWorkspaceTopBar() {
       </div>
 
       <section className="rph-card hire-ws-hero-card">
-        <HireWorkspaceHero chrome={chrome} status={shell.status} mode="driver" />
+        <HireWorkspaceHero
+          chrome={chrome}
+          status={shell.status}
+          mode="driver"
+          hideCheckInShortcut={onCheckInPage}
+        />
       </section>
 
       <HireWorkspaceTabNav items={items} isItemActive={isDriverHireWorkspaceNavItemActive} />
