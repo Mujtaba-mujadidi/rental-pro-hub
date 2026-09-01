@@ -18,7 +18,7 @@ import {
   parseDamageChargeGbp,
   type HireInspectionDamageChargeResolution,
 } from "@/lib/fleet/hire-inspection-damage-charges";
-import { isHireEndHireFinalized, parseHireEndHireDraft, type HireEndHireDraft, type HireEndHireReturnChargesDraft } from "@/lib/fleet/hire-end-hire";
+import { advanceHireEndHireFurthestStep, isHireEndHireFinalized, parseHireEndHireDraft, type HireEndHireDraft, type HireEndHireReturnChargesDraft } from "@/lib/fleet/hire-end-hire";
 import { revalidateHireWorkspaceCache } from "@/lib/fleet/hire-workspace-cache";
 import {
   buildReturnChargeLineItemDrafts,
@@ -387,6 +387,10 @@ export async function saveHireReturnChargesDraftAction(
 
   const nextDraft: HireEndHireDraft = {
     ...previousDraft,
+    furthestStep: advanceHireEndHireFurthestStep(
+      previousDraft.furthestStep ?? previousDraft.step,
+      "return_charges",
+    ),
     returnChargesDraft,
     returnChargesDraftSavedAt: nowIso,
     pendingReturnReviews: {

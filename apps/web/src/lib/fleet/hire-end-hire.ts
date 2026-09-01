@@ -59,6 +59,8 @@ export type HireEndHireDraft = {
   finalizedAt: string | null;
   /** Set when staff confirm Finalise contract termination (not check-in auto-complete). */
   explicitFinalization?: boolean;
+  /** Highest step reached in the wizard — preserved when navigating back. */
+  furthestStep?: HireEndHireStep;
   /** Saved on return-charges step — committed to balance on final confirm. */
   returnChargesDraft?: HireEndHireReturnChargesDraft | null;
   returnChargesDraftSavedAt?: string | null;
@@ -122,10 +124,60 @@ export function hireEndHireStepIndex(step: HireEndHireStep): number {
   return HIRE_END_HIRE_STEPS.indexOf(step);
 }
 
+/** Keep the highest step the user has reached — never reduce when navigating back. */
+export function advanceHireEndHireFurthestStep(
+  previousFurthest: HireEndHireStep | undefined,
+  step: HireEndHireStep,
+): HireEndHireStep {
+  const prevIdx = hireEndHireStepIndex(previousFurthest ?? step);
+  const stepIdx = hireEndHireStepIndex(step);
+  return HIRE_END_HIRE_STEPS[Math.max(prevIdx, stepIdx)];
+}
+
+export function hireEndHireFurthestStep(
+  draft: HireEndHireDraft,
+  context?: {
+    status: string;
+    checkinCompleted: boolean;
+  },
+): HireEndHireStep {
+  let idx = hireEndHireStepIndex(draft.furthestStep ?? draft.step);
+  idx = Math.max(idx, hireEndHireStepIndex(draft.step));
+  if (context) {
+    if (context.status === "terminated" || context.status === "completed") {
+      idx = Math.max(idx, hireEndHireStepIndex("financial_review"));
+    }
+    if (context.checkinCompleted) {
+      idx = Math.max(idx, hireEndHireStepIndex("checkin"));
+    }
+    if (draft.returnChargesDraftSavedAt?.trim()) {
+      idx = Math.max(idx, hireEndHireStepIndex("return_charges"));
+    }
+    if (draft.finalizedAt?.trim()) {
+      idx = Math.max(idx, hireEndHireStepIndex("final_account"));
+    }
+  }
+  return HIRE_END_HIRE_STEPS[idx] ?? draft.step;
+}
+
+export function hireEndHireStepNavStatus(
+  current: HireEndHireStep,
+  furthest: HireEndHireStep,
+  step: HireEndHireStep,
+): "done" | "active" | "locked" {
+  const currentIdx = hireEndHireStepIndex(current);
+  const furthestIdx = hireEndHireStepIndex(furthest);
+  const stepIdx = hireEndHireStepIndex(step);
+  if (stepIdx === currentIdx) return "active";
+  if (stepIdx <= furthestIdx) return "done";
+  return "locked";
+}
+
 export function emptyHireEndHireDraft(nowIso: string, todayYmd: string, timeHm: string): HireEndHireDraft {
   return {
     started: false,
     step: "return_details",
+    furthestStep: "return_details",
     returnDateYmd: todayYmd,
     returnTimeHm: timeHm,
     reason: "",
@@ -195,12 +247,15 @@ export function parseHireEndHireDraft(raw: unknown): HireEndHireDraft | null {
   const row = raw as Record<string, unknown>;
   const step = typeof row.step === "string" && isHireEndHireStep(row.step) ? row.step : null;
   if (!step) return null;
+  const furthestStepRaw = typeof row.furthestStep === "string" ? row.furthestStep : step;
+  const furthestStep = isHireEndHireStep(furthestStepRaw) ? furthestStepRaw : step;
   const reasonRaw = typeof row.reason === "string" ? row.reason : "";
   const reason =
     reasonRaw === "" || isHireEndHireReturnReason(reasonRaw) ? reasonRaw : ("" as const);
   return {
     started: row.started === true,
     step,
+    furthestStep,
     returnDateYmd: typeof row.returnDateYmd === "string" ? row.returnDateYmd : "",
     returnTimeHm: typeof row.returnTimeHm === "string" ? row.returnTimeHm : "",
     reason,

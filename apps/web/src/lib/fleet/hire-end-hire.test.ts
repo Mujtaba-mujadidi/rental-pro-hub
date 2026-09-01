@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  advanceHireEndHireFurthestStep,
   emptyHireEndHireDraft,
   canCancelHireEndHireProcess,
   canFinalizeHireEndHireProcess,
+  hireEndHireFurthestStep,
+  hireEndHireStepNavStatus,
   isHireEndHireAutoCompletedBeforeFinalisation,
   isHireEndHireFinalized,
   isHireListActiveCloseout,
@@ -14,6 +17,35 @@ import {
 import { buildHireEndHireFinancialReview, depositPreCheckinFooter } from "./hire-end-hire-financial";
 
 describe("hire-end-hire draft helpers", () => {
+  it("advanceHireEndHireFurthestStep never reduces progress", () => {
+    expect(advanceHireEndHireFurthestStep("final_account", "return_details")).toBe("final_account");
+    expect(advanceHireEndHireFurthestStep("checkin", "return_charges")).toBe("return_charges");
+    expect(advanceHireEndHireFurthestStep(undefined, "financial_review")).toBe("financial_review");
+  });
+
+  it("hireEndHireStepNavStatus keeps later steps complete when navigating back", () => {
+    expect(hireEndHireStepNavStatus("return_details", "final_account", "return_details")).toBe(
+      "active",
+    );
+    expect(hireEndHireStepNavStatus("return_details", "final_account", "checkin")).toBe("done");
+    expect(hireEndHireStepNavStatus("return_details", "final_account", "final_account")).toBe(
+      "done",
+    );
+    expect(hireEndHireStepNavStatus("checkin", "checkin", "return_charges")).toBe("locked");
+  });
+
+  it("hireEndHireFurthestStep infers progress from draft context for legacy drafts", () => {
+    const draft = {
+      ...emptyHireEndHireDraft("t", "2026-08-20", "12:00"),
+      started: true,
+      step: "return_details",
+      returnChargesDraftSavedAt: "2026-08-21T10:00:00.000Z",
+    };
+    expect(
+      hireEndHireFurthestStep(draft, { status: "ending", checkinCompleted: true }),
+    ).toBe("return_charges");
+  });
+
   it("parses a valid draft", () => {
     const draft = parseHireEndHireDraft({
       started: true,

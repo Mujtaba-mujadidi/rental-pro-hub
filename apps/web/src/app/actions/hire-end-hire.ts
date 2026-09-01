@@ -6,9 +6,17 @@ import { requireRentalCompanyArea } from "@/lib/auth/profile";
 import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-guard";
 import { canWriteRentals } from "@/lib/auth/rental-permissions";
 import { assertStaffHireSubcompanyAccess } from "@/lib/auth/rental-subcompany-access";
-import { formatUkDateAtTime, formatUkDateTime, ukTodayYmd } from "@/lib/datetime/uk";
+import {
+  formatUkCalendarDateTimeText,
+  formatUkDateAtTime,
+  formatUkDateTextLong,
+  formatUkDateTime,
+  formatUkDateTimeText,
+  ukTodayYmd,
+} from "@/lib/datetime/uk";
 import { formatRentLabel } from "@/lib/fleet/hire-access-display";
 import {
+  advanceHireEndHireFurthestStep,
   canCancelHireEndHireProcess,
   canFinalizeHireEndHireProcess,
   emptyHireEndHireDraft,
@@ -277,6 +285,7 @@ async function repairAutoCompletedEndHireIfNeeded(hire: {
     ...previous,
     started: true,
     step: "final_account",
+    furthestStep: advanceHireEndHireFurthestStep(previous.furthestStep ?? previous.step, "final_account"),
     updatedAt: nowIso,
     finalizedAt: null,
     explicitFinalization: false,
@@ -340,10 +349,23 @@ export type HireEndHirePageData = {
     terminationSummary: HireTerminationAccountsSummary | null;
   } | null;
   contractEffectiveFromLabel: string;
+  contractRentStartDayMonthLabel: string;
   signedActivatedLabel: string;
   /** True when legacy check-in auto-complete was reverted on load — refresh workspace chrome. */
   repairedAutoComplete: boolean;
   returnCharges: HireReturnChargesPageData | null;
+  finalAccountLedger: {
+    returnedAtIso: string;
+    driverChargeLineItems: import("@/app/actions/rental-hire-termination").HireDriverChargeWorkspaceRow[];
+    extraChargeTimedPayments: Array<{ id: string; amountGbp: number; paidAt: string }>;
+    settlementBalancePayments: Array<{
+      id: string;
+      amountGbp: number;
+      paidAt: string;
+      direction: "received_from_driver" | "paid_to_driver";
+      paymentCategory?: string | null;
+    }>;
+  } | null;
 };
 
 export async function loadHireEndHirePageAction(
@@ -404,6 +426,7 @@ export async function loadHireEndHirePageAction(
   let canApprovePayments = false;
   let returnCharges: HireReturnChargesPageData | null = null;
   let depositResolution: HireEndHirePageData["depositResolution"] = null;
+  let finalAccountLedger: HireEndHirePageData["finalAccountLedger"] = null;
   const vehicle = group.vehicles as { vrm?: string } | null;
   const startDate = (group.start_date as string | null) ?? null;
   const startTime = (group.start_time as string | null)?.slice(0, 5) || "09:00";
@@ -419,7 +442,7 @@ export async function loadHireEndHirePageAction(
       hireEndHireReturnedAtIso(
         effectiveDraft.returnDateYmd,
         effectiveDraft.returnTimeHm || "12:00",
-      ) ?? undefined;
+      ) ?? new Date().toISOString();
     const payments = await loadHirePaymentsPageAction(hire.id);
     if (payments.ok) {
       canApprovePayments = payments.data.canApprovePayments;
@@ -507,6 +530,18 @@ export async function loadHireEndHirePageAction(
         contractActivatedLabel = detail.contractActivatedLabel;
         hireLengthSinceActivationLabel = detail.hireLengthSinceActivationLabel;
       }
+      finalAccountLedger = {
+        returnedAtIso,
+        driverChargeLineItems: payments.data.driverChargeLineItems,
+        extraChargeTimedPayments: payments.data.extraChargeTimedPayments,
+        settlementBalancePayments: payments.data.settlementBalancePayments.map((payment) => ({
+          id: payment.id,
+          amountGbp: payment.amountGbp,
+          paidAt: payment.paidAt,
+          direction: payment.direction,
+          paymentCategory: payment.paymentCategory,
+        })),
+      };
       financialReview = buildHireEndHireFinancialReview({
         returnDateYmd: effectiveDraft.returnDateYmd,
         returnTimeHm: effectiveDraft.returnTimeHm || "12:00",
@@ -610,12 +645,16 @@ export async function loadHireEndHirePageAction(
         (hire.settlementBalanceDirection as HireEndHirePageData["settlementBalanceDirection"]) ??
         null,
       depositResolution,
-      contractEffectiveFromLabel: formatUkDateAtTime(startDate, startTime),
+      contractEffectiveFromLabel: formatUkCalendarDateTimeText(startDate, startTime),
+      contractRentStartDayMonthLabel: startDate
+        ? (formatUkDateTextLong(startDate).replace(/\s+\d{4}$/, "") || formatUkDateTextLong(startDate))
+        : "the contract start date",
       signedActivatedLabel: group.activated_at
-        ? formatUkDateTime(group.activated_at as string)
+        ? formatUkDateTimeText(group.activated_at as string)
         : "—",
       repairedAutoComplete,
       returnCharges,
+      finalAccountLedger,
     },
   };
 }
@@ -840,8 +879,10 @@ export async function saveHireEndHireDraftAction(input: {
   if (!isHireEndHireStep(step)) return { ok: false, error: "Invalid step." };
 
   const draft: HireEndHireDraft = {
+    ...previous,
     started: true,
     step,
+    furthestStep: advanceHireEndHireFurthestStep(previous.furthestStep ?? previous.step, step),
     returnDateYmd: (input.returnDateYmd ?? previous.returnDateYmd).trim(),
     returnTimeHm: (input.returnTimeHm ?? previous.returnTimeHm).trim(),
     reason: (reasonRaw || "") as HireEndHireReturnReason | "",
@@ -850,10 +891,6 @@ export async function saveHireEndHireDraftAction(input: {
       input.rentBillingMode ?? previous.rentBillingMode,
     ),
     updatedAt: nowIso,
-    finalizedAt: previous.finalizedAt,
-    explicitFinalization: previous.explicitFinalization,
-    returnChargesAppliedAt: previous.returnChargesAppliedAt ?? null,
-    pendingReturnReviews: previous.pendingReturnReviews ?? null,
   };
 
   const supabase = await createClient();
@@ -906,9 +943,13 @@ export async function confirmHireEndHireReturnAction(input: {
   if (!terminated.ok) return terminated;
 
   const nowIso = new Date().toISOString();
+  const previous =
+    authorized.hire.endHireDraft ?? emptyHireEndHireDraft(nowIso, ukTodayYmd(), londonTimeHmNow());
   const draft: HireEndHireDraft = {
+    ...previous,
     started: true,
     step: "checkin",
+    furthestStep: advanceHireEndHireFurthestStep(previous.furthestStep ?? previous.step, "checkin"),
     returnDateYmd: input.returnDateYmd.trim(),
     returnTimeHm: input.returnTimeHm.trim(),
     reason: input.reason,
@@ -985,16 +1026,30 @@ export async function finalizeHireEndHireAction(
     if (!input?.depositDisposition?.trim()) {
       return { ok: false, error: "Choose what to do with the held deposit before confirming." };
     }
-    const depositRes = await resolveHireDepositDispositionAction({
-      hireGroupId: hire.id,
-      depositDisposition: input.depositDisposition,
-      depositDispositionReason: input.depositDispositionReason,
-      depositRefundAmountGbp: input.depositRefundAmountGbp,
-      settlementResolution: input.settlementResolution,
-      settlementPaymentMethod: input.settlementPaymentMethod,
-      settlementPaymentReference: input.settlementPaymentReference,
-    });
-    if (!depositRes.ok) return depositRes;
+    if (input.depositDisposition.trim() === "hold_pending") {
+      const reason = input.depositDispositionReason?.trim() ?? "";
+      if (!reason) {
+        return { ok: false, error: "Record why the deposit is being held." };
+      }
+      const supabase = await createClient();
+      const { error: holdError } = await supabase
+        .from("vehicle_hire_groups")
+        .update({ deposit_disposition_reason: reason })
+        .eq("id", hire.id)
+        .eq("parent_company_id", hire.parentCompanyId);
+      if (holdError) return { ok: false, error: holdError.message };
+    } else {
+      const depositRes = await resolveHireDepositDispositionAction({
+        hireGroupId: hire.id,
+        depositDisposition: input.depositDisposition,
+        depositDispositionReason: input.depositDispositionReason,
+        depositRefundAmountGbp: input.depositRefundAmountGbp,
+        settlementResolution: input.settlementResolution,
+        settlementPaymentMethod: input.settlementPaymentMethod,
+        settlementPaymentReference: input.settlementPaymentReference,
+      });
+      if (!depositRes.ok) return depositRes;
+    }
   }
 
   const { user } = await requireRentalCompanyArea();
@@ -1020,6 +1075,7 @@ export async function finalizeHireEndHireAction(
     ...previous,
     started: true,
     step: "final_account",
+    furthestStep: advanceHireEndHireFurthestStep(previous.furthestStep ?? previous.step, "final_account"),
     updatedAt: nowIso,
     finalizedAt: nowIso,
     explicitFinalization: true,

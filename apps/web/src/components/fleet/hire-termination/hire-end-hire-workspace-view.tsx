@@ -12,25 +12,22 @@ import {
 } from "@/app/actions/hire-end-hire";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { HireInspectionsWorkspaceClient } from "@/components/fleet/hire-inspection/hire-inspections-workspace-client";
-import { HireDepositDispositionResolveCard, type HireDepositFinalizePayload } from "@/components/fleet/hire-payments/hire-deposit-disposition-resolve-card";
+import type { HireDepositFinalizePayload } from "@/components/fleet/hire-payments/hire-deposit-disposition-resolve-card";
+import { HireEndHireFinalAccountView } from "@/components/fleet/hire-termination/hire-end-hire-final-account-view";
 import { HireReturnChargesSection, type HireReturnChargesSectionHandle } from "@/components/fleet/hire-termination/hire-return-charges-section";
-import { defaultDepositDisposition } from "@/lib/fleet/hire-settlement-resolution";
-import {
-  hireDepositDispositionLabel,
-  settlementBalanceLabel,
-  type HireTerminationAccountsSummary,
-} from "@/lib/fleet/hire-termination-summary";
 import {
   HirePaymentReviewModal,
   type HirePaymentReviewTarget,
 } from "@/components/fleet/hire-payments/hire-payment-review-modal";
 import { RphSelect } from "@/components/forms/rph-select";
-import { formatUkDateAtTime, formatUkDateTime } from "@/lib/datetime/uk";
+import { formatUkCalendarDateTimeText, formatUkDateTime } from "@/lib/datetime/uk";
 import {
   HIRE_END_HIRE_RETURN_REASON_OPTIONS,
   HIRE_END_HIRE_STEP_LABELS,
   HIRE_END_HIRE_STEPS,
   hireEndHireDefaultRentBillingMode,
+  hireEndHireFurthestStep,
+  hireEndHireStepNavStatus,
   hireEndHireStepNeedsFinancialReview,
   type HireEndHireStep,
 } from "@/lib/fleet/hire-end-hire";
@@ -47,17 +44,6 @@ import { formatGbp } from "@/lib/fleet/maintenance";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-
-function stepStatus(
-  current: HireEndHireStep,
-  step: HireEndHireStep,
-): "done" | "active" | "locked" {
-  const currentIdx = HIRE_END_HIRE_STEPS.indexOf(current);
-  const stepIdx = HIRE_END_HIRE_STEPS.indexOf(step);
-  if (stepIdx < currentIdx) return "done";
-  if (stepIdx === currentIdx) return "active";
-  return "locked";
-}
 
 function endHireBadgeLabel(data: HireEndHirePageData): string {
   if (data.isEndHireFinalized) return "Termination finalised";
@@ -97,6 +83,451 @@ function EndHireStepTransitionOverlay({ message }: { message: string }) {
         aria-hidden
       />
       <p className="text-sm font-medium text-rph-fg-secondary">{message}</p>
+    </div>
+  );
+}
+
+function EndHireIconCheckCircle() {
+  return (
+    <svg className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.75}
+        d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+      />
+    </svg>
+  );
+}
+
+function EndHireIconInfo() {
+  return (
+    <svg className="size-4 shrink-0 text-sky-600 dark:text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.75}
+        d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"
+      />
+    </svg>
+  );
+}
+
+function EndHireHireDatesRow({
+  label,
+  value,
+  highlightedLabel,
+}: {
+  label: string;
+  value: string;
+  highlightedLabel?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-rph-border py-3.5 last:border-b-0">
+      <dt className="min-w-0 text-sm text-rph-fg-secondary">
+        {highlightedLabel ? (
+          <span className="inline-block rounded bg-sky-100 px-1.5 py-0.5 text-sky-950 dark:bg-sky-900/50 dark:text-sky-100">
+            {label}
+          </span>
+        ) : (
+          label
+        )}
+      </dt>
+      <dd className="shrink-0 text-right text-sm font-semibold text-rph-fg">{value}</dd>
+    </div>
+  );
+}
+
+function EndHireReturnDetailsFormCard({
+  returnDateYmd,
+  returnTimeHm,
+  reason,
+  notes,
+  returnAlreadyConfirmed,
+  onReturnDateChange,
+  onReturnTimeChange,
+  onReasonChange,
+  onNotesChange,
+}: {
+  returnDateYmd: string;
+  returnTimeHm: string;
+  reason: string;
+  notes: string;
+  returnAlreadyConfirmed: boolean;
+  onReturnDateChange: (value: string) => void;
+  onReturnTimeChange: (value: string) => void;
+  onReasonChange: (value: string) => void;
+  onNotesChange: (value: string) => void;
+}) {
+  return (
+    <div className="rph-panel flex h-full flex-col p-5 sm:p-6">
+      <div className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block space-y-1.5">
+            <span className="text-sm font-medium text-rph-fg-secondary">Return date</span>
+            <input
+              type="date"
+              className="rph-input w-full"
+              value={returnDateYmd}
+              onChange={(e) => onReturnDateChange(e.target.value)}
+            />
+          </label>
+
+          <label className="block space-y-1.5">
+            <span className="text-sm font-medium text-rph-fg-secondary">Return time</span>
+            <input
+              type="time"
+              className="rph-input w-full"
+              value={returnTimeHm}
+              onChange={(e) => onReturnTimeChange(e.target.value)}
+            />
+          </label>
+        </div>
+
+        <div className="space-y-1.5">
+          <span className="text-sm font-medium text-rph-fg-secondary">Reason for ending</span>
+          <RphSelect
+            value={reason}
+            onValueChange={onReasonChange}
+            placeholder="Select reason"
+            options={HIRE_END_HIRE_RETURN_REASON_OPTIONS.map((option) => ({
+              value: option.value,
+              label: option.label,
+            }))}
+          />
+        </div>
+
+        <label className="block space-y-1.5">
+          <span className="text-sm font-medium text-rph-fg-secondary">Internal note</span>
+          <textarea
+            className="rph-input min-h-[7.5rem] w-full resize-y"
+            value={notes}
+            onChange={(e) => onNotesChange(e.target.value)}
+            placeholder="Vehicle returned to company location."
+          />
+        </label>
+      </div>
+
+      {!returnAlreadyConfirmed ? (
+        <div className="mt-5 flex items-start gap-2.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-emerald-950 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-100">
+          <EndHireIconCheckCircle />
+          <div className="min-w-0 text-xs leading-relaxed">
+            <p className="font-semibold">Draft only</p>
+            <p className="mt-1">
+              The hire remains active, the vehicle remains on hire and rent continues until you confirm
+              Step 2.
+            </p>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function EndHireHireDatesCard({
+  contractEffectiveFromLabel,
+  signedActivatedLabel,
+  proposedReturnLabel,
+  contractRentStartDayMonthLabel,
+}: {
+  contractEffectiveFromLabel: string;
+  signedActivatedLabel: string;
+  proposedReturnLabel: string;
+  contractRentStartDayMonthLabel: string;
+}) {
+  return (
+    <aside className="rph-panel flex h-full flex-col p-5 sm:p-6">
+      <p className="driver-dash-section-label">Hire dates</p>
+      <dl className="mt-4">
+        <EndHireHireDatesRow label="Contract effective from" value={contractEffectiveFromLabel} />
+        <EndHireHireDatesRow label="Signed / activated" value={signedActivatedLabel} />
+        <EndHireHireDatesRow label="Proposed return" value={proposedReturnLabel} />
+        <EndHireHireDatesRow
+          label="Proposed rent cut-off"
+          value={proposedReturnLabel}
+          highlightedLabel
+        />
+      </dl>
+      <div className="mt-auto flex items-start gap-2.5 rounded-lg bg-sky-50 px-3.5 py-3 text-xs leading-relaxed text-sky-950 dark:bg-sky-950/30 dark:text-sky-100">
+        <EndHireIconInfo />
+        <p>
+          <span className="font-semibold">Contract start controls rent.</span> The hire duration and rent
+          calculation both use {contractRentStartDayMonthLabel}, not the later signature date.
+        </p>
+      </div>
+    </aside>
+  );
+}
+
+function formatRentCutoffLabel(dateYmd: string, timeHm: string): string {
+  if (!dateYmd) return "—";
+  return formatUkCalendarDateTimeText(dateYmd, timeHm || "00:00").replace(/\s+\d{4},/, ",");
+}
+
+function preCheckinStatusBadge(review: HireEndHireFinancialReview): string {
+  if (review.positionDirection === "settled") return "Clear before check-in";
+  if (review.positionDirection === "company_owes_driver") return "Credit to driver";
+  return "Balance remains open";
+}
+
+function depositPositionBadge(review: HireEndHireFinancialReview): string {
+  if (review.depositRequiredGbp <= 0.005) return "No deposit";
+  if (review.depositReceivedGbp >= review.depositRequiredGbp - 0.005) return "Fully paid";
+  if (review.depositReceivedGbp > 0.005) return "Part-paid";
+  return "Unpaid";
+}
+
+function EndHireIconAlert() {
+  return (
+    <svg
+      className="size-5 shrink-0 text-red-600 dark:text-red-400"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      aria-hidden
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.75}
+        d="M12 9v3.75m0 3.75h.008M10.29 3.86 1.82 18a1.5 1.5 0 0 0 1.29 2.25h17.78a1.5 1.5 0 0 0 1.29-2.25L13.71 3.86a1.5 1.5 0 0 0-2.58 0Z"
+      />
+    </svg>
+  );
+}
+
+function EndHireFinancialStatusBadge({ label }: { label: string }) {
+  return (
+    <span className="inline-flex shrink-0 items-center rounded-full border border-amber-200 bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
+      {label}
+    </span>
+  );
+}
+
+function EndHireFinancialKpiCard({
+  label,
+  value,
+  hint,
+  highlighted,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  highlighted?: boolean;
+}) {
+  return (
+    <div
+      className={
+        highlighted
+          ? "rph-panel border-amber-200 bg-amber-50 p-4 dark:border-amber-900/40 dark:bg-amber-950/25"
+          : "rph-panel p-4"
+      }
+    >
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-rph-fg-muted">{label}</p>
+      <p className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-rph-fg">{value}</p>
+      <p className="mt-1 text-xs text-rph-fg-secondary">{hint}</p>
+    </div>
+  );
+}
+
+function EndHireFinancialLedgerRow({ label, amount }: { label: string; amount: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-rph-border py-3 last:border-b-0">
+      <dt className="min-w-0 text-sm text-rph-fg-secondary">{label}</dt>
+      <dd className="shrink-0 text-sm font-semibold tabular-nums text-rph-fg">{amount}</dd>
+    </div>
+  );
+}
+
+function EndHireConfirmedAccountChargesCard({
+  review,
+  rentCutoffLabel,
+}: {
+  review: HireEndHireFinancialReview;
+  rentCutoffLabel: string;
+}) {
+  const approvedPaymentsGbp = review.rentReceivedGbp + review.extraChargesReceivedGbp;
+
+  return (
+    <article className="rph-panel flex h-full flex-col p-5 sm:p-6">
+      <header className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="driver-dash-section-label">Confirmed account charges</p>
+          <h3 className="mt-1 text-lg font-semibold tracking-tight text-rph-fg">{review.positionLabel}</h3>
+        </div>
+        <EndHireFinancialStatusBadge label={preCheckinStatusBadge(review)} />
+      </header>
+      <dl className="mt-4 flex-1">
+        <EndHireFinancialLedgerRow
+          label={`Rent charged through ${rentCutoffLabel}`}
+          amount={formatHireEndHireSignedAmount(review.rentChargedGbp, true)}
+        />
+        <EndHireFinancialLedgerRow
+          label="Posted extra charges"
+          amount={formatHireEndHireSignedAmount(review.extraChargesPostedGbp, true)}
+        />
+        <EndHireFinancialLedgerRow
+          label="Approved driver payments"
+          amount={formatHireEndHireSignedAmount(approvedPaymentsGbp, false)}
+        />
+      </dl>
+      <div className="mt-2 flex items-center justify-between gap-4 border-t border-rph-border pt-3">
+        <span className="text-sm font-semibold text-rph-fg">Confirmed charge balance</span>
+        <span className="text-sm font-semibold tabular-nums text-rph-fg">
+          {formatGbp(review.owedBeforeCheckinGbp)}
+        </span>
+      </div>
+    </article>
+  );
+}
+
+function EndHireDepositPositionCard({ review }: { review: HireEndHireFinancialReview }) {
+  const stillToReceiveGbp = Math.max(0, review.depositRequiredGbp - review.depositReceivedGbp);
+  const heldTitle =
+    review.depositReceivedGbp > 0.005
+      ? `${formatGbp(review.depositReceivedGbp)} held`
+      : "No deposit held";
+
+  let notice: string | null = null;
+  if (stillToReceiveGbp > 0.005 && review.depositReceivedGbp > 0.005) {
+    notice = `The unpaid ${formatGbp(stillToReceiveGbp)} is not money held and cannot be allocated or refunded.`;
+  } else if (review.depositUnpaid) {
+    notice = `The ${formatGbp(review.depositRequiredGbp)} contractual deposit was not paid. It cannot be applied to rent, used for damage or refunded, and is not included in the pre-check-in balance above.`;
+  }
+
+  return (
+    <aside className="rph-panel flex h-full flex-col p-5 sm:p-6">
+      <header className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="driver-dash-section-label">Deposit position</p>
+          <h3 className="mt-1 text-lg font-semibold tracking-tight text-rph-fg">{heldTitle}</h3>
+        </div>
+        <EndHireFinancialStatusBadge label={depositPositionBadge(review)} />
+      </header>
+      <dl className="mt-4 flex-1">
+        <EndHireFinancialLedgerRow
+          label="Required by contract"
+          amount={formatGbp(review.depositRequiredGbp)}
+        />
+        <EndHireFinancialLedgerRow
+          label="Actually received"
+          amount={formatGbp(review.depositReceivedGbp)}
+        />
+        <EndHireFinancialLedgerRow
+          label="Still to receive"
+          amount={formatGbp(stillToReceiveGbp)}
+        />
+        <EndHireFinancialLedgerRow
+          label="Available at final account"
+          amount={formatGbp(review.depositReceivedGbp)}
+        />
+      </dl>
+      {notice ? (
+        <div className="mt-4 rounded-lg bg-rph-page px-3.5 py-3 text-xs leading-relaxed text-rph-fg-secondary">
+          {notice}
+        </div>
+      ) : null}
+    </aside>
+  );
+}
+
+function EndHireContractEndWarningBanner({ returnStopLabel }: { returnStopLabel: string }) {
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3.5 dark:border-red-900/50 dark:bg-red-950/30">
+      <EndHireIconAlert />
+      <p className="text-sm leading-relaxed text-red-950 dark:text-red-100">
+        <span className="font-semibold">The next action ends the contract.</span> It stops rent at{" "}
+        {returnStopLabel}, moves the vehicle to{" "}
+        <span className="font-semibold">Return pending</span> and starts the real check-in. It does not
+        settle the account or make the vehicle available.
+      </p>
+    </div>
+  );
+}
+
+function EndHireFinancialReviewStepContent({
+  review,
+  rentCutoffLabel,
+  returnStopLabel,
+  canApprovePayments,
+  onReviewPayment,
+}: {
+  review: HireEndHireFinancialReview;
+  rentCutoffLabel: string;
+  returnStopLabel: string;
+  canApprovePayments: boolean;
+  onReviewPayment: (item: HireEndHirePendingApprovalItem) => void;
+}) {
+  const rentCategory = review.categories.find((category) => category.id === "rent");
+  const extraCategory = review.categories.find((category) => category.id === "extra_charges");
+
+  return (
+    <div className="space-y-4">
+      {review.pendingApprovalTotalGbp > 0.005 ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50/90 px-4 py-3 dark:border-amber-900/50 dark:bg-amber-950/30">
+          <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">
+            {formatGbp(review.pendingApprovalTotalGbp)} awaiting company approval
+          </p>
+          <p className="mt-1 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
+            These driver submissions are not counted as received until approved.
+          </p>
+          <ul className="mt-3 space-y-2">
+            {review.pendingApprovalItems.map((item) => (
+              <li
+                key={item.id}
+                className="flex flex-col gap-2 rounded-lg border border-amber-200/80 bg-white/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-between dark:border-amber-900/40 dark:bg-amber-950/20"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-amber-950 dark:text-amber-100">{item.label}</p>
+                  <p className="text-xs text-amber-900 dark:text-amber-200">
+                    Driver submitted {formatGbp(item.submittedGbp)} — awaiting approval
+                  </p>
+                </div>
+                {canApprovePayments ? (
+                  <button
+                    type="button"
+                    className="rph-btn-primary h-9 w-full shrink-0 px-3 text-sm sm:w-auto"
+                    onClick={() => onReviewPayment(item)}
+                  >
+                    Review payment
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <EndHireFinancialKpiCard
+          label="Rent balance"
+          value={formatGbp(rentCategory?.balanceGbp ?? 0)}
+          hint={`${formatGbp(rentCategory?.chargedGbp ?? 0)} charged · ${formatGbp(rentCategory?.receivedGbp ?? 0)} received`}
+        />
+        <EndHireFinancialKpiCard
+          label="Extra-charge balance"
+          value={formatGbp(extraCategory?.balanceGbp ?? 0)}
+          hint={`${formatGbp(extraCategory?.chargedGbp ?? 0)} posted · ${formatGbp(extraCategory?.receivedGbp ?? 0)} received`}
+        />
+        <EndHireFinancialKpiCard
+          label="Deposit required"
+          value={formatGbp(review.depositRequiredGbp)}
+          hint="Contract amount"
+          highlighted
+        />
+        <EndHireFinancialKpiCard
+          label="Deposit received"
+          value={formatGbp(review.depositReceivedGbp)}
+          hint="Held funds — not revenue"
+        />
+      </div>
+
+      <div className="grid items-stretch gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(16rem,1fr)]">
+        <EndHireConfirmedAccountChargesCard review={review} rentCutoffLabel={rentCutoffLabel} />
+        <EndHireDepositPositionCard review={review} />
+      </div>
+
+      <EndHireContractEndWarningBanner returnStopLabel={returnStopLabel} />
     </div>
   );
 }
@@ -191,6 +622,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
   const [depositFinalizePayload, setDepositFinalizePayload] =
     useState<HireDepositFinalizePayload | null>(null);
   const returnChargesRef = useRef<HireReturnChargesSectionHandle>(null);
+  const [returnChargesCanContinue, setReturnChargesCanContinue] = useState(true);
   const [paymentReviewTarget, setPaymentReviewTarget] = useState<HirePaymentReviewTarget | null>(null);
 
   const [returnDateYmd, setReturnDateYmd] = useState("");
@@ -253,11 +685,17 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
   }, [hireGroupId]);
 
   const step = data?.draft.step ?? "return_details";
+  const furthestStep = data
+    ? hireEndHireFurthestStep(data.draft, {
+        status: data.status,
+        checkinCompleted: data.checkinCompleted,
+      })
+    : "return_details";
   const started = data?.draft.started === true;
 
   const proposedReturnLabel = useMemo(() => {
     if (!returnDateYmd) return "—";
-    return formatUkDateAtTime(returnDateYmd, returnTimeHm || "00:00");
+    return formatUkCalendarDateTimeText(returnDateYmd, returnTimeHm || "00:00");
   }, [returnDateYmd, returnTimeHm]);
 
   function saveDraft(nextStep?: HireEndHireStep) {
@@ -309,8 +747,16 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
           : prev,
       );
 
-      if (targetStep === "return_details" || canUseCachedFinancialReview || targetStep === "checkin" || targetStep === "return_charges") {
+      if (
+        targetStep === "return_details" ||
+        canUseCachedFinancialReview ||
+        targetStep === "checkin"
+      ) {
         setTransitionMessage(null);
+        return;
+      }
+      if (targetStep === "return_charges") {
+        await refreshPageData(message, { includeFinancialReview: true });
         return;
       }
       if (nextStep) {
@@ -482,9 +928,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
   if (!data) return null;
 
   const needsDepositOnConfirm =
-    !data.isEndHireFinalized &&
-    Boolean(data.depositResolution?.canResolveDeposit) &&
-    !data.depositResolution?.depositDisposition;
+    !data.isEndHireFinalized && Boolean(data.depositResolution?.canResolveDeposit);
   const finalizeBlockedByDeposit = needsDepositOnConfirm && !depositFinalizePayload;
 
   const showStepTransition = Boolean(transitionMessage);
@@ -580,46 +1024,49 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
 
       <nav className="grid gap-2 rounded-2xl border border-rph-border bg-rph-raised p-3 sm:grid-cols-5" aria-label="End hire stages">
         {HIRE_END_HIRE_STEPS.map((item, index) => {
-          const status = stepStatus(step, item);
-          const canGoBack = status === "done" && !pending;
-          return (
-            <div
+          const status = hireEndHireStepNavStatus(step, furthestStep, item);
+          const canNavigate = status === "done" && !pending;
+          const cardClass = `rounded-xl border px-3 py-2.5 transition-all duration-200 ease-out ${
+            canNavigate ? "cursor-pointer hover:-translate-y-0.5 hover:shadow-md" : ""
+          } ${
+            status === "active"
+              ? "border-blue-500 bg-blue-50 dark:border-sky-500 dark:bg-sky-950/40"
+              : status === "done"
+                ? "border-emerald-300 bg-emerald-50/70 dark:border-emerald-800 dark:bg-emerald-950/20"
+                : "border-rph-border bg-rph-page/40"
+          }`;
+
+          const cardBody = (
+            <>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-rph-fg-muted">
+                {status === "done" ? "✓" : index + 1} · {HIRE_END_HIRE_STEP_LABELS[item]}
+              </p>
+              <p
+                className={`mt-0.5 text-xs ${
+                  canNavigate ? "text-rph-link" : "text-rph-fg-secondary"
+                }`}
+              >
+                {status === "locked"
+                  ? "Complete previous step"
+                  : status === "active"
+                    ? "Current"
+                    : "Complete"}
+              </p>
+            </>
+          );
+
+          return canNavigate ? (
+            <button
               key={item}
-              className={`rounded-xl border px-3 py-2.5 ${
-                status === "active"
-                  ? "border-blue-500 bg-blue-50 dark:border-sky-500 dark:bg-sky-950/40"
-                  : status === "done"
-                    ? "border-emerald-300 bg-emerald-50/70 dark:border-emerald-800 dark:bg-emerald-950/20"
-                    : "border-rph-border bg-rph-page/40"
-              }`}
+              type="button"
+              className={`w-full text-left ${cardClass}`}
+              onClick={() => saveDraft(item)}
             >
-              {canGoBack ? (
-                <button
-                  type="button"
-                  className="w-full text-left"
-                  onClick={() => saveDraft(item)}
-                >
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-rph-fg-muted">
-                    ✓ · {HIRE_END_HIRE_STEP_LABELS[item]}
-                  </p>
-                  <p className="mt-0.5 text-xs text-rph-link hover:text-rph-link-hover">
-                    Go back to this step
-                  </p>
-                </button>
-              ) : (
-                <>
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-rph-fg-muted">
-                    {status === "done" ? "✓" : index + 1} · {HIRE_END_HIRE_STEP_LABELS[item]}
-                  </p>
-                  <p className="mt-0.5 text-xs text-rph-fg-secondary">
-                    {status === "locked"
-                      ? "Complete previous step"
-                      : status === "done"
-                        ? "Complete"
-                        : "Current"}
-                  </p>
-                </>
-              )}
+              {cardBody}
+            </button>
+          ) : (
+            <div key={item} className={cardClass}>
+              {cardBody}
             </div>
           );
         })}
@@ -634,92 +1081,45 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
 
       {step === "return_details" ? (
         <section className="overflow-hidden rounded-2xl border border-rph-border bg-rph-raised shadow-sm">
-          <div className="border-b border-rph-border px-4 py-4 sm:px-5">
+          <div className="border-b border-rph-border px-5 py-5 sm:px-6">
             <p className="driver-dash-section-label">Step 1</p>
-            <h2 className="mt-1 text-lg font-semibold text-rph-fg">When was the vehicle returned?</h2>
-            <p className="mt-1 text-sm text-rph-fg-secondary">
-              This timestamp stops rent accrual when you confirm the return, but does not settle the
-              account.
+            <h2 className="mt-1 text-xl font-semibold tracking-tight text-rph-fg sm:text-[1.375rem]">
+              When was the vehicle returned?
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-rph-fg-secondary">
+              This is a proposed return time until Step 2 is confirmed. Saving or leaving this page does
+              not stop rent.
             </p>
             {returnAlreadyConfirmed ? (
-              <p className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-relaxed text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-100">
+              <p className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-relaxed text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-100">
                 Return was already confirmed. You can review these details here; changing them does not
                 alter the recorded contract end.
               </p>
             ) : null}
           </div>
-          <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_20rem] sm:p-5">
-            <div className="space-y-4">
-              <label className="block space-y-1">
-                <span className="text-xs font-medium text-rph-fg-muted">Return date</span>
-                <input
-                  type="date"
-                  className="rph-input w-full"
-                  value={returnDateYmd}
-                  onChange={(e) => setReturnDateYmd(e.target.value)}
-                />
-              </label>
-              <label className="block space-y-1">
-                <span className="text-xs font-medium text-rph-fg-muted">Return time</span>
-                <input
-                  type="time"
-                  className="rph-input w-full"
-                  value={returnTimeHm}
-                  onChange={(e) => setReturnTimeHm(e.target.value)}
-                />
-              </label>
-              <div className="space-y-1">
-                <span className="text-xs font-medium text-rph-fg-muted">Reason for ending</span>
-                <RphSelect
-                  value={reason}
-                  onValueChange={setReason}
-                  placeholder="Select reason"
-                  options={HIRE_END_HIRE_RETURN_REASON_OPTIONS.map((option) => ({
-                    value: option.value,
-                    label: option.label,
-                  }))}
-                />
-              </div>
-              <label className="block space-y-1">
-                <span className="text-xs font-medium text-rph-fg-muted">Internal note</span>
-                <textarea
-                  className="rph-input min-h-28 w-full"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Vehicle returned to company location."
-                />
-              </label>
+
+          <div className="bg-rph-page p-4 sm:p-5">
+            <div className="grid items-stretch gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(16rem,1fr)]">
+              <EndHireReturnDetailsFormCard
+                returnDateYmd={returnDateYmd}
+                returnTimeHm={returnTimeHm}
+                reason={reason}
+                notes={notes}
+                returnAlreadyConfirmed={returnAlreadyConfirmed}
+                onReturnDateChange={setReturnDateYmd}
+                onReturnTimeChange={setReturnTimeHm}
+                onReasonChange={setReason}
+                onNotesChange={setNotes}
+              />
+              <EndHireHireDatesCard
+                contractEffectiveFromLabel={data.contractEffectiveFromLabel}
+                signedActivatedLabel={data.signedActivatedLabel}
+                proposedReturnLabel={proposedReturnLabel}
+                contractRentStartDayMonthLabel={data.contractRentStartDayMonthLabel}
+              />
             </div>
-            <aside className="rounded-xl border border-rph-border bg-rph-page/60 p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-rph-fg-muted">
-                Hire dates
-              </p>
-              <dl className="mt-3 space-y-2 text-sm">
-                <div>
-                  <dt className="text-xs text-rph-fg-muted">Contract effective from</dt>
-                  <dd className="font-medium text-rph-fg">{data.contractEffectiveFromLabel}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-rph-fg-muted">Signed / activated</dt>
-                  <dd className="font-medium text-rph-fg">{data.signedActivatedLabel}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-rph-fg-muted">Proposed return</dt>
-                  <dd className="font-medium text-rph-fg">{proposedReturnLabel}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-rph-fg-muted">Rent charged through</dt>
-                  <dd className="font-medium text-rph-fg">
-                    {returnDateYmd ? formatUkDateAtTime(returnDateYmd, "00:00").split(",")[0] : "—"}
-                  </dd>
-                </div>
-              </dl>
-              <p className="mt-4 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-relaxed text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-100">
-                Signed date and hire start can differ. Rent is calculated from the contract&apos;s
-                effective start, not the signature time.
-              </p>
-            </aside>
           </div>
+
           <EndHireStepFooter
             backLabel="Save and exit"
             onBack={onSaveAndExit}
@@ -734,93 +1134,44 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
 
       {step === "financial_review" ? (
         <section className="overflow-hidden rounded-2xl border border-rph-border bg-rph-raised shadow-sm">
-          <div className="border-b border-rph-border px-4 py-4 sm:px-5">
+          <div className="border-b border-rph-border px-5 py-5 sm:px-6">
             <p className="driver-dash-section-label">Step 2</p>
-            <h2 className="mt-1 text-lg font-semibold text-rph-fg">Review the position before check-in</h2>
+            <h2 className="mt-1 text-xl font-semibold tracking-tight text-rph-fg sm:text-[1.375rem]">
+              Review the position before check-in
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-rph-fg-secondary">
+              Confirm the rent cut-off and actual money received. New return charges are added only
+              after the inspection.
+            </p>
           </div>
           {review ? (
-            <div className="space-y-4 p-4 sm:p-5">
-              {review.pendingApprovalTotalGbp > 0.005 ? (
-                <div className="rounded-xl border border-amber-300 bg-amber-50/90 px-4 py-3 dark:border-amber-900/50 dark:bg-amber-950/30">
-                  <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">
-                    {formatGbp(review.pendingApprovalTotalGbp)} awaiting company approval
-                  </p>
-                  <p className="mt-1 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
-                    These driver submissions are not counted as received until approved.
-                  </p>
-                  <ul className="mt-3 space-y-2">
-                    {review.pendingApprovalItems.map((item) => (
-                      <li
-                        key={item.id}
-                        className="flex flex-col gap-2 rounded-lg border border-amber-200/80 bg-white/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-between dark:border-amber-900/40 dark:bg-amber-950/20"
-                      >
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-amber-950 dark:text-amber-100">
-                            {item.label}
-                          </p>
-                          <p className="text-xs text-amber-900 dark:text-amber-200">
-                            Driver submitted {formatGbp(item.submittedGbp)} — awaiting approval
-                          </p>
-                        </div>
-                        {data.canApprovePayments ? (
-                          <button
-                            type="button"
-                            className="rph-btn-primary h-9 w-full shrink-0 px-3 text-sm sm:w-auto"
-                            onClick={() => {
-                              const target = pendingReviewTarget(item, data);
-                              if (target) setPaymentReviewTarget(target);
-                            }}
-                          >
-                            Review payment
-                          </button>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-
-              <div className="grid gap-3 lg:grid-cols-3">
-                {review.categories.map((category) => (
-                  <CategorySummaryCard key={category.id} category={category} />
-                ))}
-              </div>
-
-              <div className="rounded-2xl border border-rph-border bg-rph-page/40 p-3 sm:p-4">
-                <EndHireAccountBreakdownHeader review={review} />
-
-                <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                  {orderedAccountSections(review.accountSections).map((section) => (
-                    <EndHireAccountSectionDetail
-                      key={section.id}
-                      section={section}
-                      paymentsHref={`/rental/hires/${hireGroupId}/payments`}
-                      layout={section.id === "rent" ? "split" : "stacked"}
-                      className={section.id === "rent" ? "lg:col-span-2" : undefined}
-                    />
-                  ))}
-                </div>
-
-                {review.depositUnpaid ? (
-                  <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] leading-snug text-red-950 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-100">
-                    The {formatGbp(review.depositRequiredGbp)} contractual deposit was not paid. It
-                    cannot be applied to rent, used for damage or refunded, and is not included in the
-                    pre-check-in balance above.
-                  </p>
-                ) : null}
-              </div>
+            <div className="bg-rph-page p-4 sm:p-5">
+              <EndHireFinancialReviewStepContent
+                review={review}
+                rentCutoffLabel={formatRentCutoffLabel(returnDateYmd, returnTimeHm)}
+                returnStopLabel={proposedReturnLabel}
+                canApprovePayments={data.canApprovePayments}
+                onReviewPayment={(item) => {
+                  const target = pendingReviewTarget(item, data);
+                  if (target) setPaymentReviewTarget(target);
+                }}
+              />
             </div>
           ) : (
-            <p className="p-5 text-sm text-rph-fg-secondary">Could not load the financial review.</p>
+            <p className="bg-rph-page p-5 text-sm text-rph-fg-secondary">
+              Could not load the financial review.
+            </p>
           )}
           <EndHireStepFooter
             backLabel="Back"
             onBack={() => saveDraft("return_details")}
             stepLabel="Step 2 of 5"
-            primaryLabel={returnAlreadyConfirmed ? "Continue to check-in" : "Vehicle check-in"}
-            onPrimary={
-              returnAlreadyConfirmed ? () => saveDraft("checkin") : onConfirmReturn
+            primaryLabel={
+              returnAlreadyConfirmed
+                ? "Continue to check-in"
+                : "Confirm return, stop rent & start check-in"
             }
+            onPrimary={returnAlreadyConfirmed ? () => saveDraft("checkin") : onConfirmReturn}
             primaryDisabled={returnAlreadyConfirmed ? false : !data.canConfirmReturn}
             pending={pending}
           />
@@ -863,279 +1214,81 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
       ) : null}
 
       {step === "return_charges" ? (
-        <section className="space-y-4">
-          <div className="overflow-hidden rounded-2xl border border-rph-border bg-rph-raised shadow-sm">
-            <div className="border-b border-rph-border px-4 py-4 sm:px-5">
-              <p className="driver-dash-section-label">Step 4</p>
-              <h2 className="mt-1 text-lg font-semibold text-rph-fg">Return charges</h2>
-              <p className="mt-1 text-sm text-rph-fg-secondary">
-                Review what check-in recorded and choose whether to charge. Your choices are applied to
-                the balance when you confirm the final account on the next step.
-              </p>
-            </div>
-            <div className="p-4 sm:p-5">
-              {data.returnCharges ? (
-                <HireReturnChargesSection
-                  ref={returnChargesRef}
-                  hireGroupId={hireGroupId}
-                  data={data.returnCharges}
-                  readOnly={data.isEndHireFinalized}
-                  embedded
-                  onSaved={() => {
-                    void refreshPageData("Refreshing return charges…", {
-                      includeFinancialReview: true,
-                    });
-                  }}
-                />
-              ) : (
-                <p className="text-sm text-rph-fg-secondary">Loading return charges…</p>
-              )}
-            </div>
-            <EndHireStepFooter
-              backLabel="Back to check-in"
-              onBack={() => saveDraft("checkin")}
-              stepLabel="Step 4 of 5"
-              primaryLabel="Continue to final account"
-              onPrimary={continueToFinalAccount}
-              primaryDisabled={pending}
-              pending={pending}
-            />
+        <section className="overflow-hidden rounded-2xl border border-rph-border bg-rph-raised shadow-sm">
+          <div className="border-b border-rph-border px-5 py-5 sm:px-6">
+            <p className="driver-dash-section-label">Step 4</p>
+            <h2 className="mt-1 text-xl font-semibold tracking-tight text-rph-fg sm:text-[1.375rem]">
+              Decide what should be charged
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-rph-fg-secondary">
+              Review inspection findings and choose what should be added to the final account.
+            </p>
           </div>
-        </section>
-      ) : null}
-
-      {step === "final_account" ? (
-        <section className="space-y-4">
-          {data.isEndHireFinalized ? (
-            <div className="rounded-2xl border border-emerald-300 bg-emerald-50/80 px-4 py-4 dark:border-emerald-800 dark:bg-emerald-950/30 sm:px-5">
-              <p className="text-sm font-semibold text-emerald-950 dark:text-emerald-100">
-                Contract termination finalised
-              </p>
-              <p className="mt-1 text-sm text-emerald-900 dark:text-emerald-200">
-                This hire is complete. The end-hire process can no longer be cancelled or reversed.
-                {data.openBalanceGbp > 0.005
-                  ? " Any open balance remains on the company Balances list until settled."
-                  : " The account is clear."}
-              </p>
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-amber-300 bg-amber-50/80 px-4 py-4 dark:border-amber-900/50 dark:bg-amber-950/25 sm:px-5">
-              <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">
-                Final account — review balance, deposit, then confirm
-              </p>
-              <p className="mt-1 text-sm text-amber-900 dark:text-amber-200">
-                Review the full account position below. Choose what to do with any held deposit, then
-                confirm to post return charges and deposit decisions to the balance sheet and close the
-                hire. Record any cash payments afterwards from Payments.
-              </p>
-            </div>
-          )}
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rph-rail px-4 py-4 text-white sm:px-5">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-white/70">
-                Balance with company
-              </p>
-              <p className="mt-1 text-xl font-semibold">
-                {settlementBalanceLabel(
-                  data.settlementBalanceDirection === "company_owes_driver"
-                    ? "company_owes_driver"
-                    : data.settlementBalanceDirection === "driver_owes_company"
-                      ? "driver_owes_company"
-                      : data.openBalanceGbp > 0.005
-                        ? "driver_owes_company"
-                        : "settled",
-                  data.openBalanceGbp,
-                )}
-              </p>
-              <p className="mt-1 text-sm text-white/80">
-                {data.depositResolution && data.depositResolution.depositHeldGbp > 0.005
-                  ? `Deposit held with company: ${formatGbp(data.depositResolution.depositHeldGbp)}.`
-                  : review
-                    ? `Contract deposit: ${formatGbp(review.depositReceivedGbp)} received of ${formatGbp(review.depositRequiredGbp)}.`
-                    : "Review return charges and deposit before finalising."}
-                {data.depositResolution?.canResolveDeposit &&
-                data.depositResolution.currentSignedSettlementGbp > 0.005
-                  ? ` Recommended: ${hireDepositDispositionLabel(defaultDepositDisposition(data.depositResolution.currentSignedSettlementGbp))}.`
-                  : ""}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Link
-                href={`/rental/hires/${hireGroupId}/payments`}
-                className="inline-flex h-10 items-center rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                Record payment
-              </Link>
-              <Link
-                href={`/rental/balances/${hireGroupId}`}
-                className="inline-flex h-10 items-center rounded-lg border border-white/30 bg-transparent px-4 text-sm font-medium text-white hover:bg-white/10"
-              >
-                Open balances
-              </Link>
-            </div>
-          </div>
-          {data.returnCharges &&
-          !data.isEndHireFinalized &&
-          data.returnCharges.returnChargesDraftSavedAt &&
-          !data.returnCharges.returnChargesAppliedAt ? (
-            <div className="rounded-xl border border-sky-300 bg-sky-50/80 px-4 py-3 text-sm text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/25 dark:text-sky-100">
-              <p className="font-medium">Return charges ready to post</p>
-              <p className="mt-1 text-sky-900 dark:text-sky-200">
-                Saved on step 4 — confirming the final account will add these charges to the hire balance.
-              </p>
-            </div>
-          ) : null}
-          {data.returnCharges &&
-          (data.returnCharges.newDamages.some((d) => d.chargeResolution === "review_later") ||
-            data.returnCharges.fuelReviewLater ||
-            data.returnCharges.accessoryReviewsLater.length > 0) ? (
-            <div className="rounded-xl border border-amber-300 bg-amber-50/80 px-4 py-3 text-sm text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-100">
-              <p className="font-medium">Marked for later review</p>
-              <p className="mt-1 text-amber-900 dark:text-amber-200">
-                These items will not be charged now. Decide later from Payments & balance whether to bill
-                the driver.
-                {data.returnCharges.newDamages.filter((d) => d.chargeResolution === "review_later")
-                  .length > 0
-                  ? ` Damage: ${
-                      data.returnCharges.newDamages.filter((d) => d.chargeResolution === "review_later")
-                        .length
-                    }.`
-                  : ""}
-                {data.returnCharges.fuelReviewLater ? " Fuel difference." : ""}
-                {data.returnCharges.accessoryReviewsLater.length > 0
-                  ? ` Missing kit: ${data.returnCharges.accessoryReviewsLater.length}.`
-                  : ""}
-              </p>
-            </div>
-          ) : null}
-          {data.depositResolution?.canResolveDeposit &&
-          data.depositResolution.terminationSummary &&
-          !data.isEndHireFinalized ? (
-            <div className="space-y-2">
-              <p className="text-sm font-semibold text-rph-fg">Deposit decision</p>
-              {data.depositResolution.currentSignedSettlementGbp > 0.005 ? (
-                <p className="rounded-xl border border-emerald-300 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100">
-                  Recommended: use the held deposit (
-                  {formatGbp(data.depositResolution.depositHeldGbp)}) to clear what the driver owes.
-                </p>
-              ) : data.depositResolution.currentSignedSettlementGbp < -0.005 ? (
-                <p className="rounded-xl border border-rph-border bg-rph-raised px-4 py-3 text-sm text-rph-fg-secondary">
-                  Company holds a credit for the driver. Recommended default is to return the deposit
-                  unless you need to hold it.
-                </p>
-              ) : (
-                <p className="rounded-xl border border-rph-border bg-rph-raised px-4 py-3 text-sm text-rph-fg-secondary">
-                  Account is clear. Choose whether to return or hold the deposit.
-                </p>
-              )}
-              <HireDepositDispositionResolveCard
+          <div className="bg-rph-page p-4 sm:p-5">
+            {data.returnCharges ? (
+              <HireReturnChargesSection
+                ref={returnChargesRef}
                 hireGroupId={hireGroupId}
-                terminationSummary={data.depositResolution.terminationSummary}
-                depositHeldGbp={data.depositResolution.depositHeldGbp}
-                currentSignedSettlementGbp={data.depositResolution.currentSignedSettlementGbp}
-                deferSubmit
-                onFinalizePayloadChange={setDepositFinalizePayload}
-                onSuccess={() => {
-                  void refreshPageData("Refreshing deposit decision…", {
+                data={data.returnCharges}
+                readOnly={data.isEndHireFinalized}
+                embedded
+                depositHeldGbp={
+                  data.depositResolution?.depositHeldGbp ??
+                  data.financialReview?.depositReceivedGbp ??
+                  0
+                }
+                inspectionEvidenceHref={`/rental/hires/${hireGroupId}/checkin`}
+                onContinueReadyChange={setReturnChargesCanContinue}
+                onSaved={() => {
+                  void refreshPageData("Refreshing return charges…", {
                     includeFinancialReview: true,
                   });
                 }}
               />
-            </div>
-          ) : data.depositResolution?.depositDisposition ? (
-            <div className="rounded-2xl border border-rph-border bg-rph-raised p-4 shadow-sm sm:p-5">
-              <p className="text-sm font-semibold text-rph-fg">Deposit</p>
-              <p className="mt-1 text-sm text-rph-fg-secondary">
-                {hireDepositDispositionLabel(
-                  data.depositResolution.depositDisposition as
-                    | "apply_to_balance"
-                    | "refund_full"
-                    | "refund_partial"
-                    | "forfeit"
-                    | "hold_pending",
-                )}
-                {data.depositResolution.depositHeldGbp > 0.005
-                  ? ` · Held ${formatGbp(data.depositResolution.depositHeldGbp)}`
-                  : ""}
-              </p>
-            </div>
-          ) : null}
-          <div className="rounded-2xl border border-rph-border bg-rph-raised p-4 shadow-sm sm:p-5">
-            {review ? (
-              <>
-                <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <KpiCard
-                    label="Total charges"
-                    value={formatGbp(review.rentChargedGbp + review.extraChargesPostedGbp)}
-                    hint="Rent and extras"
-                  />
-                  <KpiCard
-                    label="Money received"
-                    value={formatGbp(review.rentReceivedGbp + review.extraChargesReceivedGbp)}
-                    hint="Rent and extra-charge payments"
-                  />
-                  <KpiCard
-                    label="Deposit received"
-                    value={formatGbp(review.depositReceivedGbp)}
-                    hint={review.depositUnpaid ? "Unpaid" : "Held"}
-                  />
-                  <KpiCard
-                    label="Current balance"
-                    value={formatGbp(data.openBalanceGbp)}
-                    hint={data.openBalanceGbp > 0.005 ? "Open" : "Clear"}
-                    tone={data.openBalanceGbp > 0.005 ? "warn" : "neutral"}
-                  />
-                </div>
-
-                <div className="rounded-2xl border border-rph-border bg-rph-page/40 p-3 sm:p-4">
-                  <EndHireAccountBreakdownHeader review={review} />
-                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                    {orderedAccountSections(review.accountSections).map((section) => (
-                      <EndHireAccountSectionDetail
-                        key={section.id}
-                        section={section}
-                        paymentsHref={`/rental/hires/${hireGroupId}/payments`}
-                        layout={section.id === "rent" ? "split" : "stacked"}
-                        className={section.id === "rent" ? "lg:col-span-2" : undefined}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </>
             ) : (
-              <p className="text-sm text-rph-fg-secondary">Could not load the account breakdown.</p>
+              <p className="text-sm text-rph-fg-secondary">Loading return charges…</p>
             )}
-            <p className="mt-4 text-sm text-rph-fg-secondary">
-              Confirming posts return charges and deposit decisions to the balance. Record settlement
-              payments afterwards from Payments & balance.
+          </div>
+          <EndHireStepFooter
+            backLabel="Back to check-in"
+            onBack={() => saveDraft("checkin")}
+            stepLabel="Step 4 of 5"
+            primaryLabel="Post charges & calculate final account"
+            onPrimary={continueToFinalAccount}
+            primaryDisabled={pending || !returnChargesCanContinue}
+            pending={pending}
+          />
+        </section>
+      ) : null}
+
+      {step === "final_account" ? (
+        <section className="overflow-hidden rounded-2xl border border-rph-border bg-rph-raised shadow-sm">
+          <div className="border-b border-rph-border px-5 py-5 sm:px-6">
+            <p className="driver-dash-section-label">Step 5</p>
+            <h2 className="mt-1 text-xl font-semibold tracking-tight text-rph-fg sm:text-[1.375rem]">
+              Charges, payments and held funds
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-rph-fg-secondary">
+              Review the full account including return charges, choose how to handle any held deposit,
+              then confirm to post charges and close the hire.
             </p>
           </div>
-          {!data.isEndHireFinalized ? (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rph-border bg-rph-raised px-4 py-4 shadow-sm sm:px-5">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-rph-fg">Ready to close this hire?</p>
-                <p className="mt-1 text-sm text-rph-fg-secondary">
-                  Confirming posts charges and deposit to the balance and marks the contract completed.
-                  You can still record payments afterwards, but you cannot undo termination.
-                  {!data.canFinalizeEndHire &&
-                  data.returnCharges &&
-                  !data.returnCharges.returnChargesReady
-                    ? " Go back to return charges and save your decisions first."
-                    : finalizeBlockedByDeposit
-                      ? " Choose a deposit action above before confirming."
-                      : ""}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="inline-flex h-11 shrink-0 items-center justify-center rounded-lg bg-red-600 px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 disabled:opacity-50"
-                disabled={pending || !data.canFinalizeEndHire || finalizeBlockedByDeposit}
-                onClick={() => setFinalizeConfirmOpen(true)}
-              >
-                Confirm final account
-              </button>
-            </div>
-          ) : null}
+          <div className="bg-rph-page p-4 sm:p-5">
+            {review && data.finalAccountLedger ? (
+              <HireEndHireFinalAccountView
+                data={data}
+                review={review}
+                rentCutoffLabel={formatRentCutoffLabel(returnDateYmd, returnTimeHm)}
+                returnedAtIso={data.finalAccountLedger.returnedAtIso}
+                driverChargeLineItems={data.finalAccountLedger.driverChargeLineItems}
+                extraChargeTimedPayments={data.finalAccountLedger.extraChargeTimedPayments}
+                settlementBalancePayments={data.finalAccountLedger.settlementBalancePayments}
+                onDepositFinalizePayloadChange={setDepositFinalizePayload}
+              />
+            ) : (
+              <p className="text-sm text-rph-fg-secondary">Could not load the final account.</p>
+            )}
+          </div>
           {!data.isEndHireFinalized ? (
             <EndHireStepFooter
               backLabel="Back to return charges"
