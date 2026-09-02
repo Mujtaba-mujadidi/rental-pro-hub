@@ -112,6 +112,7 @@ function payments(overrides: Partial<HirePaymentsPageData> = {}): HirePaymentsPa
     extraChargesOutstandingGbp: 0,
     extraChargePendingPayment: null,
     extraChargeAllocationEvents: [],
+    extraChargeTimedPayments: [],
     canMutateExtraCharges: false,
     summary: {
       rentGrossAccruedGbp: 200,
@@ -131,6 +132,11 @@ function payments(overrides: Partial<HirePaymentsPageData> = {}): HirePaymentsPa
     canSubmitPayment: false,
     canApprovePayments: false,
     canApplyDiscount: false,
+    pendingReviews: {
+      depositPending: false,
+      depositHeldGbp: 0,
+      charges: [],
+    },
     ...overrides,
   };
 }

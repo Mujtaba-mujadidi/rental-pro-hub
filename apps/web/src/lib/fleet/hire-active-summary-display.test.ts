@@ -21,6 +21,7 @@ function dashboard(overrides: Partial<HireDashboardData> = {}): HireDashboardDat
       totalDiscountGbp: 0,
       contractTotalGbp: 3650,
       nextDue: { rowId: "r1", amountGbp: 10, periodStart: "2026-08-11", periodEnd: "2026-08-11" },
+      nextFutureDue: null,
     },
     health: {
       level: "attention",

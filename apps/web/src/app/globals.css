@@ -1148,6 +1148,30 @@ html {
 .hire-balance-workspace {
   @apply space-y-3;
 }
+.hire-ended-lifecycle {
+  @apply grid gap-2 sm:grid-cols-2 lg:grid-cols-4;
+}
+.hire-ended-lifecycle-step {
+  @apply rounded-xl border border-rph-border bg-rph-page/50 px-3 py-3;
+}
+.hire-ended-lifecycle-step-done {
+  @apply border-emerald-200/80 bg-emerald-50/80 dark:border-emerald-900/50 dark:bg-emerald-950/20;
+}
+.hire-ended-lifecycle-step-active {
+  @apply border-rph-rail bg-rph-rail text-white dark:border-rph-rail-soft dark:bg-rph-rail-soft;
+}
+.hire-ended-lifecycle-label {
+  @apply block text-sm font-semibold text-rph-fg;
+}
+.hire-ended-lifecycle-step-active .hire-ended-lifecycle-label {
+  @apply text-white;
+}
+.hire-ended-lifecycle-detail {
+  @apply mt-0.5 block text-xs text-rph-fg-secondary;
+}
+.hire-ended-lifecycle-step-active .hire-ended-lifecycle-detail {
+  @apply text-white/75;
+}
 .hire-balance-page-header {
   @apply space-y-1;
 }

@@ -75,6 +75,7 @@ function minimalPage(overrides: Partial<HirePaymentsPageData> = {}): HirePayment
     extraChargesOutstandingGbp: 0,
     extraChargePendingPayment: null,
     extraChargeAllocationEvents: [],
+    extraChargeTimedPayments: [],
     canMutateExtraCharges: false,
     rows: [
       {
@@ -113,6 +114,11 @@ function minimalPage(overrides: Partial<HirePaymentsPageData> = {}): HirePayment
     canSubmitPayment: false,
     canApprovePayments: false,
     canApplyDiscount: false,
+    pendingReviews: {
+      depositPending: false,
+      depositHeldGbp: 0,
+      charges: [],
+    },
     ...overrides,
   };
 }

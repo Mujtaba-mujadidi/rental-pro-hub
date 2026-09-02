@@ -38,6 +38,10 @@ import {
   hasPostEndPrepaidRows,
 } from "@/lib/fleet/hire-ended-payment-schedule";
 import {
+  parseHireEndHireDraft,
+} from "@/lib/fleet/hire-end-hire";
+import type { HireEndedPendingChargeReview, HireEndedPendingReviewsSummary } from "@/lib/fleet/hire-ended-balance-case";
+import {
   buildActiveHireAccountPosition,
   buildEndedHireAccountPosition,
 } from "@/lib/fleet/hire-account-adapters";
@@ -179,6 +183,8 @@ export type HirePaymentsPageData = {
   canSubmitPayment: boolean;
   canApprovePayments: boolean;
   canApplyDiscount: boolean;
+  /** Pending deposit / return-charge decisions after end-hire (staff balances). */
+  pendingReviews: HireEndedPendingReviewsSummary;
 };
 
 type DbScheduleRow = {
@@ -358,7 +364,7 @@ async function buildPaymentsPageData(
   const { data: group, error: groupErr } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, status, terminated_at, ended_at, parent_company_id, subcompany_id, driver_user_id, driver_email, driver_licence_number, default_payment_account_id, settlement_balance_gbp, settlement_balance_direction, driver_documents_retain_until, deposit_disposition, deposit_refund_amount_gbp, settlement_resolution, termination_settlement, vehicles(vrm)",
+      "id, status, terminated_at, ended_at, parent_company_id, subcompany_id, driver_user_id, driver_email, driver_licence_number, default_payment_account_id, settlement_balance_gbp, settlement_balance_direction, driver_documents_retain_until, deposit_disposition, deposit_refund_amount_gbp, settlement_resolution, termination_settlement, end_hire_draft, vehicles(vrm)",
     )
     .eq("id", hireGroupId)
     .maybeSingle();
@@ -715,6 +721,81 @@ async function buildPaymentsPageData(
     isDepositDispositionPending(depositDisposition) && depositHeldGbp > 0.005;
   const settlementResolution = (group.settlement_resolution as string | null) ?? null;
 
+  const pendingReviewCharges: HireEndedPendingChargeReview[] = [];
+  if (contractEndedYmd && !options.driverUserId) {
+    const { data: checkinInspection } = await supabase
+      .from("vehicle_hire_inspections")
+      .select("id")
+      .eq("hire_group_id", hireGroupId)
+      .eq("kind", "checkin")
+      .eq("status", "completed")
+      .maybeSingle();
+    if (checkinInspection?.id) {
+      const { data: pendingDamages } = await supabase
+        .from("vehicle_hire_inspection_damages")
+        .select("id, panel_id, damage_type, severity, notes, charge_gbp, charge_resolution")
+        .eq("inspection_id", checkinInspection.id as string)
+        .eq("charge_resolution", "review_later");
+      for (const damage of pendingDamages ?? []) {
+        const panel = String(damage.panel_id ?? "").trim();
+        const damageType = String(damage.damage_type ?? "").trim();
+        const label = [panel, damageType].filter(Boolean).join(" · ") || "Return damage";
+        const severity = String(damage.severity ?? "").trim();
+        const notes = String(damage.notes ?? "").trim();
+        const detail = [severity ? `${severity} damage` : null, notes || null].filter(Boolean).join(" · ") || null;
+        const proposed =
+          damage.charge_gbp != null && Number.isFinite(Number(damage.charge_gbp))
+            ? Math.max(0, Number(damage.charge_gbp))
+            : null;
+        pendingReviewCharges.push({
+          id: String(damage.id),
+          kind: "damage",
+          label,
+          detail,
+          proposedGbp: proposed,
+          evidenceHref: `/rental/hires/${hireGroupId}/checkin`,
+        });
+      }
+    }
+
+    const endHireDraft = parseHireEndHireDraft(group.end_hire_draft);
+    const pendingFlags = endHireDraft?.pendingReturnReviews ?? null;
+    const draft = endHireDraft?.returnChargesDraft ?? null;
+    if (pendingFlags?.fuel) {
+      const fuelGbp =
+        draft?.fuel?.enabled && draft.fuel.amountGbp != null
+          ? Math.max(0, Number(draft.fuel.amountGbp) || 0)
+          : null;
+      pendingReviewCharges.push({
+        id: "fuel-review",
+        kind: "fuel",
+        label: "Fuel shortfall",
+        detail: "Awaiting return fuel decision",
+        proposedGbp: fuelGbp != null && fuelGbp > 0.005 ? fuelGbp : null,
+        evidenceHref: `/rental/hires/${hireGroupId}/checkin`,
+      });
+    }
+    for (const key of pendingFlags?.accessories ?? []) {
+      const accessoryDraft = draft?.accessories?.find((item) => item.key === key);
+      const amount =
+        accessoryDraft?.amountGbp != null ? Math.max(0, Number(accessoryDraft.amountGbp) || 0) : null;
+      pendingReviewCharges.push({
+        id: `accessory-${key}`,
+        kind: "accessory",
+        label: `Missing accessory · ${key}`,
+        detail: "Awaiting accessory charge decision",
+        proposedGbp: amount != null && amount > 0.005 ? amount : null,
+        evidenceHref: `/rental/hires/${hireGroupId}/checkin`,
+      });
+    }
+  }
+
+  const pendingReviews: HireEndedPendingReviewsSummary = {
+    depositPending: depositPendingReview,
+    depositHeldGbp: depositHeldGbp > 0.005 ? depositHeldGbp : 0,
+    charges: pendingReviewCharges,
+  };
+
   const settlementPaymentsToDriverGbp = roundGbpSum(
     (balancePayments ?? [])
       .filter((payment) => payment.direction === "paid_to_driver")
@@ -855,6 +936,7 @@ async function buildPaymentsPageData(
       canSubmitPayment,
       canApprovePayments,
       canApplyDiscount,
+      pendingReviews,
     },
   };
 }

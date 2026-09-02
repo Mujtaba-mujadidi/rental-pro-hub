@@ -9,6 +9,7 @@ import { ukTodayYmd } from "@/lib/datetime/uk";
 import { logHireGroupEvent } from "@/lib/fleet/hire-audit";
 import {
   EMPTY_HIRE_INSPECTION_ACCESSORIES,
+  hireInspectionAccessoryLabel,
   type HireInspectionAccessoryKey,
 } from "@/lib/fleet/hire-inspection-accessories";
 import {
@@ -30,6 +31,14 @@ import {
   type HireReturnChargeDamageInput,
   type HireReturnChargeOptionalInput,
 } from "@/lib/fleet/hire-return-charges";
+import {
+  hirePendingReturnReviewResolveGate,
+  parseHirePendingReturnReviewAmountGbp,
+  parseHirePendingReturnReviewDecision,
+  parseHirePendingReturnReviewId,
+} from "@/lib/fleet/hire-pending-return-review-resolve";
+import { formatHireFuelLevelPercent } from "@/lib/fleet/hire-fuel-level";
+import { roundGbp } from "@/lib/fleet/hire-money";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { loadHireInspectionAction } from "@/app/actions/hire-inspections";
@@ -126,7 +135,11 @@ function revalidateReturnChargePaths(hireGroupId: string, vehicleId: string | nu
   revalidatePath(`/rental/hires/${hireGroupId}`);
   revalidatePath(`/rental/hires/${hireGroupId}/end-hire`);
   revalidatePath(`/rental/hires/${hireGroupId}/payments`);
+  revalidatePath(`/rental/hires/${hireGroupId}/settlement`);
+  revalidatePath(`/rental/hires/${hireGroupId}/settlement-statement`);
   revalidatePath(`/rental/hires/${hireGroupId}/checkin`);
+  revalidatePath(`/rental/balances/${hireGroupId}`);
+  revalidatePath("/rental/balances");
   if (vehicleId) revalidatePath(`/rental/vehicles/${vehicleId}`);
   revalidateHireWorkspaceCache(hireGroupId);
 }
@@ -714,4 +727,314 @@ export async function applyHireReturnChargesAction(
 
   revalidateReturnChargePaths(hireGroupId, (hireGroup.vehicle_id as string | null) ?? null);
   return { ok: true, data: { returnChargesAppliedAt: nowIso } };
+}
+
+/**
+ * Resolve a single pending return-charge review after end-hire
+ * (damage UUID, fuel-review, or accessory-<key>).
+ */
+export async function resolveHirePendingReturnChargeAction(input: {
+  hireGroupId: string;
+  reviewId: string;
+  decision: "approve" | "waive";
+  amountGbp?: number;
+}): Promise<ActionResult<{ reviewId: string; decision: "approve" | "waive" }>> {
+  const authorized = await authorizeReturnChargesWrite(input.hireGroupId);
+  if (!authorized.ok) return authorized;
+
+  const gate = hirePendingReturnReviewResolveGate({
+    canWriteRentals: true,
+    hireStatus: authorized.hire.status,
+  });
+  if (gate) return { ok: false, error: gate };
+
+  const decision = parseHirePendingReturnReviewDecision(input.decision);
+  if (!decision) return { ok: false, error: "Invalid review decision." };
+
+  const parsedId = parseHirePendingReturnReviewId(input.reviewId);
+  if (!parsedId) return { ok: false, error: "Unknown pending review." };
+
+  const amountParsed = parseHirePendingReturnReviewAmountGbp(decision, input.amountGbp);
+  if (!amountParsed.ok) return amountParsed;
+
+  const hireGroupId = authorized.hire.id;
+  const parentCompanyId = authorized.hire.parentCompanyId;
+  const admin = createSupabaseAdminClient();
+  const nowIso = new Date().toISOString();
+
+  const [checkoutRes, checkinRes] = await Promise.all([
+    loadHireInspectionAction(hireGroupId, "checkout"),
+    loadHireInspectionAction(hireGroupId, "checkin"),
+  ]);
+  if (!checkinRes.ok || !checkinRes.data?.id || checkinRes.data.status !== "completed") {
+    return { ok: false, error: "Complete vehicle check-in before resolving return reviews." };
+  }
+  const checkin = checkinRes.data;
+  const checkout = checkoutRes.ok ? checkoutRes.data : null;
+
+  const { data: hireGroup, error: hireGroupError } = await admin
+    .from("vehicle_hire_groups")
+    .select(
+      "settlement_balance_gbp, settlement_balance_direction, parent_company_id, end_hire_draft, vehicle_id",
+    )
+    .eq("id", hireGroupId)
+    .eq("parent_company_id", parentCompanyId)
+    .maybeSingle();
+  if (hireGroupError) return { ok: false, error: hireGroupError.message };
+  if (!hireGroup) return { ok: false, error: "Hire not found." };
+
+  let balanceDirection = (hireGroup.settlement_balance_direction as
+    | "driver_owes_company"
+    | "company_owes_driver"
+    | "settled"
+    | null) ?? "settled";
+  let balanceAmountGbp = Number(hireGroup.settlement_balance_gbp ?? 0);
+  const previousDraft =
+    parseHireEndHireDraft(hireGroup.end_hire_draft) ??
+    authorized.hire.endHireDraft ??
+    ({
+      started: true,
+      step: "final_account",
+      returnDateYmd: "",
+      returnTimeHm: "",
+      reason: "",
+      notes: "",
+      rentBillingMode: "end_of_period",
+      updatedAt: nowIso,
+      finalizedAt: null,
+      explicitFinalization: false,
+      returnChargesAppliedAt: null,
+      pendingReturnReviews: null,
+    } satisfies HireEndHireDraft);
+
+  let lineItem:
+    | {
+        chargeType: string;
+        amountGbp: number;
+        sourceKind: string;
+        sourceId: string | null;
+        description: string;
+      }
+    | null = null;
+  let auditSummary = "";
+  let nextPending = previousDraft.pendingReturnReviews
+    ? {
+        fuel: previousDraft.pendingReturnReviews.fuel === true,
+        accessories: [...(previousDraft.pendingReturnReviews.accessories ?? [])],
+      }
+    : { fuel: false, accessories: [] as string[] };
+
+  if (parsedId.kind === "damage") {
+    const damage = checkin.damages.find((row) => row.id === parsedId.damageId);
+    if (!damage) return { ok: false, error: "Damage review not found on this check-in." };
+    if (damage.checkoutDamageId) {
+      return { ok: false, error: "Pre-existing checkout damage cannot be charged here." };
+    }
+    if (damage.chargeResolution !== "review_later") {
+      return { ok: false, error: "This damage is not awaiting review." };
+    }
+
+    const { data: existingLine } = await admin
+      .from("vehicle_hire_driver_charge_line_items")
+      .select("id")
+      .eq("hire_group_id", hireGroupId)
+      .eq("source_kind", "checkin_inspection_damage")
+      .eq("source_id", damage.id)
+      .maybeSingle();
+    if (existingLine) return { ok: false, error: "This damage charge was already posted." };
+
+    if (decision === "approve") {
+      const amountGbp = amountParsed.amountGbp!;
+      const panel = damage.panelLabel ?? damage.panelId.replace(/_/g, " ");
+      const { error: damageUpdateError } = await admin
+        .from("vehicle_hire_inspection_damages")
+        .update({
+          charge_gbp: amountGbp,
+          charge_resolution: "add_to_balance",
+        })
+        .eq("id", damage.id)
+        .eq("inspection_id", checkin.id);
+      if (damageUpdateError) return { ok: false, error: damageUpdateError.message };
+
+      lineItem = {
+        chargeType: "damage",
+        amountGbp,
+        sourceKind: "checkin_inspection_damage",
+        sourceId: damage.id,
+        description: `${panel} · ${damage.damageType} · ${damage.severity}`,
+      };
+      auditSummary = `Approved pending damage charge (${formatGbpAudit(amountGbp)}).`;
+    } else {
+      const { error: damageUpdateError } = await admin
+        .from("vehicle_hire_inspection_damages")
+        .update({
+          charge_gbp: null,
+          charge_resolution: "waived",
+        })
+        .eq("id", damage.id)
+        .eq("inspection_id", checkin.id);
+      if (damageUpdateError) return { ok: false, error: damageUpdateError.message };
+      auditSummary = "Waived pending damage charge.";
+    }
+  } else if (parsedId.kind === "fuel") {
+    if (previousDraft.pendingReturnReviews?.fuel !== true) {
+      return { ok: false, error: "Fuel review is not pending." };
+    }
+    const { data: existingFuel } = await admin
+      .from("vehicle_hire_driver_charge_line_items")
+      .select("id")
+      .eq("hire_group_id", hireGroupId)
+      .eq("source_kind", "checkin_inspection_fuel")
+      .maybeSingle();
+    if (existingFuel) return { ok: false, error: "Fuel charge was already posted." };
+
+    nextPending.fuel = false;
+    if (decision === "approve") {
+      const amountGbp = amountParsed.amountGbp!;
+      const checkoutLabel = formatHireFuelLevelPercent(checkout?.fuelLevel ?? null);
+      const checkinLabel = formatHireFuelLevelPercent(checkin.fuelLevel);
+      lineItem = {
+        chargeType: "other",
+        amountGbp,
+        sourceKind: "checkin_inspection_fuel",
+        sourceId: checkin.id,
+        description: `Fuel difference — checkout ${checkoutLabel} / return ${checkinLabel}`,
+      };
+      auditSummary = `Approved pending fuel charge (${formatGbpAudit(amountGbp)}).`;
+    } else {
+      auditSummary = "Waived pending fuel charge.";
+    }
+  } else {
+    const key = parsedId.key;
+    const pendingAccessories = previousDraft.pendingReturnReviews?.accessories ?? [];
+    if (!pendingAccessories.includes(key)) {
+      return { ok: false, error: "Accessory review is not pending." };
+    }
+    const { data: existingAccessory } = await admin
+      .from("vehicle_hire_driver_charge_line_items")
+      .select("id")
+      .eq("hire_group_id", hireGroupId)
+      .eq("source_kind", "checkin_inspection_accessory")
+      .eq("source_id", key)
+      .maybeSingle();
+    if (existingAccessory) return { ok: false, error: "Accessory charge was already posted." };
+
+    nextPending.accessories = pendingAccessories.filter((item) => item !== key);
+    if (decision === "approve") {
+      const amountGbp = amountParsed.amountGbp!;
+      lineItem = {
+        chargeType: "other",
+        amountGbp,
+        sourceKind: "checkin_inspection_accessory",
+        sourceId: key,
+        description: `Missing ${hireInspectionAccessoryLabel(key)}`,
+      };
+      auditSummary = `Approved pending accessory charge (${formatGbpAudit(amountGbp)}).`;
+    } else {
+      auditSummary = `Waived pending accessory charge (${hireInspectionAccessoryLabel(key)}).`;
+    }
+  }
+
+  if (lineItem) {
+    const addToBalanceGbp = roundGbp(lineItem.amountGbp);
+    const balanceAfter = applyDamageChargesToSettlementBalance({
+      settlementBalanceDirection: balanceDirection,
+      settlementBalanceGbp: balanceAmountGbp,
+      addToBalanceGbp,
+    });
+    balanceDirection = balanceAfter.settlementBalanceDirection;
+    balanceAmountGbp = balanceAfter.settlementBalanceGbp;
+
+    const { error: balanceUpdateError } = await admin
+      .from("vehicle_hire_groups")
+      .update({
+        settlement_balance_direction: balanceDirection,
+        settlement_balance_gbp: balanceAmountGbp,
+      })
+      .eq("id", hireGroupId)
+      .eq("parent_company_id", parentCompanyId);
+    if (balanceUpdateError) return { ok: false, error: balanceUpdateError.message };
+
+    const { error: lineItemsError } = await admin.from("vehicle_hire_driver_charge_line_items").insert({
+      hire_group_id: hireGroupId,
+      parent_company_id: parentCompanyId,
+      charge_type: lineItem.chargeType,
+      amount_gbp: lineItem.amountGbp,
+      resolution: "add_to_balance",
+      source_kind: lineItem.sourceKind,
+      source_id: lineItem.sourceId,
+      description: lineItem.description,
+      balance_payment_id: null,
+      charged_on: ukTodayYmd(),
+      created_by_user_id: authorized.userId,
+    });
+    if (lineItemsError) return { ok: false, error: lineItemsError.message };
+  }
+
+  const pendingCleared =
+    !nextPending.fuel && nextPending.accessories.length === 0
+      ? null
+      : {
+          fuel: nextPending.fuel,
+          accessories: nextPending.accessories,
+        };
+
+  // Keep draft fuel/accessory amounts in sync when approving from the reviews tab.
+  let returnChargesDraft = previousDraft.returnChargesDraft ?? null;
+  if (returnChargesDraft && parsedId.kind !== "damage") {
+    if (parsedId.kind === "fuel") {
+      returnChargesDraft = {
+        ...returnChargesDraft,
+        fuel: {
+          ...returnChargesDraft.fuel,
+          enabled: decision === "approve",
+          amountGbp: decision === "approve" ? amountParsed.amountGbp : null,
+          chargeResolution: decision === "approve" ? "add_to_balance" : "waived",
+        },
+      };
+    } else {
+      returnChargesDraft = {
+        ...returnChargesDraft,
+        accessories: returnChargesDraft.accessories.map((accessory) =>
+          accessory.key === parsedId.key
+            ? {
+                ...accessory,
+                enabled: decision === "approve",
+                amountGbp: decision === "approve" ? amountParsed.amountGbp : null,
+                chargeResolution: decision === "approve" ? "add_to_balance" : "waived",
+              }
+            : accessory,
+        ),
+      };
+    }
+  }
+
+  const nextDraft: HireEndHireDraft = {
+    ...previousDraft,
+    returnChargesDraft,
+    pendingReturnReviews: pendingCleared,
+    updatedAt: nowIso,
+  };
+
+  const { error: draftError } = await admin
+    .from("vehicle_hire_groups")
+    .update({ end_hire_draft: nextDraft })
+    .eq("id", hireGroupId)
+    .eq("parent_company_id", parentCompanyId);
+  if (draftError) return { ok: false, error: draftError.message };
+
+  await logHireGroupEvent(admin, {
+    hireGroupId,
+    eventType: "hire_status_changed",
+    summary: auditSummary,
+    actorRole: "company_staff",
+    actorUserId: authorized.userId,
+  });
+
+  revalidateReturnChargePaths(hireGroupId, (hireGroup.vehicle_id as string | null) ?? null);
+  return { ok: true, data: { reviewId: input.reviewId.trim(), decision } };
+}
+
+function formatGbpAudit(amountGbp: number): string {
+  return `£${amountGbp.toFixed(2)}`;
 }
