@@ -37,7 +37,9 @@ function endHireDepositChoiceLabel(
   choice: EndHireDepositChoice,
   depositHeldGbp: number,
 ): string {
-  if (choice === "apply_to_balance") return `Apply ${formatGbp(depositHeldGbp)} to the balance`;
+  if (choice === "apply_to_balance") {
+    return `Apply ${formatGbp(depositHeldGbp)} to confirmed balance`;
+  }
   if (choice === "hold_pending") return "Hold deposit pending review";
   return "Refund while balance remains open";
 }
@@ -72,6 +74,8 @@ export function HireEndHireDepositPositionPanel({
   const [settlementPaymentReference, setSettlementPaymentReference] = useState("");
 
   const heldGbp = Math.max(0, Number(depositHeldGbp) || 0);
+  const requiredGbp = Math.max(0, Number(depositRequiredGbp) || 0);
+  const unreceivedGbp = Math.max(0, roundGbp(requiredGbp - heldGbp));
   const driverOwes = driverBalanceBeforeDepositGbp > 0.005;
 
   useEffect(() => {
@@ -181,39 +185,44 @@ export function HireEndHireDepositPositionPanel({
     : ["apply_to_balance", "refund_full"];
 
   return (
-    <article className="rph-panel flex h-full flex-col p-5 sm:p-6">
+    <article className="rph-panel flex h-full flex-col p-4 sm:p-5">
       <header className="flex items-start justify-between gap-3">
         <div>
           <p className="driver-dash-section-label">Deposit position</p>
-          <h3 className="mt-1 text-lg font-semibold tracking-tight text-rph-fg">
+          <h3 className="mt-0.5 text-base font-semibold tracking-tight text-rph-fg sm:text-lg">
             Choose how to handle the deposit
           </h3>
         </div>
-        <span className="rph-pill border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
+        <span className="rph-pill shrink-0 border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
           Review required
         </span>
       </header>
 
-      <dl className="mt-4 space-y-2 border-b border-rph-border pb-4 text-sm">
+      <dl className="mt-3 space-y-1.5 text-sm">
         <div className="flex items-center justify-between gap-3">
-          <dt className="text-rph-fg-secondary">Deposit required by contract</dt>
-          <dd className="font-medium tabular-nums text-rph-fg">
-            {formatGbp(depositRequiredGbp)}
-          </dd>
+          <dt className="text-rph-fg-secondary">Required by contract</dt>
+          <dd className="font-medium tabular-nums text-rph-fg">{formatGbp(requiredGbp)}</dd>
         </div>
         <div className="flex items-center justify-between gap-3">
-          <dt className="text-rph-fg-secondary">Deposit actually received</dt>
+          <dt className="text-rph-fg-secondary">Actually received</dt>
           <dd className="font-medium tabular-nums text-rph-fg">{formatGbp(heldGbp)}</dd>
         </div>
-        <div className="flex items-center justify-between gap-3">
-          <dt className="text-rph-fg-secondary">Driver balance before deposit</dt>
-          <dd className="font-medium tabular-nums text-rph-fg">
-            {formatGbp(driverBalanceBeforeDepositGbp)}
-          </dd>
-        </div>
+        {unreceivedGbp > 0.005 ? (
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-rph-fg-secondary">Unreceived — not final debt</dt>
+            <dd className="font-medium tabular-nums text-rph-fg">{formatGbp(unreceivedGbp)}</dd>
+          </div>
+        ) : null}
       </dl>
 
-      <div className="mt-4 space-y-2">
+      <div className="mt-3 flex items-center justify-between gap-3 border-t border-rph-border pt-3">
+        <span className="text-sm font-semibold text-rph-fg">Confirmed balance before deposit</span>
+        <span className="text-sm font-semibold tabular-nums text-rph-fg">
+          {formatGbp(driverBalanceBeforeDepositGbp)}
+        </span>
+      </div>
+
+      <div className="mt-3 space-y-2">
         {choices.map((choice) => {
           const selected = depositChoice === choice;
           const badge =
@@ -229,13 +238,13 @@ export function HireEndHireDepositPositionPanel({
           return (
             <label
               key={choice}
-              className={`block cursor-pointer rounded-xl border px-4 py-3 transition-colors ${
+              className={`block cursor-pointer rounded-xl border px-3 py-2.5 transition-colors ${
                 selected
                   ? "border-sky-400 bg-sky-50/80 dark:border-sky-700 dark:bg-sky-950/25"
                   : "border-rph-border bg-rph-page/40 hover:bg-rph-page/70"
               }`}
             >
-              <div className="flex items-start gap-3">
+              <div className="flex items-start gap-2.5">
                 <input
                   type="radio"
                   name="end-hire-deposit-choice"
@@ -247,12 +256,12 @@ export function HireEndHireDepositPositionPanel({
                   }}
                 />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start justify-between gap-2">
                     <p className="text-sm font-semibold text-rph-fg">
                       {endHireDepositChoiceLabel(choice, heldGbp)}
                     </p>
                     <span
-                      className={`rph-pill shrink-0 text-xs ${
+                      className={`rph-pill shrink-0 text-[11px] ${
                         badge.tone === "success"
                           ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-100"
                           : badge.tone === "warn"
@@ -264,25 +273,24 @@ export function HireEndHireDepositPositionPanel({
                     </span>
                   </div>
                   {choice === "apply_to_balance" ? (
-                    <p className="mt-1 text-xs text-rph-fg-secondary">
-                      Recommended when the driver still owes money. Up to {formatGbp(heldGbp)} can be
-                      applied to the open balance.
+                    <p className="mt-0.5 text-xs text-rph-fg-secondary">
+                      Pending charges are excluded until approved.
                     </p>
                   ) : choice === "hold_pending" ? (
-                    <p className="mt-1 text-xs text-rph-fg-secondary">
+                    <p className="mt-0.5 text-xs text-rph-fg-secondary">
                       Keep {formatGbp(heldGbp)} ring-fenced. It does not reduce the driver debt.
                     </p>
                   ) : (
-                    <p className="mt-1 text-xs text-rph-fg-secondary">
-                      Admin exception — the refund does not clear or reduce the debt.
+                    <p className="mt-0.5 text-xs text-rph-fg-secondary">
+                      Admin exception — the refund does not reduce the debt.
                     </p>
                   )}
                 </div>
               </div>
 
               {selected && choice === "hold_pending" ? (
-                <div className="mt-3 grid gap-3 border-t border-rph-border/70 pt-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
+                <div className="mt-2.5 grid gap-2.5 border-t border-rph-border/70 pt-2.5 sm:grid-cols-2">
+                  <div className="space-y-1">
                     <label className="text-xs font-medium text-rph-fg" htmlFor="hold-reason">
                       Reason
                     </label>
@@ -302,7 +310,7 @@ export function HireEndHireDepositPositionPanel({
                       }}
                     />
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     <label className="text-xs font-medium text-rph-fg" htmlFor="hold-review-date">
                       Review date
                     </label>
@@ -318,12 +326,12 @@ export function HireEndHireDepositPositionPanel({
               ) : null}
 
               {selected && choice === "refund_full" ? (
-                <div className="mt-3 space-y-3 border-t border-rph-border/70 pt-3">
+                <div className="mt-2.5 space-y-2.5 border-t border-rph-border/70 pt-2.5">
                   <div className="rounded-lg border border-rose-200 bg-rose-50/80 px-3 py-2 text-xs text-rose-950 dark:border-rose-900/40 dark:bg-rose-950/25 dark:text-rose-100">
                     This is an exception where the driver is refunded while the debt remains open.
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-1.5">
+                  <div className="grid gap-2.5 sm:grid-cols-2">
+                    <div className="space-y-1">
                       <label className="text-xs font-medium text-rph-fg" htmlFor="refund-reason">
                         Admin reason
                       </label>
@@ -343,7 +351,7 @@ export function HireEndHireDepositPositionPanel({
                         }}
                       />
                     </div>
-                    <div className="space-y-1.5">
+                    <div className="space-y-1">
                       <label className="text-xs font-medium text-rph-fg" htmlFor="refund-method">
                         Refund method
                       </label>
@@ -358,13 +366,13 @@ export function HireEndHireDepositPositionPanel({
                       />
                     </div>
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     <label className="text-xs font-medium text-rph-fg" htmlFor="refund-notes">
                       Notes (optional)
                     </label>
                     <textarea
                       id="refund-notes"
-                      className="rph-input min-h-16 w-full"
+                      className="rph-input min-h-14 w-full"
                       value={refundNotes}
                       onChange={(event) => setRefundNotes(event.target.value)}
                     />
@@ -376,11 +384,11 @@ export function HireEndHireDepositPositionPanel({
         })}
       </div>
 
-      {previewError ? <p className="mt-3 text-sm text-rph-fg-secondary">{previewError}</p> : null}
+      {previewError ? <p className="mt-2 text-sm text-rph-fg-secondary">{previewError}</p> : null}
 
       {needsSettlementStep && preview && depositChoice !== "hold_pending" ? (
-        <div className="mt-4 space-y-3 border-t border-rph-border pt-4">
-          <div className="space-y-1.5">
+        <div className="mt-3 space-y-2 border-t border-rph-border pt-3">
+          <div className="space-y-1">
             <label className="text-sm font-medium text-rph-fg" htmlFor="settlement-resolution">
               How to clear the balance
             </label>
@@ -397,8 +405,8 @@ export function HireEndHireDepositPositionPanel({
         </div>
       ) : null}
 
-      <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 dark:border-amber-900/40 dark:bg-amber-950/25">
-        <label className="flex items-start gap-3">
+      <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5 dark:border-amber-900/40 dark:bg-amber-950/25">
+        <label className="flex items-start gap-2.5">
           <input
             type="checkbox"
             className="mt-0.5"
@@ -407,27 +415,18 @@ export function HireEndHireDepositPositionPanel({
           />
           <span>
             <span className="text-sm font-semibold text-rph-fg">Confirm this deposit decision</span>
-            <span className="mt-1 block text-xs text-rph-fg-secondary">
-              I understand this creates an audited financial action and cannot be silently edited
-              later.
+            <span className="mt-0.5 block text-xs text-rph-fg-secondary">
+              This creates an audited action when the final account is confirmed, and cannot be
+              silently edited later.
             </span>
           </span>
         </label>
       </div>
 
-      <button
-        type="button"
-        className="rph-btn-primary mt-4 h-11 w-full"
-        disabled={!canSubmit}
-      >
-        {depositChoice === "apply_to_balance"
-          ? `Apply ${formatGbp(heldGbp)} deposit`
-          : depositChoice === "hold_pending"
-            ? "Hold deposit pending review"
-            : `Authorise ${formatGbp(heldGbp)} refund`}
-      </button>
       <p className="mt-2 text-center text-xs text-rph-fg-muted">
-        No deposit is applied or refunded until this action is confirmed.
+        {canSubmit
+          ? "This deposit decision will be applied when you confirm the final account."
+          : "Select an option and confirm above to unlock final account confirmation."}
       </p>
       {depositChoice !== "hold_pending" && preview ? (
         <p className="sr-only">

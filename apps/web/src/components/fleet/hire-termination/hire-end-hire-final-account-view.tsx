@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import type { HireEndHirePageData } from "@/app/actions/hire-end-hire";
 import type { HireDepositFinalizePayload } from "@/components/fleet/hire-payments/hire-deposit-disposition-resolve-card";
@@ -18,36 +17,6 @@ import type { HireEndHireFinancialReview } from "@/lib/fleet/hire-end-hire-finan
 
 type FinalAccountTab = "overview" | "statement";
 
-function FinalAccountKpiCard({
-  label,
-  value,
-  hint,
-  valueClassName,
-  highlighted,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-  valueClassName?: string;
-  highlighted?: boolean;
-}) {
-  return (
-    <div
-      className={
-        highlighted
-          ? "rph-panel border-amber-200 bg-amber-50 p-4 dark:border-amber-900/40 dark:bg-amber-950/25"
-          : "rph-panel p-4"
-      }
-    >
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-rph-fg-muted">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold tabular-nums tracking-tight ${valueClassName ?? "text-rph-fg"}`}>
-        {value}
-      </p>
-      <p className="mt-1 text-xs text-rph-fg-secondary">{hint}</p>
-    </div>
-  );
-}
-
 function FinalAccountAmountRow({
   label,
   amount,
@@ -59,8 +28,8 @@ function FinalAccountAmountRow({
 }) {
   return (
     <div
-      className={`flex items-center justify-between gap-4 border-b border-rph-border py-2.5 last:border-b-0 ${
-        emphasis ? "font-semibold text-rph-fg" : ""
+      className={`flex items-center justify-between gap-4 py-1.5 ${
+        emphasis ? "mt-1 border-t border-dashed border-rph-border pt-2 font-semibold text-rph-fg" : ""
       }`}
     >
       <span className={emphasis ? "text-sm" : "text-sm text-rph-fg-secondary"}>{label}</span>
@@ -88,8 +57,6 @@ function StatementStatusPill({
     </span>
   );
 }
-
-import type { HireDriverChargeWorkspaceRow } from "@/app/actions/rental-hire-termination";
 
 type FinalAccountLedger = NonNullable<HireEndHirePageData["finalAccountLedger"]>;
 
@@ -149,6 +116,7 @@ export function HireEndHireFinalAccountView({
     [
       review,
       data.returnCharges,
+      data.draft.returnChargesDraft,
       returnedAtIso,
       driverChargeLineItems,
       extraChargeTimedPayments,
@@ -156,12 +124,12 @@ export function HireEndHireFinalAccountView({
     ],
   );
 
-  const heroBalanceLabel = hireEndHireFinalAccountBalanceLabel(model.currentDriverBalanceGbp);
+  const confirmedBalanceLabel = hireEndHireFinalAccountBalanceLabel(model.balanceBeforeDepositGbp);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {data.isEndHireFinalized ? (
-        <div className="rounded-2xl border border-emerald-300 bg-emerald-50/80 px-4 py-4 dark:border-emerald-800 dark:bg-emerald-950/30 sm:px-5">
+        <div className="rounded-2xl border border-emerald-300 bg-emerald-50/80 px-4 py-3 dark:border-emerald-800 dark:bg-emerald-950/30 sm:px-5">
           <p className="text-sm font-semibold text-emerald-950 dark:text-emerald-100">
             Contract termination finalised
           </p>
@@ -169,53 +137,7 @@ export function HireEndHireFinalAccountView({
             This hire is complete. Any open balance remains on the company Balances list until settled.
           </p>
         </div>
-      ) : depositNeedsDecision && model.depositHeldGbp > 0.005 ? (
-        <div className="flex flex-col gap-4 rounded-2xl bg-rph-rail px-4 py-4 text-white sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-sky-200">
-              Deposit decision required
-            </p>
-            <p className="mt-1 text-2xl font-semibold tracking-tight">{heroBalanceLabel}</p>
-            <p className="mt-1 text-sm text-white/80">
-              {formatGbp(model.depositHeldGbp)} is held, but not applied. Choose how to handle it below.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg bg-sky-500 px-4 text-sm font-semibold text-white hover:bg-sky-600"
-            onClick={() => depositPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-          >
-            Choose deposit action
-          </button>
-        </div>
       ) : null}
-
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <FinalAccountKpiCard
-          label="Total final charges"
-          value={formatGbp(model.totalFinalChargesGbp)}
-          hint="Rent, existing extras and return charges"
-        />
-        <FinalAccountKpiCard
-          label="Driver payments received"
-          value={formatHireEndHireSignedAmount(model.driverPaymentsReceivedGbp, false)}
-          hint="Approved payments only"
-          valueClassName="text-emerald-700 dark:text-emerald-300"
-        />
-        <FinalAccountKpiCard
-          label="Deposit held"
-          value={formatGbp(model.depositHeldGbp)}
-          hint={
-            depositNeedsDecision ? "Decision required — not applied" : "Held or already resolved"
-          }
-        />
-        <FinalAccountKpiCard
-          label="Current driver balance"
-          value={formatGbp(model.currentDriverBalanceGbp)}
-          hint="Held or refunded deposit does not reduce this debt"
-          highlighted
-        />
-      </div>
 
       <div className="border-b border-rph-border">
         <div className="flex gap-6">
@@ -237,18 +159,18 @@ export function HireEndHireFinalAccountView({
       </div>
 
       {tab === "overview" ? (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
-          <article className="rph-panel p-5 sm:p-6">
-            <p className="driver-dash-section-label">How it is calculated</p>
-            <h3 className="mt-1 text-lg font-semibold tracking-tight text-rph-fg">
+        <div className="grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)]">
+          <article className="rph-panel p-4 sm:p-5">
+            <p className="driver-dash-section-label">Confirmed calculation</p>
+            <h3 className="mt-0.5 text-base font-semibold tracking-tight text-rph-fg sm:text-lg">
               Charges, payments and held funds
             </h3>
 
-            <div className="mt-5">
+            <div className="mt-4">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-rph-fg-muted">
-                Final charges
+                Confirmed final charges
               </p>
-              <div className="mt-2">
+              <div className="mt-1.5">
                 {model.chargeLines.map((line) => (
                   <FinalAccountAmountRow
                     key={line.id}
@@ -257,34 +179,34 @@ export function HireEndHireFinalAccountView({
                   />
                 ))}
                 <FinalAccountAmountRow
-                  label="Total final charges"
+                  label="Total confirmed charges"
                   amount={formatGbp(model.totalFinalChargesGbp)}
                   emphasis
                 />
               </div>
             </div>
 
-            <div className="mt-5">
+            <div className="mt-4">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-rph-fg-muted">
-                Settlement funding
+                Confirmed settlement funding
               </p>
-              <div className="mt-2">
+              <div className="mt-1.5">
                 <FinalAccountAmountRow
                   label="Approved driver payments"
                   amount={formatHireEndHireSignedAmount(model.driverPaymentsReceivedGbp, false)}
                 />
                 <FinalAccountAmountRow
-                  label="Funding applied so far"
+                  label="Funding applied"
                   amount={formatGbp(model.driverPaymentsReceivedGbp)}
                   emphasis
                 />
               </div>
             </div>
 
-            <div className="mt-5 flex items-center justify-between gap-4 border-t border-rph-border pt-4">
-              <span className="text-sm font-semibold text-rph-fg">Current driver balance</span>
+            <div className="mt-4 flex items-center justify-between gap-4 border-t border-rph-border pt-3">
+              <span className="text-sm font-semibold text-rph-fg">Confirmed balance now</span>
               <span className="text-sm font-semibold text-amber-800 tabular-nums dark:text-amber-200">
-                {heroBalanceLabel}
+                {confirmedBalanceLabel}
               </span>
             </div>
           </article>
@@ -300,9 +222,9 @@ export function HireEndHireFinalAccountView({
               />
             </div>
           ) : (
-            <article className="rph-panel flex h-full flex-col p-5 sm:p-6">
+            <article className="rph-panel flex h-full flex-col p-4 sm:p-5">
               <p className="driver-dash-section-label">Deposit position</p>
-              <h3 className="mt-1 text-lg font-semibold tracking-tight text-rph-fg">
+              <h3 className="mt-0.5 text-base font-semibold tracking-tight text-rph-fg sm:text-lg">
                 Deposit on this hire
               </h3>
               <p className="mt-3 text-sm text-rph-fg-secondary">
@@ -320,24 +242,21 @@ export function HireEndHireFinalAccountView({
           )}
         </div>
       ) : (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,0.6fr)]">
-          <article className="rph-panel p-5 sm:p-6">
+        <div className="grid gap-3 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,0.6fr)]">
+          <article className="rph-panel p-4 sm:p-5">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="driver-dash-section-label">Full statement</p>
-                <h3 className="mt-1 text-lg font-semibold tracking-tight text-rph-fg">
+                <h3 className="mt-0.5 text-base font-semibold tracking-tight text-rph-fg sm:text-lg">
                   Charges, payments and allocations
                 </h3>
                 <p className="mt-1 text-sm text-rph-fg-secondary">
                   Only posted settlement funding reduces the running driver balance.
                 </p>
               </div>
-              <button type="button" className="rph-btn-ghost h-9 px-3 text-sm">
-                Export
-              </button>
             </div>
 
-            <div className="mt-4 overflow-x-auto">
+            <div className="mt-3 overflow-x-auto">
               <table className="min-w-full text-left text-sm">
                 <thead>
                   <tr className="border-b border-rph-border text-[11px] font-semibold uppercase tracking-wide text-rph-fg-muted">
@@ -351,23 +270,23 @@ export function HireEndHireFinalAccountView({
                 <tbody>
                   {statementRows.map((row) => (
                     <tr key={row.id} className="border-b border-rph-border/70 align-top">
-                      <td className="px-2 py-3 text-xs text-rph-fg-secondary">{row.dateLabel}</td>
-                      <td className="px-2 py-3">
+                      <td className="px-2 py-2.5 text-xs text-rph-fg-secondary">{row.dateLabel}</td>
+                      <td className="px-2 py-2.5">
                         <p className="font-medium text-rph-fg">{row.activity}</p>
                         {row.detail ? (
                           <p className="mt-0.5 text-xs text-rph-fg-secondary">{row.detail}</p>
                         ) : null}
                       </td>
-                      <td className="px-2 py-3">
+                      <td className="px-2 py-2.5">
                         <div className="flex flex-col items-start gap-1">
                           <StatementStatusPill label={row.statusLabel} tone={row.statusTone} />
                           <span className="text-xs text-rph-fg-secondary">{row.categoryLabel}</span>
                         </div>
                       </td>
-                      <td className="px-2 py-3 text-right font-semibold tabular-nums text-rph-fg">
+                      <td className="px-2 py-2.5 text-right font-semibold tabular-nums text-rph-fg">
                         {formatHireEndHireSignedAmount(row.amountGbp, row.signed)}
                       </td>
-                      <td className="px-2 py-3 text-right font-semibold tabular-nums text-rph-fg">
+                      <td className="px-2 py-2.5 text-right font-semibold tabular-nums text-rph-fg">
                         {formatGbp(row.balanceGbp)}
                       </td>
                     </tr>
@@ -377,14 +296,14 @@ export function HireEndHireFinalAccountView({
             </div>
           </article>
 
-          <article className="rph-panel h-fit p-5 sm:p-6">
+          <article className="rph-panel h-fit p-4 sm:p-5">
             <p className="driver-dash-section-label">Reconciliation</p>
-            <h3 className="mt-1 text-lg font-semibold tracking-tight text-rph-fg">
+            <h3 className="mt-0.5 text-base font-semibold tracking-tight text-rph-fg sm:text-lg">
               Final balance calculation
             </h3>
-            <dl className="mt-4 space-y-2 text-sm">
+            <dl className="mt-3 space-y-1.5 text-sm">
               <div className="flex items-center justify-between gap-3">
-                <dt className="text-rph-fg-secondary">Total final charges</dt>
+                <dt className="text-rph-fg-secondary">Total confirmed charges</dt>
                 <dd className="font-medium tabular-nums text-rph-fg">
                   {formatHireEndHireSignedAmount(model.totalFinalChargesGbp, true)}
                 </dd>
@@ -396,54 +315,23 @@ export function HireEndHireFinalAccountView({
                 </dd>
               </div>
             </dl>
-            <div className="mt-4 border-t border-rph-border pt-4">
+            <div className="mt-3 border-t border-rph-border pt-3">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-sm font-semibold text-rph-fg">Current driver balance</span>
-                <span className="text-sm font-semibold tabular-nums text-rph-fg">
-                  {formatGbp(model.currentDriverBalanceGbp)}
+                <span className="text-sm font-semibold text-rph-fg">Confirmed balance now</span>
+                <span className="text-sm font-semibold tabular-nums text-amber-800 dark:text-amber-200">
+                  {confirmedBalanceLabel}
                 </span>
               </div>
               {depositNeedsDecision && model.depositHeldGbp > 0.005 ? (
-                <p className="mt-3 text-xs text-rph-fg-secondary">
-                  {formatGbp(model.depositHeldGbp)} remains unallocated until a deposit decision is
-                  explicitly confirmed.
+                <p className="mt-2 text-xs text-rph-fg-secondary">
+                  {formatGbp(model.depositHeldGbp)} remains unallocated until you confirm a deposit
+                  decision and complete the final account.
                 </p>
               ) : null}
             </div>
           </article>
         </div>
       )}
-
-      {!data.isEndHireFinalized ? (
-        <div className="flex flex-col gap-3 rounded-2xl border border-rph-border bg-rph-raised px-4 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">
-              What happens next
-            </p>
-            <p className="mt-1 text-sm font-semibold text-rph-fg">
-              Confirm the deposit decision before settlement
-            </p>
-            <p className="mt-1 text-sm text-rph-fg-secondary">
-              Applying the deposit is recommended. Holding or refunding it keeps the driver debt open
-              and requires a reason.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href={`/rental/hires/${data.hireGroupId}/payments`}
-              className="rph-btn-ghost h-10 px-4"
-            >
-              Add adjustment
-            </Link>
-            <Link
-              href={`/rental/balances/${data.hireGroupId}`}
-              className="inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-rph-link hover:text-rph-link-hover"
-            >
-              Send balance reminder
-            </Link>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

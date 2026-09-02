@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 export type HireInspectionEndedTab = "comparison" | "checkout" | "checkin";
 
@@ -83,14 +83,14 @@ export function useEndedInspectionTabState(
   },
   ready: boolean,
 ) {
-  const [activeTab, setActiveTab] = useState<HireInspectionEndedTab>("checkout");
-  const initializedRef = useRef(false);
+  const [activeTab, setActiveTab] = useState<HireInspectionEndedTab>(() =>
+    resolveInitialEndedInspectionTab(input),
+  );
 
   useEffect(() => {
-    if (!ready || initializedRef.current) return;
+    if (!ready) return;
     setActiveTab(resolveInitialEndedInspectionTab(input));
-    initializedRef.current = true;
-  }, [input.checkoutCompleted, input.checkinCompleted, input.focusKind, ready]);
+  }, [ready, input.checkoutCompleted, input.checkinCompleted, input.focusKind]);
 
   return { activeTab, setActiveTab };
 }

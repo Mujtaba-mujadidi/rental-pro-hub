@@ -179,6 +179,12 @@ function HireInspectionDamageForm({
 
 const PHOTO_REQUIRED_MESSAGE = "Add at least one vehicle photo to continue.";
 
+type HireInspectionInitialTracker = {
+  linked: boolean;
+  odometerMiles?: number | null;
+  liveUnavailable?: boolean;
+};
+
 type Props = {
   hireGroupId: string;
   kind: HireInspectionKind;
@@ -187,6 +193,10 @@ type Props = {
   vehicleId?: string | null;
   audience?: "staff" | "driver";
   embedded?: boolean;
+  /** Skip the first network fetch when the parent already loaded these payloads. */
+  initialInspection?: HireInspectionPayload | null;
+  initialCheckoutBaseline?: HireInspectionPayload | null;
+  initialTracker?: HireInspectionInitialTracker | null;
   /** When set, staff completion stays in-context (e.g. end-hire wizard) instead of navigating to hire summary. */
   onStaffComplete?: () => void | Promise<void>;
 };
@@ -199,27 +209,42 @@ export function HireInspectionWizard({
   vehicleId,
   audience = "staff",
   embedded = false,
+  initialInspection = null,
+  initialCheckoutBaseline = null,
+  initialTracker = null,
   onStaffComplete,
 }: Props) {
   const router = useRouter();
   const workspaceCache = useHireWorkspaceCache();
   const [step, setStep] = useState(1);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialInspection);
   const [saving, startSaving] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<HireInspectionPayload | null>(null);
-  const [checkoutBaseline, setCheckoutBaseline] = useState<HireInspectionPayload | null>(null);
+  const [data, setData] = useState<HireInspectionPayload | null>(initialInspection);
+  const [checkoutBaseline, setCheckoutBaseline] = useState<HireInspectionPayload | null>(
+    initialCheckoutBaseline,
+  );
 
-  const [odometer, setOdometer] = useState("");
-  const [fuelLevel, setFuelLevel] = useState<number | null>(null);
-  const [generalNotes, setGeneralNotes] = useState("");
-  const [accessories, setAccessories] = useState<HireInspectionAccessories>({
-    ...EMPTY_HIRE_INSPECTION_ACCESSORIES,
+  const [odometer, setOdometer] = useState(() => {
+    if (initialInspection?.odometerReading != null) return String(initialInspection.odometerReading);
+    if (initialTracker?.linked && initialTracker.odometerMiles != null) {
+      return String(Math.round(initialTracker.odometerMiles));
+    }
+    return "";
   });
-  const [trackerOdometerMiles, setTrackerOdometerMiles] = useState<number | null>(null);
-  const [trackerLinked, setTrackerLinked] = useState(false);
+  const [fuelLevel, setFuelLevel] = useState<number | null>(initialInspection?.fuelLevel ?? null);
+  const [generalNotes, setGeneralNotes] = useState(initialInspection?.generalNotes ?? "");
+  const [accessories, setAccessories] = useState<HireInspectionAccessories>(
+    initialInspection?.accessories ?? { ...EMPTY_HIRE_INSPECTION_ACCESSORIES },
+  );
+  const [trackerOdometerMiles, setTrackerOdometerMiles] = useState<number | null>(
+    initialTracker?.linked ? (initialTracker.odometerMiles ?? null) : null,
+  );
+  const [trackerLinked, setTrackerLinked] = useState(Boolean(initialTracker?.linked));
   const [trackerLoading, setTrackerLoading] = useState(false);
-  const [trackerLiveUnavailable, setTrackerLiveUnavailable] = useState(false);
+  const [trackerLiveUnavailable, setTrackerLiveUnavailable] = useState(
+    Boolean(initialTracker?.linked && initialTracker.liveUnavailable),
+  );
   const [trackerError, setTrackerError] = useState<string | null>(null);
 
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
@@ -233,8 +258,17 @@ export function HireInspectionWizard({
   const [damageNotes, setDamageNotes] = useState("");
   const [linkPreExisting, setLinkPreExisting] = useState(false);
   const [diagramExpanded, setDiagramExpanded] = useState(false);
-  const [draftDamages, setDraftDamages] = useState<HireInspectionDraftDamage[]>([]);
-  const [draftMedia, setDraftMedia] = useState<HireInspectionDraftMedia[]>([]);
+  const [draftDamages, setDraftDamages] = useState<HireInspectionDraftDamage[]>(() => {
+    if (!initialInspection) return [];
+    const damages = mapInspectionDamagesToDraft(initialInspection.damages);
+    if (kind === "checkin" && initialCheckoutBaseline?.damages.length) {
+      return seedCheckinDamagesFromCheckout(damages, initialCheckoutBaseline.damages);
+    }
+    return damages;
+  });
+  const [draftMedia, setDraftMedia] = useState<HireInspectionDraftMedia[]>(() =>
+    initialInspection ? mapInspectionMediaToDraft(initialInspection.media) : [],
+  );
 
   const title = kind === "checkout" ? "Vehicle checkout" : "Vehicle check-in";
   const completeLabel = kind === "checkout" ? "Complete checkout" : "Complete check-in";
@@ -282,14 +316,19 @@ export function HireInspectionWizard({
   }, [applyInspectionPayload, audience, hireGroupId, kind]);
 
   useEffect(() => {
+    if (initialInspection) {
+      setLoading(false);
+      return;
+    }
     void loadInspection();
-  }, [loadInspection]);
+  }, [initialInspection, loadInspection]);
 
   const readOnly = audience === "driver" || data?.status === "completed";
   const resolvedVehicleId = vehicleId?.trim() || data?.vehicleId?.trim() || null;
 
   useEffect(() => {
     if (audience !== "staff" || readOnly || !hireGroupId.trim()) return;
+    if (initialTracker) return;
     let cancelled = false;
     void (async () => {
       setTrackerLoading(true);
@@ -323,7 +362,7 @@ export function HireInspectionWizard({
     return () => {
       cancelled = true;
     };
-  }, [audience, hireGroupId, readOnly, resolvedVehicleId]);
+  }, [audience, hireGroupId, initialTracker, readOnly, resolvedVehicleId]);
 
   const diagramDamages = useMemo(() => {
     const rows = draftDamages.map((d) => ({

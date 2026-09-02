@@ -55,13 +55,13 @@ import type { HireTerminationRentBillingMode } from "@/lib/fleet/hire-terminatio
 import type { RentCadence } from "@/lib/fleet/hire-types";
 import { canStartCheckin, canTerminateHire } from "@/lib/fleet/hire-lifecycle-attention";
 import { logHireGroupEvent } from "@/lib/fleet/hire-audit";
-import { HIRE_RETURN_CHARGE_SOURCE_KINDS } from "@/lib/fleet/hire-return-charges";
+import { revertEndHireSessionArtifacts } from "@/lib/fleet/hire-end-hire-session-cleanup";
 import { PROVISIONAL_TERMINATION_DEPOSIT_DISPOSITION } from "@/lib/fleet/hire-settlement-finalization";
 import { syncVehicleStatusForHireGroup } from "@/lib/fleet/sync-vehicle-hire-status";
 import { revalidateHireWorkspaceCache } from "@/lib/fleet/hire-workspace-cache";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { loadHirePaymentsPageAction, type HirePaymentPageRow } from "@/app/actions/hire-payments";
+import { loadHirePaymentsPageAction, type HirePaymentPageRow, type HirePaymentsPageData } from "@/app/actions/hire-payments";
 import {
   loadHireTerminationPreviewAction,
   terminateHireGroupAction,
@@ -143,6 +143,163 @@ function rentDetailFromTerminationAccounts(
     contractActivatedLabel,
     hireLengthSinceActivationLabel:
       contractActivatedLabel != null ? formatHireDurationWeeksAndDays(accounts.durationDays) : null,
+  };
+}
+
+/** Map the shared payments + termination preview builders into the end-hire Step 2/5 payload. */
+function assembleEndHireFinancialSlice(input: {
+  hireStatus: string;
+  returnDateYmd: string;
+  returnTimeHm: string;
+  rentBillingMode: HireTerminationRentBillingMode;
+  startDate: string | null;
+  startTime: string;
+  activatedAt: string | null;
+  rentAmountGbp: number | null;
+  rentCadence: RentCadence;
+  payments: HirePaymentsPageData;
+  previewAccounts: HireTerminationAccountsSummary | null;
+}): {
+  financialReview: HireEndHireFinancialReview;
+  pendingApprovalItems: HireEndHirePendingApprovalItem[];
+  pendingScheduleRows: HirePaymentPageRow[];
+  extraChargePendingPayment: HireEndHirePageData["extraChargePendingPayment"];
+  extraChargesOutstandingGbp: number;
+  canApprovePayments: boolean;
+  depositResolution: HireEndHirePageData["depositResolution"];
+  finalAccountLedger: HireEndHirePageData["finalAccountLedger"];
+} {
+  const { payments, previewAccounts } = input;
+  const returnedAtIso =
+    hireEndHireReturnedAtIso(input.returnDateYmd, input.returnTimeHm || "12:00") ??
+    new Date().toISOString();
+
+  const pendingScheduleRows = payments.rows.filter((row) => row.paymentStatus === "pending_approval");
+  const pendingApprovalItems = buildHireEndHirePendingApprovalItems({
+    scheduleRows: payments.rows,
+    pendingAmountForRow: hirePaymentPendingApprovalAmountGbp,
+    extraChargePending: payments.extraChargePendingPayment,
+    extraChargesOutstandingGbp: payments.extraChargesOutstandingGbp,
+  });
+
+  let rentChargedGbp = payments.summary.totalDueGbp;
+  let rentReceivedGbp = payments.summary.totalPaidGbp;
+  let rentGrossAccruedGbp = payments.summary.rentGrossAccruedGbp;
+  let rentDiscountGbp = payments.summary.totalDiscountGbp;
+  let billedPeriodsLabel: string | null = null;
+  let rentBillingLabel: string | null = null;
+  let rentBillingDetail: string | null = null;
+  let proRataAdjustmentGbp: number | null = null;
+  let proRataLineLabel: string | null = null;
+  let proRataNote: string | null = null;
+  let contractActivatedLabel: string | null = null;
+  let hireLengthSinceActivationLabel: string | null = null;
+
+  const billingMode =
+    canTerminateHire(input.hireStatus) || input.hireStatus === "ending"
+      ? input.rentBillingMode
+      : (payments.terminationSummary?.rentBillingMode ?? input.rentBillingMode);
+
+  if (previewAccounts) {
+    const detail = rentDetailFromTerminationAccounts(
+      previewAccounts,
+      billingMode,
+      input.startDate,
+      input.activatedAt,
+    );
+    rentChargedGbp = detail.rentChargedGbp;
+    rentReceivedGbp = detail.rentReceivedGbp;
+    rentGrossAccruedGbp = detail.rentGrossAccruedGbp;
+    rentDiscountGbp = detail.rentDiscountGbp;
+    billedPeriodsLabel = detail.billedPeriodsLabel;
+    rentBillingLabel = detail.rentBillingLabel;
+    rentBillingDetail = detail.rentBillingDetail;
+    proRataAdjustmentGbp = detail.proRataAdjustmentGbp;
+    proRataLineLabel = detail.proRataLineLabel;
+    proRataNote = detail.proRataNote;
+    contractActivatedLabel = detail.contractActivatedLabel;
+    hireLengthSinceActivationLabel = detail.hireLengthSinceActivationLabel;
+  } else if (payments.terminationSummary) {
+    const detail = rentDetailFromTerminationAccounts(
+      payments.terminationSummary,
+      payments.terminationSummary.rentBillingMode,
+      input.startDate,
+      payments.terminationSummary.activatedAt,
+    );
+    rentChargedGbp = detail.rentChargedGbp;
+    rentReceivedGbp = detail.rentReceivedGbp;
+    rentGrossAccruedGbp = detail.rentGrossAccruedGbp;
+    rentDiscountGbp = detail.rentDiscountGbp;
+    billedPeriodsLabel = detail.billedPeriodsLabel;
+    rentBillingLabel = detail.rentBillingLabel;
+    rentBillingDetail = detail.rentBillingDetail;
+    proRataAdjustmentGbp = detail.proRataAdjustmentGbp;
+    proRataLineLabel = detail.proRataLineLabel;
+    proRataNote = detail.proRataNote;
+    contractActivatedLabel = detail.contractActivatedLabel;
+    hireLengthSinceActivationLabel = detail.hireLengthSinceActivationLabel;
+  }
+
+  return {
+    canApprovePayments: payments.canApprovePayments,
+    extraChargePendingPayment: payments.extraChargePendingPayment,
+    extraChargesOutstandingGbp: payments.extraChargesOutstandingGbp,
+    pendingScheduleRows,
+    pendingApprovalItems,
+    depositResolution: {
+      canResolveDeposit: payments.canResolveDeposit,
+      depositHeldGbp: payments.depositReceivedGbp,
+      depositReceivedGbp: payments.depositReceivedGbp,
+      currentSignedSettlementGbp: payments.currentSignedSettlementGbp,
+      depositDisposition: payments.depositDisposition,
+      terminationSummary: payments.terminationSummary,
+    },
+    finalAccountLedger: {
+      returnedAtIso,
+      driverChargeLineItems: payments.driverChargeLineItems,
+      extraChargeTimedPayments: payments.extraChargeTimedPayments,
+      settlementBalancePayments: payments.settlementBalancePayments.map((payment) => ({
+        id: payment.id,
+        amountGbp: payment.amountGbp,
+        paidAt: payment.paidAt,
+        direction: payment.direction,
+        paymentCategory: payment.paymentCategory,
+      })),
+    },
+    financialReview: buildHireEndHireFinancialReview({
+      returnDateYmd: input.returnDateYmd,
+      returnTimeHm: input.returnTimeHm || "12:00",
+      rentChargedGbp,
+      rentReceivedGbp,
+      contractPeriodStartLabel: formatUkDateAtTime(input.startDate, input.startTime),
+      contractActivatedLabel,
+      hireLengthSinceActivationLabel,
+      rentRateLabel: formatRentLabel(input.rentAmountGbp, input.rentCadence),
+      rentBillingLabel,
+      rentBillingDetail,
+      billedPeriodsLabel,
+      rentGrossAccruedGbp,
+      rentDiscountGbp,
+      proRataAdjustmentGbp,
+      proRataLineLabel,
+      proRataNote,
+      depositRequiredGbp: Number(
+        payments.terminationSummary?.depositGbp ??
+          payments.rows.find((row) => row.rowKind === "deposit")?.netDueGbp ??
+          0,
+      ),
+      depositReceivedGbp: Number(payments.depositReceivedGbp ?? 0),
+      extraCharges: payments.driverChargeLineItems.map((item) => ({
+        id: item.id,
+        chargeType: item.chargeType,
+        chargeTypeLabel: item.chargeTypeLabel,
+        description: item.description,
+        amountGbp: item.amountGbp,
+        resolution: item.resolution,
+      })),
+      extraChargesOutstandingGbp: payments.extraChargesOutstandingGbp,
+      pendingApprovalItems,
+    }),
   };
 }
 
@@ -370,29 +527,36 @@ export type HireEndHirePageData = {
 
 export async function loadHireEndHirePageAction(
   hireGroupId: string,
-  options?: { includeFinancialReview?: boolean },
+  options?: {
+    includeFinancialReview?: boolean;
+    /** Prefetch / step refresh: skip repair + vehicle sync side effects. */
+    skipSideEffects?: boolean;
+  },
 ): Promise<{ ok: true; data: HireEndHirePageData } | { ok: false; error: string }> {
   let authorized = await authorizeEndHireWrite(hireGroupId);
   if (!authorized.ok) return authorized;
 
   let repairedAutoComplete = false;
-  if (
-    await repairAutoCompletedEndHireIfNeeded({
-      id: authorized.hire.id,
-      parentCompanyId: authorized.hire.parentCompanyId,
-      status: authorized.hire.status,
-      endHireDraft: authorized.hire.endHireDraft,
-      checkinCompleted: authorized.hire.checkinCompleted,
-      terminatedAt: authorized.hire.terminatedAt,
-    })
-  ) {
-    repairedAutoComplete = true;
-    authorized = await authorizeEndHireWrite(hireGroupId);
-    if (!authorized.ok) return authorized;
+  if (!options?.skipSideEffects) {
+    if (
+      await repairAutoCompletedEndHireIfNeeded({
+        id: authorized.hire.id,
+        parentCompanyId: authorized.hire.parentCompanyId,
+        status: authorized.hire.status,
+        endHireDraft: authorized.hire.endHireDraft,
+        checkinCompleted: authorized.hire.checkinCompleted,
+        terminatedAt: authorized.hire.terminatedAt,
+      })
+    ) {
+      repairedAutoComplete = true;
+      authorized = await authorizeEndHireWrite(hireGroupId);
+      if (!authorized.ok) return authorized;
+    }
   }
 
   const { hire } = authorized;
   if (
+    !options?.skipSideEffects &&
     (hire.status === "ending" || hire.status === "terminated") &&
     !isHireEndHireFinalized({ status: hire.status, draft: hire.endHireDraft })
   ) {
@@ -400,13 +564,6 @@ export async function loadHireEndHirePageAction(
   }
 
   const supabase = await createClient();
-  const { data: group } = await supabase
-    .from("vehicle_hire_groups")
-    .select("id, status, start_date, start_time, activated_at, rent_amount_gbp, rent_cadence, vehicles(vrm)")
-    .eq("id", hire.id)
-    .maybeSingle();
-  if (!group) return { ok: false, error: "Hire not found." };
-
   const nowIso = new Date().toISOString();
   const draft =
     hire.endHireDraft ?? emptyHireEndHireDraft(nowIso, ukTodayYmd(), londonTimeHmNow());
@@ -418,6 +575,40 @@ export async function loadHireEndHirePageAction(
     nowIso,
   });
 
+  const includeFinancialReview =
+    options?.includeFinancialReview ??
+    (effectiveDraft.started &&
+      Boolean(effectiveDraft.returnDateYmd) &&
+      hireEndHireStepNeedsFinancialReview(effectiveDraft.step));
+
+  const needsReturnCharges =
+    hire.checkinCompleted &&
+    (effectiveDraft.step === "return_charges" || effectiveDraft.step === "final_account");
+
+  const groupPromise = supabase
+    .from("vehicle_hire_groups")
+    .select("id, status, start_date, start_time, activated_at, rent_amount_gbp, rent_cadence, vehicles(vrm)")
+    .eq("id", hire.id)
+    .maybeSingle();
+
+  const paymentsPromise =
+    includeFinancialReview && effectiveDraft.returnDateYmd
+      ? loadHirePaymentsPageAction(hire.id)
+      : Promise.resolve(null);
+
+  const returnChargesPromise = needsReturnCharges
+    ? loadHireReturnChargesAction(hire.id)
+    : Promise.resolve(null);
+
+  const [groupResult, paymentsResult, returnChargesResult] = await Promise.all([
+    groupPromise,
+    paymentsPromise,
+    returnChargesPromise,
+  ]);
+
+  const group = groupResult.data;
+  if (!group) return { ok: false, error: "Hire not found." };
+
   let financialReview: HireEndHireFinancialReview | null = null;
   let pendingApprovalItems: HireEndHirePendingApprovalItem[] = [];
   let pendingScheduleRows: HirePaymentPageRow[] = [];
@@ -427,174 +618,66 @@ export async function loadHireEndHirePageAction(
   let returnCharges: HireReturnChargesPageData | null = null;
   let depositResolution: HireEndHirePageData["depositResolution"] = null;
   let finalAccountLedger: HireEndHirePageData["finalAccountLedger"] = null;
+
   const vehicle = group.vehicles as { vrm?: string } | null;
   const startDate = (group.start_date as string | null) ?? null;
   const startTime = (group.start_time as string | null)?.slice(0, 5) || "09:00";
   const rentCadence = ((group.rent_cadence as RentCadence | null) ?? "weekly") as RentCadence;
-  const includeFinancialReview =
-    options?.includeFinancialReview ??
-    (effectiveDraft.started &&
-      Boolean(effectiveDraft.returnDateYmd) &&
-      hireEndHireStepNeedsFinancialReview(effectiveDraft.step));
+  const activatedAt = (group.activated_at as string | null) ?? null;
 
-  if (includeFinancialReview && effectiveDraft.returnDateYmd) {
+  if (paymentsResult?.ok && effectiveDraft.returnDateYmd) {
+    const billingMode =
+      canTerminateHire(hire.status) || hire.status === "ending"
+        ? effectiveDraft.rentBillingMode
+        : (paymentsResult.data.terminationSummary?.rentBillingMode ?? effectiveDraft.rentBillingMode);
+
     const returnedAtIso =
       hireEndHireReturnedAtIso(
         effectiveDraft.returnDateYmd,
         effectiveDraft.returnTimeHm || "12:00",
-      ) ?? new Date().toISOString();
-    const payments = await loadHirePaymentsPageAction(hire.id);
-    if (payments.ok) {
-      canApprovePayments = payments.data.canApprovePayments;
-      extraChargePendingPayment = payments.data.extraChargePendingPayment;
-      extraChargesOutstandingGbp = payments.data.extraChargesOutstandingGbp;
-      depositResolution = {
-        canResolveDeposit: payments.data.canResolveDeposit,
-        depositHeldGbp: payments.data.depositReceivedGbp,
-        depositReceivedGbp: payments.data.depositReceivedGbp,
-        currentSignedSettlementGbp: payments.data.currentSignedSettlementGbp,
-        depositDisposition: payments.data.depositDisposition,
-        terminationSummary: payments.data.terminationSummary,
-      };
-      pendingScheduleRows = payments.data.rows.filter(
-        (row) => row.paymentStatus === "pending_approval",
-      );
-      pendingApprovalItems = buildHireEndHirePendingApprovalItems({
-        scheduleRows: payments.data.rows,
-        pendingAmountForRow: hirePaymentPendingApprovalAmountGbp,
-        extraChargePending: payments.data.extraChargePendingPayment,
-        extraChargesOutstandingGbp: payments.data.extraChargesOutstandingGbp,
-      });
-      let rentChargedGbp = payments.data.summary.totalDueGbp;
-      let rentReceivedGbp = payments.data.summary.totalPaidGbp;
-      let rentGrossAccruedGbp = payments.data.summary.rentGrossAccruedGbp;
-      let rentDiscountGbp = payments.data.summary.totalDiscountGbp;
-      let billedPeriodsLabel: string | null = null;
-      let rentBillingLabel: string | null = null;
-      let rentBillingDetail: string | null = null;
-      let proRataAdjustmentGbp: number | null = null;
-      let proRataLineLabel: string | null = null;
-      let proRataNote: string | null = null;
-      let contractActivatedLabel: string | null = null;
-      let hireLengthSinceActivationLabel: string | null = null;
-      const billingMode =
-        canTerminateHire(hire.status) || hire.status === "ending"
-          ? effectiveDraft.rentBillingMode
-          : (payments.data.terminationSummary?.rentBillingMode ?? effectiveDraft.rentBillingMode);
-      if (canTerminateHire(hire.status) && returnedAtIso) {
-        const preview = await loadHireTerminationPreviewAction(
-          hire.id,
-          PROVISIONAL_TERMINATION_DEPOSIT_DISPOSITION,
-          null,
-          billingMode,
-          returnedAtIso,
-          effectiveDraft.returnDateYmd,
-        );
-        if (preview.ok) {
-          const detail = rentDetailFromTerminationAccounts(
-            preview.data.accounts,
-            billingMode,
-            startDate,
-            (group.activated_at as string | null) ?? null,
-          );
-          rentChargedGbp = detail.rentChargedGbp;
-          rentReceivedGbp = detail.rentReceivedGbp;
-          rentGrossAccruedGbp = detail.rentGrossAccruedGbp;
-          rentDiscountGbp = detail.rentDiscountGbp;
-          billedPeriodsLabel = detail.billedPeriodsLabel;
-          rentBillingLabel = detail.rentBillingLabel;
-          rentBillingDetail = detail.rentBillingDetail;
-          proRataAdjustmentGbp = detail.proRataAdjustmentGbp;
-          proRataLineLabel = detail.proRataLineLabel;
-          proRataNote = detail.proRataNote;
-          contractActivatedLabel = detail.contractActivatedLabel;
-          hireLengthSinceActivationLabel = detail.hireLengthSinceActivationLabel;
-        }
-      } else if (payments.data.terminationSummary) {
-        const detail = rentDetailFromTerminationAccounts(
-          payments.data.terminationSummary,
-          payments.data.terminationSummary.rentBillingMode,
-          startDate,
-          payments.data.terminationSummary.activatedAt,
-        );
-        rentChargedGbp = detail.rentChargedGbp;
-        rentReceivedGbp = detail.rentReceivedGbp;
-        rentGrossAccruedGbp = detail.rentGrossAccruedGbp;
-        rentDiscountGbp = detail.rentDiscountGbp;
-        billedPeriodsLabel = detail.billedPeriodsLabel;
-        rentBillingLabel = detail.rentBillingLabel;
-        rentBillingDetail = detail.rentBillingDetail;
-        proRataAdjustmentGbp = detail.proRataAdjustmentGbp;
-        proRataLineLabel = detail.proRataLineLabel;
-        proRataNote = detail.proRataNote;
-        contractActivatedLabel = detail.contractActivatedLabel;
-        hireLengthSinceActivationLabel = detail.hireLengthSinceActivationLabel;
-      }
-      finalAccountLedger = {
+      ) ?? nowIso;
+
+    let previewAccounts: HireTerminationAccountsSummary | null = null;
+    if (canTerminateHire(hire.status) && returnedAtIso) {
+      const preview = await loadHireTerminationPreviewAction(
+        hire.id,
+        PROVISIONAL_TERMINATION_DEPOSIT_DISPOSITION,
+        null,
+        billingMode,
         returnedAtIso,
-        driverChargeLineItems: payments.data.driverChargeLineItems,
-        extraChargeTimedPayments: payments.data.extraChargeTimedPayments,
-        settlementBalancePayments: payments.data.settlementBalancePayments.map((payment) => ({
-          id: payment.id,
-          amountGbp: payment.amountGbp,
-          paidAt: payment.paidAt,
-          direction: payment.direction,
-          paymentCategory: payment.paymentCategory,
-        })),
-      };
-      financialReview = buildHireEndHireFinancialReview({
-        returnDateYmd: effectiveDraft.returnDateYmd,
-        returnTimeHm: effectiveDraft.returnTimeHm || "12:00",
-        rentChargedGbp,
-        rentReceivedGbp,
-        contractPeriodStartLabel: formatUkDateAtTime(startDate, startTime),
-        contractActivatedLabel,
-        hireLengthSinceActivationLabel,
-        rentRateLabel: formatRentLabel(group.rent_amount_gbp, rentCadence),
-        rentBillingLabel,
-        rentBillingDetail,
-        billedPeriodsLabel,
-        rentGrossAccruedGbp,
-        rentDiscountGbp,
-        proRataAdjustmentGbp,
-        proRataLineLabel,
-        proRataNote,
-        depositRequiredGbp: Number(
-          payments.data.terminationSummary?.depositGbp ??
-            payments.data.rows.find((row) => row.rowKind === "deposit")?.netDueGbp ??
-            0,
-        ),
-        depositReceivedGbp: Number(payments.data.depositReceivedGbp ?? 0),
-        extraCharges: payments.data.driverChargeLineItems.map((item) => ({
-          id: item.id,
-          chargeType: item.chargeType,
-          chargeTypeLabel: item.chargeTypeLabel,
-          description: item.description,
-          amountGbp: item.amountGbp,
-          resolution: item.resolution,
-        })),
-        // Same outstanding figure as Payments — nets approved driver_charge receipts.
-        extraChargesOutstandingGbp: payments.data.extraChargesOutstandingGbp,
-        pendingApprovalItems,
-      });
+        effectiveDraft.returnDateYmd,
+        paymentsResult.data,
+      );
+      if (preview.ok) previewAccounts = preview.data.accounts;
     }
+
+    const slice = assembleEndHireFinancialSlice({
+      hireStatus: hire.status,
+      returnDateYmd: effectiveDraft.returnDateYmd,
+      returnTimeHm: effectiveDraft.returnTimeHm || "12:00",
+      rentBillingMode: billingMode,
+      startDate,
+      startTime,
+      activatedAt,
+      rentAmountGbp: (group.rent_amount_gbp as number | null) ?? null,
+      rentCadence,
+      payments: paymentsResult.data,
+      previewAccounts,
+    });
+    financialReview = slice.financialReview;
+    pendingApprovalItems = slice.pendingApprovalItems;
+    pendingScheduleRows = slice.pendingScheduleRows;
+    extraChargePendingPayment = slice.extraChargePendingPayment;
+    extraChargesOutstandingGbp = slice.extraChargesOutstandingGbp;
+    canApprovePayments = slice.canApprovePayments;
+    depositResolution = slice.depositResolution;
+    finalAccountLedger = slice.finalAccountLedger;
   }
 
-  if (
-    hire.checkinCompleted &&
-    (effectiveDraft.step === "return_charges" || effectiveDraft.step === "final_account")
-  ) {
-    const returnChargesRes = await loadHireReturnChargesAction(hire.id);
-    if (returnChargesRes.ok) {
-      returnCharges = returnChargesRes.data;
-    }
+  if (returnChargesResult?.ok) {
+    returnCharges = returnChargesResult.data;
   }
 
-  const hasReturnChargeWork = returnCharges
-    ? returnCharges.newDamages.length > 0 ||
-      returnCharges.fuelShortfall ||
-      returnCharges.missingAccessories.length > 0
-    : false;
   const returnChargesReady = returnCharges
     ? returnCharges.returnChargesReady
     : areReturnChargesReady({
@@ -649,9 +732,7 @@ export async function loadHireEndHirePageAction(
       contractRentStartDayMonthLabel: startDate
         ? (formatUkDateTextLong(startDate).replace(/\s+\d{4}$/, "") || formatUkDateTextLong(startDate))
         : "the contract start date",
-      signedActivatedLabel: group.activated_at
-        ? formatUkDateTimeText(group.activated_at as string)
-        : "—",
+      signedActivatedLabel: activatedAt ? formatUkDateTimeText(activatedAt) : "—",
       repairedAutoComplete,
       returnCharges,
       finalAccountLedger,
@@ -738,78 +819,10 @@ export async function cancelHireEndHireAction(
 
   const admin = createSupabaseAdminClient();
 
+  const revert = await revertEndHireSessionArtifacts(admin, hire.id);
+  if (!revert.ok) return revert;
+
   if (hire.status === "terminated" || hire.status === "completed") {
-    // Reverse check-in: remove inspection (+ cascaded damages/media) and check-in damage charges/payments.
-    const { data: checkinCharges } = await admin
-      .from("vehicle_hire_driver_charge_line_items")
-      .select("id, balance_payment_id")
-      .eq("hire_group_id", hire.id)
-      .in("source_kind", [...HIRE_RETURN_CHARGE_SOURCE_KINDS]);
-
-    const paymentIds = [
-      ...new Set(
-        (checkinCharges ?? [])
-          .map((row) => (row.balance_payment_id as string | null)?.trim() || "")
-          .filter(Boolean),
-      ),
-    ];
-
-    const { error: chargeDeleteError } = await admin
-      .from("vehicle_hire_driver_charge_line_items")
-      .delete()
-      .eq("hire_group_id", hire.id)
-      .in("source_kind", [...HIRE_RETURN_CHARGE_SOURCE_KINDS]);
-    if (chargeDeleteError) return { ok: false, error: chargeDeleteError.message };
-
-    if (paymentIds.length > 0) {
-      const { error: paymentDeleteError } = await admin
-        .from("vehicle_hire_balance_payments")
-        .delete()
-        .eq("hire_group_id", hire.id)
-        .in("id", paymentIds);
-      if (paymentDeleteError) return { ok: false, error: paymentDeleteError.message };
-    }
-
-    // Also remove orphaned return-charge receipts by note (paid_now may not link via charge row).
-    await admin
-      .from("vehicle_hire_balance_payments")
-      .delete()
-      .eq("hire_group_id", hire.id)
-      .eq("payment_category", "driver_charge")
-      .or("notes.ilike.%check-in%,notes.ilike.%return charge%");
-
-    const { data: checkinInspections } = await admin
-      .from("vehicle_hire_inspections")
-      .select("id")
-      .eq("hire_group_id", hire.id)
-      .eq("kind", "checkin");
-    const checkinInspectionIds = (checkinInspections ?? [])
-      .map((row) => (row.id as string | null)?.trim() || "")
-      .filter(Boolean);
-    if (checkinInspectionIds.length > 0) {
-      const { data: checkinMedia } = await admin
-        .from("vehicle_hire_inspection_media")
-        .select("file_path")
-        .in("inspection_id", checkinInspectionIds);
-      const mediaPaths = [
-        ...new Set(
-          (checkinMedia ?? [])
-            .map((row) => (row.file_path as string | null)?.trim() || "")
-            .filter(Boolean),
-        ),
-      ];
-      if (mediaPaths.length > 0) {
-        await admin.storage.from("hire-inspection-media").remove(mediaPaths);
-      }
-    }
-
-    const { error: inspectionDeleteError } = await admin
-      .from("vehicle_hire_inspections")
-      .delete()
-      .eq("hire_group_id", hire.id)
-      .eq("kind", "checkin");
-    if (inspectionDeleteError) return { ok: false, error: inspectionDeleteError.message };
-
     await admin
       .from("vehicle_hire_agreements")
       .update({ status: "active" })

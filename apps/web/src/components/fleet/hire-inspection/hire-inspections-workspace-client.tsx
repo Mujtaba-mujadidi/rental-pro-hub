@@ -19,7 +19,7 @@ import {
 } from "@/lib/fleet/hire-inspection-accessories";
 import { hireInspectionEndedEmptyMessage } from "@/lib/fleet/hire-inspection-ended-display";
 import type { VehicleDamageDiagramEntry } from "@/components/fleet/hire-inspection/vehicle-damage-diagram";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 
 function isContractEnded(status: string): boolean {
   return status === "terminated" || status === "completed";
@@ -56,7 +56,9 @@ export function HireInspectionsWorkspaceClient({
   vehicleId,
   focusKind = "checkout",
   audience = "staff",
+  embedded = false,
   onCheckinComplete,
+  onContentReady,
 }: {
   hireGroupId: string;
   hireStatus: string;
@@ -64,13 +66,19 @@ export function HireInspectionsWorkspaceClient({
   vehicleId?: string | null;
   focusKind?: "checkout" | "checkin";
   audience?: "staff" | "driver";
+  /** End-hire wizard: show check-in directly without inspection tabs/chrome. */
+  embedded?: boolean;
   onCheckinComplete?: () => void | Promise<void>;
+  /** Fired once inspections are ready to show (cache hit or network load). */
+  onContentReady?: () => void;
 }) {
   const contractEnded = isContractEnded(hireStatus);
   const query = useHireWorkspaceCachedLoad<{
     checkout: HireInspectionPayload;
     checkin: HireInspectionPayload | null;
-    trackerLinked: boolean;
+    tracker:
+      | { linked: false }
+      | { linked: true; odometerMiles: number | null; liveUnavailable: boolean };
   }>({
     key: "inspections",
     useCache: audience === "staff",
@@ -85,12 +93,20 @@ export function HireInspectionsWorkspaceClient({
           : Promise.resolve({ ok: true as const, linked: false as const }),
       ]);
       if (!checkoutRes.ok) return checkoutRes;
+      const tracker =
+        trackerRes.ok && trackerRes.linked
+          ? {
+              linked: true as const,
+              odometerMiles: trackerRes.odometerMiles,
+              liveUnavailable: trackerRes.liveUnavailable,
+            }
+          : { linked: false as const };
       return {
         ok: true as const,
         data: {
           checkout: checkoutRes.data,
           checkin: checkinRes.ok ? checkinRes.data : null,
-          trackerLinked: trackerRes.ok && trackerRes.linked,
+          tracker,
         },
       };
     },
@@ -100,7 +116,13 @@ export function HireInspectionsWorkspaceClient({
   const error = query.error;
   const checkoutData = query.data?.checkout ?? null;
   const checkinData = query.data?.checkin ?? null;
-  const trackerLinked = query.data?.trackerLinked ?? false;
+  const tracker = query.data?.tracker ?? null;
+  const trackerLinked = Boolean(tracker?.linked);
+
+  useEffect(() => {
+    if (loading) return;
+    if (error || checkoutData) onContentReady?.();
+  }, [loading, error, checkoutData, onContentReady]);
 
   const checkoutCompleted = checkoutData?.status === "completed";
   const checkinCompleted = checkinData?.status === "completed";
@@ -214,6 +236,34 @@ export function HireInspectionsWorkspaceClient({
   if (loading && !checkoutData) return inspectionLoader();
   if (error) return <p className="rph-alert-error text-sm">{error}</p>;
 
+  if (embedded && contractEnded && focusKind === "checkin") {
+    if (!checkoutCompleted) {
+      return (
+        <p className="rph-alert-error text-sm">
+          Complete vehicle checkout before starting check-in.
+        </p>
+      );
+    }
+    if (checkinCompleted && completedCheckinView) {
+      return completedCheckinView;
+    }
+    return (
+      <HireInspectionWizard
+        hireGroupId={hireGroupId}
+        kind="checkin"
+        vehicleLabel={vehicleLabel}
+        hireStatus={hireStatus}
+        vehicleId={vehicleId}
+        audience={audience}
+        embedded
+        initialInspection={checkinData}
+        initialCheckoutBaseline={checkoutData}
+        initialTracker={tracker}
+        onStaffComplete={onCheckinComplete}
+      />
+    );
+  }
+
   const showCheckoutWizard =
     audience === "staff" && focusKind === "checkout" && !checkoutCompleted;
 
@@ -240,6 +290,8 @@ export function HireInspectionsWorkspaceClient({
               vehicleId={vehicleId}
               audience={audience}
               embedded
+              initialInspection={checkoutData}
+              initialTracker={tracker}
             />
           ) : null
         }
@@ -253,6 +305,9 @@ export function HireInspectionsWorkspaceClient({
               vehicleId={vehicleId}
               audience={audience}
               embedded
+              initialInspection={checkinData}
+              initialCheckoutBaseline={checkoutData}
+              initialTracker={tracker}
               onStaffComplete={onCheckinComplete}
             />
           ) : null

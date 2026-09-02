@@ -38,7 +38,7 @@ describe("hire-end-hire draft helpers", () => {
     const draft = {
       ...emptyHireEndHireDraft("t", "2026-08-20", "12:00"),
       started: true,
-      step: "return_details",
+      step: "return_details" as const,
       returnChargesDraftSavedAt: "2026-08-21T10:00:00.000Z",
     };
     expect(

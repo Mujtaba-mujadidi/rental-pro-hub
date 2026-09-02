@@ -31,6 +31,7 @@ import {
   hireEndHireStepNeedsFinancialReview,
   type HireEndHireStep,
 } from "@/lib/fleet/hire-end-hire";
+import { hireWorkspaceKeysInvalidatedByInspectionChange } from "@/lib/fleet/hire-workspace-tab-cache";
 import {
   formatHireEndHireSignedAmount,
   formatHireEndHireSectionFooter,
@@ -43,15 +44,17 @@ import {
 import { formatGbp } from "@/lib/fleet/maintenance";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
-function endHireBadgeLabel(data: HireEndHirePageData): string {
-  if (data.isEndHireFinalized) return "Termination finalised";
-  if (data.checkinCompleted) return "Check-in complete";
-  if (data.status === "terminated") return "Contract ended";
-  if (data.status === "ending") return "Ending hire";
-  return "Active hire";
+function financialReviewPrefetchKey(input: {
+  returnDateYmd: string;
+  returnTimeHm: string;
+  rentBillingMode?: string | null;
+}): string {
+  return `${input.returnDateYmd.trim()}|${(input.returnTimeHm || "00:00").trim()}|${input.rentBillingMode ?? ""}`;
 }
+
+
 
 function stepTransitionLabel(step: HireEndHireStep): string {
   switch (step) {
@@ -73,7 +76,7 @@ function stepTransitionLabel(step: HireEndHireStep): string {
 function EndHireStepTransitionOverlay({ message }: { message: string }) {
   return (
     <div
-      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-2xl bg-rph-page/85 backdrop-blur-[1px]"
+      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-2xl bg-rph-page/95 backdrop-blur-[2px]"
       role="status"
       aria-live="polite"
       aria-busy="true"
@@ -609,7 +612,7 @@ function pendingReviewTarget(
 }
 
 export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string }) {
-  const { shell } = useHireWorkspace();
+  const { shell, invalidateCache, readCache, writeCache } = useHireWorkspace();
   const router = useRouter();
   const [data, setData] = useState<HireEndHirePageData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -629,8 +632,15 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
   const [returnTimeHm, setReturnTimeHm] = useState("");
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState("");
+  const financialReviewKeyRef = useRef<string | null>(null);
+  const prefetchInFlightRef = useRef<string | null>(null);
+  const waitingForCheckinReadyRef = useRef(false);
 
-  function applyPageData(page: HireEndHirePageData) {
+  function invalidateEndHireWorkspaceCaches() {
+    invalidateCache(hireWorkspaceKeysInvalidatedByInspectionChange());
+  }
+
+  function applyPageData(page: HireEndHirePageData, options?: { financialReviewKey?: string | null }) {
     setData(page);
     setReturnDateYmd(page.draft.returnDateYmd);
     setReturnTimeHm(page.draft.returnTimeHm);
@@ -639,11 +649,58 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
     if (page.draft.updatedAt) {
       setSavedLabel(`Saved ${formatUkDateTime(page.draft.updatedAt)}`);
     }
+    if (options?.financialReviewKey !== undefined) {
+      financialReviewKeyRef.current = options.financialReviewKey;
+    } else if (page.financialReview) {
+      financialReviewKeyRef.current = financialReviewPrefetchKey({
+        returnDateYmd: page.draft.returnDateYmd,
+        returnTimeHm: page.draft.returnTimeHm,
+        rentBillingMode: page.draft.rentBillingMode,
+      });
+    }
+  }
+
+  /** Show the step overlay immediately — must not run inside startTransition (low-priority paint). */
+  function beginStepTransition(message: string, nextStep?: HireEndHireStep) {
+    setTransitionMessage(message);
+    if (nextStep) {
+      setData((prev) =>
+        prev ? { ...prev, draft: { ...prev.draft, step: nextStep } } : prev,
+      );
+    }
+  }
+
+  const clearStepTransition = useCallback(() => {
+    waitingForCheckinReadyRef.current = false;
+    setTransitionMessage(null);
+  }, []);
+
+  const onCheckinContentReady = useCallback(() => {
+    if (!waitingForCheckinReadyRef.current) return;
+    waitingForCheckinReadyRef.current = false;
+    setTransitionMessage(null);
+  }, []);
+
+  const stepBusy = Boolean(transitionMessage) || pending;
+
+  function hasFreshFinancialReview(forStep: HireEndHireStep): boolean {
+    if (!data?.financialReview) return false;
+    if (forStep !== "financial_review" && forStep !== "final_account") return false;
+    const key = financialReviewPrefetchKey({
+      returnDateYmd,
+      returnTimeHm,
+      rentBillingMode: data.draft.rentBillingMode,
+    });
+    return financialReviewKeyRef.current === key;
   }
 
   async function refreshPageData(
     message: string,
-    options?: { refreshShell?: boolean; includeFinancialReview?: boolean },
+    options?: {
+      refreshShell?: boolean;
+      includeFinancialReview?: boolean;
+      skipSideEffects?: boolean;
+    },
   ) {
     setTransitionMessage(message);
     try {
@@ -651,13 +708,24 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
       const includeFinancialReview =
         options?.includeFinancialReview ??
         (data?.draft.step != null && hireEndHireStepNeedsFinancialReview(data.draft.step));
-      const res = await loadHireEndHirePageAction(hireGroupId, { includeFinancialReview });
+      const res = await loadHireEndHirePageAction(hireGroupId, {
+        includeFinancialReview,
+        skipSideEffects: options?.skipSideEffects ?? !options?.refreshShell,
+      });
       if (!res.ok) {
         setError(res.error);
         return false;
       }
       setError(null);
-      applyPageData(res.data);
+      applyPageData(res.data, {
+        financialReviewKey: includeFinancialReview
+          ? financialReviewPrefetchKey({
+              returnDateYmd: res.data.draft.returnDateYmd,
+              returnTimeHm: res.data.draft.returnTimeHm,
+              rentBillingMode: res.data.draft.rentBillingMode,
+            })
+          : financialReviewKeyRef.current,
+      });
       if (res.data.repairedAutoComplete) router.refresh();
       return true;
     } finally {
@@ -693,16 +761,133 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
     : "return_details";
   const started = data?.draft.started === true;
 
+  // Prefetch financial review while staff are still on Step 1.
+  useEffect(() => {
+    if (!started || !data || step !== "return_details") return;
+    if (!returnDateYmd.trim() || !returnTimeHm.trim() || !reason.trim()) return;
+    if (transitionMessage) return;
+
+    const key = financialReviewPrefetchKey({
+      returnDateYmd,
+      returnTimeHm,
+      rentBillingMode: data.draft.rentBillingMode,
+    });
+    if (financialReviewKeyRef.current === key && data.financialReview) return;
+    if (prefetchInFlightRef.current === key) return;
+
+    const timer = window.setTimeout(() => {
+      prefetchInFlightRef.current = key;
+      void (async () => {
+        try {
+          const saveRes = await saveHireEndHireDraftAction({
+            hireGroupId,
+            step: "return_details",
+            returnDateYmd,
+            returnTimeHm,
+            reason,
+            notes,
+            rentBillingMode: data.draft.rentBillingMode,
+          });
+          if (!saveRes.ok) return;
+          const loadRes = await loadHireEndHirePageAction(hireGroupId, {
+            includeFinancialReview: true,
+            skipSideEffects: true,
+          });
+          if (!loadRes.ok) return;
+          // Stay on Step 1 — only merge the expensive financial payload.
+          setData((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  draft: { ...saveRes.draft, step: prev.draft.step },
+                  financialReview: loadRes.data.financialReview,
+                  pendingApprovalItems: loadRes.data.pendingApprovalItems,
+                  pendingScheduleRows: loadRes.data.pendingScheduleRows,
+                  extraChargePendingPayment: loadRes.data.extraChargePendingPayment,
+                  extraChargesOutstandingGbp: loadRes.data.extraChargesOutstandingGbp,
+                  canApprovePayments: loadRes.data.canApprovePayments,
+                  depositResolution: loadRes.data.depositResolution,
+                  finalAccountLedger: loadRes.data.finalAccountLedger,
+                }
+              : prev,
+          );
+          financialReviewKeyRef.current = key;
+          setSavedLabel("Saved just now");
+        } finally {
+          if (prefetchInFlightRef.current === key) prefetchInFlightRef.current = null;
+        }
+      })();
+    }, 450);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    started,
+    data,
+    step,
+    returnDateYmd,
+    returnTimeHm,
+    reason,
+    notes,
+    hireGroupId,
+    transitionMessage,
+  ]);
+
+  // Warm the inspections workspace cache while staff are on financial review / check-in.
+  useEffect(() => {
+    if (!started || !data) return;
+    if (step !== "financial_review" && step !== "checkin") return;
+    if (readCache("inspections") !== undefined) return;
+
+    let cancelled = false;
+    void (async () => {
+      const { loadHireInspectionAction, loadHireInspectionTrackerOdometerAction } = await import(
+        "@/app/actions/hire-inspections"
+      );
+      const [checkoutRes, checkinRes, trackerRes] = await Promise.all([
+        loadHireInspectionAction(hireGroupId, "checkout"),
+        loadHireInspectionAction(hireGroupId, "checkin"),
+        loadHireInspectionTrackerOdometerAction({
+          hireGroupId,
+          vehicleId: shell.vehicleId,
+        }),
+      ]);
+      if (cancelled || !checkoutRes.ok) return;
+      const tracker =
+        trackerRes.ok && trackerRes.linked
+          ? {
+              linked: true as const,
+              odometerMiles: trackerRes.odometerMiles,
+              liveUnavailable: trackerRes.liveUnavailable,
+            }
+          : { linked: false as const };
+      writeCache("inspections", {
+        checkout: checkoutRes.data,
+        checkin: checkinRes.ok ? checkinRes.data : null,
+        tracker,
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [started, data, step, hireGroupId, shell.vehicleId, readCache, writeCache]);
+
   const proposedReturnLabel = useMemo(() => {
     if (!returnDateYmd) return "—";
     return formatUkCalendarDateTimeText(returnDateYmd, returnTimeHm || "00:00");
   }, [returnDateYmd, returnTimeHm]);
 
   function saveDraft(nextStep?: HireEndHireStep) {
-    startTransition(async () => {
-      const message = nextStep ? stepTransitionLabel(nextStep) : "Saving…";
-      setTransitionMessage(message);
-      const currentStep = data?.draft.step ?? "return_details";
+    const message = nextStep ? stepTransitionLabel(nextStep) : "Saving…";
+    const previousStep = data?.draft.step ?? "return_details";
+    // Set before optimistic step change so a warm cache can clear the overlay during save.
+    if (nextStep === "checkin") {
+      waitingForCheckinReadyRef.current = true;
+    }
+    beginStepTransition(message, nextStep);
+
+    void (async () => {
+      const currentStep = previousStep;
       const res = await saveHireEndHireDraftAction({
         hireGroupId,
         step: nextStep,
@@ -714,17 +899,19 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
       });
       if (!res.ok) {
         setError(res.error);
-        setTransitionMessage(null);
+        setData((prev) =>
+          prev ? { ...prev, draft: { ...prev.draft, step: previousStep } } : prev,
+        );
+        clearStepTransition();
         return;
       }
       setSavedLabel("Saved just now");
 
       const targetStep = nextStep ?? res.draft.step;
       const needsFinancialReview = hireEndHireStepNeedsFinancialReview(targetStep);
-      const hasCachedFinancialReview = Boolean(data?.financialReview);
       const canUseCachedFinancialReview =
         needsFinancialReview &&
-        hasCachedFinancialReview &&
+        hasFreshFinancialReview(targetStep) &&
         (targetStep === "financial_review" ||
           (targetStep === "checkin" && currentStep === "financial_review"));
 
@@ -747,12 +934,17 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
           : prev,
       );
 
-      if (
-        targetStep === "return_details" ||
-        canUseCachedFinancialReview ||
-        targetStep === "checkin"
-      ) {
-        setTransitionMessage(null);
+      if (targetStep === "checkin") {
+        waitingForCheckinReadyRef.current = true;
+        // onContentReady may already have fired while save was in flight (warm cache).
+        if (readCache("inspections") !== undefined) {
+          clearStepTransition();
+        }
+        return;
+      }
+
+      if (targetStep === "return_details" || canUseCachedFinancialReview) {
+        clearStepTransition();
         return;
       }
       if (targetStep === "return_charges") {
@@ -763,14 +955,14 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
         await refreshPageData(message, { includeFinancialReview: needsFinancialReview });
         return;
       }
-      setTransitionMessage(null);
-    });
+      clearStepTransition();
+    })();
   }
 
   function continueToFinalAccount() {
-    startTransition(async () => {
+    setTransitionMessage("Saving return charges…");
+    void (async () => {
       setError(null);
-      setTransitionMessage("Saving return charges…");
       const saveRes = await returnChargesRef.current?.saveDraft();
       if (saveRes && !saveRes.ok) {
         setError(saveRes.error);
@@ -778,7 +970,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
         return;
       }
 
-      setTransitionMessage("Loading final account…");
+      beginStepTransition("Loading final account…", "final_account");
       const res = await saveHireEndHireDraftAction({
         hireGroupId,
         step: "final_account",
@@ -790,17 +982,20 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
       });
       if (!res.ok) {
         setError(res.error);
+        setData((prev) =>
+          prev ? { ...prev, draft: { ...prev.draft, step: "return_charges" } } : prev,
+        );
         setTransitionMessage(null);
         return;
       }
       setSavedLabel("Saved just now");
       setData((prev) => (prev ? { ...prev, draft: res.draft } : prev));
       await refreshPageData("Loading final account…", { includeFinancialReview: true });
-    });
+    })();
   }
 
   async function advanceToReturnChargesAfterCheckin() {
-    setTransitionMessage("Loading return charges…");
+    beginStepTransition("Loading return charges…", "return_charges");
     const res = await saveHireEndHireDraftAction({
       hireGroupId,
       step: "return_charges",
@@ -812,6 +1007,9 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
     });
     if (!res.ok) {
       setError(res.error);
+      setData((prev) =>
+        prev ? { ...prev, draft: { ...prev.draft, step: "checkin" } } : prev,
+      );
       setTransitionMessage(null);
       return;
     }
@@ -824,32 +1022,34 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
   }
 
   function onConfirmStart() {
+    setStartConfirmOpen(false);
+    setTransitionMessage("Starting contract termination…");
+    financialReviewKeyRef.current = null;
     startTransition(async () => {
-      setTransitionMessage("Starting contract termination…");
       const res = await startHireEndHireAction(hireGroupId);
       if (!res.ok) {
         setError(res.error);
-        setStartConfirmOpen(false);
         setTransitionMessage(null);
         return;
       }
-      setStartConfirmOpen(false);
       setSavedLabel("Saved just now");
+      invalidateEndHireWorkspaceCaches();
       await refreshPageData("Opening end hire…", { refreshShell: true });
     });
   }
 
   function onConfirmCancel() {
+    setCancelConfirmOpen(false);
+    setTransitionMessage("Cancelling end hire…");
+    financialReviewKeyRef.current = null;
     startTransition(async () => {
-      setTransitionMessage("Cancelling end hire…");
       const res = await cancelHireEndHireAction(hireGroupId);
       if (!res.ok) {
         setError(res.error);
-        setCancelConfirmOpen(false);
         setTransitionMessage(null);
         return;
       }
-      setCancelConfirmOpen(false);
+      invalidateEndHireWorkspaceCaches();
       await refreshPageData("Restoring active hire…", { refreshShell: true });
     });
   }
@@ -872,8 +1072,9 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
   }
 
   function onConfirmReturn() {
-    startTransition(async () => {
-      setTransitionMessage("Confirming return and preparing check-in…");
+    beginStepTransition("Confirming return and preparing check-in…", "checkin");
+    waitingForCheckinReadyRef.current = true;
+    void (async () => {
       const res = await confirmHireEndHireReturnAction({
         hireGroupId,
         returnDateYmd,
@@ -884,7 +1085,10 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
       });
       if (!res.ok) {
         setError(res.error);
-        setTransitionMessage(null);
+        setData((prev) =>
+          prev ? { ...prev, draft: { ...prev.draft, step: "financial_review" } } : prev,
+        );
+        clearStepTransition();
         return;
       }
       setSavedLabel("Saved just now");
@@ -898,29 +1102,39 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
             }
           : prev,
       );
-      setTransitionMessage(null);
+      // Overlay stays until check-in content reports ready (or cache is already warm).
+      if (readCache("inspections") !== undefined) {
+        clearStepTransition();
+      }
       void router.refresh();
-    });
+    })();
   }
 
   function onConfirmFinalize() {
+    setFinalizeConfirmOpen(false);
+    setTransitionMessage("Finalising contract termination…");
     startTransition(async () => {
-      setTransitionMessage("Finalising contract termination…");
       const res = await finalizeHireEndHireAction(hireGroupId, depositFinalizePayload ?? undefined);
       if (!res.ok) {
         setError(res.error);
-        setFinalizeConfirmOpen(false);
         setTransitionMessage(null);
         return;
       }
-      setFinalizeConfirmOpen(false);
       setDepositFinalizePayload(null);
       await refreshPageData("Updating final account…", { refreshShell: true });
     });
   }
 
   if (!data && !error) {
-    return <p className="rph-muted text-sm">Loading end hire…</p>;
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-16" role="status" aria-live="polite">
+        <span
+          className="h-10 w-10 animate-spin rounded-full border-[3px] border-rph-border border-t-rph-rail"
+          aria-hidden
+        />
+        <p className="rph-muted text-sm">Loading end hire…</p>
+      </div>
+    );
   }
   if (error && !data) {
     return <p className="rph-alert-error text-sm">{error}</p>;
@@ -950,7 +1164,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
           <button
             type="button"
             className="inline-flex h-11 items-center justify-center rounded-lg bg-red-600 px-6 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 disabled:opacity-50"
-            disabled={pending || !data.canConfirmReturn}
+            disabled={stepBusy || !data.canConfirmReturn}
             onClick={() => setStartConfirmOpen(true)}
           >
             Start contract termination
@@ -969,7 +1183,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
           confirmLabel="Start ending contract"
           cancelLabel="Keep hire active"
           variant="danger"
-          pending={pending}
+          pending={false}
           onConfirm={onConfirmStart}
           onCancel={() => setStartConfirmOpen(false)}
         />
@@ -984,13 +1198,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
     <div className="space-y-4">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rph-pill rph-pill-active">{endHireBadgeLabel(data)}</span>
-            <span className="text-xs text-rph-fg-muted">
-              Hire #{data.hireGroupIdShort} · {data.vehicleVrm}
-            </span>
-          </div>
-          <h1 className="mt-2 text-2xl font-semibold text-rph-fg">
+          <h1 className="text-2xl font-semibold text-rph-fg">
             {step === "final_account" ? "Final account" : "End hire"}
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-rph-fg-secondary">
@@ -1001,31 +1209,38 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
               : "Complete each stage in order. Progress is saved to the company account so another authorised device can continue."}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col items-end gap-1.5 text-right">
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
             <span aria-hidden>✓</span>
             {savedLabel}
           </span>
-          {data.canCancelEndHire ? (
+          <div className="flex flex-wrap items-center justify-end gap-2 text-sm">
             <button
               type="button"
-              className="rph-btn-ghost h-10 px-3 text-red-700 hover:text-red-800 dark:text-red-300"
-              disabled={pending}
-              onClick={() => setCancelConfirmOpen(true)}
+              className="inline-flex h-9 items-center rounded-lg border border-sky-200 bg-sky-50 px-3 font-semibold text-sky-900 transition-colors hover:bg-sky-100 disabled:opacity-50 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-100 dark:hover:bg-sky-950/70"
+              disabled={stepBusy}
+              onClick={onSaveAndExit}
             >
-              Cancel ending
+              Save and exit
             </button>
-          ) : null}
-          <button type="button" className="rph-btn-ghost h-10 px-3" disabled={pending} onClick={onSaveAndExit}>
-            Save and exit
-          </button>
+            {data.canCancelEndHire ? (
+              <button
+                type="button"
+                className="inline-flex h-9 items-center rounded-lg border border-red-200 bg-red-50 px-3 font-semibold text-red-800 transition-colors hover:bg-red-100 disabled:opacity-50 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/60"
+                disabled={stepBusy}
+                onClick={() => setCancelConfirmOpen(true)}
+              >
+                Cancel end hire
+              </button>
+            ) : null}
+          </div>
         </div>
       </header>
 
       <nav className="grid gap-2 rounded-2xl border border-rph-border bg-rph-raised p-3 sm:grid-cols-5" aria-label="End hire stages">
         {HIRE_END_HIRE_STEPS.map((item, index) => {
           const status = hireEndHireStepNavStatus(step, furthestStep, item);
-          const canNavigate = status === "done" && !pending;
+          const canNavigate = status === "done" && !stepBusy;
           const cardClass = `rounded-xl border px-3 py-2.5 transition-all duration-200 ease-out ${
             canNavigate ? "cursor-pointer hover:-translate-y-0.5 hover:shadow-md" : ""
           } ${
@@ -1074,11 +1289,15 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
 
       {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
 
-      <div className="relative space-y-4">
+      <div className="relative min-h-[28rem] space-y-4">
         {showStepTransition && transitionMessage ? (
           <EndHireStepTransitionOverlay message={transitionMessage} />
         ) : null}
 
+        <div
+          className={`space-y-4 ${showStepTransition ? "pointer-events-none invisible" : ""}`}
+          aria-hidden={showStepTransition}
+        >
       {step === "return_details" ? (
         <section className="overflow-hidden rounded-2xl border border-rph-border bg-rph-raised shadow-sm">
           <div className="border-b border-rph-border px-5 py-5 sm:px-6">
@@ -1127,7 +1346,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
             primaryLabel="Review financial position"
             onPrimary={() => saveDraft("financial_review")}
             primaryDisabled={!returnDateYmd || !returnTimeHm || !reason}
-            pending={pending}
+            pending={stepBusy}
           />
         </section>
       ) : null}
@@ -1173,7 +1392,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
             }
             onPrimary={returnAlreadyConfirmed ? () => saveDraft("checkin") : onConfirmReturn}
             primaryDisabled={returnAlreadyConfirmed ? false : !data.canConfirmReturn}
-            pending={pending}
+            pending={stepBusy}
           />
         </section>
       ) : null}
@@ -1191,12 +1410,14 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
           <div className="p-4 sm:p-5">
             <HireInspectionsWorkspaceClient
               hireGroupId={hireGroupId}
-              hireStatus={shell.status}
+              hireStatus={data.status}
               vehicleLabel={`${shell.vehicleVrm} · ${shell.vehicleLabel}`}
               vehicleId={shell.vehicleId}
               focusKind="checkin"
               audience="staff"
+              embedded
               onCheckinComplete={advanceToReturnChargesAfterCheckin}
+              onContentReady={onCheckinContentReady}
             />
           </div>
           <EndHireStepFooter
@@ -1208,7 +1429,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
             }
             onPrimary={() => saveDraft("return_charges")}
             primaryDisabled={!data.checkinCompleted}
-            pending={pending}
+            pending={stepBusy}
           />
         </section>
       ) : null}
@@ -1255,8 +1476,8 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
             stepLabel="Step 4 of 5"
             primaryLabel="Post charges & calculate final account"
             onPrimary={continueToFinalAccount}
-            primaryDisabled={pending || !returnChargesCanContinue}
-            pending={pending}
+            primaryDisabled={stepBusy || !returnChargesCanContinue}
+            pending={stepBusy}
           />
         </section>
       ) : null}
@@ -1297,12 +1518,13 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
               primaryLabel="Confirm final account"
               onPrimary={() => setFinalizeConfirmOpen(true)}
               primaryDisabled={!data.canFinalizeEndHire || finalizeBlockedByDeposit}
-              pending={pending}
+              pending={stepBusy}
             />
           ) : null}
         </section>
       ) : null}
 
+        </div>
       </div>
 
       <HirePaymentReviewModal
@@ -1315,12 +1537,12 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
       />
       <ConfirmDialog
         open={cancelConfirmOpen}
-        title="Cancel ending this contract?"
-        description="This reverses the end-hire process and restores the hire to Active. If return was already confirmed, provisional termination is undone. If check-in was completed, that check-in inspection and any check-in damage charges are removed. Cancel is unavailable after you finalise contract termination on the final account step."
-        confirmLabel="Cancel ending"
-        cancelLabel="Keep ending"
+        title="Cancel end hire and restore active contract?"
+        description="This discards the end-hire progress for this session, restores the hire to Active, and removes any provisional termination, check-in inspection, and return-charge drafts recorded during this attempt. Finalise on the final account step cannot be undone."
+        confirmLabel="Yes, cancel end hire"
+        cancelLabel="Keep ending hire"
         variant="danger"
-        pending={pending}
+        pending={false}
         onConfirm={onConfirmCancel}
         onCancel={() => setCancelConfirmOpen(false)}
       />
@@ -1331,7 +1553,7 @@ export function HireEndHireWorkspaceView({ hireGroupId }: { hireGroupId: string 
         confirmLabel="Confirm final account"
         cancelLabel="Not yet"
         variant="danger"
-        pending={pending}
+        pending={false}
         onConfirm={onConfirmFinalize}
         onCancel={() => setFinalizeConfirmOpen(false)}
       />
