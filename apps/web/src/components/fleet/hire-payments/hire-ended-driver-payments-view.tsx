@@ -349,14 +349,16 @@ export function HireEndedDriverPaymentsView({
             })}
           </ul>
 
-          <div className="hire-ws-payments-table-wrap hidden sm:block">
-            <table className="hire-ws-payments-table hire-ws-payments-table-no-actions">
+          <div className="rph-table-responsive hidden sm:block">
+            <table className="hire-ended-simple-table">
               <thead>
                 <tr>
                   <th scope="col">Date</th>
                   <th scope="col">Transaction</th>
                   <th scope="col">Method</th>
-                  <th scope="col">Amount</th>
+                  <th scope="col" className="hire-ended-simple-table-actions">
+                    Amount
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -376,7 +378,7 @@ export function HireEndedDriverPaymentsView({
                     <td data-label="Method">
                       {PAYMENT_METHOD_LABELS[payment.paymentMethod] ?? payment.paymentMethod}
                     </td>
-                    <td data-label="Amount" className="tabular-nums font-medium">
+                    <td data-label="Amount" className="hire-ended-simple-table-actions tabular-nums font-medium">
                       {formatGbp(payment.amountGbp)}
                     </td>
                   </tr>

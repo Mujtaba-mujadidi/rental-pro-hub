@@ -90,6 +90,16 @@ describe("buildHireEndedBalanceLifecycle", () => {
     });
     expect(steps[2]?.detail).toBe("Balance outstanding");
   });
+
+  it("pluralises pending review count on final account step", () => {
+    const steps = buildHireEndedBalanceLifecycle({
+      balanceCase: "pending_review",
+      openBalanceGbp: 650,
+      pendingReviewCount: 3,
+    });
+    expect(steps[2]?.detail).toBe("3 reviews required");
+    expect(steps[3]?.detail).toBe("Waiting for £650.00");
+  });
 });
 
 describe("helpers", () => {

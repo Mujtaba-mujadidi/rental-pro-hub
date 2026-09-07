@@ -38,8 +38,18 @@ import {
   hasPostEndPrepaidRows,
 } from "@/lib/fleet/hire-ended-payment-schedule";
 import {
+  hireEndedReviewsLockedUntilEndHireFinalized,
+  isHireEndHireFinalized,
   parseHireEndHireDraft,
 } from "@/lib/fleet/hire-end-hire";
+import { commitHireReturnChargesFromDraftAction } from "@/app/actions/hire-return-charges";
+import { listUnpostedReturnChargeAddToBalanceRows } from "@/lib/fleet/hire-return-charges";
+import {
+  HIRE_INSPECTION_ACCESSORY_KEYS,
+  hireInspectionAccessoryLabel,
+  type HireInspectionAccessoryKey,
+} from "@/lib/fleet/hire-inspection-accessories";
+import { formatHireReturnDamageChargeLabel } from "@/lib/fleet/vehicle-damage-panels";
 import type { HireEndedPendingChargeReview, HireEndedPendingReviewsSummary } from "@/lib/fleet/hire-ended-balance-case";
 import {
   buildActiveHireAccountPosition,
@@ -151,9 +161,21 @@ export type HirePaymentsPageData = {
   checkinCompleted: boolean;
   canFinalizeSettlement: boolean;
   canResolveDeposit: boolean;
+  /** End hire draft has explicit finalisation (finalizedAt + explicitFinalization). */
+  endHireFinalized: boolean;
+  /**
+   * Deposit disposition + pending return-charge reviews cannot be decided on Payments
+   * until End hire is finalised (started draft, not yet finalised).
+   */
+  reviewsLockedUntilEndHireFinalized: boolean;
   settlementResolutionLabel: string | null;
   settlementBreakdown: HireSettlementBreakdown | null;
   driverChargeLineItems: HireDriverChargeWorkspaceRow[];
+  /**
+   * add_to_balance return charges still only in the end-hire draft.
+   * Empty after they are posted to the charges table.
+   */
+  unpostedReturnCharges: Array<{ id: string; label: string; amountGbp: number }>;
   extraChargesOutstandingGbp: number;
   extraChargePendingPayment: {
     submissionId: string;
@@ -521,6 +543,31 @@ async function buildPaymentsPageData(
   let settlementPaymentAccounts: HireBalancePaymentAccountOption[] = [];
   let defaultSettlementPaymentAccountId: string | null = null;
 
+  if (
+    staffProfile &&
+    can(staffProfile, "rentals.write") &&
+    Boolean(contractEndedYmd) &&
+    checkinCompleted
+  ) {
+    const endHireDraft = parseHireEndHireDraft(group.end_hire_draft);
+    if (endHireDraft?.returnChargesDraft && !endHireDraft.returnChargesAppliedAt?.trim()) {
+      const commit = await commitHireReturnChargesFromDraftAction(hireGroupId);
+      if (commit.ok) {
+        const { data: refreshedGroup } = await supabase
+          .from("vehicle_hire_groups")
+          .select("settlement_balance_gbp, settlement_balance_direction, end_hire_draft")
+          .eq("id", hireGroupId)
+          .eq("parent_company_id", staffProfile.company_id as string)
+          .maybeSingle();
+        if (refreshedGroup) {
+          group.settlement_balance_gbp = refreshedGroup.settlement_balance_gbp;
+          group.settlement_balance_direction = refreshedGroup.settlement_balance_direction;
+          group.end_hire_draft = refreshedGroup.end_hire_draft;
+        }
+      }
+    }
+  }
+
   const { data: balancePayments } = await supabase
     .from("vehicle_hire_balance_payments")
     .select(
@@ -722,6 +769,11 @@ async function buildPaymentsPageData(
   const settlementResolution = (group.settlement_resolution as string | null) ?? null;
 
   const pendingReviewCharges: HireEndedPendingChargeReview[] = [];
+  let checkinDamageMeta: Array<{
+    id: string;
+    panelId: string | null;
+    damageType: string | null;
+  }> = [];
   if (contractEndedYmd && !options.driverUserId) {
     const { data: checkinInspection } = await supabase
       .from("vehicle_hire_inspections")
@@ -731,15 +783,16 @@ async function buildPaymentsPageData(
       .eq("status", "completed")
       .maybeSingle();
     if (checkinInspection?.id) {
-      const { data: pendingDamages } = await supabase
+      const { data: checkinDamages } = await supabase
         .from("vehicle_hire_inspection_damages")
         .select("id, panel_id, damage_type, severity, notes, charge_gbp, charge_resolution")
-        .eq("inspection_id", checkinInspection.id as string)
-        .eq("charge_resolution", "review_later");
-      for (const damage of pendingDamages ?? []) {
-        const panel = String(damage.panel_id ?? "").trim();
-        const damageType = String(damage.damage_type ?? "").trim();
-        const label = [panel, damageType].filter(Boolean).join(" · ") || "Return damage";
+        .eq("inspection_id", checkinInspection.id as string);
+      for (const damage of checkinDamages ?? []) {
+        if (String(damage.charge_resolution ?? "") !== "review_later") continue;
+        const label = formatHireReturnDamageChargeLabel({
+          panelId: String(damage.panel_id ?? "").trim() || null,
+          damageType: String(damage.damage_type ?? "").trim() || null,
+        });
         const severity = String(damage.severity ?? "").trim();
         const notes = String(damage.notes ?? "").trim();
         const detail = [severity ? `${severity} damage` : null, notes || null].filter(Boolean).join(" · ") || null;
@@ -756,6 +809,11 @@ async function buildPaymentsPageData(
           evidenceHref: `/rental/hires/${hireGroupId}/checkin`,
         });
       }
+      checkinDamageMeta = (checkinDamages ?? []).map((damage) => ({
+        id: String(damage.id),
+        panelId: String(damage.panel_id ?? "").trim() || null,
+        damageType: String(damage.damage_type ?? "").trim() || null,
+      }));
     }
 
     const endHireDraft = parseHireEndHireDraft(group.end_hire_draft);
@@ -779,10 +837,14 @@ async function buildPaymentsPageData(
       const accessoryDraft = draft?.accessories?.find((item) => item.key === key);
       const amount =
         accessoryDraft?.amountGbp != null ? Math.max(0, Number(accessoryDraft.amountGbp) || 0) : null;
+      const known = (HIRE_INSPECTION_ACCESSORY_KEYS as readonly string[]).includes(key);
+      const accessoryLabel = known
+        ? hireInspectionAccessoryLabel(key as HireInspectionAccessoryKey)
+        : key;
       pendingReviewCharges.push({
         id: `accessory-${key}`,
         kind: "accessory",
-        label: `Missing accessory · ${key}`,
+        label: `Missing accessory · ${accessoryLabel}`,
         detail: "Awaiting accessory charge decision",
         proposedGbp: amount != null && amount > 0.005 ? amount : null,
         evidenceHref: `/rental/hires/${hireGroupId}/checkin`,
@@ -870,6 +932,16 @@ async function buildPaymentsPageData(
           extraChargesOutstandingGbp,
         });
 
+  const endHireDraftForGates = parseHireEndHireDraft(group.end_hire_draft);
+  const endHireFinalized = isHireEndHireFinalized({
+    status: hireStatus,
+    draft: endHireDraftForGates,
+  });
+  const reviewsLockedUntilEndHireFinalized = hireEndedReviewsLockedUntilEndHireFinalized({
+    status: hireStatus,
+    draft: endHireDraftForGates,
+  });
+
   return {
     ok: true,
     data: {
@@ -903,6 +975,8 @@ async function buildPaymentsPageData(
       checkinCompleted,
       canFinalizeSettlement,
       canResolveDeposit: canResolveDeposit && depositHeldGbp > 0.005,
+      endHireFinalized,
+      reviewsLockedUntilEndHireFinalized,
       settlementResolutionLabel:
         settlementResolution &&
         (["paid_now", "open_balance", "written_off"] as const).includes(
@@ -930,6 +1004,15 @@ async function buildPaymentsPageData(
       extraChargeAllocationEvents,
       extraChargeTimedPayments: driverChargeTimedPayments,
       canMutateExtraCharges,
+      unpostedReturnCharges: listUnpostedReturnChargeAddToBalanceRows({
+        draft: parseHireEndHireDraft(group.end_hire_draft)?.returnChargesDraft,
+        posted: mappedCharges.map((item) => ({
+          sourceKind: item.sourceKind,
+          sourceId: item.sourceId,
+          description: item.description,
+        })),
+        damageMeta: checkinDamageMeta,
+      }),
       summary,
       rows,
       paymentAccount,

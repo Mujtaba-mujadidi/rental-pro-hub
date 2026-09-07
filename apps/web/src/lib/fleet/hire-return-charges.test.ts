@@ -5,6 +5,8 @@ import {
   hasFuelReturnShortfall,
   isReturnDamageResolved,
   listMissingAccessoryItems,
+  listUnpostedReturnChargeAddToBalanceRows,
+  returnChargeSettlementDeltaGbp,
   validateOptionalReturnCharge,
   validateReturnDamageCharges,
 } from "./hire-return-charges";
@@ -206,6 +208,7 @@ describe("hire-return-charges", () => {
           chargeResolution: "add_to_balance",
         },
       ],
+      checkinInspectionId: "insp-1",
     });
     expect(drafts).toHaveLength(2);
     expect(drafts.every((draft) => draft.resolution === "add_to_balance")).toBe(true);
@@ -216,7 +219,8 @@ describe("hire-return-charges", () => {
     });
     expect(drafts[1]).toMatchObject({
       sourceKind: "checkin_inspection_accessory",
-      sourceId: "hasSpareTyre",
+      sourceId: "insp-1",
+      description: "Missing Spare tyre",
       amountGbp: 120,
     });
   });
@@ -237,5 +241,111 @@ describe("hire-return-charges", () => {
         ],
       }),
     ).toHaveLength(0);
+  });
+});
+
+describe("returnChargeSettlementDeltaGbp", () => {
+  it("posts line items only when settlement already includes the return charges", () => {
+    expect(
+      returnChargeSettlementDeltaGbp({
+        currentOpenGbp: 1050,
+        rentOutstandingGbp: 600,
+        extrasOutstandingGbp: 50,
+        previousPostedReturnGbp: 0,
+        nextPostedReturnGbp: 400,
+      }),
+    ).toBe(0);
+  });
+
+  it("adds return charges to settlement when they are not in the open balance yet", () => {
+    expect(
+      returnChargeSettlementDeltaGbp({
+        currentOpenGbp: 650,
+        rentOutstandingGbp: 600,
+        extrasOutstandingGbp: 50,
+        previousPostedReturnGbp: 0,
+        nextPostedReturnGbp: 400,
+      }),
+    ).toBe(400);
+  });
+
+  it("applies the difference when a posted return charge amount changes", () => {
+    expect(
+      returnChargeSettlementDeltaGbp({
+        currentOpenGbp: 1050,
+        rentOutstandingGbp: 600,
+        extrasOutstandingGbp: 50,
+        previousPostedReturnGbp: 400,
+        nextPostedReturnGbp: 500,
+      }),
+    ).toBe(100);
+  });
+});
+
+describe("listUnpostedReturnChargeAddToBalanceRows", () => {
+  const draft = {
+    damages: [
+      {
+        id: "d-scratch",
+        chargeGbp: 100,
+        chargeResolution: "add_to_balance" as const,
+      },
+    ],
+    fuel: { enabled: false, amountGbp: null, chargeResolution: null },
+    accessories: [
+      {
+        key: "hasTyreKeyLocks",
+        enabled: true,
+        amountGbp: 100,
+        chargeResolution: "add_to_balance" as const,
+      },
+    ],
+  };
+
+  it("lists draft add_to_balance rows that are not posted", () => {
+    expect(
+      listUnpostedReturnChargeAddToBalanceRows({
+        draft,
+        posted: [],
+        damageMeta: [
+          { id: "d-scratch", panelId: "rear_bonnet", damageType: "scratch" },
+        ],
+      }),
+    ).toEqual([
+      { id: "unposted-damage-d-scratch", label: "Rear Bonnet scratch", amountGbp: 100 },
+      {
+        id: "unposted-accessory-hasTyreKeyLocks",
+        label: "Missing Tyre key / locks",
+        amountGbp: 100,
+      },
+    ]);
+  });
+
+  it("omits rows already on the charges table", () => {
+    expect(
+      listUnpostedReturnChargeAddToBalanceRows({
+        draft,
+        posted: [
+          { sourceKind: "checkin_inspection_damage", sourceId: "d-scratch" },
+          {
+            sourceKind: "checkin_inspection_accessory",
+            sourceId: "insp-1",
+            description: "Missing Tyre key / locks",
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it("still recognises legacy accessory source_id keys", () => {
+    expect(
+      listUnpostedReturnChargeAddToBalanceRows({
+        draft,
+        posted: [
+          { sourceKind: "checkin_inspection_damage", sourceId: "d-scratch" },
+          { sourceKind: "checkin_inspection_accessory", sourceId: "hasTyreKeyLocks" },
+        ],
+      }),
+    ).toEqual([]);
   });
 });

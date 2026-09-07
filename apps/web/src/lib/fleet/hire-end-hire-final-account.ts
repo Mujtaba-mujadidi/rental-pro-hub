@@ -7,6 +7,7 @@ import type { HireEndHireReturnChargesDraft } from "@/lib/fleet/hire-end-hire";
 import {
   buildReturnChargeLineItemDrafts,
   HIRE_RETURN_CHARGE_SOURCE_KINDS,
+  parseHireReturnAccessoryKeyFromCharge,
 } from "@/lib/fleet/hire-return-charges";
 import { addGbp, roundGbp, subGbp } from "@/lib/fleet/hire-money";
 import { formatGbp } from "@/lib/fleet/maintenance";
@@ -155,21 +156,33 @@ export function buildReturnChargeOverviewLines(
     damages,
     fuel,
     accessories,
+    checkinInspectionId: returnCharges?.checkinInspectionId ?? null,
   });
 
   const pending = !returnCharges?.returnChargesAppliedAt?.trim();
 
-  return drafts.map((draft) => ({
-    id: `${draft.sourceKind}:${draft.sourceId}`,
-    label: returnChargeOverviewLabel({
-      sourceKind: draft.sourceKind ?? "",
-      description: draft.description ?? "",
-      panelLabel: damageMetaById.get(String(draft.sourceId))?.panelLabel,
-    }),
-    amountGbp: draft.amountGbp,
-    kind: "return_charge" as const,
-    pending,
-  }));
+  return drafts.map((draft) => {
+    const accessoryKey =
+      draft.sourceKind === "checkin_inspection_accessory"
+        ? parseHireReturnAccessoryKeyFromCharge({
+            sourceId: draft.sourceId,
+            description: draft.description,
+          })
+        : null;
+    return {
+      id: accessoryKey
+        ? `${draft.sourceKind}:${accessoryKey}`
+        : `${draft.sourceKind}:${draft.sourceId}`,
+      label: returnChargeOverviewLabel({
+        sourceKind: draft.sourceKind ?? "",
+        description: draft.description ?? "",
+        panelLabel: damageMetaById.get(String(draft.sourceId))?.panelLabel,
+      }),
+      amountGbp: draft.amountGbp,
+      kind: "return_charge" as const,
+      pending,
+    };
+  });
 }
 
 export function sumReturnChargeOverviewGbp(lines: readonly HireEndHireFinalAccountChargeLine[]): number {

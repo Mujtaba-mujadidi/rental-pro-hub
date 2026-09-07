@@ -179,14 +179,16 @@ export function HireSettlementStatementView({
 
       <section className="space-y-3">
         <h2 className="hire-balance-panel-title">Refund audit</h2>
-        <div className="rph-table-responsive overflow-hidden rounded-xl border border-rph-border">
-          <table className="hire-ws-payments-table hire-ws-payments-table-no-actions min-w-full">
+        <div className="rph-table-responsive">
+          <table className="hire-ended-simple-table">
             <thead>
               <tr>
                 <th scope="col">Date</th>
                 <th scope="col">Transaction</th>
                 <th scope="col">Method</th>
-                <th scope="col">Amount</th>
+                <th scope="col" className="hire-ended-simple-table-actions">
+                  Amount
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -204,14 +206,14 @@ export function HireSettlementStatementView({
                   <td data-label="Method">
                     {PAYMENT_METHOD_LABELS[payment.paymentMethod] ?? payment.paymentMethod}
                   </td>
-                  <td data-label="Amount" className="tabular-nums font-medium">
+                  <td data-label="Amount" className="hire-ended-simple-table-actions tabular-nums font-medium">
                     {formatGbp(payment.amountGbp)}
                   </td>
                 </tr>
               ))}
               {refundPayments.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-6 text-sm text-rph-fg-secondary">
+                  <td colSpan={4} className="px-4 py-6 text-sm text-rph-fg-secondary sm:px-5">
                     No refunds paid to the driver.
                   </td>
                 </tr>

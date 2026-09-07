@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getVehicleDamagePanel,
+  formatHireReturnDamageChargeLabel,
   hireDamageSeverityLabel,
   hireDamageTypeLabel,
   isValidVehicleDamagePanelId,
@@ -25,6 +26,21 @@ describe("vehicle damage panels", () => {
   it("formats labels", () => {
     expect(hireDamageTypeLabel("scratch")).toBe("Scratch");
     expect(hireDamageSeverityLabel("major")).toBe("Major");
+  });
+
+  it("builds a descriptive return-damage charge label", () => {
+    expect(
+      formatHireReturnDamageChargeLabel({
+        panelId: "rear_bonnet",
+        damageType: "scratch",
+      }),
+    ).toBe("Rear Bonnet scratch");
+    expect(
+      formatHireReturnDamageChargeLabel({
+        panelId: "left_side_driver_door",
+        damageType: "dent",
+      }),
+    ).toBe("Left Side Driver Door dent");
   });
 
   it("offsets stacked pins", () => {

@@ -9,6 +9,11 @@ import {
 import { summarizeHireSettlementLedger } from "@/lib/fleet/hire-payments-ledger";
 import { hireRentTerminationAdjustmentDisplay, type HireTerminationAccountsSummary } from "@/lib/fleet/hire-termination-summary";
 import { roundGbp } from "@/lib/fleet/hire-money";
+import {
+  formatHireReturnDamageChargeLabel,
+  hireDamageSeverityLabel,
+  type HireDamageSeverity,
+} from "@/lib/fleet/vehicle-damage-panels";
 
 /** Unused rent paid for periods after the end date, plus overpayment on accrued rent. */
 export function hireAdvanceRentToRefundGbp(
@@ -317,10 +322,18 @@ export function formatEndedChargeCardDisplay(
   const parts = raw.split(/\s*·\s*/).map((part) => part.trim()).filter(Boolean);
   if (parts.length >= 3) {
     const [panel, damageType, severity] = parts;
-    const severityLabel = severity ? severity.charAt(0).toUpperCase() + severity.slice(1) : null;
+    const severityKnown = (["minor", "moderate", "major"] as const).includes(
+      severity.toLowerCase() as HireDamageSeverity,
+    );
     return {
-      title: `${panel} ${damageType}`.trim(),
-      severityLabel,
+      title: formatHireReturnDamageChargeLabel({
+        panelId: panel,
+        panelLabel: panel,
+        damageType,
+      }),
+      severityLabel: severityKnown
+        ? hireDamageSeverityLabel(severity.toLowerCase() as HireDamageSeverity)
+        : severity.charAt(0).toUpperCase() + severity.slice(1),
     };
   }
   return {

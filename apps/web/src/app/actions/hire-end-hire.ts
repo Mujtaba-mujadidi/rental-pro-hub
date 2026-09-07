@@ -1035,7 +1035,9 @@ export async function finalizeHireEndHireAction(
   }
 
   const paymentsAfterCharges = await loadHirePaymentsPageAction(hire.id);
-  if (paymentsAfterCharges.ok && paymentsAfterCharges.data.canResolveDeposit) {
+  const needsDepositDecision =
+    paymentsAfterCharges.ok && paymentsAfterCharges.data.canResolveDeposit;
+  if (needsDepositDecision) {
     if (!input?.depositDisposition?.trim()) {
       return { ok: false, error: "Choose what to do with the held deposit before confirming." };
     }
@@ -1044,24 +1046,6 @@ export async function finalizeHireEndHireAction(
       if (!reason) {
         return { ok: false, error: "Record why the deposit is being held." };
       }
-      const supabase = await createClient();
-      const { error: holdError } = await supabase
-        .from("vehicle_hire_groups")
-        .update({ deposit_disposition_reason: reason })
-        .eq("id", hire.id)
-        .eq("parent_company_id", hire.parentCompanyId);
-      if (holdError) return { ok: false, error: holdError.message };
-    } else {
-      const depositRes = await resolveHireDepositDispositionAction({
-        hireGroupId: hire.id,
-        depositDisposition: input.depositDisposition,
-        depositDispositionReason: input.depositDispositionReason,
-        depositRefundAmountGbp: input.depositRefundAmountGbp,
-        settlementResolution: input.settlementResolution,
-        settlementPaymentMethod: input.settlementPaymentMethod,
-        settlementPaymentReference: input.settlementPaymentReference,
-      });
-      if (!depositRes.ok) return depositRes;
     }
   }
 
@@ -1105,6 +1089,43 @@ export async function finalizeHireEndHireAction(
     .eq("parent_company_id", hire.parentCompanyId)
     .in("status", ["terminated", "completed"]);
   if (updateError) return { ok: false, error: updateError.message };
+
+  // Deposit resolve runs after finalisation so Payments stay locked until End hire completes.
+  if (needsDepositDecision && input?.depositDisposition?.trim()) {
+    if (input.depositDisposition.trim() === "hold_pending") {
+      const reason = input.depositDispositionReason?.trim() ?? "";
+      const supabase = await createClient();
+      const { error: holdError } = await supabase
+        .from("vehicle_hire_groups")
+        .update({ deposit_disposition_reason: reason })
+        .eq("id", hire.id)
+        .eq("parent_company_id", hire.parentCompanyId);
+      if (holdError) {
+        await revalidateEndHire(hire.id, hire.parentCompanyId);
+        return {
+          ok: false,
+          error: `Contract termination was finalised, but the deposit hold reason could not be saved: ${holdError.message}`,
+        };
+      }
+    } else {
+      const depositRes = await resolveHireDepositDispositionAction({
+        hireGroupId: hire.id,
+        depositDisposition: input.depositDisposition,
+        depositDispositionReason: input.depositDispositionReason,
+        depositRefundAmountGbp: input.depositRefundAmountGbp,
+        settlementResolution: input.settlementResolution,
+        settlementPaymentMethod: input.settlementPaymentMethod,
+        settlementPaymentReference: input.settlementPaymentReference,
+      });
+      if (!depositRes.ok) {
+        await revalidateEndHire(hire.id, hire.parentCompanyId);
+        return {
+          ok: false,
+          error: `Contract termination was finalised, but the deposit could not be resolved: ${depositRes.error}`,
+        };
+      }
+    }
+  }
 
   await cancelOpenSubcompanyDocumentRequirementsForHire(admin, hire.id, user.id);
   await syncVehicleStatusForHireGroup(admin, hire.id);

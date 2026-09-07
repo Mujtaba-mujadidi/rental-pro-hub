@@ -14,10 +14,14 @@ export type ParsedHirePendingReturnReviewId =
 export function hirePendingReturnReviewResolveGate(input: {
   canWriteRentals: boolean;
   hireStatus: string;
+  reviewsLockedUntilEndHireFinalized?: boolean;
 }): string | null {
   if (!input.canWriteRentals) return "You do not have permission.";
   if (input.hireStatus !== "terminated" && input.hireStatus !== "completed") {
     return "Pending return reviews can only be resolved after the contract has ended.";
+  }
+  if (input.reviewsLockedUntilEndHireFinalized) {
+    return "Complete End hire finalisation before resolving return charge reviews.";
   }
   return null;
 }

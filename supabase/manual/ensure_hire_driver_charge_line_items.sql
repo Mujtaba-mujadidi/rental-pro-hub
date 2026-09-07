@@ -8,7 +8,7 @@ create table if not exists public.vehicle_hire_driver_charge_line_items (
   amount_gbp numeric(12, 2) not null check (amount_gbp > 0),
   resolution text not null check (resolution in ('waived', 'paid_now', 'add_to_balance', 'voided')),
   source_kind text not null,
-  source_id uuid,
+  source_id text,
   description text,
   balance_payment_id uuid,
   charged_on date not null default (timezone('Europe/London', now()))::date,
@@ -85,5 +85,21 @@ begin
       and tablename = 'vehicle_hire_driver_charge_line_items'
   ) then
     alter publication supabase_realtime add table public.vehicle_hire_driver_charge_line_items;
+  end if;
+end $$;
+
+-- Accessory keys (e.g. hasTyreKeyLocks) are stored in source_id alongside UUIDs.
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'vehicle_hire_driver_charge_line_items'
+      and column_name = 'source_id'
+      and data_type = 'uuid'
+  ) then
+    alter table public.vehicle_hire_driver_charge_line_items
+      alter column source_id type text using source_id::text;
   end if;
 end $$;

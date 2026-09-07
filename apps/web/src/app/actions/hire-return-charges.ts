@@ -19,11 +19,15 @@ import {
   parseDamageChargeGbp,
   type HireInspectionDamageChargeResolution,
 } from "@/lib/fleet/hire-inspection-damage-charges";
-import { advanceHireEndHireFurthestStep, isHireEndHireFinalized, parseHireEndHireDraft, type HireEndHireDraft, type HireEndHireReturnChargesDraft } from "@/lib/fleet/hire-end-hire";
+import { advanceHireEndHireFurthestStep, hireEndedReviewsLockedUntilEndHireFinalized, isHireEndHireFinalized, parseHireEndHireDraft, type HireEndHireDraft, type HireEndHireReturnChargesDraft } from "@/lib/fleet/hire-end-hire";
 import { revalidateHireWorkspaceCache } from "@/lib/fleet/hire-workspace-cache";
 import {
   buildReturnChargeLineItemDrafts,
   HIRE_RETURN_CHARGE_SOURCE_KINDS,
+  hireReturnAccessoryChargeDescription,
+  isHireReturnChargeSourceKind,
+  parseHireReturnAccessoryKeyFromCharge,
+  returnChargeSettlementDeltaGbp,
   sumLineItemAddToBalanceGbp,
   validateOptionalReturnCharge,
   validateReturnDamageCharges,
@@ -38,6 +42,7 @@ import {
   parseHirePendingReturnReviewId,
 } from "@/lib/fleet/hire-pending-return-review-resolve";
 import { formatHireFuelLevelPercent } from "@/lib/fleet/hire-fuel-level";
+import { outstandingExtraChargesGbp } from "@/lib/fleet/hire-driver-charges";
 import { roundGbp } from "@/lib/fleet/hire-money";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -161,7 +166,7 @@ export async function loadHireReturnChargesAction(
       const supabase = await createClient();
       return supabase
         .from("vehicle_hire_driver_charge_line_items")
-        .select("source_kind, source_id, amount_gbp, resolution")
+        .select("source_kind, source_id, amount_gbp, resolution, description")
         .eq("hire_group_id", hireGroupId)
         .in("source_kind", [...HIRE_RETURN_CHARGE_SOURCE_KINDS]);
     })(),
@@ -206,12 +211,21 @@ export async function loadHireReturnChargesAction(
       : null;
   let appliedAccessoryCharges = lineItems
     .filter((row) => row.source_kind === "checkin_inspection_accessory")
-    .map((row) => ({
-      key: row.source_id as HireInspectionAccessoryKey,
-      amountGbp: Number(row.amount_gbp),
-      resolution: row.resolution as string,
-    }))
-    .filter((row) => row.key);
+    .map((row) => {
+      const key = parseHireReturnAccessoryKeyFromCharge({
+        sourceId: row.source_id as string | null,
+        description: row.description as string | null,
+      });
+      if (!key) return null;
+      return {
+        key,
+        amountGbp: Number(row.amount_gbp),
+        resolution: row.resolution as string,
+      };
+    })
+    .filter((row): row is { key: HireInspectionAccessoryKey; amountGbp: number; resolution: string } =>
+      Boolean(row),
+    );
 
   const returnChargesDraftSavedAt =
     authorized.hire.endHireDraft?.returnChargesDraftSavedAt?.trim() || null;
@@ -422,6 +436,10 @@ export async function saveHireReturnChargesDraftAction(
   if (draftError) return { ok: false, error: draftError.message };
 
   revalidateReturnChargePaths(hireGroupId, authorized.hire.vehicleId);
+
+  const applyRes = await applyHireReturnChargesAction(hireGroupId, input);
+  if (!applyRes.ok) return applyRes;
+
   return { ok: true, data: { returnChargesDraftSavedAt: nowIso } };
 }
 
@@ -533,6 +551,7 @@ export async function applyHireReturnChargesAction(
         }
       : undefined,
     accessories: input.accessories,
+    checkinInspectionId: checkin.id,
   });
 
   const addToBalanceGbp = sumLineItemAddToBalanceGbp(chargeDrafts);
@@ -544,7 +563,7 @@ export async function applyHireReturnChargesAction(
   const { data: hireGroup, error: hireGroupError } = await admin
     .from("vehicle_hire_groups")
     .select(
-      "settlement_balance_gbp, settlement_balance_direction, parent_company_id, end_hire_draft, vehicle_id",
+      "settlement_balance_gbp, settlement_balance_direction, parent_company_id, end_hire_draft, vehicle_id, termination_settlement",
     )
     .eq("id", hireGroupId)
     .eq("parent_company_id", authorized.hire.parentCompanyId)
@@ -554,7 +573,7 @@ export async function applyHireReturnChargesAction(
 
   const { data: existingCharges } = await admin
     .from("vehicle_hire_driver_charge_line_items")
-    .select("id, balance_payment_id, resolution, amount_gbp")
+    .select("id, balance_payment_id, resolution, amount_gbp, source_kind")
     .eq("hire_group_id", hireGroupId)
     .in("source_kind", [...HIRE_RETURN_CHARGE_SOURCE_KINDS]);
 
@@ -564,6 +583,36 @@ export async function applyHireReturnChargesAction(
     if (!Number.isFinite(amount) || amount <= 0) return sum;
     return sum + amount;
   }, 0);
+
+  const { data: allChargeRows } = await admin
+    .from("vehicle_hire_driver_charge_line_items")
+    .select("amount_gbp, resolution, source_kind")
+    .eq("hire_group_id", hireGroupId);
+
+  const extraChargesForSettlement = (allChargeRows ?? []).filter(
+    (row) => !isHireReturnChargeSourceKind(String(row.source_kind ?? "")),
+  );
+  const { data: extraReceipts } = await admin
+    .from("vehicle_hire_balance_payments")
+    .select("amount_gbp, direction, payment_category")
+    .eq("hire_group_id", hireGroupId);
+
+  const extrasOutstandingGbp = outstandingExtraChargesGbp(
+    extraChargesForSettlement.map((row) => ({
+      amountGbp: Number(row.amount_gbp ?? 0),
+      resolution: String(row.resolution ?? ""),
+    })),
+    (extraReceipts ?? []).map((payment) => ({
+      amountGbp: Number(payment.amount_gbp ?? 0),
+      direction: (payment.direction as string | null) ?? null,
+      paymentCategory: (payment.payment_category as string | null) ?? "settlement",
+    })),
+  );
+
+  const terminationSettlement = hireGroup.termination_settlement as
+    | { signedRentBalanceGbp?: number }
+    | null;
+  const rentOutstandingGbp = Number(terminationSettlement?.signedRentBalanceGbp ?? 0);
 
   const paymentIds = [
     ...new Set(
@@ -603,33 +652,37 @@ export async function applyHireReturnChargesAction(
     | null) ?? "settled";
   let balanceAmountGbp = Number(hireGroup.settlement_balance_gbp ?? 0);
 
-  const reversedBalance = applySignedChargeDeltaToSettlementBalance({
-    settlementBalanceDirection: balanceDirection,
-    settlementBalanceGbp: balanceAmountGbp,
-    deltaGbp: -previousAddToBalanceGbp,
-  });
-  balanceDirection = reversedBalance.settlementBalanceDirection;
-  balanceAmountGbp = reversedBalance.settlementBalanceGbp;
+  const naiveDeltaGbp = roundGbp(addToBalanceGbp - previousAddToBalanceGbp);
+  const settlementDeltaGbp =
+    balanceDirection === "company_owes_driver"
+      ? naiveDeltaGbp
+      : returnChargeSettlementDeltaGbp({
+          currentOpenGbp: balanceAmountGbp,
+          rentOutstandingGbp,
+          extrasOutstandingGbp,
+          previousPostedReturnGbp: previousAddToBalanceGbp,
+          nextPostedReturnGbp: addToBalanceGbp,
+        });
 
-  if (addToBalanceGbp > 0) {
-    const balanceAfterCharges = applyDamageChargesToSettlementBalance({
+  if (Math.abs(settlementDeltaGbp) > 0.005) {
+    const balanceAfterCharges = applySignedChargeDeltaToSettlementBalance({
       settlementBalanceDirection: balanceDirection,
       settlementBalanceGbp: balanceAmountGbp,
-      addToBalanceGbp,
+      deltaGbp: settlementDeltaGbp,
     });
     balanceDirection = balanceAfterCharges.settlementBalanceDirection;
     balanceAmountGbp = balanceAfterCharges.settlementBalanceGbp;
-  }
 
-  const { error: balanceUpdateError } = await admin
-    .from("vehicle_hire_groups")
-    .update({
-      settlement_balance_direction: balanceDirection,
-      settlement_balance_gbp: balanceAmountGbp,
-    })
-    .eq("id", hireGroupId)
-    .eq("parent_company_id", authorized.hire.parentCompanyId);
-  if (balanceUpdateError) return { ok: false, error: balanceUpdateError.message };
+    const { error: balanceUpdateError } = await admin
+      .from("vehicle_hire_groups")
+      .update({
+        settlement_balance_direction: balanceDirection,
+        settlement_balance_gbp: balanceAmountGbp,
+      })
+      .eq("id", hireGroupId)
+      .eq("parent_company_id", authorized.hire.parentCompanyId);
+    if (balanceUpdateError) return { ok: false, error: balanceUpdateError.message };
+  }
 
   for (const damage of input.damages) {
     if (damage.checkoutDamageId != null) continue;
@@ -745,6 +798,10 @@ export async function resolveHirePendingReturnChargeAction(input: {
   const gate = hirePendingReturnReviewResolveGate({
     canWriteRentals: true,
     hireStatus: authorized.hire.status,
+    reviewsLockedUntilEndHireFinalized: hireEndedReviewsLockedUntilEndHireFinalized({
+      status: authorized.hire.status,
+      draft: authorized.hire.endHireDraft,
+    }),
   });
   if (gate) return { ok: false, error: gate };
 
@@ -782,6 +839,18 @@ export async function resolveHirePendingReturnChargeAction(input: {
     .maybeSingle();
   if (hireGroupError) return { ok: false, error: hireGroupError.message };
   if (!hireGroup) return { ok: false, error: "Hire not found." };
+
+  if (
+    hireEndedReviewsLockedUntilEndHireFinalized({
+      status: authorized.hire.status,
+      draft: parseHireEndHireDraft(hireGroup.end_hire_draft) ?? authorized.hire.endHireDraft,
+    })
+  ) {
+    return {
+      ok: false,
+      error: "Complete End hire finalisation before resolving return charge reviews.",
+    };
+  }
 
   let balanceDirection = (hireGroup.settlement_balance_direction as
     | "driver_owes_company"
@@ -910,14 +979,19 @@ export async function resolveHirePendingReturnChargeAction(input: {
     if (!pendingAccessories.includes(key)) {
       return { ok: false, error: "Accessory review is not pending." };
     }
-    const { data: existingAccessory } = await admin
+    const { data: existingAccessoryRows } = await admin
       .from("vehicle_hire_driver_charge_line_items")
-      .select("id")
+      .select("id, source_id, description")
       .eq("hire_group_id", hireGroupId)
-      .eq("source_kind", "checkin_inspection_accessory")
-      .eq("source_id", key)
-      .maybeSingle();
-    if (existingAccessory) return { ok: false, error: "Accessory charge was already posted." };
+      .eq("source_kind", "checkin_inspection_accessory");
+    const alreadyPosted = (existingAccessoryRows ?? []).some(
+      (row) =>
+        parseHireReturnAccessoryKeyFromCharge({
+          sourceId: row.source_id as string | null,
+          description: row.description as string | null,
+        }) === key,
+    );
+    if (alreadyPosted) return { ok: false, error: "Accessory charge was already posted." };
 
     nextPending.accessories = pendingAccessories.filter((item) => item !== key);
     if (decision === "approve") {
@@ -926,8 +1000,8 @@ export async function resolveHirePendingReturnChargeAction(input: {
         chargeType: "other",
         amountGbp,
         sourceKind: "checkin_inspection_accessory",
-        sourceId: key,
-        description: `Missing ${hireInspectionAccessoryLabel(key)}`,
+        sourceId: checkin.id,
+        description: hireReturnAccessoryChargeDescription(key),
       };
       auditSummary = `Approved pending accessory charge (${formatGbpAudit(amountGbp)}).`;
     } else {

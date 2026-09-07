@@ -105,6 +105,10 @@ import {
 } from "@/lib/rental/subcompany-legal-snapshot";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import {
+  hireEndedReviewsLockedUntilEndHireFinalized,
+  parseHireEndHireDraft,
+} from "@/lib/fleet/hire-end-hire";
 
 export type HireTerminationPreview = {
   hireGroupId: string;
@@ -1481,6 +1485,12 @@ export async function previewHireDepositResolutionAction(input: {
   if (!payments.data.canResolveDeposit || payments.data.depositReceivedGbp <= 0.005) {
     return { ok: false, error: "There is no held deposit to preview on this hire." };
   }
+  if (payments.data.reviewsLockedUntilEndHireFinalized) {
+    return {
+      ok: false,
+      error: "Complete End hire finalisation before resolving the deposit on Payments.",
+    };
+  }
 
   const preview = buildDepositResolutionPreview({
     currentSignedSettlementGbp: payments.data.currentSignedSettlementGbp,
@@ -1514,7 +1524,7 @@ export async function resolveHireDepositDispositionAction(input: {
   const { data: group, error: groupError } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, status, terminated_at, ended_at, deposit_disposition, settlement_balance_gbp, settlement_balance_direction, termination_settlement",
+      "id, status, terminated_at, ended_at, deposit_disposition, settlement_balance_gbp, settlement_balance_direction, termination_settlement, end_hire_draft",
     )
     .eq("id", input.hireGroupId.trim())
     .maybeSingle();
@@ -1528,6 +1538,17 @@ export async function resolveHireDepositDispositionAction(input: {
   const status = String(group.status ?? "");
   if (status !== "terminated" && status !== "completed") {
     return { ok: false, error: "Deposit can only be resolved after the contract ends." };
+  }
+  if (
+    hireEndedReviewsLockedUntilEndHireFinalized({
+      status,
+      draft: parseHireEndHireDraft(group.end_hire_draft),
+    })
+  ) {
+    return {
+      ok: false,
+      error: "Complete End hire finalisation before resolving the deposit on Payments.",
+    };
   }
   if (!isDepositDispositionPending(group.deposit_disposition as string | null)) {
     return { ok: false, error: "The deposit has already been resolved." };

@@ -411,7 +411,7 @@ export function HirePaymentScheduleTable({
       {rowError ? <p className="rph-alert-error text-sm">{rowError}</p> : null}
 
       {workspaceTable ? (
-        <div className={`hire-ws-payments-table-wrap ${balanceTable ? "hire-balance-rent-schedule-table-wrap" : "!px-0 !pb-0"}`}>
+        <div className="hire-ws-payments-table-wrap hire-balance-rent-schedule-table-wrap">
           <div className="max-h-[min(60vh,28rem)] overflow-y-auto overscroll-y-contain">{tableBody}</div>
         </div>
       ) : (

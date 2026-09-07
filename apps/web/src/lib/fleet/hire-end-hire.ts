@@ -61,10 +61,10 @@ export type HireEndHireDraft = {
   explicitFinalization?: boolean;
   /** Highest step reached in the wizard — preserved when navigating back. */
   furthestStep?: HireEndHireStep;
-  /** Saved on return-charges step — committed to balance on final confirm. */
+  /** Saved on return-charges step — posted to the charges table when staff confirm add_to_balance. */
   returnChargesDraft?: HireEndHireReturnChargesDraft | null;
   returnChargesDraftSavedAt?: string | null;
-  /** Set when return charges are posted to the hire balance (on final confirm). */
+  /** Set when return charges are posted to the hire charges table. */
   returnChargesAppliedAt?: string | null;
   /** Optional fuel/accessory items marked review-later (no charge posted yet). */
   pendingReturnReviews?: {
@@ -340,6 +340,26 @@ export function isHireEndHireFinalized(input: {
   draft: HireEndHireDraft | null;
 }): boolean {
   return Boolean(input.draft?.finalizedAt && input.draft.explicitFinalization === true);
+}
+
+/**
+ * Payments Reviews (deposit disposition + pending return-charge approve/waive)
+ * stay locked while End hire has started but is not yet explicitly finalised.
+ * Legacy ended hires with no end-hire draft remain unlocked.
+ */
+export function hireEndedReviewsLockedUntilEndHireFinalized(input: {
+  status: string;
+  draft: HireEndHireDraft | null;
+}): boolean {
+  if (!input.draft?.started) return false;
+  if (
+    input.status !== "ending" &&
+    input.status !== "terminated" &&
+    input.status !== "completed"
+  ) {
+    return false;
+  }
+  return !isHireEndHireFinalized(input);
 }
 
 /** Check-in previously auto-set status=completed before explicit finalise — repairable. */

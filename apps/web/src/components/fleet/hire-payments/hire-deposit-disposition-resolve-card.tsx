@@ -5,7 +5,6 @@ import {
   previewHireDepositResolutionAction,
   resolveHireDepositDispositionAction,
 } from "@/app/actions/rental-hire-termination";
-import { depositResolutionHelpText } from "@/lib/fleet/hire-deposit-resolution";
 import type { DepositResolutionPreview } from "@/lib/fleet/hire-deposit-resolution";
 import { openBalanceDirection } from "@/lib/fleet/hire-open-balance";
 import {
@@ -186,54 +185,79 @@ export function HireDepositDispositionResolveCard({
   const afterDirection = preview?.afterDirection ?? currentDirection;
 
   return (
-    <section className="rph-card space-y-4 border-amber-500/30 p-4">
-      <div>
-        <h2 className="text-sm font-semibold text-rph-fg">Resolve held deposit</h2>
-        <p className="rph-muted mt-1 text-sm">{depositResolutionHelpText()}</p>
-        <p className="mt-2 text-sm text-rph-fg">
-          Deposit held: <span className="font-medium tabular-nums">{formatGbp(heldGbp)}</span>
-          {terminationSummary.depositGbp > heldGbp + 0.005 ? (
-            <span className="text-rph-fg-muted">
-              {" "}
-              (contract {formatGbp(terminationSummary.depositGbp)};{" "}
-              {formatGbp(terminationSummary.depositGbp - heldGbp)} still unpaid)
+    <section className="hire-ended-deposit-review">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="hire-balance-panel-kicker">Deposit review</p>
+          <h2 className="mt-1 text-base font-semibold text-rph-fg">
+            Deposit held
+            <span className="tabular-nums"> · {formatGbp(heldGbp)}</span>
+          </h2>
+          <p className="mt-1 text-sm text-rph-fg-secondary">
+            Open balance{" "}
+            <span className="font-medium text-rph-fg">
+              {settlementBalanceLabel(currentDirection, Math.abs(currentSigned))}
             </span>
-          ) : null}
-        </p>
-        <p className="mt-1 text-sm text-rph-fg-secondary">
-          Open balance now:{" "}
-          <span className="font-medium text-rph-fg">
-            {settlementBalanceLabel(currentDirection, Math.abs(currentSigned))}
-          </span>
-        </p>
+            {terminationSummary.depositGbp > heldGbp + 0.005 ? (
+              <span className="text-rph-fg-muted">
+                {" "}
+                · contract {formatGbp(terminationSummary.depositGbp)}
+              </span>
+            ) : null}
+          </p>
+        </div>
+        <span className="inline-flex shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+          Awaiting review
+        </span>
       </div>
 
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-rph-fg" htmlFor="deposit-disposition">
-          Deposit action
-        </label>
-        <RphSelect
-          value={depositDisposition}
-          aria-label="Deposit action"
-          options={depositOptions.map((option) => ({
-            value: option.value,
-            label:
-              option.label +
-              (!option.allowed && option.disabledReason ? ` — ${option.disabledReason}` : ""),
-            disabled: !option.allowed,
-          }))}
-          onValueChange={(value) => setDepositDisposition(value as HireDepositDisposition)}
-        />
+      <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-end">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-rph-fg-muted" htmlFor="deposit-disposition">
+            Deposit action
+          </label>
+          <RphSelect
+            value={depositDisposition}
+            aria-label="Deposit action"
+            options={depositOptions.map((option) => ({
+              value: option.value,
+              label:
+                option.label +
+                (!option.allowed && option.disabledReason ? ` — ${option.disabledReason}` : ""),
+              disabled: !option.allowed,
+            }))}
+            onValueChange={(value) => setDepositDisposition(value as HireDepositDisposition)}
+          />
+        </div>
+        <div className="rounded-lg border border-rph-border bg-rph-page/60 px-3 py-2 text-sm">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-rph-fg-muted">
+            After deposit action
+          </p>
+          {previewPending ? (
+            <p className="mt-0.5 text-xs text-rph-fg-muted">Calculating…</p>
+          ) : preview ? (
+            <p className="mt-0.5 font-semibold tabular-nums text-rph-fg">
+              {settlementBalanceLabel(afterDirection, Math.abs(afterSigned))}
+              {preview.depositRefundDueGbp > 0.005
+                ? ` · refund ${formatGbp(preview.depositRefundDueGbp)}`
+                : ""}
+            </p>
+          ) : previewError ? (
+            <p className="mt-0.5 text-xs text-rph-fg-muted">{previewError}</p>
+          ) : (
+            <p className="mt-0.5 text-xs text-rph-fg-muted">—</p>
+          )}
+        </div>
       </div>
 
       {depositDisposition === "refund_partial" ? (
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-rph-fg" htmlFor="deposit-refund-amount">
+        <div className="mt-3 space-y-1.5">
+          <label className="text-xs font-medium text-rph-fg-muted" htmlFor="deposit-refund-amount">
             Refund amount (£)
           </label>
           <input
             id="deposit-refund-amount"
-            className="rph-input w-full"
+            className="rph-input w-full max-w-xs"
             inputMode="decimal"
             value={depositRefundAmountGbp}
             onChange={(event) => setDepositRefundAmountGbp(event.target.value)}
@@ -242,55 +266,23 @@ export function HireDepositDispositionResolveCard({
       ) : null}
 
       {needsDepositReason ? (
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-rph-fg" htmlFor="deposit-reason">
+        <div className="mt-3 space-y-1.5">
+          <label className="text-xs font-medium text-rph-fg-muted" htmlFor="deposit-reason">
             {depositDispositionReasonLabel(depositDisposition)}
           </label>
           <textarea
             id="deposit-reason"
-            className="rph-input min-h-20 w-full"
+            className="rph-input min-h-16 w-full"
             value={depositDispositionReason}
             onChange={(event) => setDepositDispositionReason(event.target.value)}
           />
         </div>
       ) : null}
 
-      <div className="rounded-lg border border-rph-border bg-rph-chrome/40 px-3 py-2 text-sm">
-        <p className="text-rph-fg-secondary">After deposit action:</p>
-        {previewPending ? (
-          <p className="mt-1 text-xs text-rph-fg-muted">Calculating…</p>
-        ) : preview ? (
-          <>
-            {preview.depositAppliedToBalanceGbp > 0.005 ? (
-              <p className="mt-1 text-xs text-rph-fg-muted tabular-nums">
-                {settlementBalanceLabel(currentDirection, Math.abs(currentSigned))}
-                {" − "}
-                deposit applied {formatGbp(preview.depositAppliedToBalanceGbp)}
-                {" = "}
-                {settlementBalanceLabel(afterDirection, Math.abs(afterSigned))}
-              </p>
-            ) : null}
-            <p className="mt-1 font-medium text-rph-fg">
-              {settlementBalanceLabel(afterDirection, Math.abs(afterSigned))}
-            </p>
-            {preview.depositRefundDueGbp > 0.005 ? (
-              <p className="mt-1 text-sm text-rph-fg-secondary">
-                Deposit refund due:{" "}
-                <span className="font-medium tabular-nums text-rph-fg">
-                  {formatGbp(preview.depositRefundDueGbp)}
-                </span>
-              </p>
-            ) : null}
-          </>
-        ) : previewError ? (
-          <p className="mt-1 text-xs text-rph-fg-muted">{previewError}</p>
-        ) : null}
-      </div>
-
       {needsSettlementStep && preview ? (
-        <div className="space-y-3 border-t border-rph-border pt-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-rph-fg" htmlFor="settlement-resolution">
+        <div className="mt-3 grid gap-3 border-t border-rph-border pt-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-rph-fg-muted" htmlFor="settlement-resolution">
               How to clear the balance
             </label>
             <RphSelect
@@ -308,8 +300,8 @@ export function HireDepositDispositionResolveCard({
 
           {effectiveSettlementResolution === "paid_now" ? (
             <>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-rph-fg" htmlFor="settlement-method">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-rph-fg-muted" htmlFor="settlement-method">
                   Payment method
                 </label>
                 <RphSelect
@@ -322,13 +314,13 @@ export function HireDepositDispositionResolveCard({
                   onValueChange={setSettlementPaymentMethod}
                 />
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-rph-fg" htmlFor="settlement-reference">
+              <div className="space-y-1.5 sm:col-span-2">
+                <label className="text-xs font-medium text-rph-fg-muted" htmlFor="settlement-reference">
                   Reference (optional)
                 </label>
                 <input
                   id="settlement-reference"
-                  className="rph-input w-full"
+                  className="rph-input w-full max-w-md"
                   value={settlementPaymentReference}
                   onChange={(event) => setSettlementPaymentReference(event.target.value)}
                 />
@@ -338,20 +330,22 @@ export function HireDepositDispositionResolveCard({
         </div>
       ) : null}
 
-      {error ? <p className="rph-alert-error text-sm">{error}</p> : null}
+      {error ? <p className="rph-alert-error mt-3 text-sm">{error}</p> : null}
 
       {!deferSubmit ? (
-        <button
-          type="button"
-          className="rph-btn-primary"
-          onClick={submit}
-          disabled={pending || previewPending || !canSubmit || !preview}
-        >
-          Resolve deposit — {hireDepositDispositionLabel(depositDisposition)}
-        </button>
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            className="rph-btn-primary"
+            onClick={submit}
+            disabled={pending || previewPending || !canSubmit || !preview}
+          >
+            Resolve deposit — {hireDepositDispositionLabel(depositDisposition)}
+          </button>
+        </div>
       ) : (
-        <p className="text-sm text-rph-fg-secondary">
-          Deposit will be resolved when you confirm the final account below.
+        <p className="mt-3 text-xs text-rph-fg-secondary">
+          Deposit will be resolved when you confirm the final account.
         </p>
       )}
     </section>

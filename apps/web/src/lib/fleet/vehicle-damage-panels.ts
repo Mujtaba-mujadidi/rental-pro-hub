@@ -51,6 +51,28 @@ export function hireDamageTypeLabel(type: HireDamageType): string {
   return labels[type];
 }
 
+/** Charges-table title, e.g. "Rear bonnet scratch". */
+export function formatHireReturnDamageChargeLabel(input: {
+  panelId?: string | null;
+  panelLabel?: string | null;
+  damageType?: string | null;
+}): string {
+  const panelId = input.panelId?.trim() || "";
+  const fromCatalog = panelId ? getVehicleDamagePanel(panelId)?.label : null;
+  const panel =
+    fromCatalog ||
+    input.panelLabel?.trim() ||
+    (panelId ? panelId.replace(/_/g, " ") : "") ||
+    "Return damage";
+  const typeRaw = (input.damageType ?? "").trim().toLowerCase();
+  const typeKnown = (HIRE_DAMAGE_TYPES as readonly string[]).includes(typeRaw);
+  const typeLabel = typeKnown
+    ? hireDamageTypeLabel(typeRaw as HireDamageType).toLowerCase()
+    : typeRaw;
+  if (!typeLabel) return panel;
+  return `${panel} ${typeLabel}`;
+}
+
 export function hireDamageSeverityLabel(severity: HireDamageSeverity): string {
   const labels: Record<HireDamageSeverity, string> = {
     minor: "Minor",

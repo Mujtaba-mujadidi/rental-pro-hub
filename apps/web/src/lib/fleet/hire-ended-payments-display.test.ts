@@ -430,6 +430,18 @@ describe("formatEndedChargeCardDisplay", () => {
     });
   });
 
+  it("humanises stored panel ids", () => {
+    expect(
+      formatEndedChargeCardDisplay({
+        description: "rear_bonnet · scratch · minor",
+        chargeTypeLabel: "Damage",
+      }),
+    ).toEqual({
+      title: "Rear Bonnet scratch",
+      severityLabel: "Minor",
+    });
+  });
+
   it("falls back to raw description when not structured", () => {
     expect(
       formatEndedChargeCardDisplay({

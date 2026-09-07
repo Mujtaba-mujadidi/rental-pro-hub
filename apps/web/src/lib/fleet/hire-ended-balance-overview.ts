@@ -1,12 +1,15 @@
 import type { HirePaymentsPageData } from "@/app/actions/hire-payments";
+import { formatHireEndHireSignedAmount } from "@/lib/fleet/hire-end-hire-financial";
 import { formatGbp } from "@/lib/fleet/maintenance";
 import { roundGbp } from "@/lib/fleet/hire-money";
 import {
   countHireEndedPendingReviews,
+  hireEndedConfirmedPositionLabel,
   type HireEndedPendingReviewsSummary,
 } from "@/lib/fleet/hire-ended-balance-case";
-import { buildHireEndedRentCalculation } from "@/lib/fleet/hire-ended-payments-display";
-import { sumDriverChargesGbp } from "@/lib/fleet/hire-ended-summary-display";
+import {
+  buildHireEndedRentCalculation,
+} from "@/lib/fleet/hire-ended-payments-display";
 import { summarizeHireSettlementLedger } from "@/lib/fleet/hire-payments-ledger";
 
 export type HireEndedConfirmedCalcRow = {
@@ -17,13 +20,42 @@ export type HireEndedConfirmedCalcRow = {
 };
 
 export type HireEndedConfirmedCalculation = {
-  rows: HireEndedConfirmedCalcRow[];
+  chargeRows: HireEndedConfirmedCalcRow[];
+  totalConfirmedChargesGbp: number;
+  totalConfirmedChargesLabel: string;
+  fundingRows: HireEndedConfirmedCalcRow[];
+  fundingAppliedGbp: number;
   confirmedBalanceLabel: string;
+  confirmedBalanceHeadline: string;
   confirmedBalanceGbp: number;
   pendingReviewGbp: number;
   projectedBalanceGbp: number | null;
   projectedLine: string | null;
+  /** Shown under the confirmed balance when return items still need review. */
+  pendingReviewNote: string | null;
+  /** @deprecated flat rows kept for settled reconciliation */
+  rows: HireEndedConfirmedCalcRow[];
 };
+
+/** Footnote for Overview when return charges await a decision (not listed line-by-line). */
+export function hireEndedPendingChargeReviewNote(
+  summary: HireEndedPendingReviewsSummary | null | undefined,
+): string | null {
+  const count = summary?.charges.length ?? 0;
+  if (count <= 0) return null;
+  if (count === 1) {
+    return "One return item still needs review. The confirmed balance may change once that decision is made.";
+  }
+  return `${count} return items still need review. The confirmed balance may change once those decisions are made.`;
+}
+
+function isReturnChargeSource(sourceKind: string): boolean {
+  return (
+    sourceKind === "checkin_inspection_damage" ||
+    sourceKind === "checkin_inspection_fuel" ||
+    sourceKind === "checkin_inspection_accessory"
+  );
+}
 
 /** Sum of proposed amounts on pending charge reviews (excludes deposit hold). */
 export function sumHireEndedPendingChargeProposedGbp(
@@ -49,7 +81,7 @@ export function hireEndedPendingReviewBannerLine(input: {
   const open = roundGbp(Math.max(0, input.openBalanceGbp));
   const projected = roundGbp(open + pendingGbp);
   if (pendingGbp > 0.005) {
-    return `${formatGbp(pendingGbp)} awaiting review · projected ${formatGbp(projected)}`;
+    return `${formatGbp(pendingGbp)} awaiting review · projected balance if approved ${formatGbp(projected)}`;
   }
   if (input.pendingReviews?.depositPending) {
     const held = roundGbp(Math.max(0, input.pendingReviews.depositHeldGbp));
@@ -68,6 +100,7 @@ export function buildHireEndedConfirmedCalculation(
     | "depositDisposition"
     | "depositReceivedGbp"
     | "driverChargeLineItems"
+    | "unpostedReturnCharges"
     | "settlementBalance"
     | "settlementBalancePayments"
     | "pendingReviews"
@@ -75,72 +108,137 @@ export function buildHireEndedConfirmedCalculation(
   >,
 ): HireEndedConfirmedCalculation {
   const rent = buildHireEndedRentCalculation(data);
-  const postedChargesGbp = sumDriverChargesGbp(data.driverChargeLineItems);
   const ledger = summarizeHireSettlementLedger(data.settlementBalancePayments);
   const openBalanceGbp = roundGbp(
     data.settlementBalance?.openBalanceGbp ?? Math.abs(data.currentSignedSettlementGbp),
   );
   const pendingReviewGbp = sumHireEndedPendingChargeProposedGbp(data.pendingReviews);
-  const settlementFundingGbp = roundGbp(ledger.totalReceivedGbp);
-  const settlementPaidGbp = roundGbp(ledger.totalPaidGbp);
+  const direction =
+    data.settlementBalance?.settlementDirection ??
+    (openBalanceGbp <= 0.005 ? "settled" : "driver_owes_company");
 
-  const rows: HireEndedConfirmedCalcRow[] = [
+  const posted = data.driverChargeLineItems.filter(
+    (item) =>
+      (item.resolution === "add_to_balance" || item.resolution === "paid_now") &&
+      item.amountGbp > 0.005,
+  );
+  const existingExtrasGbp = roundGbp(
+    posted
+      .filter((item) => !isReturnChargeSource(item.sourceKind))
+      .reduce((sum, item) => sum + item.amountGbp, 0),
+  );
+  const returnCharges = posted.filter((item) => isReturnChargeSource(item.sourceKind));
+  const unpostedReturnCharges = data.unpostedReturnCharges ?? [];
+
+  const returnChargesGbp = roundGbp(
+    returnCharges.reduce((sum, item) => sum + item.amountGbp, 0) +
+      unpostedReturnCharges.reduce((sum, item) => sum + item.amountGbp, 0),
+  );
+
+  const chargeRows: HireEndedConfirmedCalcRow[] = [
     {
       id: "rent",
-      label: "Rent due to end date",
-      value: formatGbp(rent.rentDueToEndGbp),
-    },
-    {
-      id: "charges",
-      label: "Posted charges",
-      value: formatGbp(postedChargesGbp),
+      label: "Rent through return time",
+      value: formatHireEndHireSignedAmount(rent.rentDueToEndGbp, true),
     },
   ];
-
-  if (pendingReviewGbp > 0.005 || countHireEndedPendingReviews(data.pendingReviews) > 0) {
-    rows.push({
-      id: "pending",
-      label: "Pending review",
-      value: pendingReviewGbp > 0.005 ? formatGbp(pendingReviewGbp) : "Awaiting decision",
-      tone: "pending",
+  if (existingExtrasGbp > 0.005) {
+    chargeRows.push({
+      id: "existing-extras",
+      label: "Existing posted extra charges",
+      value: formatHireEndHireSignedAmount(existingExtrasGbp, true),
+    });
+  }
+  if (returnChargesGbp > 0.005) {
+    chargeRows.push({
+      id: "return-charges",
+      label: "Return charges",
+      value: formatHireEndHireSignedAmount(returnChargesGbp, true),
     });
   }
 
-  if (settlementFundingGbp > 0.005) {
-    rows.push({
-      id: "funding",
+  const totalConfirmedChargesGbp = roundGbp(
+    rent.rentDueToEndGbp + existingExtrasGbp + returnChargesGbp,
+  );
+
+  const pendingReviewNote = hireEndedPendingChargeReviewNote(data.pendingReviews);
+
+  const rentReceivedGbp = roundGbp(Math.max(0, rent.paymentReceivedDuringHireGbp));
+  const extraReceiptsGbp = roundGbp(Math.max(0, ledger.driverChargeReceivedGbp));
+  const settlementReceivedGbp = roundGbp(Math.max(0, ledger.settlementReceivedGbp));
+  const fundingAppliedGbp = roundGbp(rentReceivedGbp + extraReceiptsGbp + settlementReceivedGbp);
+
+  const fundingRows: HireEndedConfirmedCalcRow[] = [];
+  if (rentReceivedGbp > 0.005) {
+    fundingRows.push({
+      id: "rent-received",
+      label: "Rent received during hire",
+      value: formatHireEndHireSignedAmount(rentReceivedGbp, false),
+    });
+  }
+  if (extraReceiptsGbp > 0.005) {
+    fundingRows.push({
+      id: "extra-receipts",
+      label: "Extra charge receipts",
+      value: formatHireEndHireSignedAmount(extraReceiptsGbp, false),
+    });
+  }
+  if (settlementReceivedGbp > 0.005) {
+    fundingRows.push({
+      id: "settlement-received",
       label: "Settlement received",
-      value: `−${formatGbp(settlementFundingGbp)}`,
-    });
-  }
-  if (settlementPaidGbp > 0.005) {
-    rows.push({
-      id: "paid_out",
-      label: "Paid to driver",
-      value: formatGbp(settlementPaidGbp),
+      value: formatHireEndHireSignedAmount(settlementReceivedGbp, false),
     });
   }
 
-  rows.push({
-    id: "confirmed",
-    label: "Confirmed balance",
-    value: formatGbp(openBalanceGbp),
-    tone: "emphasis",
+  const confirmedBalanceHeadline = hireEndedConfirmedPositionLabel({
+    direction,
+    amountGbp: openBalanceGbp,
   });
 
   const projectedBalanceGbp =
     pendingReviewGbp > 0.005 ? roundGbp(openBalanceGbp + pendingReviewGbp) : null;
 
+  const flatRows: HireEndedConfirmedCalcRow[] = [
+    ...chargeRows,
+    {
+      id: "total-charges",
+      label: "Total confirmed charges",
+      value: formatGbp(totalConfirmedChargesGbp),
+      tone: "emphasis",
+    },
+    ...fundingRows,
+    {
+      id: "funding-applied",
+      label: "Funding applied",
+      value: formatGbp(fundingAppliedGbp),
+      tone: "emphasis",
+    },
+    {
+      id: "confirmed",
+      label: "Confirmed balance now",
+      value: confirmedBalanceHeadline,
+      tone: "emphasis",
+    },
+  ];
+
   return {
-    rows,
+    chargeRows,
+    totalConfirmedChargesGbp,
+    totalConfirmedChargesLabel: formatGbp(totalConfirmedChargesGbp),
+    fundingRows,
+    fundingAppliedGbp,
     confirmedBalanceLabel: formatGbp(openBalanceGbp),
+    confirmedBalanceHeadline,
     confirmedBalanceGbp: openBalanceGbp,
     pendingReviewGbp,
     projectedBalanceGbp,
     projectedLine:
       projectedBalanceGbp != null
-        ? `Projected after reviews ${formatGbp(projectedBalanceGbp)}`
+        ? `Projected if charge approved ${formatGbp(projectedBalanceGbp)}`
         : null,
+    pendingReviewNote,
+    rows: flatRows,
   };
 }
 
@@ -164,10 +262,64 @@ export function buildHireEndedSettledKpis(
 ): HireEndedSettledKpis {
   const ledger = summarizeHireSettlementLedger(data.settlementBalancePayments);
   const rent = buildHireEndedRentCalculation(data);
+  const postedChargesGbp = roundGbp(
+    data.driverChargeLineItems
+      .filter(
+        (item) =>
+          (item.resolution === "add_to_balance" || item.resolution === "paid_now") &&
+          item.amountGbp > 0.005,
+      )
+      .reduce((sum, item) => sum + item.amountGbp, 0),
+  );
   return {
-    finalChargesGbp: roundGbp(sumDriverChargesGbp(data.driverChargeLineItems) + rent.rentDueToEndGbp),
+    finalChargesGbp: roundGbp(postedChargesGbp + rent.rentDueToEndGbp),
     receivedGbp: roundGbp(data.summary.totalPaidGbp + ledger.totalReceivedGbp),
     depositUsedGbp: rent.paidFromDepositGbp,
     refundedGbp: ledger.totalPaidGbp,
+  };
+}
+
+export type HireEndedDepositPositionDisplay = {
+  requiredGbp: number;
+  receivedGbp: number;
+  unreceivedGbp: number;
+  confirmedBeforeDepositGbp: number;
+  projectedIfApprovedGbp: number | null;
+  heldSeparatelyGbp: number;
+  stillOwesGbp: number;
+  stillOwesLabel: string;
+  heldForReview: boolean;
+  holdReason: string | null;
+};
+
+export function buildHireEndedDepositPositionDisplay(
+  data: Pick<
+    HirePaymentsPageData,
+    | "terminationSummary"
+    | "depositReceivedGbp"
+    | "depositPendingReview"
+    | "pendingReviews"
+  >,
+  confirmed: Pick<HireEndedConfirmedCalculation, "confirmedBalanceGbp" | "projectedBalanceGbp">,
+): HireEndedDepositPositionDisplay {
+  const requiredGbp = roundGbp(Math.max(0, data.terminationSummary?.depositGbp ?? 0));
+  const receivedGbp = roundGbp(Math.max(0, data.depositReceivedGbp));
+  const unreceivedGbp = roundGbp(Math.max(0, requiredGbp - receivedGbp));
+  const confirmedBeforeDepositGbp = confirmed.confirmedBalanceGbp;
+  const heldSeparatelyGbp = data.depositPendingReview
+    ? roundGbp(Math.max(0, data.pendingReviews.depositHeldGbp || receivedGbp))
+    : 0;
+
+  return {
+    requiredGbp,
+    receivedGbp,
+    unreceivedGbp,
+    confirmedBeforeDepositGbp,
+    projectedIfApprovedGbp: confirmed.projectedBalanceGbp,
+    heldSeparatelyGbp,
+    stillOwesGbp: confirmedBeforeDepositGbp,
+    stillOwesLabel: formatGbp(confirmedBeforeDepositGbp),
+    heldForReview: data.depositPendingReview,
+    holdReason: null,
   };
 }

@@ -1146,31 +1146,37 @@ html {
 
 /* Active hire balance workspace — matches balances overview mockup */
 .hire-balance-workspace {
-  @apply space-y-3;
+  @apply w-full space-y-3;
 }
 .hire-ended-lifecycle {
-  @apply grid gap-2 sm:grid-cols-2 lg:grid-cols-4;
+  @apply w-full rounded-2xl border border-rph-border bg-rph-raised px-4 py-4 shadow-sm sm:px-6 sm:py-5;
 }
-.hire-ended-lifecycle-step {
-  @apply rounded-xl border border-rph-border bg-rph-page/50 px-3 py-3;
+.hire-ended-deposit-review {
+  @apply rounded-2xl border border-amber-200/80 bg-rph-raised p-4 shadow-sm dark:border-amber-900/40 sm:p-5;
 }
-.hire-ended-lifecycle-step-done {
-  @apply border-emerald-200/80 bg-emerald-50/80 dark:border-emerald-900/50 dark:bg-emerald-950/20;
+.hire-ended-next-steps {
+  @apply mt-4 grid w-full gap-4 rounded-2xl border border-rph-border bg-rph-raised px-4 py-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-8 sm:px-5 sm:py-5;
 }
-.hire-ended-lifecycle-step-active {
-  @apply border-rph-rail bg-rph-rail text-white dark:border-rph-rail-soft dark:bg-rph-rail-soft;
+.hire-ended-next-steps-copy {
+  @apply min-w-0;
 }
-.hire-ended-lifecycle-label {
-  @apply block text-sm font-semibold text-rph-fg;
+.hire-ended-next-steps-kicker {
+  @apply text-[11px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-300;
 }
-.hire-ended-lifecycle-step-active .hire-ended-lifecycle-label {
-  @apply text-white;
+.hire-ended-next-steps-title {
+  @apply mt-1 text-lg font-semibold tracking-tight text-rph-fg;
 }
-.hire-ended-lifecycle-detail {
-  @apply mt-0.5 block text-xs text-rph-fg-secondary;
+.hire-ended-next-steps-desc {
+  @apply mt-1 text-sm leading-relaxed text-rph-fg-secondary;
 }
-.hire-ended-lifecycle-step-active .hire-ended-lifecycle-detail {
-  @apply text-white/75;
+.hire-ended-next-steps-actions {
+  @apply flex w-full shrink-0 flex-col gap-2 sm:w-auto;
+}
+.hire-ended-next-steps-actions-row {
+  @apply flex flex-wrap items-center gap-2;
+}
+.hire-ended-next-steps-reminder {
+  @apply inline-flex h-9 items-center self-start text-sm font-medium text-rph-fg hover:text-rph-fg-secondary;
 }
 .hire-balance-page-header {
   @apply space-y-1;
@@ -1248,26 +1254,26 @@ html {
   @apply space-y-4;
 }
 .hire-balance-hero {
-  @apply rounded-2xl bg-rph-rail px-5 py-5 text-white shadow-sm sm:px-6 sm:py-6 dark:bg-rph-rail-soft;
+  @apply w-full rounded-2xl bg-rph-rail px-4 py-4 text-white shadow-sm sm:px-5 dark:bg-rph-rail-soft;
 }
 .hire-balance-hero-inner {
-  @apply flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between;
+  @apply flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between;
 }
 .hire-balance-hero-badge {
-  @apply inline-flex rounded-full bg-amber-200/95 px-2.5 py-0.5 text-[11px] font-semibold text-amber-950;
+  @apply text-[11px] font-semibold uppercase tracking-wide text-sky-200;
 }
 .hire-balance-hero-label {
-  @apply mt-2 text-sm font-medium text-white/80;
+  @apply mt-1 text-xl font-semibold tracking-tight text-white sm:text-2xl;
 }
 .hire-balance-hero-amount {
-  @apply mt-1 text-4xl font-semibold tabular-nums tracking-tight sm:text-5xl;
+  @apply hidden;
 }
 .hire-balance-hero-breakdown {
-  @apply mt-2 text-sm text-white/70;
+  @apply mt-1 text-sm text-white/70;
 }
 .hire-balance-hero .rph-btn-primary,
 .hire-balance-hero-cta {
-  @apply h-11 shrink-0 rounded-xl bg-white px-5 text-sm font-semibold text-rph-rail shadow-sm hover:bg-white/90;
+  @apply inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-sky-500 px-4 text-sm font-semibold text-white shadow-sm hover:bg-sky-600;
 }
 .hire-balance-kpi-grid {
   @apply grid gap-3 sm:grid-cols-2 xl:grid-cols-4;
@@ -1314,6 +1320,23 @@ html {
 .hire-balance-panel-kicker {
   @apply text-[11px] font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300;
 }
+/* Simple ended-hire tables (Charges / Reviews) — not the payment-schedule workspace table. */
+.hire-ended-simple-table {
+  @apply w-full min-w-full border-separate border-spacing-0 text-sm;
+}
+.hire-ended-simple-table thead th {
+  @apply border-b border-rph-border bg-rph-page px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-rph-fg-muted sm:px-5;
+}
+.hire-ended-simple-table tbody td {
+  @apply border-b border-rph-border/60 px-4 py-3 align-middle text-sm text-rph-fg sm:px-5;
+}
+.hire-ended-simple-table tbody tr:last-child td {
+  @apply border-b-0;
+}
+.hire-ended-simple-table thead th.hire-ended-simple-table-actions,
+.hire-ended-simple-table tbody td.hire-ended-simple-table-actions {
+  @apply text-right;
+}
 .hire-balance-panel-link {
   @apply shrink-0 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-sky-400 dark:hover:text-sky-300;
 }
@@ -1347,6 +1370,7 @@ html {
 .hire-balance-rent-schedule-table-wrap {
   @apply !w-full !max-w-none !overflow-x-auto !px-0 !pb-0 sm:!px-0;
 }
+/* Edge-to-edge workspace cards still need first/last cell padding (thead first:pl-0 assumes wrap padding). */
 .hire-balance-rent-schedule-table-wrap .hire-ws-payments-table {
   @apply w-full min-w-full;
 }

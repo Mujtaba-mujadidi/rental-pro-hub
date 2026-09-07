@@ -12,6 +12,7 @@ import {
 import type { HireDriverChargeLineItemInput } from "@/lib/fleet/hire-driver-charges";
 import { formatHireFuelLevelPercent } from "@/lib/fleet/hire-fuel-level";
 import { roundGbp } from "@/lib/fleet/hire-money";
+import { formatHireReturnDamageChargeLabel } from "@/lib/fleet/vehicle-damage-panels";
 
 export const HIRE_RETURN_CHARGE_SOURCE_KINDS = [
   "checkin_inspection_damage",
@@ -40,6 +41,31 @@ export function isHireReturnChargeResolution(
   return (
     value != null && (HIRE_RETURN_CHARGE_RESOLUTIONS as readonly string[]).includes(value)
   );
+}
+
+/** Human-readable (and stable) description for a missing-accessory return charge. */
+export function hireReturnAccessoryChargeDescription(key: HireInspectionAccessoryKey): string {
+  return `Missing ${hireInspectionAccessoryLabel(key)}`;
+}
+
+/**
+ * Resolve accessory key from a posted charge.
+ * Prefer the description (source_id is the check-in UUID for UUID-typed columns);
+ * also accept a legacy source_id that stored the accessory key directly.
+ */
+export function parseHireReturnAccessoryKeyFromCharge(input: {
+  sourceId?: string | null;
+  description?: string | null;
+}): HireInspectionAccessoryKey | null {
+  const sourceId = input.sourceId?.trim() ?? "";
+  if ((HIRE_INSPECTION_ACCESSORY_KEYS as readonly string[]).includes(sourceId)) {
+    return sourceId as HireInspectionAccessoryKey;
+  }
+  const description = input.description?.trim() ?? "";
+  for (const key of HIRE_INSPECTION_ACCESSORY_KEYS) {
+    if (description === hireReturnAccessoryChargeDescription(key)) return key;
+  }
+  return null;
 }
 
 export type HireReturnChargeDamageInput = {
@@ -177,6 +203,8 @@ export function buildReturnChargeLineItemDrafts(input: {
     amountGbp: number | null;
     chargeResolution: HireInspectionDamageChargeResolution | null;
   }[];
+  /** Required when posting accessory charges — stored as source_id (UUID column). */
+  checkinInspectionId?: string | null;
 }): HireDriverChargeLineItemInput[] {
   const drafts: HireDriverChargeLineItemInput[] = [];
 
@@ -212,17 +240,20 @@ export function buildReturnChargeLineItemDrafts(input: {
     }
   }
 
+  const checkinInspectionId = input.checkinInspectionId?.trim() || input.fuel?.checkinInspectionId?.trim() || "";
   for (const accessory of input.accessories ?? []) {
     if (!accessory.enabled || accessory.chargeResolution !== "add_to_balance") continue;
     const amount = parseDamageChargeGbp(accessory.amountGbp);
     if (amount == null || amount <= 0) continue;
+    if (!checkinInspectionId) continue;
     drafts.push({
       chargeType: "other",
       amountGbp: roundGbp(amount),
       resolution: "add_to_balance",
       sourceKind: "checkin_inspection_accessory",
-      sourceId: accessory.key,
-      description: `Missing ${hireInspectionAccessoryLabel(accessory.key)}`,
+      // DB source_id is uuid-typed in older schemas — never store the accessory key here.
+      sourceId: checkinInspectionId,
+      description: hireReturnAccessoryChargeDescription(accessory.key),
     });
   }
 
@@ -254,4 +285,134 @@ export function sumLineItemAddToBalanceGbp(
     total += amount;
   }
   return roundGbp(total);
+}
+
+/**
+ * Settlement delta when posting return charges.
+ * If the open balance already includes the next return-charge total (draft applied to
+ * settlement without line items), returns 0 so we only persist the charges table.
+ */
+export function returnChargeSettlementDeltaGbp(input: {
+  currentOpenGbp: number;
+  rentOutstandingGbp: number;
+  extrasOutstandingGbp: number;
+  previousPostedReturnGbp: number;
+  nextPostedReturnGbp: number;
+}): number {
+  const naive = roundGbp(input.nextPostedReturnGbp - input.previousPostedReturnGbp);
+  const current = roundGbp(Math.abs(input.currentOpenGbp));
+  const extras = roundGbp(Math.max(0, input.extrasOutstandingGbp));
+  const rent = roundGbp(input.rentOutstandingGbp);
+  const expectedWithNext = roundGbp(rent + extras + input.nextPostedReturnGbp);
+  const expectedWithPrevious = roundGbp(rent + extras + input.previousPostedReturnGbp);
+  if (Math.abs(current - expectedWithNext) <= 0.005) return 0;
+  if (Math.abs(current - expectedWithPrevious) <= 0.005) return naive;
+  return naive;
+}
+
+export type UnpostedReturnChargeRow = {
+  id: string;
+  label: string;
+  amountGbp: number;
+};
+
+/** add_to_balance draft rows that are not yet in `vehicle_hire_driver_charge_line_items`. */
+export function listUnpostedReturnChargeAddToBalanceRows(input: {
+  draft: {
+    damages: readonly {
+      id: string;
+      chargeGbp: number | null;
+      chargeResolution: string | null;
+    }[];
+    fuel: {
+      enabled: boolean;
+      amountGbp: number | null;
+      chargeResolution: string | null;
+    };
+    accessories: readonly {
+      key: string;
+      enabled: boolean;
+      amountGbp: number | null;
+      chargeResolution: string | null;
+    }[];
+  } | null | undefined;
+  posted: readonly {
+    sourceKind: string;
+    sourceId?: string | null;
+    description?: string | null;
+  }[];
+  damageMeta?: readonly {
+    id: string;
+    panelId?: string | null;
+    panelLabel?: string | null;
+    damageType?: string | null;
+  }[];
+}): UnpostedReturnChargeRow[] {
+  const draft = input.draft;
+  if (!draft) return [];
+  const postedKeys = new Set(
+    input.posted
+      .filter((row) => isHireReturnChargeSourceKind(row.sourceKind))
+      .filter((row) => row.sourceKind !== "checkin_inspection_accessory")
+      .map((row) => `${row.sourceKind}:${row.sourceId ?? ""}`),
+  );
+  const postedAccessoryKeys = new Set(
+    input.posted
+      .filter((row) => row.sourceKind === "checkin_inspection_accessory")
+      .map((row) => parseHireReturnAccessoryKeyFromCharge(row))
+      .filter((key): key is HireInspectionAccessoryKey => key != null),
+  );
+  const damageMetaById = new Map((input.damageMeta ?? []).map((row) => [row.id, row]));
+  const rows: UnpostedReturnChargeRow[] = [];
+
+  for (const damage of draft.damages) {
+    if (damage.chargeResolution !== "add_to_balance") continue;
+    const amount = parseDamageChargeGbp(damage.chargeGbp);
+    if (amount == null || amount <= 0) continue;
+    const key = `checkin_inspection_damage:${damage.id}`;
+    if (postedKeys.has(key)) continue;
+    const meta = damageMetaById.get(damage.id);
+    rows.push({
+      id: `unposted-damage-${damage.id}`,
+      label: formatHireReturnDamageChargeLabel({
+        panelId: meta?.panelId,
+        panelLabel: meta?.panelLabel,
+        damageType: meta?.damageType,
+      }),
+      amountGbp: roundGbp(amount),
+    });
+  }
+
+  if (draft.fuel.enabled && draft.fuel.chargeResolution === "add_to_balance") {
+    const amount = parseDamageChargeGbp(draft.fuel.amountGbp);
+    if (amount != null && amount > 0) {
+      const alreadyPosted = [...postedKeys].some((key) =>
+        key.startsWith("checkin_inspection_fuel:"),
+      );
+      if (!alreadyPosted) {
+        rows.push({
+          id: "unposted-fuel",
+          label: "Fuel shortfall",
+          amountGbp: roundGbp(amount),
+        });
+      }
+    }
+  }
+
+  for (const accessory of draft.accessories) {
+    if (!accessory.enabled || accessory.chargeResolution !== "add_to_balance") continue;
+    const amount = parseDamageChargeGbp(accessory.amountGbp);
+    if (amount == null || amount <= 0) continue;
+    const known = (HIRE_INSPECTION_ACCESSORY_KEYS as readonly string[]).includes(accessory.key);
+    if (known && postedAccessoryKeys.has(accessory.key as HireInspectionAccessoryKey)) continue;
+    rows.push({
+      id: `unposted-accessory-${accessory.key}`,
+      label: known
+        ? hireReturnAccessoryChargeDescription(accessory.key as HireInspectionAccessoryKey)
+        : `Missing accessory · ${accessory.key}`,
+      amountGbp: roundGbp(amount),
+    });
+  }
+
+  return rows;
 }

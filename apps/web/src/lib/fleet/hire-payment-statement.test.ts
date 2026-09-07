@@ -70,6 +70,8 @@ function minimalPage(overrides: Partial<HirePaymentsPageData> = {}): HirePayment
     accountPosition: null,
     depositPendingReview: false,
     canResolveDeposit: false,
+    endHireFinalized: true,
+    reviewsLockedUntilEndHireFinalized: false,
     checkinCompleted: true,
     driverChargeLineItems: [],
     extraChargesOutstandingGbp: 0,
@@ -77,6 +79,7 @@ function minimalPage(overrides: Partial<HirePaymentsPageData> = {}): HirePayment
     extraChargeAllocationEvents: [],
     extraChargeTimedPayments: [],
     canMutateExtraCharges: false,
+    unpostedReturnCharges: [],
     rows: [
       {
         id: "d1",

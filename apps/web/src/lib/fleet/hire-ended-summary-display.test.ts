@@ -92,6 +92,8 @@ function payments(overrides: Partial<HirePaymentsPageData> = {}): HirePaymentsPa
     checkinCompleted: true,
     canFinalizeSettlement: true,
     canResolveDeposit: false,
+    endHireFinalized: true,
+    reviewsLockedUntilEndHireFinalized: false,
     settlementResolutionLabel: "Paid",
     settlementBreakdown: null,
     driverChargeLineItems: [
@@ -114,6 +116,7 @@ function payments(overrides: Partial<HirePaymentsPageData> = {}): HirePaymentsPa
     extraChargeAllocationEvents: [],
     extraChargeTimedPayments: [],
     canMutateExtraCharges: false,
+    unpostedReturnCharges: [],
     summary: {
       rentGrossAccruedGbp: 200,
       totalDueGbp: 157.14,

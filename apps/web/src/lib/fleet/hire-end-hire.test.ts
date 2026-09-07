@@ -4,6 +4,7 @@ import {
   emptyHireEndHireDraft,
   canCancelHireEndHireProcess,
   canFinalizeHireEndHireProcess,
+  hireEndedReviewsLockedUntilEndHireFinalized,
   hireEndHireFurthestStep,
   hireEndHireStepNavStatus,
   isHireEndHireAutoCompletedBeforeFinalisation,
@@ -167,6 +168,42 @@ describe("hire-end-hire draft helpers", () => {
         draft: { ...draft, finalizedAt: "2026-08-21T10:00:00.000Z", explicitFinalization: true },
       }),
     ).toBe(true);
+  });
+
+  it("locks Payments reviews until End hire is explicitly finalised", () => {
+    const started = {
+      ...emptyHireEndHireDraft("t", "2026-08-20", "12:00"),
+      started: true,
+      step: "final_account" as const,
+    };
+    expect(
+      hireEndedReviewsLockedUntilEndHireFinalized({
+        status: "terminated",
+        draft: started,
+      }),
+    ).toBe(true);
+    expect(
+      hireEndedReviewsLockedUntilEndHireFinalized({
+        status: "terminated",
+        draft: null,
+      }),
+    ).toBe(false);
+    expect(
+      hireEndedReviewsLockedUntilEndHireFinalized({
+        status: "active",
+        draft: started,
+      }),
+    ).toBe(false);
+    expect(
+      hireEndedReviewsLockedUntilEndHireFinalized({
+        status: "completed",
+        draft: {
+          ...started,
+          finalizedAt: "2026-08-21T10:00:00.000Z",
+          explicitFinalization: true,
+        },
+      }),
+    ).toBe(false);
   });
 
   it("allows finalise only on final account after check-in and return charges", () => {
