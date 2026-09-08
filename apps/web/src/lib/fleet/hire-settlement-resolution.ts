@@ -38,6 +38,29 @@ export function settlementStepRequired(netSettlementGbp: number): boolean {
 }
 
 /**
+ * Whether the deposit resolve UI should ask how to clear the remaining balance.
+ * Remaining driver debt stays on the balance sheet — collect/write-off from Payments.
+ * Only prompt when the company owes the driver (refund/credit payout).
+ */
+export function depositResolutionShowsSettlementUi(input: {
+  disposition: string;
+  afterSignedSettlementGbp: number;
+}): boolean {
+  void input.disposition;
+  // Company owes driver → ask pay refund now vs later.
+  return input.afterSignedSettlementGbp < -0.005;
+}
+
+/** Resolution to persist when the settlement UI is hidden or settled. */
+export function depositResolutionDefaultSettlementResolution(
+  afterSignedSettlementGbp: number,
+): HireSettlementResolution | null {
+  if (!settlementStepRequired(afterSignedSettlementGbp)) return null;
+  if (afterSignedSettlementGbp > 0.005) return "open_balance";
+  return "open_balance";
+}
+
+/**
  * Deposit action choices for termination / post-end resolve.
  * Pass the **current signed settlement** (rent + extras + charges), not rent-only —
  * otherwise “use deposit against balance” is wrongly disabled when only damage is owed.

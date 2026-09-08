@@ -148,4 +148,41 @@ describe("buildHireEndHireFinalAccountModel", () => {
     expect(model.currentDriverBalanceGbp).toBe(1010);
     expect(model.chargeLines).toHaveLength(5);
   });
+
+  it("does not double-count return charges once they are already posted", () => {
+    const model = buildHireEndHireFinalAccountModel({
+      review: baseReview({
+        // Existing extras (280) already include the £400 return charges once posted.
+        extraChargesPostedGbp: 680,
+      }),
+      rentCutoffLabel: "31 Aug 2026, 22:09",
+      returnCharges: {
+        ...returnCharges,
+        returnChargesAppliedAt: "2026-08-31T22:00:00.000Z",
+      },
+      returnChargesDraft: {
+        damages: returnCharges.newDamages.map((damage) => ({
+          id: damage.id,
+          checkoutDamageId: null,
+          chargeGbp: damage.chargeGbp,
+          chargeResolution: damage.chargeResolution,
+        })),
+        fuel: {
+          enabled: true,
+          amountGbp: 50,
+          chargeResolution: "add_to_balance",
+        },
+        accessories: [],
+      },
+      depositHeldGbp: 600,
+      depositRequiredGbp: 1200,
+      depositNeedsDecision: true,
+      currentSignedSettlementGbp: 610,
+      returnChargesApplied: true,
+    });
+
+    expect(model.totalFinalChargesGbp).toBe(1295);
+    expect(model.chargeLines.find((line) => line.id === "existing-extras")?.amountGbp).toBe(280);
+    expect(model.pendingReturnChargesGbp).toBe(0);
+  });
 });

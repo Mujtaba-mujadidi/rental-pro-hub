@@ -15,6 +15,10 @@ import {
   formatEndedChargeCardDisplay,
   formatEndedChargeEvidenceHref,
 } from "@/lib/fleet/hire-ended-payments-display";
+import {
+  buildExtraChargePaymentTableRowsFromWorkspace,
+  extraChargePaymentStatusClass,
+} from "@/lib/fleet/hire-driver-charge-payment";
 import { buildHireScheduleRefundMarksByRowId } from "@/lib/fleet/hire-ended-payment-schedule";
 import {
   buildHireEndedOutstandingBalance,
@@ -76,6 +80,24 @@ export function HireEndedDriverPaymentsView({
       (item.resolution === "add_to_balance" || item.resolution === "paid_now") &&
       item.amountGbp > 0.005,
   );
+  const chargeStatusById = useMemo(() => {
+    const rows = buildExtraChargePaymentTableRowsFromWorkspace({
+      hireGroupId,
+      items: data.driverChargeLineItems,
+      outstandingGbp: data.extraChargesOutstandingGbp,
+      pendingAmountGbp: data.extraChargePendingPayment?.amountGbp,
+      timedPayments: data.extraChargeTimedPayments,
+      allocationEvents: data.extraChargeAllocationEvents,
+    });
+    return new Map(rows.map((row) => [row.id, row]));
+  }, [
+    data.driverChargeLineItems,
+    data.extraChargeAllocationEvents,
+    data.extraChargePendingPayment?.amountGbp,
+    data.extraChargeTimedPayments,
+    data.extraChargesOutstandingGbp,
+    hireGroupId,
+  ]);
   const settlementPayments = data.settlementBalancePayments;
 
   return (
@@ -265,10 +287,12 @@ export function HireEndedDriverPaymentsView({
                 const recordedMeta = item.createdAt
                   ? `Recorded at check-in on ${formatUkDateTime(item.createdAt)}`
                   : null;
+                const paymentRow = chargeStatusById.get(item.id);
+                const statusLabel = paymentRow?.statusLabel ?? item.resolutionLabel;
                 const meta =
                   card.severityLabel && recordedMeta
                     ? `${card.severityLabel} - ${recordedMeta}`
-                    : recordedMeta ?? item.resolutionLabel;
+                    : recordedMeta ?? statusLabel;
                 return (
                   <li key={item.id} className="hire-ws-charges-card">
                     <div className="min-w-0 flex-1">
@@ -289,7 +313,15 @@ export function HireEndedDriverPaymentsView({
                         <p className="text-base font-semibold tabular-nums text-rph-fg">
                           {formatGbp(item.amountGbp)}
                         </p>
-                        <p className="hire-ws-charges-resolution">{item.resolutionLabel}</p>
+                        {paymentRow ? (
+                          <span
+                            className={`hire-ws-payments-status-pill mt-1 inline-flex ${extraChargePaymentStatusClass(paymentRow.statusTone)}`}
+                          >
+                            {statusLabel}
+                          </span>
+                        ) : (
+                          <p className="hire-ws-charges-resolution">{statusLabel}</p>
+                        )}
                       </div>
                     </div>
                   </li>

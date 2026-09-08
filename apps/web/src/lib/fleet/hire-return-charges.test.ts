@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   areReturnChargesReady,
   buildReturnChargeLineItemDrafts,
+  dedupePostedAccessoryChargeRows,
   hasFuelReturnShortfall,
   isReturnDamageResolved,
+  isUniqueChargeSourceConflict,
   listMissingAccessoryItems,
   listUnpostedReturnChargeAddToBalanceRows,
+  missingPostedReturnChargeSettlementGbp,
+  parseHireReturnAccessoryKeyFromCharge,
   returnChargeSettlementDeltaGbp,
   validateOptionalReturnCharge,
   validateReturnDamageCharges,
@@ -219,7 +223,7 @@ describe("hire-return-charges", () => {
     });
     expect(drafts[1]).toMatchObject({
       sourceKind: "checkin_inspection_accessory",
-      sourceId: "insp-1",
+      sourceId: "hasSpareTyre",
       description: "Missing Spare tyre",
       amountGbp: 120,
     });
@@ -279,6 +283,47 @@ describe("returnChargeSettlementDeltaGbp", () => {
         nextPostedReturnGbp: 500,
       }),
     ).toBe(100);
+  });
+});
+
+describe("missingPostedReturnChargeSettlementGbp", () => {
+  it("heals when open balance matches rent+extras but return charges are posted", () => {
+    expect(
+      missingPostedReturnChargeSettlementGbp({
+        settlementBalanceDirection: "driver_owes_company",
+        settlementBalanceGbp: 650,
+        depositDisposition: "hold_pending",
+        rentOutstandingGbp: 600,
+        hireExtrasOutstandingGbp: 50,
+        postedReturnAddToBalanceGbp: 400,
+      }),
+    ).toBe(400);
+  });
+
+  it("does not heal when settlement already includes return charges", () => {
+    expect(
+      missingPostedReturnChargeSettlementGbp({
+        settlementBalanceDirection: "driver_owes_company",
+        settlementBalanceGbp: 1050,
+        depositDisposition: "hold_pending",
+        rentOutstandingGbp: 600,
+        hireExtrasOutstandingGbp: 50,
+        postedReturnAddToBalanceGbp: 400,
+      }),
+    ).toBe(0);
+  });
+
+  it("does not heal after deposit was applied to the balance", () => {
+    expect(
+      missingPostedReturnChargeSettlementGbp({
+        settlementBalanceDirection: "driver_owes_company",
+        settlementBalanceGbp: 450,
+        depositDisposition: "apply_to_balance",
+        rentOutstandingGbp: 600,
+        hireExtrasOutstandingGbp: 50,
+        postedReturnAddToBalanceGbp: 400,
+      }),
+    ).toBe(0);
   });
 });
 
@@ -347,5 +392,97 @@ describe("listUnpostedReturnChargeAddToBalanceRows", () => {
         ],
       }),
     ).toEqual([]);
+  });
+
+  it("omits unposted tyre key when description uses pending-review wording", () => {
+    expect(
+      listUnpostedReturnChargeAddToBalanceRows({
+        draft,
+        posted: [
+          { sourceKind: "checkin_inspection_damage", sourceId: "d-scratch" },
+          {
+            sourceKind: "checkin_inspection_accessory",
+            sourceId: "insp-uuid",
+            description: "Missing accessory · Tyre key / locks",
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe("parseHireReturnAccessoryKeyFromCharge", () => {
+  it("resolves key, canonical description, and pending-review wording", () => {
+    expect(
+      parseHireReturnAccessoryKeyFromCharge({ sourceId: "hasTyreKeyLocks", description: null }),
+    ).toBe("hasTyreKeyLocks");
+    expect(
+      parseHireReturnAccessoryKeyFromCharge({
+        sourceId: "insp-1",
+        description: "Missing Tyre key / locks",
+      }),
+    ).toBe("hasTyreKeyLocks");
+    expect(
+      parseHireReturnAccessoryKeyFromCharge({
+        sourceId: "insp-1",
+        description: "Missing accessory · Tyre key / locks",
+      }),
+    ).toBe("hasTyreKeyLocks");
+  });
+});
+
+describe("dedupePostedAccessoryChargeRows", () => {
+  it("keeps one tyre-key accessory row when duplicates exist", () => {
+    const rows = dedupePostedAccessoryChargeRows([
+      {
+        id: "a1",
+        sourceKind: "checkin_inspection_accessory",
+        sourceId: "insp-1",
+        description: "Missing Tyre key / locks",
+        createdAt: "2026-09-01T10:00:00.000Z",
+      },
+      {
+        id: "a2",
+        sourceKind: "checkin_inspection_accessory",
+        sourceId: "hasTyreKeyLocks",
+        description: "Missing Tyre key / locks",
+        createdAt: "2026-09-01T11:00:00.000Z",
+      },
+      {
+        id: "d1",
+        sourceKind: "checkin_inspection_damage",
+        sourceId: "damage-1",
+        description: "Bumper · scratch · minor",
+        createdAt: "2026-09-01T09:00:00.000Z",
+      },
+    ]);
+    expect(rows.map((row) => row.id)).toEqual(["d1", "a1"]);
+  });
+
+  it("keeps one damage row per source_id when duplicates exist", () => {
+    const rows = dedupePostedAccessoryChargeRows([
+      {
+        id: "d1",
+        sourceKind: "checkin_inspection_damage",
+        sourceId: "damage-1",
+        description: "Bumper · scratch · minor",
+        createdAt: "2026-09-01T10:00:00.000Z",
+      },
+      {
+        id: "d2",
+        sourceKind: "checkin_inspection_damage",
+        sourceId: "damage-1",
+        description: "Bumper · scratch · minor",
+        createdAt: "2026-09-01T10:00:00.100Z",
+      },
+    ]);
+    expect(rows.map((row) => row.id)).toEqual(["d1"]);
+  });
+});
+
+describe("isUniqueChargeSourceConflict", () => {
+  it("detects postgres unique violations", () => {
+    expect(isUniqueChargeSourceConflict({ code: "23505", message: "duplicate key" })).toBe(true);
+    expect(isUniqueChargeSourceConflict({ code: "23503", message: "fk" })).toBe(false);
   });
 });

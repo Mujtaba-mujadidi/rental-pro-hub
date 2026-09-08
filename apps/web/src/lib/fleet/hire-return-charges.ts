@@ -62,10 +62,66 @@ export function parseHireReturnAccessoryKeyFromCharge(input: {
     return sourceId as HireInspectionAccessoryKey;
   }
   const description = input.description?.trim() ?? "";
+  if (!description) return null;
   for (const key of HIRE_INSPECTION_ACCESSORY_KEYS) {
-    if (description === hireReturnAccessoryChargeDescription(key)) return key;
+    const canonical = hireReturnAccessoryChargeDescription(key);
+    if (description === canonical) return key;
+    // Older pending-review / UI copy used "Missing accessory · {label}".
+    const label = hireInspectionAccessoryLabel(key);
+    if (description === `Missing accessory · ${label}`) return key;
+    if (description.toLowerCase() === canonical.toLowerCase()) return key;
   }
   return null;
+}
+
+/**
+ * Keep one live posted return-charge row per source (oldest first).
+ * Guards against rare duplicate inserts from concurrent apply, and against
+ * accessory rows that used different source_id shapes for the same key.
+ */
+export function dedupePostedAccessoryChargeRows<T extends {
+  id: string;
+  sourceKind: string;
+  sourceId?: string | null;
+  description?: string | null;
+  createdAt?: string | null;
+}>(rows: readonly T[]): T[] {
+  const seenSourceKeys = new Set<string>();
+  const seenAccessoryKeys = new Set<HireInspectionAccessoryKey>();
+  const ordered = [...rows].sort((a, b) => {
+    const aAt = a.createdAt?.trim() || "";
+    const bAt = b.createdAt?.trim() || "";
+    if (aAt !== bAt) return aAt.localeCompare(bAt);
+    return a.id.localeCompare(b.id);
+  });
+  const out: T[] = [];
+  for (const row of ordered) {
+    const sourceId = row.sourceId?.trim() || "";
+    if (isHireReturnChargeSourceKind(row.sourceKind) && sourceId) {
+      const sourceKey = `${row.sourceKind}:${sourceId}`;
+      if (seenSourceKeys.has(sourceKey)) continue;
+      seenSourceKeys.add(sourceKey);
+    }
+    if (row.sourceKind === "checkin_inspection_accessory") {
+      const key = parseHireReturnAccessoryKeyFromCharge(row);
+      if (key) {
+        if (seenAccessoryKeys.has(key)) continue;
+        seenAccessoryKeys.add(key);
+      }
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+/** True when a Postgres/PostgREST error is a unique-constraint conflict. */
+export function isUniqueChargeSourceConflict(error: {
+  code?: string | null;
+  message?: string | null;
+} | null | undefined): boolean {
+  if (!error) return false;
+  if (error.code === "23505") return true;
+  return /duplicate key|unique constraint/i.test(error.message ?? "");
 }
 
 export type HireReturnChargeDamageInput = {
@@ -203,7 +259,7 @@ export function buildReturnChargeLineItemDrafts(input: {
     amountGbp: number | null;
     chargeResolution: HireInspectionDamageChargeResolution | null;
   }[];
-  /** Required when posting accessory charges — stored as source_id (UUID column). */
+  /** Kept for fuel source_id; accessories use the accessory key (text source_id). */
   checkinInspectionId?: string | null;
 }): HireDriverChargeLineItemInput[] {
   const drafts: HireDriverChargeLineItemInput[] = [];
@@ -240,19 +296,17 @@ export function buildReturnChargeLineItemDrafts(input: {
     }
   }
 
-  const checkinInspectionId = input.checkinInspectionId?.trim() || input.fuel?.checkinInspectionId?.trim() || "";
   for (const accessory of input.accessories ?? []) {
     if (!accessory.enabled || accessory.chargeResolution !== "add_to_balance") continue;
     const amount = parseDamageChargeGbp(accessory.amountGbp);
     if (amount == null || amount <= 0) continue;
-    if (!checkinInspectionId) continue;
     drafts.push({
       chargeType: "other",
       amountGbp: roundGbp(amount),
       resolution: "add_to_balance",
       sourceKind: "checkin_inspection_accessory",
-      // DB source_id is uuid-typed in older schemas — never store the accessory key here.
-      sourceId: checkinInspectionId,
+      // Text source_id (post-migration). Legacy UUID rows still parse via description.
+      sourceId: accessory.key,
       description: hireReturnAccessoryChargeDescription(accessory.key),
     });
   }
@@ -310,6 +364,46 @@ export function returnChargeSettlementDeltaGbp(input: {
   return naive;
 }
 
+/**
+ * When return charges are posted as line items but the hire open settlement still
+ * matches rent + hire-time extras only (deposit not applied to balance), return the
+ * missing return-charge amount so Overview / Payments can heal settlement.
+ */
+export function missingPostedReturnChargeSettlementGbp(input: {
+  settlementBalanceDirection: string | null | undefined;
+  settlementBalanceGbp: number;
+  depositDisposition: string | null | undefined;
+  rentOutstandingGbp: number;
+  /** Outstanding hire-time extras only (exclude return-charge source kinds). */
+  hireExtrasOutstandingGbp: number;
+  postedReturnAddToBalanceGbp: number;
+}): number {
+  const postedReturn = roundGbp(Math.max(0, input.postedReturnAddToBalanceGbp));
+  if (postedReturn <= 0.005) return 0;
+
+  const disposition = (input.depositDisposition ?? "").trim();
+  if (disposition === "apply_to_balance" || disposition === "forfeit") {
+    // Open balance is already net of deposit — do not infer from rent + extras alone.
+    return 0;
+  }
+
+  const direction = input.settlementBalanceDirection ?? null;
+  if (direction === "company_owes_driver") return 0;
+
+  const current = roundGbp(Math.max(0, Number(input.settlementBalanceGbp) || 0));
+  const withoutReturn = roundGbp(
+    Math.max(0, input.rentOutstandingGbp) + Math.max(0, input.hireExtrasOutstandingGbp),
+  );
+  const withReturn = roundGbp(withoutReturn + postedReturn);
+
+  if (Math.abs(current - withReturn) <= 0.005) return 0;
+  if (Math.abs(current - withoutReturn) <= 0.005) return postedReturn;
+
+  const gap = roundGbp(withReturn - current);
+  if (gap > 0.005 && Math.abs(gap - postedReturn) <= 0.005) return postedReturn;
+  return 0;
+}
+
 export type UnpostedReturnChargeRow = {
   id: string;
   label: string;
@@ -362,6 +456,12 @@ export function listUnpostedReturnChargeAddToBalanceRows(input: {
       .map((row) => parseHireReturnAccessoryKeyFromCharge(row))
       .filter((key): key is HireInspectionAccessoryKey => key != null),
   );
+  const postedAccessoryDescriptions = new Set(
+    input.posted
+      .filter((row) => row.sourceKind === "checkin_inspection_accessory")
+      .map((row) => row.description?.trim().toLowerCase() ?? "")
+      .filter(Boolean),
+  );
   const damageMetaById = new Map((input.damageMeta ?? []).map((row) => [row.id, row]));
   const rows: UnpostedReturnChargeRow[] = [];
 
@@ -405,11 +505,13 @@ export function listUnpostedReturnChargeAddToBalanceRows(input: {
     if (amount == null || amount <= 0) continue;
     const known = (HIRE_INSPECTION_ACCESSORY_KEYS as readonly string[]).includes(accessory.key);
     if (known && postedAccessoryKeys.has(accessory.key as HireInspectionAccessoryKey)) continue;
+    const label = known
+      ? hireReturnAccessoryChargeDescription(accessory.key as HireInspectionAccessoryKey)
+      : `Missing accessory · ${accessory.key}`;
+    if (postedAccessoryDescriptions.has(label.toLowerCase())) continue;
     rows.push({
       id: `unposted-accessory-${accessory.key}`,
-      label: known
-        ? hireReturnAccessoryChargeDescription(accessory.key as HireInspectionAccessoryKey)
-        : `Missing accessory · ${accessory.key}`,
+      label,
       amountGbp: roundGbp(amount),
     });
   }

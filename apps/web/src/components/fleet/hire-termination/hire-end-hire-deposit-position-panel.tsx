@@ -3,14 +3,19 @@
 import { RphSelect } from "@/components/forms/rph-select";
 import {
   previewHireDepositResolutionAction,
+  type HireBalancePaymentAccountOption,
 } from "@/app/actions/rental-hire-termination";
 import type { HireDepositFinalizePayload } from "@/components/fleet/hire-payments/hire-deposit-disposition-resolve-card";
 import type { DepositResolutionPreview } from "@/lib/fleet/hire-deposit-resolution";
 import { openBalanceDirection } from "@/lib/fleet/hire-open-balance";
 import {
-  settlementResolutionLabel,
+  depositResolutionShowsSettlementUi,
   type HireSettlementResolution,
 } from "@/lib/fleet/hire-settlement-resolution";
+import {
+  settlementPaymentMethodRequiresAccount,
+  HIRE_PAYMENT_METHOD_LABELS,
+} from "@/lib/fleet/hire-settlement-payment-method";
 import {
   HIRE_DEPOSIT_REFUND_METHODS,
   settlementBalanceLabel,
@@ -49,12 +54,16 @@ export function HireEndHireDepositPositionPanel({
   depositRequiredGbp,
   depositHeldGbp,
   driverBalanceBeforeDepositGbp,
+  paymentAccounts = [],
+  defaultPaymentAccountId = null,
   onFinalizePayloadChange,
 }: {
   hireGroupId: string;
   depositRequiredGbp: number;
   depositHeldGbp: number;
   driverBalanceBeforeDepositGbp: number;
+  paymentAccounts?: HireBalancePaymentAccountOption[];
+  defaultPaymentAccountId?: string | null;
   onFinalizePayloadChange: (payload: HireDepositFinalizePayload | null) => void;
 }) {
   const [previewPending, startPreviewTransition] = useTransition();
@@ -67,16 +76,30 @@ export function HireEndHireDepositPositionPanel({
   const [holdReviewDateYmd, setHoldReviewDateYmd] = useState("");
   const [refundReason, setRefundReason] = useState("");
   const [refundMethod, setRefundMethod] = useState("bank_transfer");
+  const [refundPaymentAccountId, setRefundPaymentAccountId] = useState("");
   const [refundNotes, setRefundNotes] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [settlementResolution, setSettlementResolution] = useState<HireSettlementResolution>("open_balance");
   const [settlementPaymentMethod, setSettlementPaymentMethod] = useState("bank_transfer");
+  const [settlementPaymentAccountId, setSettlementPaymentAccountId] = useState("");
   const [settlementPaymentReference, setSettlementPaymentReference] = useState("");
 
   const heldGbp = Math.max(0, Number(depositHeldGbp) || 0);
   const requiredGbp = Math.max(0, Number(depositRequiredGbp) || 0);
   const unreceivedGbp = Math.max(0, roundGbp(requiredGbp - heldGbp));
   const driverOwes = driverBalanceBeforeDepositGbp > 0.005;
+  const showRefundAccount = settlementPaymentMethodRequiresAccount(refundMethod);
+  const showSettlementAccount = settlementPaymentMethodRequiresAccount(settlementPaymentMethod);
+
+  useEffect(() => {
+    const fallback =
+      defaultPaymentAccountId ??
+      paymentAccounts.find((account) => account.isDefault)?.id ??
+      paymentAccounts[0]?.id ??
+      "";
+    setRefundPaymentAccountId((current) => current || fallback);
+    setSettlementPaymentAccountId((current) => current || fallback);
+  }, [defaultPaymentAccountId, paymentAccounts]);
 
   useEffect(() => {
     if (depositChoice === "hold_pending") {
@@ -104,7 +127,19 @@ export function HireEndHireDepositPositionPanel({
     depositChoice === "hold_pending" ||
     Boolean(depositOptions.find((option) => option.value === depositChoice)?.allowed);
 
-  const needsSettlementStep = preview?.needsSettlementStep ?? false;
+  const needsSettlementStep = preview
+    ? depositResolutionShowsSettlementUi({
+        disposition: depositChoice,
+        afterSignedSettlementGbp: preview.afterSignedSettlementGbp,
+      })
+    : false;
+  const remainingDriverOwes =
+    preview != null && preview.afterSignedSettlementGbp > 0.005;
+  const separateRefundWhileDriverOwes =
+    depositChoice === "refund_full" &&
+    preview != null &&
+    preview.depositRefundDueGbp > 0.005 &&
+    preview.afterSignedSettlementGbp > 0.005;
   const effectiveSettlementResolution =
     preview && preview.settlementResolutions.includes(settlementResolution)
       ? settlementResolution
@@ -130,7 +165,13 @@ export function HireEndHireDepositPositionPanel({
     selectedAllowed &&
     reasonValid &&
     confirmed &&
-    (depositChoice === "hold_pending" || (preview != null && !previewPending));
+    (depositChoice === "hold_pending" || (preview != null && !previewPending)) &&
+    (!separateRefundWhileDriverOwes ||
+      !showRefundAccount ||
+      Boolean(refundPaymentAccountId)) &&
+    (!(needsSettlementStep && effectiveSettlementResolution === "paid_now") ||
+      !showSettlementAccount ||
+      Boolean(settlementPaymentAccountId));
 
   const depositDispositionReason = useMemo(() => {
     if (depositChoice === "hold_pending") {
@@ -156,12 +197,32 @@ export function HireEndHireDepositPositionPanel({
         depositChoice === "apply_to_balance"
           ? "Applied to final account balance"
           : depositDispositionReason,
-      settlementResolution: needsSettlementStep ? effectiveSettlementResolution : undefined,
+      depositRefundPayout: separateRefundWhileDriverOwes ? "paid_now" : undefined,
+      depositRefundPaymentMethod: separateRefundWhileDriverOwes ? refundMethod : undefined,
+      depositRefundPaymentAccountId:
+        separateRefundWhileDriverOwes && showRefundAccount
+          ? refundPaymentAccountId || undefined
+          : undefined,
+      settlementResolution: needsSettlementStep
+        ? effectiveSettlementResolution
+        : remainingDriverOwes
+          ? "open_balance"
+          : undefined,
       settlementPaymentMethod:
         needsSettlementStep && effectiveSettlementResolution === "paid_now"
           ? settlementPaymentMethod
-          : depositChoice === "refund_full"
+          : depositChoice === "refund_full" && !separateRefundWhileDriverOwes
             ? refundMethod
+            : undefined,
+      settlementPaymentAccountId:
+        needsSettlementStep &&
+        effectiveSettlementResolution === "paid_now" &&
+        showSettlementAccount
+          ? settlementPaymentAccountId || undefined
+          : depositChoice === "refund_full" &&
+              !separateRefundWhileDriverOwes &&
+              showRefundAccount
+            ? refundPaymentAccountId || undefined
             : undefined,
       settlementPaymentReference:
         needsSettlementStep && effectiveSettlementResolution === "paid_now"
@@ -173,11 +234,17 @@ export function HireEndHireDepositPositionPanel({
     onFinalizePayloadChange,
     depositChoice,
     depositDispositionReason,
+    separateRefundWhileDriverOwes,
+    refundMethod,
+    refundPaymentAccountId,
+    showRefundAccount,
     needsSettlementStep,
+    remainingDriverOwes,
     effectiveSettlementResolution,
     settlementPaymentMethod,
+    settlementPaymentAccountId,
+    showSettlementAccount,
     settlementPaymentReference,
-    refundMethod,
   ]);
 
   const choices: EndHireDepositChoice[] = driverOwes
@@ -327,9 +394,17 @@ export function HireEndHireDepositPositionPanel({
 
               {selected && choice === "refund_full" ? (
                 <div className="mt-2.5 space-y-2.5 border-t border-rph-border/70 pt-2.5">
-                  <div className="rounded-lg border border-rose-200 bg-rose-50/80 px-3 py-2 text-xs text-rose-950 dark:border-rose-900/40 dark:bg-rose-950/25 dark:text-rose-100">
-                    This is an exception where the driver is refunded while the debt remains open.
-                  </div>
+                  {driverOwes ? (
+                    <div className="rph-alert-warn" role="status">
+                      <p className="font-semibold">
+                        Driver still owes {formatGbp(Math.max(0, driverBalanceBeforeDepositGbp))}
+                      </p>
+                      <p className="mt-0.5 text-[13px] leading-snug opacity-90">
+                        Returning the full deposit does not clear that balance. The deposit is paid
+                        back to the driver and the open hire debt stays on Payments to collect later.
+                      </p>
+                    </div>
+                  ) : null}
                   <div className="grid gap-2.5 sm:grid-cols-2">
                     <div className="space-y-1">
                       <label className="text-xs font-medium text-rph-fg" htmlFor="refund-reason">
@@ -360,12 +435,39 @@ export function HireEndHireDepositPositionPanel({
                         aria-label="Refund method"
                         options={HIRE_DEPOSIT_REFUND_METHODS.map((method) => ({
                           value: method,
-                          label: method.replace(/_/g, " "),
+                          label: HIRE_PAYMENT_METHOD_LABELS[method] ?? method.replace(/_/g, " "),
                         }))}
-                        onValueChange={setRefundMethod}
+                        onValueChange={(value) => {
+                          setRefundMethod(value);
+                          if (!settlementPaymentMethodRequiresAccount(value)) {
+                            setRefundPaymentAccountId("");
+                          }
+                        }}
                       />
                     </div>
                   </div>
+                  {showRefundAccount ? (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-rph-fg" htmlFor="refund-account">
+                        Paid from account
+                      </label>
+                      <RphSelect
+                        value={refundPaymentAccountId || "__none__"}
+                        placeholder="Select payment account…"
+                        aria-label="Paid from account"
+                        options={[
+                          { value: "__none__", label: "Select payment account…" },
+                          ...paymentAccounts.map((account) => ({
+                            value: account.id,
+                            label: `${account.name}${account.isDefault ? " (hire default)" : ""}`,
+                          })),
+                        ]}
+                        onValueChange={(value) =>
+                          setRefundPaymentAccountId(value === "__none__" ? "" : value)
+                        }
+                      />
+                    </div>
+                  ) : null}
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-rph-fg" htmlFor="refund-notes">
                       Notes (optional)
@@ -390,18 +492,70 @@ export function HireEndHireDepositPositionPanel({
         <div className="mt-3 space-y-2 border-t border-rph-border pt-3">
           <div className="space-y-1">
             <label className="text-sm font-medium text-rph-fg" htmlFor="settlement-resolution">
-              How to clear the balance
+              Deposit refund payout
             </label>
+            <p className="text-xs text-rph-fg-secondary">
+              How you pay the refund amount back to the driver. Remaining driver debt stays on
+              Payments.
+            </p>
             <RphSelect
               value={effectiveSettlementResolution}
-              aria-label="How to clear the balance"
+              aria-label="Deposit refund payout"
               options={preview.settlementResolutions.map((resolution) => ({
                 value: resolution,
-                label: settlementResolutionLabel(resolution),
+                label:
+                  resolution === "paid_now"
+                    ? "Pay refund now — record payout"
+                    : "Pay refund later — leave company owing",
               }))}
               onValueChange={(value) => setSettlementResolution(value as HireSettlementResolution)}
             />
           </div>
+          {effectiveSettlementResolution === "paid_now" ? (
+            <div className="grid gap-2.5 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-rph-fg" htmlFor="settlement-method">
+                  Payout method
+                </label>
+                <RphSelect
+                  value={settlementPaymentMethod}
+                  aria-label="Payout method"
+                  options={HIRE_DEPOSIT_REFUND_METHODS.map((method) => ({
+                    value: method,
+                    label: HIRE_PAYMENT_METHOD_LABELS[method] ?? method.replace(/_/g, " "),
+                  }))}
+                  onValueChange={(value) => {
+                    setSettlementPaymentMethod(value);
+                    if (!settlementPaymentMethodRequiresAccount(value)) {
+                      setSettlementPaymentAccountId("");
+                    }
+                  }}
+                />
+              </div>
+              {showSettlementAccount ? (
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-rph-fg" htmlFor="settlement-account">
+                    Paid from account
+                  </label>
+                  <RphSelect
+                    value={settlementPaymentAccountId || "__none__"}
+                    placeholder="Select payment account…"
+                    aria-label="Paid from account"
+                    options={[
+                      { value: "__none__", label: "Select payment account…" },
+                      ...paymentAccounts.map((account) => ({
+                        value: account.id,
+                        label: `${account.name}${account.isDefault ? " (hire default)" : ""}`,
+                      })),
+                    ]}
+                    onValueChange={(value) =>
+                      setSettlementPaymentAccountId(value === "__none__" ? "" : value)
+                    }
+                  />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

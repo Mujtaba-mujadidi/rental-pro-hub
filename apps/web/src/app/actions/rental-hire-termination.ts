@@ -44,6 +44,8 @@ import {
 } from "@/lib/fleet/hire-rent-settlement";
 import {
   availableSettlementResolutions,
+  depositResolutionDefaultSettlementResolution,
+  depositResolutionShowsSettlementUi,
   HIRE_SETTLEMENT_RESOLUTIONS,
   isDepositDispositionAllowed,
   resolveTerminationBalanceState,
@@ -77,12 +79,14 @@ import { syncVehicleStatusForHireGroup } from "@/lib/fleet/sync-vehicle-hire-sta
 import { cancelOpenSubcompanyDocumentRequirementsForHire } from "@/lib/rental/subcompany-hire-document-requirements";
 import { revalidateVehicleFinancialsForHireGroup } from "@/app/actions/rental-vehicle-financials";
 import {
+  allocateDepositApplyToBalanceGbp,
   buildDepositResolutionPreview,
   computeDepositResolutionSettlement,
   isDepositDispositionPending,
   parseTerminationAccountsSummary,
   type DepositResolutionPreview,
 } from "@/lib/fleet/hire-deposit-resolution";
+import { persistDepositCreditToDriverCharges } from "@/lib/fleet/persist-hire-deposit-charge-credit";
 import {
   buildHireTerminationAccountsSummary,
   HIRE_DEPOSIT_DISPOSITIONS,
@@ -170,6 +174,8 @@ export type HireDriverChargeWorkspaceRow = {
   chargedOn: string | null;
   sourceKind: string;
   balancePaymentId?: string | null;
+  paidGbp?: number | null;
+  collectionStatus?: string | null;
   canMutate: boolean;
 };
 
@@ -1497,6 +1503,8 @@ export async function previewHireDepositResolutionAction(input: {
     depositHeldGbp: payments.data.depositReceivedGbp,
     disposition,
     refundAmountGbp: input.depositRefundAmountGbp,
+    unpaidRentGbp: Math.max(0, payments.data.terminationSummary?.signedRentBalanceGbp ?? 0),
+    unpaidChargesGbp: Math.max(0, payments.data.extraChargesOutstandingGbp),
   });
 
   return { ok: true, preview };
@@ -1507,8 +1515,14 @@ export async function resolveHireDepositDispositionAction(input: {
   depositDisposition: string;
   depositDispositionReason?: string;
   depositRefundAmountGbp?: number;
+  /** Pay the deposit refund now vs later when driver still owes separately. */
+  depositRefundPayout?: string;
+  depositRefundPaymentMethod?: string;
+  depositRefundPaymentAccountId?: string;
+  depositRefundPaymentReference?: string;
   settlementResolution?: string;
   settlementPaymentMethod?: string;
+  settlementPaymentAccountId?: string;
   settlementPaymentReference?: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const { profile, user } = await requireRentalCompanyArea();
@@ -1524,7 +1538,7 @@ export async function resolveHireDepositDispositionAction(input: {
   const { data: group, error: groupError } = await supabase
     .from("vehicle_hire_groups")
     .select(
-      "id, status, terminated_at, ended_at, deposit_disposition, settlement_balance_gbp, settlement_balance_direction, termination_settlement, end_hire_draft",
+      "id, status, terminated_at, ended_at, parent_company_id, deposit_disposition, settlement_balance_gbp, settlement_balance_direction, termination_settlement, end_hire_draft, default_payment_account_id",
     )
     .eq("id", input.hireGroupId.trim())
     .maybeSingle();
@@ -1635,15 +1649,21 @@ export async function resolveHireDepositDispositionAction(input: {
   });
 
   const needsSettlementStep = settlementStepRequired(netSettlementGbp);
-  const resolution = needsSettlementStep
+  const showSettlementUi = depositResolutionShowsSettlementUi({
+    disposition,
+    afterSignedSettlementGbp: netSettlementGbp,
+  });
+  const resolution = showSettlementUi
     ? parseSettlementResolution((input.settlementResolution ?? "").trim())
-    : null;
+    : depositResolutionDefaultSettlementResolution(netSettlementGbp);
 
-  if (needsSettlementStep) {
+  if (showSettlementUi) {
     if (!resolution) return { ok: false, error: "Choose how to settle the balance after applying the deposit." };
     if (!availableSettlementResolutions(netSettlementGbp).includes(resolution)) {
       return { ok: false, error: "The selected settlement option is not valid." };
     }
+  } else if (needsSettlementStep && !resolution) {
+    return { ok: false, error: "Choose how to settle the balance after applying the deposit." };
   }
 
   let balanceState;
@@ -1662,6 +1682,70 @@ export async function resolveHireDepositDispositionAction(input: {
       : null;
   if (balanceState.recordPayment != null && !settlementPaymentMethod) {
     return { ok: false, error: "Select how the settlement payment was made." };
+  }
+
+  const resolvePaymentAccountId = async (
+    method: string,
+    requestedId: string | undefined,
+    errorLabel: string,
+  ): Promise<{ ok: true; paymentAccountId: string | null } | { ok: false; error: string }> => {
+    const accountRequired = settlementPaymentMethodRequiresAccount(method);
+    if (!accountRequired) return { ok: true, paymentAccountId: null };
+    const paymentAccountId =
+      requestedId?.trim() ||
+      ((group.default_payment_account_id as string | null) ?? null);
+    if (!paymentAccountId) {
+      return { ok: false, error: `Select the payment account used for this ${errorLabel}.` };
+    }
+    const { data: account } = await supabase
+      .from("company_payment_accounts")
+      .select("id")
+      .eq("id", paymentAccountId)
+      .eq("parent_company_id", group.parent_company_id as string)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (!account?.id) return { ok: false, error: "Payment account not found." };
+    return { ok: true, paymentAccountId };
+  };
+
+  let settlementPaymentAccountId: string | null = null;
+  if (balanceState.recordPayment != null && settlementPaymentMethod) {
+    const accountRes = await resolvePaymentAccountId(
+      settlementPaymentMethod,
+      input.settlementPaymentAccountId,
+      balanceState.recordPayment.direction === "paid_to_driver"
+        ? "payout to the driver"
+        : "settlement payment",
+    );
+    if (!accountRes.ok) return accountRes;
+    settlementPaymentAccountId = accountRes.paymentAccountId;
+  }
+
+  const refundDueGbp =
+    disposition === "refund_full"
+      ? depositReceivedGbp
+      : disposition === "refund_partial"
+        ? Math.max(
+            0,
+            Math.min(depositReceivedGbp, Number(input.depositRefundAmountGbp ?? 0)),
+          )
+        : 0;
+  /** Refund due while the open hire balance is still driver-owing — payout is separate. */
+  const separateRefundPayout = refundDueGbp > 0.005 && netSettlementGbp > 0.005;
+  let refundPayoutMethod: ReturnType<typeof parseRefundMethod> = null;
+  let refundPaymentAccountId: string | null = null;
+  if (separateRefundPayout && input.depositRefundPayout === "paid_now") {
+    refundPayoutMethod = parseRefundMethod((input.depositRefundPaymentMethod ?? "").trim());
+    if (!refundPayoutMethod) {
+      return { ok: false, error: "Select how the deposit refund was paid." };
+    }
+    const accountRes = await resolvePaymentAccountId(
+      refundPayoutMethod,
+      input.depositRefundPaymentAccountId,
+      "deposit refund",
+    );
+    if (!accountRes.ok) return accountRes;
+    refundPaymentAccountId = accountRes.paymentAccountId;
   }
 
   const depositReason = requiresDepositDispositionReason(disposition)
@@ -1700,12 +1784,29 @@ export async function resolveHireDepositDispositionAction(input: {
       hire_group_id: input.hireGroupId.trim(),
       amount_gbp: balanceState.recordPayment.amountGbp,
       payment_method: settlementPaymentMethod,
+      payment_account_id: settlementPaymentAccountId,
       payment_reference: input.settlementPaymentReference?.trim() || null,
       direction: balanceState.recordPayment.direction,
+      payment_category: "settlement",
       notes: "Deposit resolution settlement",
       recorded_by_user_id: user.id,
     });
     if (paymentError) return { ok: false, error: paymentError.message };
+  }
+
+  if (separateRefundPayout && refundPayoutMethod) {
+    const { error: refundPaymentError } = await admin.from("vehicle_hire_balance_payments").insert({
+      hire_group_id: input.hireGroupId.trim(),
+      amount_gbp: refundDueGbp,
+      payment_method: refundPayoutMethod,
+      payment_account_id: refundPaymentAccountId,
+      payment_reference: input.depositRefundPaymentReference?.trim() || null,
+      direction: "paid_to_driver",
+      payment_category: "settlement",
+      notes: "Deposit refund",
+      recorded_by_user_id: user.id,
+    });
+    if (refundPaymentError) return { ok: false, error: refundPaymentError.message };
   }
 
   const accrualYmd =
@@ -1723,6 +1824,51 @@ export async function resolveHireDepositDispositionAction(input: {
     accrualYmd,
   });
   if (!depositCredit.ok) return depositCredit;
+
+  if (disposition === "apply_to_balance") {
+    const unpaidChargesGbp = await (async () => {
+      const [{ data: chargeRows }, { data: receiptRows }] = await Promise.all([
+        admin
+          .from("vehicle_hire_driver_charge_line_items")
+          .select("amount_gbp, resolution")
+          .eq("hire_group_id", input.hireGroupId.trim())
+          .eq("parent_company_id", group.parent_company_id as string),
+        admin
+          .from("vehicle_hire_balance_payments")
+          .select("amount_gbp, direction, payment_category")
+          .eq("hire_group_id", input.hireGroupId.trim()),
+      ]);
+      return outstandingExtraChargesGbp(
+        (chargeRows ?? []).map((row) => ({
+          amountGbp: Number(row.amount_gbp ?? 0),
+          resolution: String(row.resolution ?? ""),
+        })),
+        (receiptRows ?? []).map((payment) => ({
+          amountGbp: Number(payment.amount_gbp ?? 0),
+          direction: (payment.direction as string | null) ?? null,
+          paymentCategory: (payment.payment_category as string | null) ?? "settlement",
+        })),
+      );
+    })();
+
+    const split = allocateDepositApplyToBalanceGbp({
+      depositGbp: depositReceivedGbp,
+      unpaidRentGbp: Math.max(0, terminationSummary.signedRentBalanceGbp),
+      unpaidChargesGbp,
+    });
+
+    if (split.appliedToChargesGbp > 0.005) {
+      const chargeCredit = await persistDepositCreditToDriverCharges({
+        admin,
+        hireGroupId: input.hireGroupId.trim(),
+        parentCompanyId: group.parent_company_id as string,
+        userId: user.id,
+        amountGbp: split.appliedToChargesGbp,
+        paidAtIso: new Date().toISOString(),
+      });
+      if (!chargeCredit.ok) return chargeCredit;
+    }
+  }
 
   await logHireGroupEvent(admin, {
     hireGroupId: input.hireGroupId.trim(),

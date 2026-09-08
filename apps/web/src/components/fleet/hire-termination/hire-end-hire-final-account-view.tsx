@@ -218,6 +218,8 @@ export function HireEndHireFinalAccountView({
                 depositRequiredGbp={review.depositRequiredGbp}
                 depositHeldGbp={model.depositHeldGbp}
                 driverBalanceBeforeDepositGbp={model.balanceBeforeDepositGbp}
+                paymentAccounts={data.depositResolution?.paymentAccounts ?? []}
+                defaultPaymentAccountId={data.depositResolution?.defaultPaymentAccountId ?? null}
                 onFinalizePayloadChange={onDepositFinalizePayloadChange}
               />
             </div>

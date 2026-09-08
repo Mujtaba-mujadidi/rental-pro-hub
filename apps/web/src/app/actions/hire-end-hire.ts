@@ -253,6 +253,8 @@ function assembleEndHireFinancialSlice(input: {
       currentSignedSettlementGbp: payments.currentSignedSettlementGbp,
       depositDisposition: payments.depositDisposition,
       terminationSummary: payments.terminationSummary,
+      paymentAccounts: payments.settlementPaymentAccounts,
+      defaultPaymentAccountId: payments.defaultSettlementPaymentAccountId,
     },
     finalAccountLedger: {
       returnedAtIso,
@@ -504,6 +506,8 @@ export type HireEndHirePageData = {
     currentSignedSettlementGbp: number;
     depositDisposition: string | null;
     terminationSummary: HireTerminationAccountsSummary | null;
+    paymentAccounts: import("@/app/actions/rental-hire-termination").HireBalancePaymentAccountOption[];
+    defaultPaymentAccountId: string | null;
   } | null;
   contractEffectiveFromLabel: string;
   contractRentStartDayMonthLabel: string;
@@ -988,8 +992,13 @@ export async function finalizeHireEndHireAction(
     depositDisposition?: string;
     depositDispositionReason?: string;
     depositRefundAmountGbp?: number;
+    depositRefundPayout?: string;
+    depositRefundPaymentMethod?: string;
+    depositRefundPaymentAccountId?: string;
+    depositRefundPaymentReference?: string;
     settlementResolution?: string;
     settlementPaymentMethod?: string;
+    settlementPaymentAccountId?: string;
     settlementPaymentReference?: string;
   },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -1113,8 +1122,13 @@ export async function finalizeHireEndHireAction(
         depositDisposition: input.depositDisposition,
         depositDispositionReason: input.depositDispositionReason,
         depositRefundAmountGbp: input.depositRefundAmountGbp,
+        depositRefundPayout: input.depositRefundPayout,
+        depositRefundPaymentMethod: input.depositRefundPaymentMethod,
+        depositRefundPaymentAccountId: input.depositRefundPaymentAccountId,
+        depositRefundPaymentReference: input.depositRefundPaymentReference,
         settlementResolution: input.settlementResolution,
         settlementPaymentMethod: input.settlementPaymentMethod,
+        settlementPaymentAccountId: input.settlementPaymentAccountId,
         settlementPaymentReference: input.settlementPaymentReference,
       });
       if (!depositRes.ok) {

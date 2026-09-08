@@ -204,14 +204,17 @@ export function buildHireEndHireFinalAccountModel(input: {
     input.returnCharges,
     input.returnChargesDraft,
   );
-  const pendingReturnChargesGbp = input.returnChargesApplied ? 0 : sumReturnChargeOverviewGbp(returnChargeLines);
+  const returnChargesGbp = sumReturnChargeOverviewGbp(returnChargeLines);
+  const pendingReturnChargesGbp = input.returnChargesApplied ? 0 : returnChargesGbp;
+
+  // Once return charges are posted they sit inside extraChargesPostedGbp.
+  // Keep them as separate overview lines, but do not count them twice.
+  const existingExtrasGbp = input.returnChargesApplied
+    ? roundGbp(Math.max(0, input.review.extraChargesPostedGbp - returnChargesGbp))
+    : roundGbp(input.review.extraChargesPostedGbp);
 
   const totalFinalChargesGbp = roundGbp(
-    addGbp(
-      input.review.rentChargedGbp,
-      input.review.extraChargesPostedGbp,
-      sumReturnChargeOverviewGbp(returnChargeLines),
-    ),
+    addGbp(input.review.rentChargedGbp, existingExtrasGbp, returnChargesGbp),
   );
   const driverPaymentsReceivedGbp = roundGbp(
     addGbp(input.review.rentReceivedGbp, input.review.extraChargesReceivedGbp),
@@ -226,12 +229,12 @@ export function buildHireEndHireFinalAccountModel(input: {
       amountGbp: input.review.rentChargedGbp,
       kind: "rent",
     },
-    ...(input.review.extraChargesPostedGbp > 0.005
+    ...(existingExtrasGbp > 0.005
       ? [
           {
             id: "existing-extras",
             label: "Existing posted extra charges",
-            amountGbp: input.review.extraChargesPostedGbp,
+            amountGbp: existingExtrasGbp,
             kind: "existing_extra" as const,
           },
         ]

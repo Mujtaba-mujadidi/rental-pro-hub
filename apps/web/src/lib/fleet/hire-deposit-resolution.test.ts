@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeDepositResolutionSettlement,
   buildDepositResolutionPreview,
+  allocateDepositApplyToBalanceGbp,
   hireDepositHeldGbp,
   isDepositDispositionPending,
 } from "@/lib/fleet/hire-deposit-resolution";
@@ -75,6 +76,33 @@ describe("computeDepositResolutionSettlement", () => {
     expect(preview.depositAppliedToBalanceGbp).toBe(0);
   });
 
+  it("previews apply-to-balance waterfall: rent then charges", () => {
+    const preview = buildDepositResolutionPreview({
+      currentSignedSettlementGbp: 1050,
+      depositHeldGbp: 600,
+      disposition: "apply_to_balance",
+      unpaidRentGbp: 600,
+      unpaidChargesGbp: 450,
+    });
+    expect(preview.afterSignedSettlementGbp).toBe(450);
+    expect(preview.depositAppliedToRentGbp).toBe(600);
+    expect(preview.depositAppliedToChargesGbp).toBe(0);
+    expect(preview.depositAppliedToBalanceGbp).toBe(600);
+  });
+
+  it("previews apply-to-balance covering rent and part of charges", () => {
+    const preview = buildDepositResolutionPreview({
+      currentSignedSettlementGbp: 750,
+      depositHeldGbp: 900,
+      disposition: "apply_to_balance",
+      unpaidRentGbp: 300,
+      unpaidChargesGbp: 450,
+    });
+    expect(preview.depositAppliedToRentGbp).toBe(300);
+    expect(preview.depositAppliedToChargesGbp).toBe(450);
+    expect(preview.afterSignedSettlementGbp).toBe(-150);
+  });
+
   it("forfeits deposit without creating a credit when rent is settled", () => {
     expect(
       computeDepositResolutionSettlement({
@@ -120,5 +148,35 @@ describe("computeDepositResolutionSettlement", () => {
         disposition: "forfeit",
       }),
     ).toBe(0);
+  });
+});
+
+describe("allocateDepositApplyToBalanceGbp", () => {
+  it("pours deposit onto rent before charges", () => {
+    expect(
+      allocateDepositApplyToBalanceGbp({
+        depositGbp: 600,
+        unpaidRentGbp: 400,
+        unpaidChargesGbp: 450,
+      }),
+    ).toEqual({
+      appliedToRentGbp: 400,
+      appliedToChargesGbp: 200,
+      surplusGbp: 0,
+    });
+  });
+
+  it("leaves surplus when deposit exceeds rent and charges", () => {
+    expect(
+      allocateDepositApplyToBalanceGbp({
+        depositGbp: 1000,
+        unpaidRentGbp: 300,
+        unpaidChargesGbp: 200,
+      }),
+    ).toEqual({
+      appliedToRentGbp: 300,
+      appliedToChargesGbp: 200,
+      surplusGbp: 500,
+    });
   });
 });

@@ -71,6 +71,29 @@ export function computeDepositResolutionSettlement(input: {
   return balance;
 }
 
+/**
+ * Waterfall for apply-to-balance: rent first, then outstanding charges, then surplus.
+ * Matches recording a payment against those debts for vehicle P&L.
+ */
+export function allocateDepositApplyToBalanceGbp(input: {
+  depositGbp: number;
+  unpaidRentGbp: number;
+  unpaidChargesGbp: number;
+}): {
+  appliedToRentGbp: number;
+  appliedToChargesGbp: number;
+  surplusGbp: number;
+} {
+  const deposit = roundGbp(Math.max(0, input.depositGbp));
+  const unpaidRentGbp = roundGbp(Math.max(0, input.unpaidRentGbp));
+  const unpaidChargesGbp = roundGbp(Math.max(0, input.unpaidChargesGbp));
+  const appliedToRentGbp = roundGbp(Math.min(deposit, unpaidRentGbp));
+  const afterRent = roundGbp(deposit - appliedToRentGbp);
+  const appliedToChargesGbp = roundGbp(Math.min(afterRent, unpaidChargesGbp));
+  const surplusGbp = roundGbp(afterRent - appliedToChargesGbp);
+  return { appliedToRentGbp, appliedToChargesGbp, surplusGbp };
+}
+
 export type DepositResolutionPreview = {
   currentSignedSettlementGbp: number;
   currentDirection: SettlementBalanceDirection;
@@ -78,6 +101,10 @@ export type DepositResolutionPreview = {
   afterDirection: SettlementBalanceDirection;
   /** Held deposit applied against the open charge balance (apply / forfeit only). */
   depositAppliedToBalanceGbp: number;
+  /** Of the applied amount, allocated to unpaid rent (apply / forfeit). */
+  depositAppliedToRentGbp: number;
+  /** Of the applied amount, allocated to outstanding charges (apply_to_balance only). */
+  depositAppliedToChargesGbp: number;
   /** Deposit cash to return to the driver (refund dispositions). */
   depositRefundDueGbp: number;
   needsSettlementStep: boolean;
@@ -97,6 +124,8 @@ export function buildDepositResolutionPreview(input: {
   depositHeldGbp: number;
   disposition: HireDepositDisposition;
   refundAmountGbp?: number | null;
+  unpaidRentGbp?: number;
+  unpaidChargesGbp?: number;
 }): DepositResolutionPreview {
   const currentSignedSettlementGbp = roundGbp(input.currentSignedSettlementGbp);
   const depositHeldGbp = roundGbp(input.depositHeldGbp);
@@ -108,12 +137,29 @@ export function buildDepositResolutionPreview(input: {
   });
 
   let depositAppliedToBalanceGbp = 0;
+  let depositAppliedToRentGbp = 0;
+  let depositAppliedToChargesGbp = 0;
   let depositRefundDueGbp = 0;
 
-  if (input.disposition === "apply_to_balance" || input.disposition === "forfeit") {
+  const unpaidRentGbp = roundGbp(Math.max(0, input.unpaidRentGbp ?? 0));
+  const unpaidChargesGbp = roundGbp(Math.max(0, input.unpaidChargesGbp ?? 0));
+
+  if (input.disposition === "apply_to_balance") {
+    const split = allocateDepositApplyToBalanceGbp({
+      depositGbp: depositHeldGbp,
+      unpaidRentGbp,
+      unpaidChargesGbp,
+    });
+    depositAppliedToRentGbp = split.appliedToRentGbp;
+    depositAppliedToChargesGbp = split.appliedToChargesGbp;
+    depositAppliedToBalanceGbp = roundGbp(
+      depositAppliedToRentGbp + depositAppliedToChargesGbp,
+    );
+  } else if (input.disposition === "forfeit") {
     depositAppliedToBalanceGbp = roundGbp(
       Math.min(depositHeldGbp, Math.max(0, currentSignedSettlementGbp)),
     );
+    depositAppliedToRentGbp = roundGbp(Math.min(depositHeldGbp, unpaidRentGbp));
   } else if (input.disposition === "refund_full") {
     depositRefundDueGbp = depositHeldGbp;
   } else if (input.disposition === "refund_partial") {
@@ -128,6 +174,8 @@ export function buildDepositResolutionPreview(input: {
     afterSignedSettlementGbp,
     afterDirection: settlementDirectionFromSigned(afterSignedSettlementGbp),
     depositAppliedToBalanceGbp,
+    depositAppliedToRentGbp,
+    depositAppliedToChargesGbp,
     depositRefundDueGbp,
     needsSettlementStep: settlementStepRequired(afterSignedSettlementGbp),
     settlementResolutions: availableSettlementResolutions(afterSignedSettlementGbp),
@@ -227,5 +275,5 @@ export function parseTerminationAccountsSummary(
 }
 
 export function depositResolutionHelpText(): string {
-  return "The deposit was held when the contract ended. Choose whether to return it, keep it, or use it to pay what is still owed. Returning the deposit does not reduce an outstanding charge balance.";
+  return "The deposit was held when the contract ended. Choose whether to return it, keep it, or use it to pay what is still owed. Apply to balance pays unpaid rent first, then outstanding charges — the same as recording those payments. Returning the deposit does not reduce an outstanding charge balance.";
 }

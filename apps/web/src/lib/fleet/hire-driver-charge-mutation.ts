@@ -96,6 +96,24 @@ export function staffManualExtraChargeVoidBlock(input: {
   return null;
 }
 
+/**
+ * Extra charges posted while the hire was active stay read-only on the ended
+ * Charges tab (History / Amend paid only). Post-end staff adjustments remain editable.
+ */
+export function staffManualChargeLockedAsHireTimePost(input: {
+  sourceKind: string;
+  chargedOn?: string | null;
+  createdAt?: string | null;
+  contractEndedYmd?: string | null;
+}): boolean {
+  const endedYmd = input.contractEndedYmd?.trim() ?? "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(endedYmd)) return false;
+  if (input.sourceKind !== "staff_manual") return false;
+  const day = (input.chargedOn?.trim() || input.createdAt?.trim().slice(0, 10) || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return true;
+  return day < endedYmd;
+}
+
 export function parseStaffManualChargeAmountGbp(value: number): number | null {
   const amount = Math.round(Number(value) * 100) / 100;
   if (!Number.isFinite(amount) || amount <= 0) return null;

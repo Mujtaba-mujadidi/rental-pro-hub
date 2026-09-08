@@ -26,6 +26,7 @@ import {
   HIRE_RETURN_CHARGE_SOURCE_KINDS,
   hireReturnAccessoryChargeDescription,
   isHireReturnChargeSourceKind,
+  isUniqueChargeSourceConflict,
   parseHireReturnAccessoryKeyFromCharge,
   returnChargeSettlementDeltaGbp,
   sumLineItemAddToBalanceGbp,
@@ -571,6 +572,82 @@ export async function applyHireReturnChargesAction(
   if (hireGroupError) return { ok: false, error: hireGroupError.message };
   if (!hireGroup) return { ok: false, error: "Hire not found." };
 
+  const previousDraft =
+    parseHireEndHireDraft(hireGroup.end_hire_draft) ??
+    ({
+      started: true,
+      step: "final_account",
+      returnDateYmd: "",
+      returnTimeHm: "",
+      reason: "",
+      notes: "",
+      rentBillingMode: "end_of_period",
+      updatedAt: nowIso,
+      finalizedAt: null,
+      explicitFinalization: false,
+      returnChargesAppliedAt: null,
+      pendingReturnReviews: null,
+    } satisfies HireEndHireDraft);
+
+  if (previousDraft.returnChargesAppliedAt?.trim()) {
+    return {
+      ok: true,
+      data: { returnChargesAppliedAt: previousDraft.returnChargesAppliedAt },
+    };
+  }
+
+  const pendingAccessoriesForClaim = input.accessories
+    .filter(
+      (accessory) => accessory.enabled && accessory.chargeResolution === "review_later",
+    )
+    .map((accessory) => accessory.key);
+  const claimDraft: HireEndHireDraft = {
+    ...previousDraft,
+    returnChargesAppliedAt: nowIso,
+    pendingReturnReviews: {
+      fuel: Boolean(input.fuel.enabled && input.fuel.chargeResolution === "review_later"),
+      accessories: pendingAccessoriesForClaim,
+    },
+    updatedAt: nowIso,
+  };
+
+  // Compare-and-set so concurrent finalize/payments commits cannot double-insert accessories.
+  const { data: claimedRows, error: claimError } = await admin
+    .from("vehicle_hire_groups")
+    .update({ end_hire_draft: claimDraft })
+    .eq("id", hireGroupId)
+    .eq("parent_company_id", authorized.hire.parentCompanyId)
+    .or(
+      "end_hire_draft->>returnChargesAppliedAt.is.null,end_hire_draft->>returnChargesAppliedAt.eq.",
+    )
+    .select("id");
+  if (claimError) return { ok: false, error: claimError.message };
+  if (!claimedRows?.length) {
+    const { data: refreshed } = await admin
+      .from("vehicle_hire_groups")
+      .select("end_hire_draft")
+      .eq("id", hireGroupId)
+      .eq("parent_company_id", authorized.hire.parentCompanyId)
+      .maybeSingle();
+    const appliedAt =
+      parseHireEndHireDraft(refreshed?.end_hire_draft)?.returnChargesAppliedAt?.trim() || nowIso;
+    return { ok: true, data: { returnChargesAppliedAt: appliedAt } };
+  }
+
+  const clearApplyClaim = async () => {
+    await admin
+      .from("vehicle_hire_groups")
+      .update({
+        end_hire_draft: {
+          ...claimDraft,
+          returnChargesAppliedAt: null,
+          updatedAt: new Date().toISOString(),
+        },
+      })
+      .eq("id", hireGroupId)
+      .eq("parent_company_id", authorized.hire.parentCompanyId);
+  };
+
   const { data: existingCharges } = await admin
     .from("vehicle_hire_driver_charge_line_items")
     .select("id, balance_payment_id, resolution, amount_gbp, source_kind")
@@ -627,7 +704,10 @@ export async function applyHireReturnChargesAction(
     .delete()
     .eq("hire_group_id", hireGroupId)
     .in("source_kind", [...HIRE_RETURN_CHARGE_SOURCE_KINDS]);
-  if (deleteChargesError) return { ok: false, error: deleteChargesError.message };
+  if (deleteChargesError) {
+    await clearApplyClaim();
+    return { ok: false, error: deleteChargesError.message };
+  }
 
   if (paymentIds.length > 0) {
     const { error: paymentDeleteError } = await admin
@@ -635,7 +715,10 @@ export async function applyHireReturnChargesAction(
       .delete()
       .eq("hire_group_id", hireGroupId)
       .in("id", paymentIds);
-    if (paymentDeleteError) return { ok: false, error: paymentDeleteError.message };
+    if (paymentDeleteError) {
+      await clearApplyClaim();
+      return { ok: false, error: paymentDeleteError.message };
+    }
   }
 
   await admin
@@ -681,7 +764,10 @@ export async function applyHireReturnChargesAction(
       })
       .eq("id", hireGroupId)
       .eq("parent_company_id", authorized.hire.parentCompanyId);
-    if (balanceUpdateError) return { ok: false, error: balanceUpdateError.message };
+    if (balanceUpdateError) {
+      await clearApplyClaim();
+      return { ok: false, error: balanceUpdateError.message };
+    }
   }
 
   for (const damage of input.damages) {
@@ -704,7 +790,10 @@ export async function applyHireReturnChargesAction(
       })
       .eq("id", damage.id)
       .eq("inspection_id", checkin.id);
-    if (damageUpdateError) return { ok: false, error: damageUpdateError.message };
+    if (damageUpdateError) {
+      await clearApplyClaim();
+      return { ok: false, error: damageUpdateError.message };
+    }
   }
 
   if (chargeDrafts.length > 0) {
@@ -723,48 +812,16 @@ export async function applyHireReturnChargesAction(
         created_by_user_id: userId,
       })),
     );
-    if (lineItemsError) return { ok: false, error: lineItemsError.message };
+    if (lineItemsError) {
+      if (isUniqueChargeSourceConflict(lineItemsError)) {
+        // Lost a race after claim — live unique index already has these sources.
+        revalidateReturnChargePaths(hireGroupId, (hireGroup.vehicle_id as string | null) ?? null);
+        return { ok: true, data: { returnChargesAppliedAt: nowIso } };
+      }
+      await clearApplyClaim();
+      return { ok: false, error: lineItemsError.message };
+    }
   }
-
-  const previousDraft =
-    parseHireEndHireDraft(hireGroup.end_hire_draft) ??
-    ({
-      started: true,
-      step: "final_account",
-      returnDateYmd: "",
-      returnTimeHm: "",
-      reason: "",
-      notes: "",
-      rentBillingMode: "end_of_period",
-      updatedAt: nowIso,
-      finalizedAt: null,
-      explicitFinalization: false,
-      returnChargesAppliedAt: null,
-      pendingReturnReviews: null,
-    } satisfies HireEndHireDraft);
-
-  const pendingAccessories = input.accessories
-    .filter(
-      (accessory) => accessory.enabled && accessory.chargeResolution === "review_later",
-    )
-    .map((accessory) => accessory.key);
-
-  const nextDraft: HireEndHireDraft = {
-    ...previousDraft,
-    returnChargesAppliedAt: nowIso,
-    pendingReturnReviews: {
-      fuel: Boolean(input.fuel.enabled && input.fuel.chargeResolution === "review_later"),
-      accessories: pendingAccessories,
-    },
-    updatedAt: nowIso,
-  };
-
-  const { error: draftError } = await admin
-    .from("vehicle_hire_groups")
-    .update({ end_hire_draft: nextDraft })
-    .eq("id", hireGroupId)
-    .eq("parent_company_id", authorized.hire.parentCompanyId);
-  if (draftError) return { ok: false, error: draftError.message };
 
   const totalChargedGbp = chargeDrafts.reduce((sum, draft) => sum + draft.amountGbp, 0);
   await logHireGroupEvent(admin, {
@@ -909,6 +966,8 @@ export async function resolveHirePendingReturnChargeAction(input: {
       .eq("hire_group_id", hireGroupId)
       .eq("source_kind", "checkin_inspection_damage")
       .eq("source_id", damage.id)
+      .neq("resolution", "voided")
+      .limit(1)
       .maybeSingle();
     if (existingLine) return { ok: false, error: "This damage charge was already posted." };
 
@@ -954,6 +1013,8 @@ export async function resolveHirePendingReturnChargeAction(input: {
       .select("id")
       .eq("hire_group_id", hireGroupId)
       .eq("source_kind", "checkin_inspection_fuel")
+      .neq("resolution", "voided")
+      .limit(1)
       .maybeSingle();
     if (existingFuel) return { ok: false, error: "Fuel charge was already posted." };
 
@@ -981,9 +1042,10 @@ export async function resolveHirePendingReturnChargeAction(input: {
     }
     const { data: existingAccessoryRows } = await admin
       .from("vehicle_hire_driver_charge_line_items")
-      .select("id, source_id, description")
+      .select("id, source_id, description, resolution")
       .eq("hire_group_id", hireGroupId)
-      .eq("source_kind", "checkin_inspection_accessory");
+      .eq("source_kind", "checkin_inspection_accessory")
+      .neq("resolution", "voided");
     const alreadyPosted = (existingAccessoryRows ?? []).some(
       (row) =>
         parseHireReturnAccessoryKeyFromCharge({
@@ -1000,7 +1062,7 @@ export async function resolveHirePendingReturnChargeAction(input: {
         chargeType: "other",
         amountGbp,
         sourceKind: "checkin_inspection_accessory",
-        sourceId: checkin.id,
+        sourceId: key,
         description: hireReturnAccessoryChargeDescription(key),
       };
       auditSummary = `Approved pending accessory charge (${formatGbpAudit(amountGbp)}).`;
@@ -1042,7 +1104,12 @@ export async function resolveHirePendingReturnChargeAction(input: {
       charged_on: ukTodayYmd(),
       created_by_user_id: authorized.userId,
     });
-    if (lineItemsError) return { ok: false, error: lineItemsError.message };
+    if (lineItemsError) {
+      if (isUniqueChargeSourceConflict(lineItemsError)) {
+        return { ok: false, error: "This charge was already posted." };
+      }
+      return { ok: false, error: lineItemsError.message };
+    }
   }
 
   const pendingCleared =

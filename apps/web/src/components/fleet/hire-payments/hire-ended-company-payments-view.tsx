@@ -31,6 +31,13 @@ import {
   formatEndedChargeCardDisplay,
   formatEndedChargeEvidenceHref,
 } from "@/lib/fleet/hire-ended-payments-display";
+import {
+  buildExtraChargePaymentTableRowsFromWorkspace,
+  extraChargePaymentStatusClass,
+  previewExtraChargePendingAllocation,
+  type ExtraChargePaymentTableRow,
+} from "@/lib/fleet/hire-driver-charge-payment";
+import { staffManualChargeLockedAsHireTimePost } from "@/lib/fleet/hire-driver-charge-mutation";
 import { buildHireScheduleRefundMarksByRowId } from "@/lib/fleet/hire-ended-payment-schedule";
 import { buildHireEndedOutstandingBalance } from "@/lib/fleet/hire-ended-summary-display";
 import {
@@ -40,6 +47,13 @@ import {
 import { formatHireEndHireSignedAmount } from "@/lib/fleet/hire-end-hire-financial";
 import { formatGbp } from "@/lib/fleet/maintenance";
 import { roundGbp } from "@/lib/fleet/hire-money";
+import type { HireDriverChargeWorkspaceRow } from "@/app/actions/rental-hire-termination";
+import { HireAddChargeModal } from "@/components/fleet/hire-charges/hire-add-charge-modal";
+import { HireChargeHistoryModal } from "@/components/fleet/hire-charges/hire-charge-history-modal";
+import { HireVoidChargeModal } from "@/components/fleet/hire-charges/hire-void-charge-modal";
+import { HireExtraChargeAmendPaymentModal } from "@/components/fleet/hire-charges/hire-extra-charge-amend-payment-modal";
+import { HireExtraChargeRowActions } from "@/components/fleet/hire-charges/hire-extra-charge-row-actions";
+import { HirePaymentReviewModal } from "@/components/fleet/hire-payments/hire-payment-review-modal";
 
 type EndedBalanceTab =
   | "overview"
@@ -353,9 +367,7 @@ export function HireEndedCompanyPaymentsView({
             <ChargesTab
               hireGroupId={hireGroupId}
               data={data}
-              reviewsLocked={reviewsLocked}
-              endHireHref={endHireHref}
-              onGoReviews={goReviews}
+              onReload={onReload}
             />
           ) : null}
 
@@ -840,16 +852,20 @@ function CalcRow({
 function ChargesTab({
   hireGroupId,
   data,
-  reviewsLocked,
-  endHireHref,
-  onGoReviews,
+  onReload,
 }: {
   hireGroupId: string;
   data: HirePaymentsPageData;
-  reviewsLocked: boolean;
-  endHireHref: string;
-  onGoReviews: () => void;
+  onReload: () => void;
 }) {
+  const [addOpen, setAddOpen] = useState(false);
+  const [editing, setEditing] = useState<HireDriverChargeWorkspaceRow | null>(null);
+  const [voiding, setVoiding] = useState<HireDriverChargeWorkspaceRow | null>(null);
+  const [history, setHistory] = useState<HireDriverChargeWorkspaceRow | null>(null);
+  const [amending, setAmending] = useState<ExtraChargePaymentTableRow | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewRow, setReviewRow] = useState<ExtraChargePaymentTableRow | null>(null);
+
   const posted = data.driverChargeLineItems.filter(
     (item) =>
       (item.resolution === "add_to_balance" ||
@@ -858,6 +874,69 @@ function ChargesTab({
       (item.resolution === "waived" || item.amountGbp > 0.005),
   );
   const pending = data.pendingReviews.charges;
+  const paymentRows = useMemo(
+    () =>
+      buildExtraChargePaymentTableRowsFromWorkspace({
+        hireGroupId,
+        items: data.driverChargeLineItems,
+        outstandingGbp: data.extraChargesOutstandingGbp,
+        pendingAmountGbp: data.extraChargePendingPayment?.amountGbp,
+        allowMutate: data.canMutateExtraCharges,
+        timedPayments: data.extraChargeTimedPayments,
+        allocationEvents: data.extraChargeAllocationEvents,
+      }),
+    [
+      data.canMutateExtraCharges,
+      data.driverChargeLineItems,
+      data.extraChargeAllocationEvents,
+      data.extraChargePendingPayment?.amountGbp,
+      data.extraChargeTimedPayments,
+      data.extraChargesOutstandingGbp,
+      hireGroupId,
+    ],
+  );
+  const paymentStatusById = useMemo(() => new Map(paymentRows.map((row) => [row.id, row])), [paymentRows]);
+
+  const pendingReviewTarget = useMemo(() => {
+    const pendingPayment = data.extraChargePendingPayment;
+    if (!pendingPayment) return null;
+    const preview = previewExtraChargePendingAllocation({
+      amountGbp: pendingPayment.amountGbp,
+      rows: paymentRows,
+      storedAllocations: pendingPayment.allocations,
+    });
+    const focus = reviewRow;
+    const chargeLabel = focus
+      ? focus.description
+        ? `${focus.chargeTypeLabel} · ${focus.description}`
+        : focus.chargeTypeLabel
+      : "Extra charges";
+    return {
+      kind: "extra_charges" as const,
+      hireGroupId,
+      amountGbp: pendingPayment.amountGbp,
+      paymentReference: pendingPayment.paymentReference,
+      outstandingGbp: data.extraChargesOutstandingGbp,
+      focusChargeLineItemId: focus?.id,
+      title: chargeLabel,
+      chargedGbp: focus?.chargedGbp,
+      paidGbp: focus?.paidGbp,
+      balanceGbp: focus?.balanceGbp,
+      allocations: preview.allocations.map((line) => ({
+        rowId: line.rowId,
+        label: line.label,
+        allocatedGbp: line.allocatedGbp,
+        rowBalanceAfterGbp: line.rowBalanceAfterGbp,
+        fullyAllocated: line.fullyAllocated,
+      })),
+    };
+  }, [
+    data.extraChargePendingPayment,
+    data.extraChargesOutstandingGbp,
+    hireGroupId,
+    paymentRows,
+    reviewRow,
+  ]);
 
   return (
     <div className="space-y-4">
@@ -866,13 +945,14 @@ function ChargesTab({
           <p className="hire-balance-panel-kicker">Return & extras</p>
           <h2 className="hire-balance-panel-title">Charges</h2>
           <p className="mt-1 text-sm text-rph-fg-secondary">
-            Posted, waived and pending review charges for this ended hire.
+            Posted, waived and pending review charges for this ended hire. Hire-time posts stay
+            read-only; pending reviews unlock actions after a decision.
           </p>
         </div>
         {data.canMutateExtraCharges ? (
-          <Link href={`/rental/hires/${hireGroupId}/payments`} className="rph-btn-ghost">
+          <button type="button" className="rph-btn-ghost" onClick={() => setAddOpen(true)}>
             Add adjustment
-          </Link>
+          </button>
         ) : (
           <Link href={`/rental/hires/${hireGroupId}`} className="rph-btn-ghost">
             View hire
@@ -910,15 +990,7 @@ function ChargesTab({
                     : "—"}
                 </td>
                 <td data-label="Actions" className="hire-ended-simple-table-actions">
-                  {reviewsLocked ? (
-                    <Link href={endHireHref} className="rph-btn-ghost">
-                      End hire
-                    </Link>
-                  ) : (
-                    <button type="button" className="rph-btn-ghost" onClick={onGoReviews}>
-                      Review
-                    </button>
-                  )}
+                  <span className="text-xs text-rph-fg-muted">—</span>
                 </td>
               </tr>
             ))}
@@ -934,13 +1006,29 @@ function ChargesTab({
                   {formatGbp(item.amountGbp)}
                 </td>
                 <td data-label="Actions" className="hire-ended-simple-table-actions">
-                  —
+                  <span className="text-xs text-rph-fg-muted">—</span>
                 </td>
               </tr>
             ))}
             {posted.map((item) => {
               const card = formatEndedChargeCardDisplay(item);
               const evidenceHref = formatEndedChargeEvidenceHref(hireGroupId, item);
+              const paymentRow = paymentStatusById.get(item.id);
+              const statusLabel = paymentRow?.statusLabel ?? item.resolutionLabel;
+              const statusTone = paymentRow?.statusTone;
+              const hireTimeLocked = staffManualChargeLockedAsHireTimePost({
+                sourceKind: item.sourceKind,
+                chargedOn: item.chargedOn,
+                createdAt: item.createdAt,
+                contractEndedYmd: data.contractEndedYmd,
+              });
+              const actionRow = paymentRow
+                ? {
+                    ...paymentRow,
+                    canEdit: paymentRow.canEdit && !hireTimeLocked,
+                    canVoid: paymentRow.canVoid && !hireTimeLocked,
+                  }
+                : null;
               return (
                 <tr key={item.id}>
                   <td data-label="Charge">
@@ -949,18 +1037,46 @@ function ChargesTab({
                       {item.chargeTypeLabel}
                       {item.createdAt ? ` · ${formatUkDateTime(item.createdAt)}` : ""}
                     </p>
+                    {evidenceHref ? (
+                      <Link
+                        href={evidenceHref}
+                        className="mt-1 inline-block text-xs font-medium text-rph-link hover:text-rph-link-hover"
+                      >
+                        View evidence
+                      </Link>
+                    ) : null}
                   </td>
-                  <td data-label="Status">{item.resolutionLabel}</td>
+                  <td data-label="Status">
+                    {statusTone ? (
+                      <span
+                        className={`hire-ws-payments-status-pill ${extraChargePaymentStatusClass(statusTone)}`}
+                      >
+                        {statusLabel}
+                      </span>
+                    ) : (
+                      statusLabel
+                    )}
+                  </td>
                   <td data-label="Amount" className="tabular-nums font-medium">
                     {item.resolution === "waived" ? formatGbp(0) : formatGbp(item.amountGbp)}
                   </td>
                   <td data-label="Actions" className="hire-ended-simple-table-actions">
-                    {evidenceHref ? (
-                      <Link href={evidenceHref} className="text-sm font-medium text-rph-link hover:text-rph-link-hover">
-                        Evidence
-                      </Link>
+                    {actionRow ? (
+                      <HireExtraChargeRowActions
+                        row={actionRow}
+                        canMutate={data.canMutateExtraCharges}
+                        canApprove={data.canApprovePayments}
+                        onHistory={() => setHistory(item)}
+                        onEdit={() => setEditing(item)}
+                        onVoid={() => setVoiding(item)}
+                        onReview={() => {
+                          setReviewRow(actionRow);
+                          setReviewOpen(true);
+                        }}
+                        onAmend={() => setAmending(actionRow)}
+                      />
                     ) : (
-                      <span className="text-xs text-rph-fg-muted">History</span>
+                      <span className="text-xs text-rph-fg-muted">—</span>
                     )}
                   </td>
                 </tr>
@@ -976,6 +1092,58 @@ function ChargesTab({
           </tbody>
         </table>
       </div>
+
+      <HireAddChargeModal
+        hireGroupId={hireGroupId}
+        open={addOpen || Boolean(editing)}
+        charge={editing}
+        headerMeta={data.vehicleVrm?.toUpperCase() ?? null}
+        paymentAccounts={data.settlementPaymentAccounts ?? []}
+        defaultPaymentAccountId={data.defaultSettlementPaymentAccountId ?? null}
+        onClose={() => {
+          setAddOpen(false);
+          setEditing(null);
+        }}
+        onSaved={onReload}
+      />
+      <HireVoidChargeModal
+        hireGroupId={hireGroupId}
+        charge={voiding}
+        open={Boolean(voiding)}
+        onClose={() => setVoiding(null)}
+        onVoided={onReload}
+      />
+      {history ? (
+        <HireChargeHistoryModal
+          hireGroupId={hireGroupId}
+          chargeLineItemId={history.id}
+          title={`${history.chargeTypeLabel} · ${formatGbp(history.amountGbp)}`}
+          open
+          onClose={() => setHistory(null)}
+        />
+      ) : null}
+      {amending ? (
+        <HireExtraChargeAmendPaymentModal
+          hireGroupId={hireGroupId}
+          row={amending}
+          open
+          onClose={() => setAmending(null)}
+          onSuccess={onReload}
+        />
+      ) : null}
+      <HirePaymentReviewModal
+        target={pendingReviewTarget}
+        open={reviewOpen && pendingReviewTarget != null}
+        onClose={() => {
+          setReviewOpen(false);
+          setReviewRow(null);
+        }}
+        onSuccess={() => {
+          setReviewOpen(false);
+          setReviewRow(null);
+          onReload();
+        }}
+      />
     </div>
   );
 }
@@ -1128,6 +1296,9 @@ function ReviewsTab({
             terminationSummary={data.terminationSummary!}
             depositHeldGbp={data.depositReceivedGbp}
             currentSignedSettlementGbp={data.currentSignedSettlementGbp}
+            unpaidChargesGbp={data.extraChargesOutstandingGbp}
+            paymentAccounts={data.settlementPaymentAccounts ?? []}
+            defaultPaymentAccountId={data.defaultSettlementPaymentAccountId ?? null}
             onSuccess={onReload}
           />
         </div>

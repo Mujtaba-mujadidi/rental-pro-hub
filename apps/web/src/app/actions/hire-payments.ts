@@ -43,7 +43,13 @@ import {
   parseHireEndHireDraft,
 } from "@/lib/fleet/hire-end-hire";
 import { commitHireReturnChargesFromDraftAction } from "@/app/actions/hire-return-charges";
-import { listUnpostedReturnChargeAddToBalanceRows } from "@/lib/fleet/hire-return-charges";
+import {
+  dedupePostedAccessoryChargeRows,
+  isHireReturnChargeSourceKind,
+  listUnpostedReturnChargeAddToBalanceRows,
+  missingPostedReturnChargeSettlementGbp,
+  parseHireReturnAccessoryKeyFromCharge,
+} from "@/lib/fleet/hire-return-charges";
 import {
   HIRE_INSPECTION_ACCESSORY_KEYS,
   hireInspectionAccessoryLabel,
@@ -69,6 +75,7 @@ import {
   outstandingExtraChargesFromTimedPaymentsGbp,
   resolveOpenExtraChargePayment,
 } from "@/lib/fleet/hire-driver-charge-payment";
+import { applySignedChargeDeltaToSettlementBalance } from "@/lib/fleet/hire-inspection-damage-charges";
 import type { HireDriverChargeWorkspaceRow } from "@/app/actions/rental-hire-termination";
 import type { HirePaymentStatus } from "@/lib/fleet/hire-types";
 import {
@@ -591,8 +598,27 @@ async function buildPaymentsPageData(
     .in("event_type", [...EXTRA_CHARGE_PAYMENT_EVENT_TYPES])
     .order("created_at", { ascending: true });
 
-  const mappedCharges = mapDriverChargeLineItemsFromDb(
-    (chargeRows ?? []) as DriverChargeLineItemDbRow[],
+  const mappedCharges = dedupePostedAccessoryChargeRows(
+    mapDriverChargeLineItemsFromDb(
+      (chargeRows ?? []) as DriverChargeLineItemDbRow[],
+    ).map((item) => ({
+      ...item,
+      createdAt: item.createdAt ?? "",
+    })),
+  );
+  const postedAccessoryKeys = new Set(
+    mappedCharges
+      .filter((item) => item.sourceKind === "checkin_inspection_accessory")
+      .map((item) =>
+        parseHireReturnAccessoryKeyFromCharge({
+          sourceId: item.sourceId,
+          description: item.description,
+        }),
+      )
+      .filter((key): key is HireInspectionAccessoryKey => key != null),
+  );
+  const fuelAlreadyPosted = mappedCharges.some(
+    (item) => item.sourceKind === "checkin_inspection_fuel",
   );
   const driverChargeTimedPayments = (balancePayments ?? [])
     .filter(
@@ -624,6 +650,78 @@ async function buildPaymentsPageData(
           paymentCategory: (payment.payment_category as string | null) ?? "settlement",
         })),
       );
+
+  // Heal open settlement when return charges are posted but missing from the balance
+  // (e.g. after a concurrent-apply race / duplicate cleanup).
+  if (contractEndedYmd) {
+    const postedReturnAddToBalanceGbp = roundGbpSum(
+      mappedCharges
+        .filter(
+          (item) =>
+            isHireReturnChargeSourceKind(item.sourceKind) && item.resolution === "add_to_balance",
+        )
+        .map((item) => item.amountGbp),
+    );
+    const hireTimeCharges = mappedCharges.filter(
+      (item) => !isHireReturnChargeSourceKind(item.sourceKind),
+    );
+    const hireExtrasOutstandingGbp = driverChargeTimedPayments.length
+      ? outstandingExtraChargesFromTimedPaymentsGbp({
+          charges: hireTimeCharges,
+          payments: driverChargeTimedPayments,
+          allocationEvents: extraChargeAllocationEvents,
+        })
+      : outstandingExtraChargesGbp(
+          hireTimeCharges,
+          (balancePayments ?? []).map((payment) => ({
+            amountGbp: Number(payment.amount_gbp ?? 0),
+            direction: (payment.direction as string | null) ?? null,
+            paymentCategory: (payment.payment_category as string | null) ?? "settlement",
+          })),
+        );
+    const terminationSnapshot = group.termination_settlement as {
+      signedRentBalanceGbp?: number;
+    } | null;
+    const missingReturnSettlementGbp = missingPostedReturnChargeSettlementGbp({
+      settlementBalanceDirection: (group.settlement_balance_direction as string | null) ?? null,
+      settlementBalanceGbp: Number(group.settlement_balance_gbp ?? 0),
+      depositDisposition: (group.deposit_disposition as string | null) ?? null,
+      rentOutstandingGbp: Math.max(0, Number(terminationSnapshot?.signedRentBalanceGbp ?? 0)),
+      hireExtrasOutstandingGbp,
+      postedReturnAddToBalanceGbp,
+    });
+    if (missingReturnSettlementGbp > 0.005) {
+      const healed = applySignedChargeDeltaToSettlementBalance({
+        settlementBalanceDirection:
+          (group.settlement_balance_direction as
+            | "driver_owes_company"
+            | "company_owes_driver"
+            | "settled"
+            | null) ?? "settled",
+        settlementBalanceGbp: Number(group.settlement_balance_gbp ?? 0),
+        deltaGbp: missingReturnSettlementGbp,
+      });
+      let healClient = supabase;
+      try {
+        healClient = createSupabaseAdminClient();
+      } catch {
+        // Fall back to the request-scoped client when service role is unavailable.
+      }
+      const { error: healError } = await healClient
+        .from("vehicle_hire_groups")
+        .update({
+          settlement_balance_direction: healed.settlementBalanceDirection,
+          settlement_balance_gbp: healed.settlementBalanceGbp,
+        })
+        .eq("id", hireGroupId)
+        .eq("parent_company_id", group.parent_company_id as string);
+      if (!healError) {
+        group.settlement_balance_direction = healed.settlementBalanceDirection;
+        group.settlement_balance_gbp = healed.settlementBalanceGbp;
+      }
+    }
+  }
+
   const extraChargePendingPayment = resolveOpenExtraChargePayment(
     (extraChargePaymentEvents ?? []).map((event) => ({
       eventType: String(event.event_type ?? ""),
@@ -694,11 +792,15 @@ async function buildPaymentsPageData(
 
   if (staffProfile) {
     const profile = staffProfile;
-    canApprovePayments = can(profile, "billing.pay") && !contractEndedYmd;
+    canApprovePayments =
+      can(profile, "billing.pay") &&
+      (!contractEndedYmd || settlementBalance?.settled !== true);
     canSubmitPayment = can(profile, "rentals.write") && !contractEndedYmd;
     canApplyDiscount = can(profile, "rentals.write") && !contractEndedYmd;
     canMutateExtraCharges =
-      can(profile, "rentals.write") && !contractEndedYmd && isHirePaymentsWorkspaceOpen(hireStatus);
+      can(profile, "rentals.write") &&
+      settlementBalance?.settled !== true &&
+      (isHirePaymentsWorkspaceOpen(hireStatus) || Boolean(contractEndedYmd));
 
     canResolveDeposit =
       canFinalizeSettlement &&
@@ -819,7 +921,7 @@ async function buildPaymentsPageData(
     const endHireDraft = parseHireEndHireDraft(group.end_hire_draft);
     const pendingFlags = endHireDraft?.pendingReturnReviews ?? null;
     const draft = endHireDraft?.returnChargesDraft ?? null;
-    if (pendingFlags?.fuel) {
+    if (pendingFlags?.fuel && !fuelAlreadyPosted) {
       const fuelGbp =
         draft?.fuel?.enabled && draft.fuel.amountGbp != null
           ? Math.max(0, Number(draft.fuel.amountGbp) || 0)
@@ -834,6 +936,7 @@ async function buildPaymentsPageData(
       });
     }
     for (const key of pendingFlags?.accessories ?? []) {
+      if (postedAccessoryKeys.has(key as HireInspectionAccessoryKey)) continue;
       const accessoryDraft = draft?.accessories?.find((item) => item.key === key);
       const amount =
         accessoryDraft?.amountGbp != null ? Math.max(0, Number(accessoryDraft.amountGbp) || 0) : null;

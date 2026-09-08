@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   defaultDepositDisposition,
+  depositResolutionShowsSettlementUi,
   getDepositDispositionOptions,
   resolveTerminationBalanceState,
   settlementStepRequired,
@@ -27,6 +28,39 @@ describe("hire-settlement-resolution", () => {
   it("requires settlement step when net balance is non-zero", () => {
     expect(settlementStepRequired(50)).toBe(true);
     expect(settlementStepRequired(0)).toBe(false);
+  });
+
+  it("hides settlement UI when driver still owes; shows only when company owes", () => {
+    expect(
+      depositResolutionShowsSettlementUi({
+        disposition: "apply_to_balance",
+        afterSignedSettlementGbp: 450,
+      }),
+    ).toBe(false);
+    expect(
+      depositResolutionShowsSettlementUi({
+        disposition: "refund_partial",
+        afterSignedSettlementGbp: 1050,
+      }),
+    ).toBe(false);
+    expect(
+      depositResolutionShowsSettlementUi({
+        disposition: "refund_full",
+        afterSignedSettlementGbp: 1050,
+      }),
+    ).toBe(false);
+    expect(
+      depositResolutionShowsSettlementUi({
+        disposition: "apply_to_balance",
+        afterSignedSettlementGbp: -200,
+      }),
+    ).toBe(true);
+    expect(
+      depositResolutionShowsSettlementUi({
+        disposition: "refund_full",
+        afterSignedSettlementGbp: -100,
+      }),
+    ).toBe(true);
   });
 
   it("records payment when clearing now", () => {

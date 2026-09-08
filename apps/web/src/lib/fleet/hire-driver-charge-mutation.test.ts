@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseStaffManualChargeFields,
   parseStaffManualChargeResolution,
+  staffManualChargeLockedAsHireTimePost,
   staffManualChargeMutationBlock,
   staffManualExtraChargeEditBlock,
   staffManualExtraChargeVoidBlock,
@@ -194,6 +195,41 @@ describe("staffManualExtraChargeVoidBlock", () => {
     expect(
       staffManualExtraChargeVoidBlock({ paidGbp: 0, paymentPendingApproval: false }),
     ).toBeNull();
+  });
+});
+
+describe("staffManualChargeLockedAsHireTimePost", () => {
+  it("locks staff-manual charges dated before contract end", () => {
+    expect(
+      staffManualChargeLockedAsHireTimePost({
+        sourceKind: "staff_manual",
+        chargedOn: "2026-08-01",
+        createdAt: "2026-08-01T10:00:00.000Z",
+        contractEndedYmd: "2026-09-01",
+      }),
+    ).toBe(true);
+  });
+
+  it("allows staff-manual adjustments after contract end", () => {
+    expect(
+      staffManualChargeLockedAsHireTimePost({
+        sourceKind: "staff_manual",
+        chargedOn: "2026-09-02",
+        createdAt: "2026-09-02T10:00:00.000Z",
+        contractEndedYmd: "2026-09-01",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not apply to return inspection charges", () => {
+    expect(
+      staffManualChargeLockedAsHireTimePost({
+        sourceKind: "checkin_inspection_accessory",
+        chargedOn: "2026-08-01",
+        createdAt: "2026-08-01T10:00:00.000Z",
+        contractEndedYmd: "2026-09-01",
+      }),
+    ).toBe(false);
   });
 });
 
