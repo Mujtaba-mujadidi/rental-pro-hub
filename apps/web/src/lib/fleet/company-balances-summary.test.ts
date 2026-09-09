@@ -234,6 +234,14 @@ describe("company balances summary", () => {
       hires: [
         hire({ id: "active1", status: "active", vehicleVrm: "KE18 FSX" }),
         hire({
+          id: "open1",
+          status: "completed",
+          terminatedAtYmd: "2026-08-01",
+          settlementBalanceDirection: "driver_owes_company",
+          settlementOpenBalanceGbp: 500,
+          vehicleVrm: "OPEN1",
+        }),
+        hire({
           id: "ended1",
           status: "completed",
           terminatedAtYmd: "2026-08-01",
@@ -257,7 +265,12 @@ describe("company balances summary", () => {
     });
 
     expect(companyBalancesAccountsForTab(rows, "active")).toHaveLength(1);
-    expect(companyBalancesAccountsForTab(rows, "final_settlements")).toHaveLength(1);
+    expect(companyBalancesAccountsForTab(rows, "final_settlements").map((row) => row.hireGroupId)).toEqual([
+      "open1",
+      "ended1",
+    ]);
+    expect(companyBalancesAccountsForTab(rows, "all")).toHaveLength(3);
+    expect(rows.find((row) => row.hireGroupId === "open1")?.accountStatus).toBe("open_settlement");
     expect(
       filterCompanyBalancesAccounts({
         rows,

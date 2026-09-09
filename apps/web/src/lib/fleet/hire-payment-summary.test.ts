@@ -114,6 +114,16 @@ describe("hire-payment-allocation", () => {
     expect(result.unallocatedGbp).toBe(250);
   });
 
+  it("does not pour rent-only credit into a partially paid deposit row", () => {
+    const result = allocatePaymentAcrossRows(600, rows, "2026-07-10", {
+      accruedOnly: true,
+      rowKind: "rent",
+    });
+    expect(result.allocations.every((line) => line.rowKind === "rent")).toBe(true);
+    expect(result.allocations.map((a) => a.rowId)).toEqual(["w2"]);
+    expect(result.allocations[0]?.allocatedGbp).toBe(250);
+  });
+
   it("can allocate to deposit or rent only", () => {
     const depositOnly = allocatePaymentAcrossRows(100, rows, "2026-07-10", { rowKind: "deposit" });
     expect(depositOnly.allocations.map((a) => a.rowId)).toEqual(["dep"]);

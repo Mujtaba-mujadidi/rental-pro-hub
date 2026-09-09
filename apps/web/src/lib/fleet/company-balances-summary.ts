@@ -570,9 +570,11 @@ export function buildCompanyBalancesKpis(input: {
       outstandingAcrossHiresGbp = roundGbp(outstandingAcrossHiresGbp + row.balanceGbp);
     }
     pendingReviewGbp = roundGbp(pendingReviewGbp + row.pendingReviewGbp);
-    if (row.accountStatus === "settled") {
+    if (row.accountStatus === "open_settlement" || row.accountStatus === "settled") {
       finalSettlementsCount += 1;
-      if (row.balanceGbp <= 0.005) finalSettlementsPaidInFullCount += 1;
+      if (row.accountStatus === "settled" || row.balanceGbp <= 0.005) {
+        finalSettlementsPaidInFullCount += 1;
+      }
     }
   }
 
@@ -646,7 +648,10 @@ export function companyBalancesAccountsForTab(
     return rows.filter((row) => row.pendingReviewGbp > 0.005);
   }
   if (tab === "final_settlements") {
-    return rows.filter((row) => row.accountStatus === "settled");
+    // Ended hires: still chasing settlement cash, or already cleared.
+    return rows.filter(
+      (row) => row.accountStatus === "open_settlement" || row.accountStatus === "settled",
+    );
   }
   return [...rows];
 }
@@ -776,7 +781,7 @@ export function companyBalancesTabFooterHint(tab: CompanyBalancesTab): string {
     return "Submitted payments stay here until finance approves or rejects them";
   }
   if (tab === "final_settlements") {
-    return "Ended hires with a cleared settlement balance";
+    return "Ended hires with an open or cleared settlement balance";
   }
   return "Every hire account in your accessible subcompanies";
 }

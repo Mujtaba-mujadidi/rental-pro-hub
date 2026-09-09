@@ -88,6 +88,26 @@ describe("formatHirePaymentRowEvent", () => {
     });
     expect(display.actorLabel).toBe("Riddhi Joshi · Company staff");
   });
+
+  it("formats deposit-applied rent credits distinctly from cash approvals", () => {
+    const display = formatHirePaymentRowEvent({
+      id: "e-dep",
+      eventKind: "status_change",
+      fromStatus: "not_received",
+      toStatus: "approved",
+      comment: "Deposit applied to rent at contract end",
+      amendmentPayload: {
+        depositAppliedGbp: 40,
+        approvedAmountGbp: 40,
+      },
+      actorRole: "company_staff",
+      createdAt: "2026-09-09T00:12:00.000Z",
+      actorDisplayName: "Ops",
+    });
+    expect(display.title).toBe("Deposit applied to rent");
+    expect(display.detailLines).toContain("Amount from deposit: £40.00");
+    expect(display.body).toContain("Deposit applied to rent");
+  });
 });
 
 describe("formatHirePaymentDiscountEvent", () => {
@@ -104,6 +124,7 @@ describe("formatHirePaymentDiscountEvent", () => {
     expect(display.detailLines).toEqual(["Amount: −£25.00"]);
     expect(display.actorLabel).toBe("Alex Ops · Company staff");
   });
+
   it("formats discount amendment and cancellation audit events", () => {
     expect(
       formatHirePaymentRowEvent({

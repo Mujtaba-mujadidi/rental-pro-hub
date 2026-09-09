@@ -230,11 +230,16 @@ function paymentDisplayOptions(
     | "depositReceivedGbp"
     | "settlementBalancePayments"
     | "driverChargeLineItems"
-  >,
+  > &
+    Partial<Pick<HirePaymentsPageData, "depositAppliedToRentGbp" | "depositAppliedToChargesGbp">>,
   audience: "driver" | "staff",
 ): HirePaymentDisplayOptions {
   const depositRefund = buildHireEndedDepositRefundDisplay({
-    payments: page,
+    payments: {
+      ...page,
+      depositAppliedToRentGbp: page.depositAppliedToRentGbp ?? 0,
+      depositAppliedToChargesGbp: page.depositAppliedToChargesGbp ?? 0,
+    },
     audience,
   });
   return {

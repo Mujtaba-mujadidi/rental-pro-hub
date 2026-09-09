@@ -17,6 +17,7 @@ import {
 } from "@/lib/fleet/hire-ended-payments-display";
 import {
   buildExtraChargePaymentTableRowsFromWorkspace,
+  endedHireExtrasSettlementCapGbp,
   extraChargePaymentStatusClass,
 } from "@/lib/fleet/hire-driver-charge-payment";
 import { buildHireScheduleRefundMarksByRowId } from "@/lib/fleet/hire-ended-payment-schedule";
@@ -80,6 +81,11 @@ export function HireEndedDriverPaymentsView({
       (item.resolution === "add_to_balance" || item.resolution === "paid_now") &&
       item.amountGbp > 0.005,
   );
+  const settlementOpenBalanceCapGbp = endedHireExtrasSettlementCapGbp({
+    contractEnded: Boolean(data.contractEndedYmd),
+    settlementDirection: data.settlementBalance?.settlementDirection,
+    openBalanceGbp: data.settlementBalance?.openBalanceGbp,
+  });
   const chargeStatusById = useMemo(() => {
     const rows = buildExtraChargePaymentTableRowsFromWorkspace({
       hireGroupId,
@@ -88,15 +94,19 @@ export function HireEndedDriverPaymentsView({
       pendingAmountGbp: data.extraChargePendingPayment?.amountGbp,
       timedPayments: data.extraChargeTimedPayments,
       allocationEvents: data.extraChargeAllocationEvents,
+      settleOrphanReceipts: Boolean(data.contractEndedYmd),
+      settlementOpenBalanceCapGbp,
     });
     return new Map(rows.map((row) => [row.id, row]));
   }, [
+    data.contractEndedYmd,
     data.driverChargeLineItems,
     data.extraChargeAllocationEvents,
     data.extraChargePendingPayment?.amountGbp,
     data.extraChargeTimedPayments,
     data.extraChargesOutstandingGbp,
     hireGroupId,
+    settlementOpenBalanceCapGbp,
   ]);
   const settlementPayments = data.settlementBalancePayments;
 

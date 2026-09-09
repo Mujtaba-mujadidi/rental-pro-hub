@@ -189,6 +189,36 @@ describe("mapDriverChargeLineItemFromDb", () => {
     ).toBeNull();
   });
 
+  it("maps waived rows with £0 amount", () => {
+    expect(
+      mapDriverChargeLineItemFromDb({
+        id: "li-waived",
+        hire_group_id: "g1",
+        charge_type: "other",
+        amount_gbp: 0,
+        resolution: "waived",
+        source_kind: "checkin_inspection_fuel",
+        description: "Fuel difference — waived",
+      }),
+    ).toMatchObject({
+      id: "li-waived",
+      amountGbp: 0,
+      resolution: "waived",
+      sourceKind: "checkin_inspection_fuel",
+    });
+
+    expect(
+      mapDriverChargeLineItemFromDb({
+        id: "li-zero-open",
+        hire_group_id: "g1",
+        charge_type: "other",
+        amount_gbp: 0,
+        resolution: "add_to_balance",
+        source_kind: "checkin_inspection_fuel",
+      }),
+    ).toBeNull();
+  });
+
   it("maps arrays via mapDriverChargeLineItemsFromDb", () => {
     const items = mapDriverChargeLineItemsFromDb([
       {

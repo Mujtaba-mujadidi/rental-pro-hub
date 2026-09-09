@@ -23,6 +23,22 @@ describe("formatHireDriverChargeHistoryEvent", () => {
     expect(display.actorLabel).toBe("Ops Staff · Company staff");
   });
 
+  it("formats waived add as charge waived", () => {
+    const display = formatHireDriverChargeHistoryEvent({
+      id: "e1w",
+      eventType: "driver_charge_added",
+      createdAt: "2026-08-17T10:00:00Z",
+      metadata: {
+        amountGbp: 0,
+        resolution: "waived",
+        chargeTypeLabel: "Other",
+        description: "Fuel difference — Review notes: Not charged",
+      },
+    });
+    expect(display.title).toBe("Charge waived");
+    expect(display.body).toContain("Fuel difference");
+  });
+
   it("formats amend with old to new amount and reason as body", () => {
     const display = formatHireDriverChargeHistoryEvent({
       id: "e2",
@@ -296,5 +312,27 @@ describe("mergeHireDriverChargeHistory", () => {
     const paymentEvents = events.filter((row) => row.title === "Payment recorded");
     expect(paymentEvents).toHaveLength(1);
     expect(paymentEvents[0]?.detailLines[0]).toBe("Amount: £10.00");
+  });
+
+  it("synthesises a created event when return-charge review left no lifecycle audit", () => {
+    const events = mergeHireDriverChargeHistory({
+      chargeLineItemId: "fuel1",
+      lifecycleEvents: [],
+      charges: [
+        {
+          id: "fuel1",
+          amountGbp: 0,
+          resolution: "waived",
+          chargedOn: "2026-09-08",
+          createdAt: "2026-09-08T12:00:00.000Z",
+          chargeTypeLabel: "Other",
+          description: "Fuel difference — Review notes: Not owed",
+        },
+      ],
+      payments: [],
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.title).toBe("Charge waived");
+    expect(events[0]?.body).toContain("Fuel difference");
   });
 });

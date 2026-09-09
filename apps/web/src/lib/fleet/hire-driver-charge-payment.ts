@@ -185,7 +185,7 @@ export function extraChargePaymentStatusMeta(
   if (status === "paid") return { label: "Paid", tone: "success" };
   if (status === "partially_paid") return { label: "Partially paid", tone: "warning" };
   if (status === "pending_approval") return { label: "Pending approval", tone: "pending" };
-  if (status === "waived") return { label: "No charge", tone: "neutral" };
+  if (status === "waived") return { label: "Waived", tone: "neutral" };
   if (status === "voided") return { label: "Voided", tone: "neutral" };
   return { label: "Due", tone: "warning" };
 }
@@ -477,9 +477,95 @@ export function sumExtraChargeReceiptAllocationsByChargeId(
   return paidById;
 }
 
+function sortExtraChargesOldestFirst<
+  T extends Pick<HireDriverChargeLineItemRow, "id" | "chargedOn" | "createdAt">,
+>(charges: readonly T[]): T[] {
+  return [...charges].sort((a, b) => {
+    const aDate = a.createdAt || a.chargedOn || "";
+    const bDate = b.createdAt || b.chargedOn || "";
+    if (aDate !== bDate) return aDate.localeCompare(bDate);
+    return a.id.localeCompare(b.id);
+  });
+}
+
+/**
+ * Pour unallocated receipt cash onto open add_to_balance lines (oldest payment → oldest charge).
+ * Used on ended hires so temporal leftovers and under-allocated metadata still settle extras.
+ */
+export function appendOrphanExtraChargeReceiptSlices(input: {
+  charges: readonly Pick<
+    HireDriverChargeLineItemRow,
+    "id" | "amountGbp" | "resolution" | "chargedOn" | "createdAt" | "balancePaymentId"
+  >[];
+  payments: readonly { id: string; amountGbp: number; paidAt: string }[];
+  slices: readonly ExtraChargeReceiptAllocationSlice[];
+}): ExtraChargeReceiptAllocationSlice[] {
+  const paidNowPaymentIds = new Set(
+    input.charges
+      .filter((row) => row.resolution === "paid_now" && row.balancePaymentId)
+      .map((row) => row.balancePaymentId as string),
+  );
+
+  const allocatedByPayment = new Map<string, number>();
+  const paidByCharge = new Map<string, number>();
+  for (const slice of input.slices) {
+    allocatedByPayment.set(
+      slice.paymentId,
+      roundGbp((allocatedByPayment.get(slice.paymentId) ?? 0) + slice.allocatedGbp),
+    );
+    paidByCharge.set(
+      slice.chargeLineItemId,
+      roundGbp((paidByCharge.get(slice.chargeLineItemId) ?? 0) + slice.allocatedGbp),
+    );
+  }
+
+  const openByCharge = new Map<string, number>();
+  for (const charge of input.charges) {
+    if (charge.resolution !== "add_to_balance") continue;
+    openByCharge.set(
+      charge.id,
+      roundGbp(Math.max(0, charge.amountGbp - (paidByCharge.get(charge.id) ?? 0))),
+    );
+  }
+
+  const orderedCharges = sortExtraChargesOldestFirst(
+    input.charges.filter((charge) => charge.resolution === "add_to_balance"),
+  );
+  const orderedPayments = [...input.payments]
+    .filter((payment) => !paidNowPaymentIds.has(payment.id))
+    .sort((a, b) => {
+      if (a.paidAt !== b.paidAt) return a.paidAt.localeCompare(b.paidAt);
+      return a.id.localeCompare(b.id);
+    });
+
+  const orphanSlices: ExtraChargeReceiptAllocationSlice[] = [];
+  for (const payment of orderedPayments) {
+    const amount = Number(payment.amountGbp);
+    if (!Number.isFinite(amount) || amount <= 0.005) continue;
+    let spare = roundGbp(Math.max(0, amount - (allocatedByPayment.get(payment.id) ?? 0)));
+    if (spare <= 0.005) continue;
+    for (const charge of orderedCharges) {
+      if (spare <= 0.005) break;
+      const open = openByCharge.get(charge.id) ?? 0;
+      if (open <= 0.005) continue;
+      const applied = roundGbp(Math.min(spare, open));
+      orphanSlices.push({
+        paymentId: payment.id,
+        chargeLineItemId: charge.id,
+        allocatedGbp: applied,
+      });
+      spare = roundGbp(spare - applied);
+      openByCharge.set(charge.id, roundGbp(open - applied));
+    }
+  }
+  return orphanSlices;
+}
+
 /**
  * Prefer staff/driver allocation metadata when present; otherwise temporal FIFO.
  * `paid_now`-linked payment IDs are never poured onto add_to_balance lines.
+ * When `settleOrphanReceipts` is set (ended hire), leftover receipt cash is poured onto
+ * remaining open extras so charge balances match settlement.
  */
 export function resolveExtraChargeReceiptAllocationSlices(input: {
   charges: readonly Pick<
@@ -492,6 +578,7 @@ export function resolveExtraChargeReceiptAllocationSlices(input: {
     eventType: string;
     metadata: Record<string, unknown> | null;
   }[];
+  settleOrphanReceipts?: boolean;
 }): ExtraChargeReceiptAllocationSlice[] {
   const paidNowPaymentIds = new Set(
     input.charges
@@ -557,6 +644,16 @@ export function resolveExtraChargeReceiptAllocationSlices(input: {
     slices.push(...allocateExtraChargeReceiptPaymentsToLines(chargesForFifo, remainingPayments));
   }
 
+  if (input.settleOrphanReceipts) {
+    slices.push(
+      ...appendOrphanExtraChargeReceiptSlices({
+        charges: input.charges,
+        payments: input.payments,
+        slices,
+      }),
+    );
+  }
+
   return slices;
 }
 
@@ -570,6 +667,17 @@ export function buildExtraChargePaidByChargeId(input: {
     eventType: string;
     metadata: Record<string, unknown> | null;
   }[];
+  /**
+   * When true (ended hire), pour leftover receipt cash that temporal rules left unallocated
+   * onto remaining open extras — so collectable balances match settlement.
+   */
+  settleOrphanReceipts?: boolean;
+  /**
+   * Ended hire: when the settlement open balance is lower than extras outstanding
+   * (e.g. settlement-category cash already reduced the hire), treat the gap as paid
+   * against open extras so Record payment cannot over-collect.
+   */
+  settlementOpenBalanceCapGbp?: number;
 }): Map<string, number> {
   const paidById = sumExtraChargeReceiptAllocationsByChargeId(
     resolveExtraChargeReceiptAllocationSlices(input),
@@ -583,7 +691,158 @@ export function buildExtraChargePaidByChargeId(input: {
       paidById.set(charge.id, 0);
     }
   }
+  clampExtraChargePaidToChargeAmounts({
+    charges: input.charges,
+    paidById,
+  });
+  if (input.settlementOpenBalanceCapGbp != null) {
+    applySettlementOpenBalanceCapToPaidById({
+      charges: input.charges,
+      paidById,
+      settlementOpenBalanceCapGbp: input.settlementOpenBalanceCapGbp,
+    });
+  }
   return paidById;
+}
+
+/**
+ * When settlement open balance is the ended-hire authority and is below extras outstanding,
+ * paint the gap as paid on open add_to_balance lines (oldest first).
+ * Pass `0` when the hire is settled so residual timed/orphan gaps do not keep showing as due.
+ */
+export function applySettlementOpenBalanceCapToPaidById(input: {
+  charges: readonly Pick<
+    HireDriverChargeLineItemRow,
+    "id" | "amountGbp" | "resolution" | "chargedOn" | "createdAt"
+  >[];
+  paidById: Map<string, number>;
+  settlementOpenBalanceCapGbp: number;
+}): void {
+  const cap = roundGbp(Math.max(0, input.settlementOpenBalanceCapGbp));
+  let outstanding = 0;
+  for (const charge of input.charges) {
+    if (charge.resolution !== "add_to_balance") continue;
+    outstanding = roundGbp(
+      outstanding + Math.max(0, charge.amountGbp - (input.paidById.get(charge.id) ?? 0)),
+    );
+  }
+  let excess = roundGbp(Math.max(0, outstanding - cap));
+  if (excess <= 0.005) return;
+
+  for (const charge of sortExtraChargesOldestFirst(
+    input.charges.filter((row) => row.resolution === "add_to_balance"),
+  )) {
+    if (excess <= 0.005) break;
+    const paid = roundGbp(input.paidById.get(charge.id) ?? 0);
+    const open = roundGbp(Math.max(0, charge.amountGbp - paid));
+    if (open <= 0.005) continue;
+    const applied = roundGbp(Math.min(excess, open));
+    input.paidById.set(charge.id, roundGbp(paid + applied));
+    excess = roundGbp(excess - applied);
+  }
+}
+
+/**
+ * Ended-hire extras collectable / display cap from settlement.
+ * - `driver_owes_company` → open settlement balance
+ * - `settled` / `company_owes_driver` → £0 (no driver extras still chaseable)
+ * - otherwise → undefined (active hire / no settlement authority)
+ */
+export function endedHireExtrasSettlementCapGbp(input: {
+  contractEnded: boolean;
+  settlementDirection?: string | null;
+  openBalanceGbp?: number | null;
+}): number | undefined {
+  if (!input.contractEnded) return undefined;
+  const direction = input.settlementDirection ?? null;
+  if (direction === "settled" || direction === "company_owes_driver") return 0;
+  if (direction === "driver_owes_company") {
+    return roundGbp(Math.max(0, Number(input.openBalanceGbp ?? 0)));
+  }
+  return undefined;
+}
+
+/** Clamp over-allocated paid amounts back to each charge and pour the excess onto open lines. */
+export function clampExtraChargePaidToChargeAmounts(input: {
+  charges: readonly Pick<
+    HireDriverChargeLineItemRow,
+    "id" | "amountGbp" | "resolution" | "chargedOn" | "createdAt"
+  >[];
+  paidById: Map<string, number>;
+}): void {
+  let excessGbp = 0;
+  for (const charge of input.charges) {
+    if (charge.resolution !== "add_to_balance") continue;
+    const paid = roundGbp(input.paidById.get(charge.id) ?? 0);
+    if (paid - charge.amountGbp <= 0.005) continue;
+    excessGbp = roundGbp(excessGbp + (paid - charge.amountGbp));
+    input.paidById.set(charge.id, roundGbp(charge.amountGbp));
+  }
+  if (excessGbp <= 0.005) return;
+  for (const charge of sortExtraChargesOldestFirst(
+    input.charges.filter((row) => row.resolution === "add_to_balance"),
+  )) {
+    if (excessGbp <= 0.005) break;
+    const paid = roundGbp(input.paidById.get(charge.id) ?? 0);
+    const open = roundGbp(Math.max(0, charge.amountGbp - paid));
+    if (open <= 0.005) continue;
+    const applied = roundGbp(Math.min(excessGbp, open));
+    input.paidById.set(charge.id, roundGbp(paid + applied));
+    excessGbp = roundGbp(excessGbp - applied);
+  }
+}
+
+/**
+ * Apply receipt cash that temporal / metadata allocation left unassigned onto remaining
+ * open add_to_balance balances (oldest first). Prefer `settleOrphanReceipts` on
+ * `resolveExtraChargeReceiptAllocationSlices` / `buildExtraChargePaidByChargeId` so
+ * payment linkage is preserved; this mutates a paid map in place for callers that
+ * already hold one.
+ */
+export function applyOrphanExtraChargeReceiptsToPaidById(input: {
+  charges: readonly Pick<
+    HireDriverChargeLineItemRow,
+    "id" | "amountGbp" | "resolution" | "chargedOn" | "createdAt" | "balancePaymentId"
+  >[];
+  payments: readonly { id: string; amountGbp: number; paidAt: string }[];
+  paidById: Map<string, number>;
+}): void {
+  const paidNowPaymentIds = new Set(
+    input.charges
+      .filter((row) => row.resolution === "paid_now" && row.balancePaymentId)
+      .map((row) => row.balancePaymentId as string),
+  );
+
+  let receiptsGbp = 0;
+  for (const payment of input.payments) {
+    if (paidNowPaymentIds.has(payment.id)) continue;
+    const amount = Number(payment.amountGbp);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    receiptsGbp = roundGbp(receiptsGbp + amount);
+  }
+
+  let attributedGbp = 0;
+  for (const charge of input.charges) {
+    if (charge.resolution !== "add_to_balance") continue;
+    attributedGbp = roundGbp(
+      attributedGbp + Math.min(charge.amountGbp, input.paidById.get(charge.id) ?? 0),
+    );
+  }
+
+  let orphanGbp = roundGbp(Math.max(0, receiptsGbp - attributedGbp));
+  if (orphanGbp <= 0.005) return;
+
+  for (const charge of sortExtraChargesOldestFirst(
+    input.charges.filter((row) => row.resolution === "add_to_balance"),
+  )) {
+    if (orphanGbp <= 0.005) break;
+    const paid = roundGbp(input.paidById.get(charge.id) ?? 0);
+    const open = roundGbp(Math.max(0, charge.amountGbp - paid));
+    if (open <= 0.005) continue;
+    const applied = roundGbp(Math.min(orphanGbp, open));
+    input.paidById.set(charge.id, roundGbp(paid + applied));
+    orphanGbp = roundGbp(orphanGbp - applied);
+  }
 }
 
 export function buildExtraChargePaymentTableRows(input: {
@@ -595,6 +854,8 @@ export function buildExtraChargePaymentTableRows(input: {
     eventType: string;
     metadata: Record<string, unknown> | null;
   }[];
+  settleOrphanReceipts?: boolean;
+  settlementOpenBalanceCapGbp?: number;
   pendingAmountGbp?: number;
   allowMutate?: boolean;
   /**
@@ -613,6 +874,8 @@ export function buildExtraChargePaymentTableRows(input: {
       charges: input.charges,
       payments: input.timedPayments,
       allocationEvents: input.allocationEvents,
+      settleOrphanReceipts: input.settleOrphanReceipts,
+      settlementOpenBalanceCapGbp: input.settlementOpenBalanceCapGbp,
     });
   } else {
     const approvedReceiptsGbp = approvedExtraChargeReceiptsGbp(input.receipts);
@@ -620,6 +883,17 @@ export function buildExtraChargePaymentTableRows(input: {
       ? approvedReceiptsGbp
       : roundGbp(Math.max(0, approvedReceiptsGbp - paidNowGbp));
     paidById = allocateExtraChargeReceiptsToLines(input.charges, receiptsAgainstExtras);
+    clampExtraChargePaidToChargeAmounts({
+      charges: input.charges,
+      paidById,
+    });
+    if (input.settlementOpenBalanceCapGbp != null) {
+      applySettlementOpenBalanceCapToPaidById({
+        charges: input.charges,
+        paidById,
+        settlementOpenBalanceCapGbp: input.settlementOpenBalanceCapGbp,
+      });
+    }
   }
   let pendingRemaining = roundGbp(Math.max(0, input.pendingAmountGbp ?? 0));
 
@@ -726,6 +1000,10 @@ export function buildExtraChargePaymentTableRowsFromWorkspace(input: {
     eventType: string;
     metadata: Record<string, unknown> | null;
   }[];
+  /** Ended hire: apply orphan receipt cash to open balances so totals match settlement. */
+  settleOrphanReceipts?: boolean;
+  /** Ended hire: do not let extras collectable exceed settlement open balance. */
+  settlementOpenBalanceCapGbp?: number;
 }): ExtraChargePaymentTableRow[] {
   const charges: HireDriverChargeLineItemRow[] = input.items.map((item) => ({
     id: item.id,
@@ -746,6 +1024,8 @@ export function buildExtraChargePaymentTableRowsFromWorkspace(input: {
       receipts: [],
       timedPayments: input.timedPayments,
       allocationEvents: input.allocationEvents,
+      settleOrphanReceipts: input.settleOrphanReceipts,
+      settlementOpenBalanceCapGbp: input.settlementOpenBalanceCapGbp,
       pendingAmountGbp: input.pendingAmountGbp,
       allowMutate: input.allowMutate,
     });
@@ -778,6 +1058,8 @@ export function buildExtraChargePaymentTableRowsFromWorkspace(input: {
     pendingAmountGbp: input.pendingAmountGbp,
     allowMutate: input.allowMutate,
     receiptsExcludePaidNow: true,
+    settleOrphanReceipts: input.settleOrphanReceipts,
+    settlementOpenBalanceCapGbp: input.settlementOpenBalanceCapGbp,
   });
 }
 
@@ -793,6 +1075,11 @@ export function planExtraChargePaidAmendment(input: {
     eventType: string;
     metadata: Record<string, unknown> | null;
   }[];
+  /**
+   * Ended hire: include orphan pour when reading current paid, and move freed cash
+   * onto other open extras before shrinking the receipt.
+   */
+  settleOrphanReceipts?: boolean;
 }):
   | {
       ok: true;
@@ -836,20 +1123,54 @@ export function planExtraChargePaidAmendment(input: {
         error: "Increasing paid amount is not supported here. Record a new payment instead.",
       };
     }
+
+    const paymentUpdates: Array<{
+      paymentId: string;
+      previousAmountGbp: number;
+      newAmountGbp: number;
+      allocations: OpenExtraChargePaymentAllocation[];
+    }> = [];
+
+    if (input.settleOrphanReceipts && newPaidGbp + 0.005 < previousPaidGbp) {
+      let freedGbp = roundGbp(previousPaidGbp - newPaidGbp);
+      const allocations: OpenExtraChargePaymentAllocation[] = [];
+      if (newPaidGbp > 0.005) {
+        allocations.push({ chargeLineItemId: chargeId, amountGbp: newPaidGbp });
+      }
+      const openOthers = sortExtraChargesOldestFirst(
+        input.charges.filter(
+          (row) => row.resolution === "add_to_balance" && row.id !== chargeId,
+        ),
+      );
+      for (const other of openOthers) {
+        if (freedGbp <= 0.005) break;
+        const applied = roundGbp(Math.min(freedGbp, other.amountGbp));
+        if (applied <= 0.005) continue;
+        allocations.push({ chargeLineItemId: other.id, amountGbp: applied });
+        freedGbp = roundGbp(freedGbp - applied);
+      }
+      paymentUpdates.push({
+        paymentId,
+        previousAmountGbp: roundGbp(payment.amountGbp),
+        newAmountGbp: roundGbp(previousPaidGbp - freedGbp),
+        allocations,
+      });
+    } else {
+      paymentUpdates.push({
+        paymentId,
+        previousAmountGbp: roundGbp(payment.amountGbp),
+        newAmountGbp: newPaidGbp,
+        allocations:
+          newPaidGbp > 0.005 ? [{ chargeLineItemId: chargeId, amountGbp: newPaidGbp }] : [],
+      });
+    }
+
     return {
       ok: true,
       previousPaidGbp,
       newPaidGbp,
       convertToAddToBalance: true,
-      paymentUpdates: [
-        {
-          paymentId,
-          previousAmountGbp: roundGbp(payment.amountGbp),
-          newAmountGbp: newPaidGbp,
-          allocations:
-            newPaidGbp > 0.005 ? [{ chargeLineItemId: chargeId, amountGbp: newPaidGbp }] : [],
-        },
-      ],
+      paymentUpdates,
     };
   }
 
@@ -857,6 +1178,7 @@ export function planExtraChargePaidAmendment(input: {
     charges: input.charges,
     payments: input.payments,
     allocationEvents: input.allocationEvents,
+    settleOrphanReceipts: input.settleOrphanReceipts,
   });
   const currentPaidGbp = roundGbp(
     slices
@@ -910,6 +1232,46 @@ export function planExtraChargePaidAmendment(input: {
     return { ok: false, error: "Could not reallocate the amended payment." };
   }
 
+  if (input.settleOrphanReceipts) {
+    const paidByCharge = new Map<string, number>();
+    for (const bucket of allocationsByPayment.values()) {
+      for (const [lineId, amountGbp] of bucket) {
+        paidByCharge.set(lineId, roundGbp((paidByCharge.get(lineId) ?? 0) + amountGbp));
+      }
+    }
+    const openByCharge = new Map<string, number>();
+    for (const row of input.charges) {
+      if (row.resolution !== "add_to_balance") continue;
+      openByCharge.set(
+        row.id,
+        roundGbp(Math.max(0, row.amountGbp - (paidByCharge.get(row.id) ?? 0))),
+      );
+    }
+    const orderedOthers = sortExtraChargesOldestFirst(
+      input.charges.filter((row) => row.resolution === "add_to_balance" && row.id !== chargeId),
+    );
+    const touchedForPour = new Set(chargeSlicesNewestFirst.map((slice) => slice.paymentId));
+    for (const paymentId of touchedForPour) {
+      const payment = paymentById.get(paymentId);
+      if (!payment) continue;
+      const bucket = allocationsByPayment.get(paymentId) ?? new Map<string, number>();
+      let allocated = 0;
+      for (const amountGbp of bucket.values()) allocated = roundGbp(allocated + amountGbp);
+      let spare = roundGbp(Math.max(0, payment.amountGbp - allocated));
+      if (spare <= 0.005) continue;
+      for (const other of orderedOthers) {
+        if (spare <= 0.005) break;
+        const open = openByCharge.get(other.id) ?? 0;
+        if (open <= 0.005) continue;
+        const applied = roundGbp(Math.min(spare, open));
+        bucket.set(other.id, roundGbp((bucket.get(other.id) ?? 0) + applied));
+        openByCharge.set(other.id, roundGbp(open - applied));
+        spare = roundGbp(spare - applied);
+      }
+      allocationsByPayment.set(paymentId, bucket);
+    }
+  }
+
   const touchedPaymentIds = new Set(chargeSlicesNewestFirst.map((slice) => slice.paymentId));
   const paymentUpdates: Array<{
     paymentId: string;
@@ -923,16 +1285,16 @@ export function planExtraChargePaidAmendment(input: {
     if (!payment) continue;
     const bucket = allocationsByPayment.get(paymentId) ?? new Map<string, number>();
     const allocations: OpenExtraChargePaymentAllocation[] = [];
-    let newAmountGbp = 0;
+    let allocatedGbp = 0;
     for (const [lineId, amountGbp] of bucket) {
       if (amountGbp <= 0.005) continue;
       allocations.push({ chargeLineItemId: lineId, amountGbp });
-      newAmountGbp = roundGbp(newAmountGbp + amountGbp);
+      allocatedGbp = roundGbp(allocatedGbp + amountGbp);
     }
     paymentUpdates.push({
       paymentId,
       previousAmountGbp: roundGbp(payment.amountGbp),
-      newAmountGbp,
+      newAmountGbp: allocatedGbp,
       allocations,
     });
   }
@@ -954,6 +1316,8 @@ export function outstandingExtraChargesFromTimedPaymentsGbp(input: {
     eventType: string;
     metadata: Record<string, unknown> | null;
   }[];
+  settleOrphanReceipts?: boolean;
+  settlementOpenBalanceCapGbp?: number;
 }): number {
   const paidById = buildExtraChargePaidByChargeId(input);
   let outstanding = 0;

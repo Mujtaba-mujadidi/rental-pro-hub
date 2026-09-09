@@ -92,6 +92,7 @@ export function HireExtraChargesPanel({
         allowMutate: canMutate,
         timedPayments: payments?.extraChargeTimedPayments,
         allocationEvents: payments?.extraChargeAllocationEvents,
+        settleOrphanReceipts: Boolean(payments?.contractEndedYmd),
       }),
     [
       canMutate,
@@ -99,6 +100,7 @@ export function HireExtraChargesPanel({
       items,
       outstandingGbp,
       pendingPaymentOpen?.amountGbp,
+      payments?.contractEndedYmd,
       payments?.extraChargeAllocationEvents,
       payments?.extraChargeTimedPayments,
     ],

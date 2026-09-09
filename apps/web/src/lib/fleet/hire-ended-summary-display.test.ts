@@ -87,6 +87,8 @@ function payments(overrides: Partial<HirePaymentsPageData> = {}): HirePaymentsPa
     depositPendingReview: false,
     depositGbp: 500,
     depositReceivedGbp: 500,
+    depositAppliedToRentGbp: 0,
+    depositAppliedToChargesGbp: 0,
     accountPosition: null,
     currentSignedSettlementGbp: 0,
     checkinCompleted: true,

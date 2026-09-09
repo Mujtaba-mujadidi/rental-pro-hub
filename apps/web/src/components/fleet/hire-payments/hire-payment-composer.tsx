@@ -94,10 +94,15 @@ export function HirePaymentComposer({
   submitLabel,
   triggerLabel = "Record payment",
   triggerClassName = "rph-btn-primary h-9 px-3 text-sm",
+  hideTrigger = false,
+  open: controlledOpen,
+  onOpenChange,
   asDriver = false,
   allocationKind = "schedule",
   allowAllocationChoice = false,
   preferredAllocationKind,
+  /** Live hire: include unpaid deposit in schedule due. Ended hire: ignore (unreceived deposit is not settlement debt). */
+  includeDepositOutstanding = true,
   outstandingExtraChargesGbp = 0,
   extraChargeRows = [],
   extraChargesSelectable,
@@ -119,11 +124,16 @@ export function HirePaymentComposer({
   submitLabel: string;
   triggerLabel?: string;
   triggerClassName?: string;
+  /** When true, only the modal is rendered — open it via `open` / `onOpenChange`. */
+  hideTrigger?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   asDriver?: boolean;
   allocationKind?: HirePaymentApplyTo;
   /** Account statement / shared record: let staff choose rent vs extra charges. */
   allowAllocationChoice?: boolean;
   preferredAllocationKind?: HirePaymentApplyTo;
+  includeDepositOutstanding?: boolean;
   outstandingExtraChargesGbp?: number;
   extraChargeRows?: readonly ExtraChargePaymentAllocationRow[];
   extraChargesSelectable?: boolean;
@@ -132,7 +142,9 @@ export function HirePaymentComposer({
   onSuccess?: () => void;
   busy?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = onOpenChange ?? setUncontrolledOpen;
   const [maximized, setMaximized] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [amount, setAmount] = useState("");
@@ -149,9 +161,16 @@ export function HirePaymentComposer({
   const extrasSelectable =
     extraChargesSelectable ?? extraOutstandingGbp > 0.005;
   const dueRentGbp = useMemo(() => accruedRentOutstandingGbp(scheduleRows), [scheduleRows]);
-  const depositDueGbp = useMemo(() => depositOutstandingGbp(scheduleRows), [scheduleRows]);
+  const depositDueGbp = useMemo(() => {
+    if (!includeDepositOutstanding) return 0;
+    return depositOutstandingGbp(scheduleRows);
+  }, [includeDepositOutstanding, scheduleRows]);
   const showDepositRentChoice = depositDueGbp > 0.005;
-  const rentSelectable = allowAllocationChoice ? dueRentGbp > 0.005 || depositDueGbp > 0.005 : scheduleBalanceGbp > 0.005;
+  const rentSelectable = allowAllocationChoice
+    ? dueRentGbp > 0.005 || depositDueGbp > 0.005
+    : includeDepositOutstanding
+      ? scheduleBalanceGbp > 0.005
+      : dueRentGbp > 0.005;
   const defaultApplyTo = allowAllocationChoice
     ? defaultHirePaymentApplyTo({
         rentOutstandingGbp: dueRentGbp + depositDueGbp,
@@ -250,7 +269,26 @@ export function HirePaymentComposer({
     setExtraAllocateMode("auto");
     setSelectedExtraChargeIds([]);
     onAllocationChange?.(EMPTY_HIGHLIGHT_IDS);
-  }, [defaultApplyTo, defaultStaffPaymentAccountId, depositDueGbp, onAllocationChange, staffPaymentAccounts]);
+  }, [defaultApplyTo, defaultStaffPaymentAccountId, depositDueGbp, onAllocationChange, setOpen, staffPaymentAccounts]);
+
+  function prepareAndOpenModal() {
+    setChosenKind(defaultApplyTo);
+    setScheduleTarget(defaultHireSchedulePaymentTarget(depositDueGbp));
+    setExtraAllocateMode("auto");
+    setSelectedExtraChargeIds([]);
+    setSubmitError(null);
+    if (defaultApplyTo === "extra_charges" && extraOutstandingGbp > 0.005 && !amount) {
+      setAmount(extraOutstandingGbp.toFixed(2));
+    }
+    setOpen(true);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    if (defaultApplyTo === "extra_charges" && extraOutstandingGbp > 0.005) {
+      setAmount((current) => (current.trim() ? current : extraOutstandingGbp.toFixed(2)));
+    }
+  }, [defaultApplyTo, extraOutstandingGbp, open]);
 
   useEffect(() => {
     if (!isExtraCharges || extraAllocateMode !== "manual") return;
@@ -352,31 +390,40 @@ export function HirePaymentComposer({
     }
     setSubmitError(null);
     startSubmit(async () => {
-      const res = await onSubmit({
-        amountGbp: parsed,
-        paymentReference: reference,
-        allocationKind: effectiveKind,
-        ...(!isExtraCharges ? { scheduleTarget: effectiveScheduleTarget } : {}),
-        ...(isExtraCharges && extraAllocateMode === "manual"
-          ? { selectedExtraChargeLineItemIds: selectedExtraChargeIds }
-          : {}),
-        ...(asDriver
-          ? {}
-          : {
-              paymentMethod,
-              paymentAccountId: settlementPaymentMethodRequiresAccount(paymentMethod)
-                ? paymentAccountId
-                : null,
-              paidOnYmd: paidOn,
-              notes,
-            }),
-      });
-      if (!res.ok) {
-        setSubmitError(res.error ?? "Could not submit payment.");
-        return;
+      try {
+        const res = await onSubmit({
+          amountGbp: parsed,
+          paymentReference: reference,
+          allocationKind: effectiveKind,
+          ...(!isExtraCharges ? { scheduleTarget: effectiveScheduleTarget } : {}),
+          ...(isExtraCharges && extraAllocateMode === "manual"
+            ? { selectedExtraChargeLineItemIds: selectedExtraChargeIds }
+            : {}),
+          ...(asDriver
+            ? {}
+            : {
+                paymentMethod,
+                paymentAccountId: settlementPaymentMethodRequiresAccount(paymentMethod)
+                  ? paymentAccountId
+                  : null,
+                paidOnYmd: paidOn,
+                notes,
+              }),
+        });
+        if (!res.ok) {
+          setSubmitError(res.error ?? "Could not submit payment.");
+          return;
+        }
+        closeModal();
+        onSuccess?.();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setSubmitError(
+          /fetch failed|network|failed to fetch/i.test(message)
+            ? "Connection interrupted while saving. Refresh the page — the payment may already have been recorded."
+            : message || "Could not submit payment.",
+        );
       }
-      closeModal();
-      onSuccess?.();
     });
   }
 
@@ -766,23 +813,16 @@ export function HirePaymentComposer({
 
   return (
     <>
-      <button
-        type="button"
-        className={triggerClassName}
-        disabled={triggerDisabled}
-        onClick={() => {
-          setChosenKind(defaultApplyTo);
-          setScheduleTarget(defaultHireSchedulePaymentTarget(depositDueGbp));
-          setExtraAllocateMode("auto");
-          setSelectedExtraChargeIds([]);
-          setOpen(true);
-          if (defaultApplyTo === "extra_charges" && extraOutstandingGbp > 0.005 && !amount) {
-            setAmount(extraOutstandingGbp.toFixed(2));
-          }
-        }}
-      >
-        {triggerLabel}
-      </button>
+      {!hideTrigger ? (
+        <button
+          type="button"
+          className={triggerClassName}
+          disabled={triggerDisabled}
+          onClick={prepareAndOpenModal}
+        >
+          {triggerLabel}
+        </button>
+      ) : null}
 
       <FormModalShell
         open={open}

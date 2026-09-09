@@ -72,7 +72,7 @@ import {
   hireActiveRentToSettlementEntries,
   type HireSettlementStatement,
 } from "@/lib/fleet/hire-settlement-statement";
-import { calendarYmdToUtcNoonIso, parseStaffManualChargeDateYmd } from "@/lib/fleet/hire-driver-charge-mutation";
+import { staffPaymentPaidAtIso, parseStaffManualChargeDateYmd } from "@/lib/fleet/hire-driver-charge-mutation";
 import { computeHireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
 import { settlementPaymentMethodRequiresAccount } from "@/lib/fleet/hire-settlement-payment-method";
 import { syncVehicleStatusForHireGroup } from "@/lib/fleet/sync-vehicle-hire-status";
@@ -826,7 +826,7 @@ export async function recordHireBalancePaymentAction(input: {
       payment_category: "settlement",
       notes: input.notes?.trim() || null,
       recorded_by_user_id: user.id,
-      ...(paidOnYmd ? { paid_at: calendarYmdToUtcNoonIso(paidOnYmd) } : {}),
+      ...(paidOnYmd ? { paid_at: staffPaymentPaidAtIso(paidOnYmd) } : {}),
     })
     .select("id")
     .maybeSingle();

@@ -77,7 +77,7 @@ export function hireDriverChargeResolutionLabel(
   resolution: HireDriverChargeResolution | HireInspectionDamageChargeResolution | string,
 ): string {
   const labels: Record<HireDriverChargeResolution | "review_later", string> = {
-    waived: "No charge",
+    waived: "Waived",
     paid_now: "Charged now",
     add_to_balance: "Added to balance",
     voided: "Voided",
@@ -305,7 +305,9 @@ export function mapDriverChargeLineItemFromDb(
   if (!isHireDriverChargeSourceKind(sourceKind)) return null;
   if (!isHireDriverChargeResolution(resolution)) return null;
   const amountGbp = Number(row.amount_gbp);
-  if (!Number.isFinite(amountGbp) || amountGbp <= 0) return null;
+  if (!Number.isFinite(amountGbp) || amountGbp < 0) return null;
+  // Waived rows may be £0 (no billed amount); other resolutions need a positive amount.
+  if (amountGbp <= 0 && resolution !== "waived") return null;
 
   return {
     id: row.id,

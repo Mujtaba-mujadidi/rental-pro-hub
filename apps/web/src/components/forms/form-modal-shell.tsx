@@ -105,10 +105,11 @@ export function FormModalShell({
   useLockBackgroundScroll(open);
 
   useEffect(() => {
-    if (!open) {
-      setMaximized(false);
-      onMaximizedChange?.(false);
-    }
+    if (open) return;
+    setMaximized(false);
+    // Defer parent notify so we never setState on the owner during this render pass.
+    const t = window.setTimeout(() => onMaximizedChange?.(false), 0);
+    return () => window.clearTimeout(t);
   }, [open, onMaximizedChange]);
 
   function toggleMaximize() {

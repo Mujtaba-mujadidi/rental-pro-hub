@@ -67,6 +67,8 @@ function minimalPage(overrides: Partial<HirePaymentsPageData> = {}): HirePayment
     canFinalizeSettlement: false,
     depositGbp: 500,
     depositReceivedGbp: 500,
+    depositAppliedToRentGbp: 0,
+    depositAppliedToChargesGbp: 0,
     accountPosition: null,
     depositPendingReview: false,
     canResolveDeposit: false,

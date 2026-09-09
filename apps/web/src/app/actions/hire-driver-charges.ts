@@ -11,7 +11,7 @@ import { assertRentalCompanyWritable } from "@/lib/auth/rental-company-write-gua
 import { can, canReadRentals, canWriteRentals } from "@/lib/auth/rental-permissions";
 import { assertStaffHireSubcompanyAccess } from "@/lib/auth/rental-subcompany-access";
 import {
-  calendarYmdToUtcNoonIso,
+  staffPaymentPaidAtIso,
   parseStaffManualChargeDateYmd,
   parseStaffManualChargeFields,
   parseStaffManualChargeResolution,
@@ -34,7 +34,9 @@ import {
   allocateExtraChargePaymentAcrossRows,
   buildExtraChargePaymentTableRows,
   EXTRA_CHARGE_PAYMENT_EVENT_TYPES,
+  endedHireExtrasSettlementCapGbp,
   extraChargeSubmitBlock,
+  outstandingExtraChargesFromTimedPaymentsGbp,
   planExtraChargePaidAmendment,
   resolveOpenExtraChargePayment,
   selectedExtraChargeRowIdsAreValid,
@@ -42,6 +44,7 @@ import {
   type OpenExtraChargePayment,
 } from "@/lib/fleet/hire-driver-charge-payment";
 import { isHirePaymentsWorkspaceOpen } from "@/lib/fleet/hire-lifecycle-attention";
+import { persistEndedHireCollectionCredit } from "@/lib/fleet/persist-hire-ended-collection-credit";
 import { loadHireAuditActorDisplayNames, logHireGroupEvent } from "@/lib/fleet/hire-audit";
 import type { HirePaymentRowEventDisplay } from "@/lib/fleet/hire-payment-row-history";
 import { notifyCompanyHirePaymentReviewers, notifyHireDriver } from "@/lib/platform-notifications";
@@ -741,8 +744,12 @@ export async function recordHireDriverChargePaymentAction(input: {
   const authorized = await loadAuthorizedHireForChargeWrite(input.hireGroupId);
   if (!authorized.ok) return authorized;
   const { hire } = authorized;
-  if (!isHirePaymentsWorkspaceOpen(hire.status)) {
-    return { ok: false, error: "Record extra-charge payments on an active hire from Payments." };
+  const ended = hire.status === "terminated" || hire.status === "completed";
+  if (!isHirePaymentsWorkspaceOpen(hire.status) && !ended) {
+    return { ok: false, error: "Extra-charge payments can only be recorded on an open hire." };
+  }
+  if (ended && hire.settlementBalanceDirection === "settled") {
+    return { ok: false, error: "This hire is already settled." };
   }
   const snapshot = await extraChargePaymentSnapshot(hire.id);
   if (snapshot.pending) {
@@ -758,7 +765,7 @@ export async function recordHireDriverChargePaymentAction(input: {
   if (!method) return { ok: false, error: "Select a payment method." };
   const paidOnYmd = parseStaffManualChargeDateYmd(input.paidOnYmd);
   if (!paidOnYmd) return { ok: false, error: "Enter a valid payment date." };
-  const paidOn = calendarYmdToUtcNoonIso(paidOnYmd);
+  const paidOn = staffPaymentPaidAtIso(paidOnYmd);
 
   const account = await resolvePaymentAccount({
     companyId: hire.parentCompanyId,
@@ -796,18 +803,39 @@ export async function recordHireDriverChargePaymentAction(input: {
     direction: (payment.direction as string | null) ?? null,
     paymentCategory: (payment.payment_category as string | null) ?? "settlement",
   }));
-  const outstanding = outstandingExtraChargesGbp(mappedCharges, receiptRows);
+  const timedPayments = mapDriverChargeTimedPayments(receipts ?? []);
+  const allocationEvents = mapExtraChargeAllocationEvents(eventRows ?? []);
+  const settlementOpenBalanceCapGbp = endedHireExtrasSettlementCapGbp({
+    contractEnded: ended,
+    settlementDirection: hire.settlementBalanceDirection,
+    openBalanceGbp: Math.abs(hire.settlementBalanceGbp),
+  });
+  const outstanding = timedPayments.length
+    ? outstandingExtraChargesFromTimedPaymentsGbp({
+        charges: mappedCharges,
+        payments: timedPayments,
+        allocationEvents,
+        settleOrphanReceipts: ended,
+        settlementOpenBalanceCapGbp,
+      })
+    : (() => {
+        let pooled = outstandingExtraChargesGbp(mappedCharges, receiptRows);
+        if (settlementOpenBalanceCapGbp != null && pooled - settlementOpenBalanceCapGbp > 0.005) {
+          pooled = settlementOpenBalanceCapGbp;
+        }
+        return pooled;
+      })();
   if (amount - outstanding > 0.005) {
     return { ok: false, error: "Amount exceeds outstanding extra charges." };
   }
 
-  const timedPayments = mapDriverChargeTimedPayments(receipts ?? []);
-  const allocationEvents = mapExtraChargeAllocationEvents(eventRows ?? []);
   const tableRows = buildExtraChargePaymentTableRows({
     charges: mappedCharges,
     receipts: receiptRows,
     timedPayments,
     allocationEvents,
+    settleOrphanReceipts: ended,
+    settlementOpenBalanceCapGbp,
   });
   const orderedRowIds = normalizeSelectedExtraChargeLineItemIds(input.selectedExtraChargeLineItemIds);
   if (orderedRowIds) {
@@ -874,6 +902,16 @@ export async function recordHireDriverChargePaymentAction(input: {
       })),
     },
   });
+
+  const settlementCredit = await persistEndedHireCollectionCredit({
+    hireGroupId: hire.id,
+    parentCompanyId: hire.parentCompanyId,
+    hireStatus: hire.status,
+    settlementBalanceDirection: hire.settlementBalanceDirection,
+    settlementBalanceGbp: hire.settlementBalanceGbp,
+    collectedGbp: amount,
+  });
+  if (!settlementCredit.ok) return settlementCredit;
 
   await revalidateHireCharges(hire.id);
   return { ok: true };
@@ -1032,6 +1070,8 @@ export async function loadHireDriverChargeHistoryAction(
         chargedOn: row.chargedOn ?? null,
         createdAt: row.createdAt ?? "",
         balancePaymentId: row.balancePaymentId ?? null,
+        chargeTypeLabel: hireDriverChargeTypeLabel(row.chargeType),
+        description: row.description ?? null,
       })),
       payments,
       paymentLifecycleEvents,
@@ -1506,10 +1546,14 @@ export async function amendExtraChargePaidAmountAction(input: {
     charges: mappedCharges,
     payments: timedPayments,
     allocationEvents,
+    settleOrphanReceipts:
+      hire.status === "terminated" || hire.status === "completed",
   });
   if (!plan.ok) return plan;
 
+  let paymentShrinkGbp = 0;
   for (const update of plan.paymentUpdates) {
+    paymentShrinkGbp = Math.round((paymentShrinkGbp + (update.previousAmountGbp - update.newAmountGbp)) * 100) / 100;
     if (update.newAmountGbp <= 0.005) {
       const { error } = await admin
         .from("vehicle_hire_balance_payments")
@@ -1561,11 +1605,11 @@ export async function amendExtraChargePaidAmountAction(input: {
       .eq("hire_group_id", hire.id)
       .eq("parent_company_id", hire.parentCompanyId);
     if (chargeError) return { ok: false, error: chargeError.message };
-
-    const remainderGbp = Math.round((plan.previousPaidGbp - plan.newPaidGbp) * 100) / 100;
-    const settled = await persistEndedSettlementDelta(hire, remainderGbp);
-    if (!settled.ok) return settled;
   }
+
+  // Receipt shrinks increase what the driver still owes on an ended hire.
+  const settled = await persistEndedSettlementDelta(hire, paymentShrinkGbp);
+  if (!settled.ok) return settled;
 
   const { data: notifyGroup } = await admin
     .from("vehicle_hire_groups")

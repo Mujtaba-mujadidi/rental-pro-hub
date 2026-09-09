@@ -9,11 +9,14 @@ import {
   resolveExtraChargeReceiptAllocationSlices,
   buildExtraChargePaymentTableRows,
   buildExtraChargePaymentTableRowsFromWorkspace,
+  clampExtraChargePaidToChargeAmounts,
+  endedHireExtrasSettlementCapGbp,
   outstandingExtraChargesFromTimedPaymentsGbp,
   extraChargeSubmitBlock,
   resolveOpenExtraChargePayment,
 } from "./hire-driver-charge-payment";
 import type { HireDriverChargeLineItemRow } from "./hire-driver-charges";
+import { outstandingExtraChargesGbp } from "./hire-driver-charges";
 
 function charge(
   partial: Partial<HireDriverChargeLineItemRow> & Pick<HireDriverChargeLineItemRow, "id" | "amountGbp">,
@@ -596,6 +599,214 @@ describe("buildExtraChargePaymentTableRows with real receipts", () => {
       }),
     ).toBe(90);
   });
+
+  it("ended hire: pours orphan early cash onto later open balances so outstanding matches pooled", () => {
+    const charges = [
+      charge({
+        id: "pcn",
+        amountGbp: 30,
+        chargedOn: "2026-08-23",
+        createdAt: "2026-08-23T10:00:00.000Z",
+      }),
+      charge({
+        id: "pco",
+        amountGbp: 100,
+        chargedOn: "2026-08-23",
+        createdAt: "2026-08-23T19:20:00.000Z",
+      }),
+    ];
+    const payments = [
+      { id: "p60", amountGbp: 60, paidAt: "2026-08-23T13:00:00.000Z" },
+      { id: "p10", amountGbp: 10, paidAt: "2026-08-23T19:25:00.000Z" },
+    ];
+    expect(
+      outstandingExtraChargesFromTimedPaymentsGbp({
+        charges,
+        payments,
+        settleOrphanReceipts: true,
+      }),
+    ).toBe(60);
+
+    const rows = buildExtraChargePaymentTableRows({
+      charges,
+      receipts: [],
+      timedPayments: payments,
+      settleOrphanReceipts: true,
+    });
+    expect(rows.find((row) => row.id === "pcn")).toMatchObject({
+      paidGbp: 30,
+      balanceGbp: 0,
+      status: "paid",
+    });
+    expect(rows.find((row) => row.id === "pco")).toMatchObject({
+      paidGbp: 40,
+      balanceGbp: 60,
+      status: "partially_paid",
+    });
+
+    const slices = resolveExtraChargeReceiptAllocationSlices({
+      charges,
+      payments,
+      settleOrphanReceipts: true,
+    });
+    expect(
+      slices
+        .filter((slice) => slice.chargeLineItemId === "pco")
+        .reduce((sum, slice) => sum + slice.allocatedGbp, 0),
+    ).toBe(40);
+  });
+
+  it("ended hire: caps extras outstanding to settlement open balance for Record payment", () => {
+    const charges = [
+      charge({
+        id: "a",
+        amountGbp: 200,
+        chargedOn: "2026-08-01",
+        createdAt: "2026-08-01T10:00:00.000Z",
+      }),
+      charge({
+        id: "b",
+        amountGbp: 340,
+        chargedOn: "2026-08-10",
+        createdAt: "2026-08-10T10:00:00.000Z",
+      }),
+    ];
+    const payments = [{ id: "p", amountGbp: 0, paidAt: "2026-08-01T12:00:00.000Z" }];
+    expect(
+      outstandingExtraChargesFromTimedPaymentsGbp({
+        charges,
+        payments: [],
+        settleOrphanReceipts: true,
+        settlementOpenBalanceCapGbp: 500,
+      }),
+    ).toBe(500);
+
+    const rows = buildExtraChargePaymentTableRows({
+      charges,
+      receipts: [],
+      timedPayments: [],
+      settleOrphanReceipts: true,
+      settlementOpenBalanceCapGbp: 500,
+    });
+    const open = rows.reduce((sum, row) => sum + row.balanceGbp, 0);
+    expect(Math.round(open * 100) / 100).toBe(500);
+  });
+
+  it("ended hire: settled hire paints residual timed gaps as paid (balances clear)", () => {
+    const charges = [
+      charge({
+        id: "car-wash",
+        amountGbp: 50,
+        chargedOn: "2026-08-25",
+        createdAt: "2026-08-25T10:00:00.000Z",
+      }),
+      charge({
+        id: "pcn-challenge",
+        amountGbp: 30,
+        chargedOn: "2026-08-28",
+        createdAt: "2026-08-28T10:00:00.000Z",
+      }),
+      charge({
+        id: "we-paid-pcn",
+        amountGbp: 40,
+        chargedOn: "2026-08-28",
+        createdAt: "2026-08-28T11:00:00.000Z",
+      }),
+    ];
+    // Timed allocation left £20 open on two older lines; settlement was cleared separately.
+    const payments = [
+      { id: "p1", amountGbp: 30, paidAt: "2026-08-25T12:00:00.000Z" },
+      { id: "p2", amountGbp: 10, paidAt: "2026-08-28T12:00:00.000Z" },
+      { id: "p3", amountGbp: 80, paidAt: "2026-08-28T13:00:00.000Z" },
+    ];
+
+    expect(endedHireExtrasSettlementCapGbp({
+      contractEnded: true,
+      settlementDirection: "settled",
+      openBalanceGbp: 0,
+    })).toBe(0);
+
+    expect(
+      outstandingExtraChargesFromTimedPaymentsGbp({
+        charges,
+        payments,
+        settleOrphanReceipts: true,
+        settlementOpenBalanceCapGbp: 0,
+      }),
+    ).toBe(0);
+
+    const rows = buildExtraChargePaymentTableRows({
+      charges,
+      receipts: [],
+      timedPayments: payments,
+      settleOrphanReceipts: true,
+      settlementOpenBalanceCapGbp: 0,
+    });
+    expect(rows.every((row) => row.balanceGbp <= 0.005)).toBe(true);
+    expect(rows.every((row) => row.status === "paid")).toBe(true);
+    const overAllocated = rows.find((row) => row.id === "we-paid-pcn");
+    expect(overAllocated?.paidGbp).toBe(40);
+    expect(overAllocated?.paidGbp).toBeLessThanOrEqual(overAllocated?.dueGbp ?? 0);
+  });
+
+  it("clamps paid above charge amount and pours excess onto open lines", () => {
+    const charges = [
+      charge({
+        id: "a",
+        amountGbp: 40,
+        chargedOn: "2026-08-01",
+        createdAt: "2026-08-01T10:00:00.000Z",
+      }),
+      charge({
+        id: "b",
+        amountGbp: 20,
+        chargedOn: "2026-08-02",
+        createdAt: "2026-08-02T10:00:00.000Z",
+      }),
+    ];
+    const paidById = new Map<string, number>([
+      ["a", 80],
+      ["b", 0],
+    ]);
+    clampExtraChargePaidToChargeAmounts({ charges, paidById });
+    expect(paidById.get("a")).toBe(40);
+    expect(paidById.get("b")).toBe(20);
+  });
+
+  it("ended hire: open charge balances match pooled extras outstanding (invariant)", () => {
+    const charges = [
+      charge({
+        id: "a",
+        amountGbp: 200,
+        chargedOn: "2026-08-01",
+        createdAt: "2026-08-01T10:00:00.000Z",
+      }),
+      charge({
+        id: "b",
+        amountGbp: 340,
+        chargedOn: "2026-08-10",
+        createdAt: "2026-08-10T10:00:00.000Z",
+      }),
+    ];
+    const payments = [
+      { id: "early", amountGbp: 40, paidAt: "2026-07-31T12:00:00.000Z" },
+      { id: "mid", amountGbp: 100, paidAt: "2026-08-05T12:00:00.000Z" },
+    ];
+    const timedOutstanding = outstandingExtraChargesFromTimedPaymentsGbp({
+      charges,
+      payments,
+      settleOrphanReceipts: true,
+    });
+    const pooledOutstanding = outstandingExtraChargesGbp(charges, [
+      {
+        amountGbp: 140,
+        direction: "received_from_driver",
+        paymentCategory: "driver_charge",
+      },
+    ]);
+    expect(timedOutstanding).toBe(pooledOutstanding);
+    expect(timedOutstanding).toBe(400);
+  });
 });
 
 describe("planExtraChargePaidAmendment", () => {
@@ -645,6 +856,54 @@ describe("planExtraChargePaidAmendment", () => {
       },
     ]);
     expect(plan.convertToAddToBalance).toBe(false);
+  });
+
+  it("ended hire: moves freed cash onto other open charges before shrinking the receipt", () => {
+    const charges = [
+      charge({
+        id: "pco",
+        amountGbp: 100,
+        chargedOn: "2026-08-24",
+        createdAt: "2026-08-24T10:00:00.000Z",
+      }),
+      charge({
+        id: "pcn",
+        amountGbp: 30,
+        chargedOn: "2026-08-24",
+        createdAt: "2026-08-24T11:00:00.000Z",
+      }),
+    ];
+    const payments = [{ id: "pay40", amountGbp: 40, paidAt: "2026-08-24T12:00:00.000Z" }];
+    const allocationEvents = [
+      {
+        eventType: "driver_charge_payment_approved",
+        metadata: {
+          balancePaymentId: "pay40",
+          allocations: [{ chargeLineItemId: "pco", amountGbp: 40 }],
+        },
+      },
+    ];
+
+    const plan = planExtraChargePaidAmendment({
+      chargeLineItemId: "pco",
+      newPaidGbp: 0,
+      charges,
+      payments,
+      allocationEvents,
+      settleOrphanReceipts: true,
+    });
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.previousPaidGbp).toBe(40);
+    expect(plan.newPaidGbp).toBe(0);
+    expect(plan.paymentUpdates).toEqual([
+      {
+        paymentId: "pay40",
+        previousAmountGbp: 40,
+        newAmountGbp: 30,
+        allocations: [{ chargeLineItemId: "pcn", amountGbp: 30 }],
+      },
+    ]);
   });
 
   it("reduces a charged-now receipt and converts the line onto the balance", () => {

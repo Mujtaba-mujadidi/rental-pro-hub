@@ -14,6 +14,7 @@ import {
   hireDamageSeverityLabel,
   type HireDamageSeverity,
 } from "@/lib/fleet/vehicle-damage-panels";
+import { stripHirePendingReturnReviewNotesFromDescription } from "@/lib/fleet/hire-pending-return-review-resolve";
 
 /** Unused rent paid for periods after the end date, plus overpayment on accrued rent. */
 export function hireAdvanceRentToRefundGbp(
@@ -144,7 +145,8 @@ export function buildHireEndedDepositRefundDisplay(input: {
     | "depositReceivedGbp"
     | "settlementBalancePayments"
     | "driverChargeLineItems"
-  >;
+  > &
+    Partial<Pick<HirePaymentsPageData, "depositAppliedToRentGbp" | "depositAppliedToChargesGbp">>;
   audience?: "staff" | "driver";
 }): HireEndedDepositRefundDisplay | null {
   const audience = input.audience ?? "staff";
@@ -159,14 +161,25 @@ export function buildHireEndedDepositRefundDisplay(input: {
   if (depositReceivedGbp <= 0.005 && advanceRentToRefundGbp <= 0.005) return null;
 
   const depositGbp = depositReceivedGbp;
-  const lessUnpaidRentGbp = input.payments.terminationSummary
-    ? hireDepositAppliedToRentGbp(
-        input.payments.terminationSummary,
-        input.payments.depositDisposition,
-        depositReceivedGbp,
-      )
-    : 0;
-  const lessDamageGbp = sumDriverChargesGbp(input.payments.driverChargeLineItems);
+  const disposition = input.payments.depositDisposition;
+  const persistedRent = roundGbp(Math.max(0, Number(input.payments.depositAppliedToRentGbp ?? 0)));
+  const persistedCharges = roundGbp(
+    Math.max(0, Number(input.payments.depositAppliedToChargesGbp ?? 0)),
+  );
+  const hasPersistedApplication = persistedRent > 0.005 || persistedCharges > 0.005;
+  const lessUnpaidRentGbp = hasPersistedApplication
+    ? persistedRent
+    : input.payments.terminationSummary
+      ? hireDepositAppliedToRentGbp(
+          input.payments.terminationSummary,
+          disposition,
+          depositReceivedGbp,
+        )
+      : 0;
+  // Prefer persisted charge credits. Legacy refund displays fell back to all posted charges.
+  const lessDamageGbp = hasPersistedApplication
+    ? persistedCharges
+    : sumDriverChargesGbp(input.payments.driverChargeLineItems);
   const ledger = summarizeHireSettlementLedger(input.payments.settlementBalancePayments);
   const refundPaidToDriverGbp = ledger.settlementPaidGbp;
   const { advanceRentRefundedGbp, depositRefundedGbp } = splitSettlementRefundsToDriver(
@@ -318,7 +331,7 @@ export type HireEndedChargeCardDisplay = {
 export function formatEndedChargeCardDisplay(
   item: Pick<HireDriverChargeWorkspaceRow, "description" | "chargeTypeLabel">,
 ): HireEndedChargeCardDisplay {
-  const raw = item.description?.trim() ?? "";
+  const raw = stripHirePendingReturnReviewNotesFromDescription(item.description);
   const parts = raw.split(/\s*·\s*/).map((part) => part.trim()).filter(Boolean);
   if (parts.length >= 3) {
     const [panel, damageType, severity] = parts;

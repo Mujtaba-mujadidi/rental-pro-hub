@@ -53,15 +53,52 @@ export function parseHirePendingReturnReviewDecision(
   return null;
 }
 
+/** Amount required to approve; optional on waive (proposed amount is used when present). */
 export function parseHirePendingReturnReviewAmountGbp(
   decision: HirePendingReturnReviewDecision,
   amountGbp: number | null | undefined,
 ): { ok: true; amountGbp: number | null } | { ok: false; error: string } {
-  if (decision === "waive") return { ok: true, amountGbp: null };
+  if (decision === "waive") {
+    if (amountGbp == null || !Number.isFinite(amountGbp) || amountGbp <= 0) {
+      return { ok: true, amountGbp: null };
+    }
+    const rounded = Math.round(amountGbp * 100) / 100;
+    return { ok: true, amountGbp: rounded > 0 ? rounded : null };
+  }
   if (amountGbp == null || !Number.isFinite(amountGbp) || amountGbp <= 0) {
     return { ok: false, error: "Enter a charge amount to approve." };
   }
   const rounded = Math.round(amountGbp * 100) / 100;
   if (rounded <= 0) return { ok: false, error: "Enter a charge amount to approve." };
   return { ok: true, amountGbp: rounded };
+}
+
+export function parseHirePendingReturnReviewNotes(
+  decision: HirePendingReturnReviewDecision,
+  notes: string | null | undefined,
+): { ok: true; notes: string | null } | { ok: false; error: string } {
+  const trimmed = notes?.trim() || "";
+  if (decision === "waive" && !trimmed) {
+    return { ok: false, error: "Add a note explaining why this charge is waived." };
+  }
+  return { ok: true, notes: trimmed || null };
+}
+
+/** Append staff review notes to the stored charge description (history / audit). */
+export function appendHirePendingReturnReviewNotes(
+  description: string,
+  notes: string | null | undefined,
+): string {
+  const trimmed = notes?.trim();
+  if (!trimmed) return description;
+  return `${description} · Note: ${trimmed}`;
+}
+
+/** Drop trailing review notes for compact table titles (notes remain in history). */
+export function stripHirePendingReturnReviewNotesFromDescription(
+  description: string | null | undefined,
+): string {
+  const raw = description?.trim() ?? "";
+  if (!raw) return "";
+  return raw.replace(/\s*·\s*Note:\s*[\s\S]*$/i, "").trim();
 }

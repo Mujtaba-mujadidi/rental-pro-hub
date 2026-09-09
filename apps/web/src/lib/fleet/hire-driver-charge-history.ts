@@ -60,7 +60,8 @@ export function formatHireDriverChargeHistoryEvent(
   let title = "Charge updated";
 
   if (event.eventType === "driver_charge_added") {
-    title = "Charge added";
+    const resolution = textFromMetadata(metadata, "resolution");
+    title = resolution === "waived" ? "Charge waived" : "Charge added";
     if (amountGbp != null) detailLines.push(`Amount: ${formatGbp(amountGbp)}`);
     if (typeLabel) detailLines.push(`Type: ${typeLabel}`);
     if (description) detailLines.push(description);
@@ -273,6 +274,8 @@ export function mergeHireDriverChargeHistory(input: {
     chargedOn: string | null;
     createdAt: string;
     balancePaymentId?: string | null;
+    chargeTypeLabel?: string | null;
+    description?: string | null;
   }[];
   payments: readonly HireDriverChargePaymentHistoryInput[];
   paymentLifecycleEvents?: readonly (ExtraChargePaymentEventInput & {
@@ -281,11 +284,32 @@ export function mergeHireDriverChargeHistory(input: {
     actorRole?: "company_staff" | "driver" | "system" | null;
   })[];
 }): HirePaymentRowEventDisplay[] {
-  const items: HirePaymentRowEventDisplay[] = [
-    ...formatHireDriverChargeHistoryEvents(input.lifecycleEvents),
-  ];
-
   const chargeLineItemId = input.chargeLineItemId;
+  const charge = input.charges.find((row) => row.id === chargeLineItemId);
+  const lifecycleEvents = [...input.lifecycleEvents];
+  // Return-charge apply / review used to log hire_status_changed only — synthesise an add
+  // event from the line so History is not empty for those older rows.
+  if (
+    charge &&
+    !lifecycleEvents.some((event) => event.eventType === "driver_charge_added")
+  ) {
+    lifecycleEvents.push({
+      id: `synthetic-added:${charge.id}`,
+      eventType: "driver_charge_added",
+      createdAt: charge.createdAt || charge.chargedOn || new Date(0).toISOString(),
+      metadata: {
+        chargeLineItemId: charge.id,
+        amountGbp: charge.amountGbp,
+        resolution: charge.resolution,
+        chargeTypeLabel: charge.chargeTypeLabel ?? null,
+        description: charge.description ?? null,
+      },
+    });
+  }
+
+  const items: HirePaymentRowEventDisplay[] = [
+    ...formatHireDriverChargeHistoryEvents(lifecycleEvents),
+  ];
   const recordedPaymentIds = new Set<string>();
 
   for (const event of input.paymentLifecycleEvents ?? []) {
@@ -316,7 +340,6 @@ export function mergeHireDriverChargeHistory(input: {
     );
   }
 
-  const charge = input.charges.find((row) => row.id === chargeLineItemId);
   if (charge?.resolution === "add_to_balance") {
     const slices = resolveExtraChargeReceiptAllocationSlices({
       charges: input.charges.map((row) => ({

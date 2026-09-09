@@ -151,13 +151,20 @@ export function formatHirePaymentRowEvent(event: HirePaymentRowEventInput): Hire
     if (reference) detailLines.push(`Reference: ${reference}`);
     if (!body && reference) body = null;
   } else if (event.toStatus === "approved") {
-    title = "Payment approved";
-    if (approved != null) detailLines.push(`Approved total: ${formatGbp(approved)}`);
-    else if (submitted != null) detailLines.push(`Amount: ${formatGbp(submitted)}`);
-    if (reference) detailLines.push(`Reference: ${reference}`);
-    if (paymentMethod) detailLines.push(`Method: ${paymentMethod.replace(/_/g, " ")}`);
-    if (paymentAccountName) detailLines.push(`Paid into: ${paymentAccountName}`);
-    if (paidOnYmd) detailLines.push(`Paid on: ${formatUkDate(paidOnYmd)}`);
+    const depositApplied = amountFromPayload(payload, "depositAppliedGbp");
+    if (depositApplied != null && depositApplied > 0.005) {
+      title = "Deposit applied to rent";
+      detailLines.push(`Amount from deposit: ${formatGbp(depositApplied)}`);
+      if (approved != null) detailLines.push(`Row paid total: ${formatGbp(approved)}`);
+    } else {
+      title = "Payment approved";
+      if (approved != null) detailLines.push(`Approved total: ${formatGbp(approved)}`);
+      else if (submitted != null) detailLines.push(`Amount: ${formatGbp(submitted)}`);
+      if (reference) detailLines.push(`Reference: ${reference}`);
+      if (paymentMethod) detailLines.push(`Method: ${paymentMethod.replace(/_/g, " ")}`);
+      if (paymentAccountName) detailLines.push(`Paid into: ${paymentAccountName}`);
+      if (paidOnYmd) detailLines.push(`Paid on: ${formatUkDate(paidOnYmd)}`);
+    }
   } else if (event.toStatus === "rejected") {
     title = "Payment rejected";
     if (submitted != null) detailLines.push(`Submitted amount: ${formatGbp(submitted)}`);

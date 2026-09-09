@@ -301,7 +301,7 @@ function BalancesEmptyState({ tab }: { tab: CompanyBalancesTab }) {
       : tab === "final_settlements"
         ? {
             title: "No final settlements yet",
-            detail: "Ended hires with a cleared settlement balance will appear here.",
+            detail: "Ended hires with an open or cleared settlement balance will appear here.",
           }
         : tab === "all"
           ? {

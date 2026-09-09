@@ -126,13 +126,6 @@ export async function rebuildHireFinancialSummary(hireGroupId: string): Promise<
     metadata: (event.metadata as Record<string, unknown> | null) ?? null,
   }));
 
-  const extras = computeHireExtraChargeLineMoney({
-    charges,
-    timedPayments: timedExtraPayments,
-    allocationEvents,
-  });
-  const scheduleSummary = computeHireSchedulePaymentSummary(paymentSchedule, todayYmd);
-
   const groupContext: HireIncomeGroupContext = {
     contractEndedYmd:
       asYmd(group.terminated_at as string | null) ?? asYmd(group.ended_at as string | null),
@@ -146,6 +139,14 @@ export async function rebuildHireFinancialSummary(hireGroupId: string): Promise<
     signedRentBalanceGbp: null,
     settlementSettled: String(group.settlement_balance_direction ?? "") === "settled",
   };
+
+  const extras = computeHireExtraChargeLineMoney({
+    charges,
+    timedPayments: timedExtraPayments,
+    allocationEvents,
+    settleOrphanReceipts: Boolean(groupContext.contractEndedYmd),
+  });
+  const scheduleSummary = computeHireSchedulePaymentSummary(paymentSchedule, todayYmd);
 
   const income = computeHireIncomeGbp({
     scheduleRows: paymentSchedule.map((row) => ({

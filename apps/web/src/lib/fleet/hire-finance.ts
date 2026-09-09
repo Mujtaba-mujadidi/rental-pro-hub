@@ -112,12 +112,14 @@ export function computeHireExtraChargesOutstandingGbp(input: {
   >[];
   timedPayments?: readonly { id: string; amountGbp: number; paidAt: string }[];
   allocationEvents?: readonly { eventType: string; metadata: Record<string, unknown> | null }[];
+  settleOrphanReceipts?: boolean;
 }): number {
   if (input.timedPayments?.length) {
     return outstandingExtraChargesFromTimedPaymentsGbp({
       charges: input.charges,
       payments: input.timedPayments,
       allocationEvents: input.allocationEvents,
+      settleOrphanReceipts: input.settleOrphanReceipts,
     });
   }
   return outstandingExtraChargesGbp(input.charges, input.receipts ?? []);
@@ -141,6 +143,7 @@ export function computeHireExtraChargeLineMoney(input: {
   charges: readonly HireDriverChargeLineItemRow[];
   timedPayments: readonly { id: string; amountGbp: number; paidAt: string }[];
   allocationEvents?: readonly { eventType: string; metadata: Record<string, unknown> | null }[];
+  settleOrphanReceipts?: boolean;
 }): {
   lines: HireExtraChargeLineMoney[];
   allocations: ExtraChargeReceiptAllocationSlice[];
@@ -152,11 +155,13 @@ export function computeHireExtraChargeLineMoney(input: {
     charges: input.charges,
     payments: input.timedPayments,
     allocationEvents: input.allocationEvents,
+    settleOrphanReceipts: input.settleOrphanReceipts,
   });
   const paidById = buildExtraChargePaidByChargeId({
     charges: input.charges,
     payments: input.timedPayments,
     allocationEvents: input.allocationEvents,
+    settleOrphanReceipts: input.settleOrphanReceipts,
   });
 
   let postedGbp = 0;
@@ -199,6 +204,7 @@ export function computeHireExtraChargeLineMoney(input: {
       charges: input.charges,
       timedPayments: input.timedPayments,
       allocationEvents: input.allocationEvents,
+      settleOrphanReceipts: input.settleOrphanReceipts,
     }),
   };
 }

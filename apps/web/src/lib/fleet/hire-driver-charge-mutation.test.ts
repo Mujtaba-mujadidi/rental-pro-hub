@@ -6,7 +6,26 @@ import {
   staffManualChargeMutationBlock,
   staffManualExtraChargeEditBlock,
   staffManualExtraChargeVoidBlock,
+  staffPaymentPaidAtIso,
 } from "./hire-driver-charge-mutation";
+import { formatUkDateTime } from "@/lib/datetime/uk";
+
+describe("staffPaymentPaidAtIso", () => {
+  it("uses the selected UK day with the current London clock time", () => {
+    // 2026-09-09 02:10 BST = 01:10 UTC
+    const now = new Date("2026-09-09T01:10:00.000Z");
+    const iso = staffPaymentPaidAtIso("2026-09-09", now);
+    expect(iso).toBe("2026-09-09T01:10:00.000Z");
+    expect(formatUkDateTime(iso)).toBe("09/09/2026, 02:10");
+  });
+
+  it("keeps a backdated calendar day while applying the recording clock", () => {
+    const now = new Date("2026-09-09T01:10:00.000Z");
+    const iso = staffPaymentPaidAtIso("2026-08-28", now);
+    expect(iso).toBe("2026-08-28T01:10:00.000Z");
+    expect(formatUkDateTime(iso)).toBe("28/08/2026, 02:10");
+  });
+});
 
 describe("staffManualChargeMutationBlock", () => {
   it("denies viewers without rentals.write", () => {

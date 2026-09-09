@@ -1,4 +1,5 @@
 import { parseUkDate } from "@/lib/validation/driver-signup";
+import { ukLondonDateTimeToIso } from "@/lib/datetime/uk";
 import {
   hireDriverChargeTypeLabel,
   type HireDriverChargeType,
@@ -201,4 +202,21 @@ export const STAFF_MANUAL_CHARGE_TYPE_OPTIONS: { value: StaffManualChargeType; l
 /** Store a calendar day as a midday UTC instant so the UK date does not shift. */
 export function calendarYmdToUtcNoonIso(ymd: string): string {
   return `${ymd.trim()}T12:00:00.000Z`;
+}
+
+/**
+ * Instant for a staff-recorded payment.
+ * Keeps the selected UK calendar day (for backdating / allocation order) and uses the
+ * current London clock time so account statements show when it was recorded — not midday UTC.
+ */
+export function staffPaymentPaidAtIso(paidOnYmd: string, now: Date = new Date()): string {
+  const ymd = paidOnYmd.trim();
+  let timeHm = now.toLocaleTimeString("en-GB", {
+    timeZone: "Europe/London",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  if (timeHm === "24:00") timeHm = "00:00";
+  return ukLondonDateTimeToIso(ymd, timeHm) ?? now.toISOString();
 }

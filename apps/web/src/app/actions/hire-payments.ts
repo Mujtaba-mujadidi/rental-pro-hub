@@ -28,7 +28,11 @@ import {
 } from "@/lib/fleet/hire-payment-summary";
 import { computeHireWorkspaceSettlementBalance } from "@/lib/fleet/hire-workspace-settlement-balance";
 import { isDepositDispositionPending, hireDepositHeldGbp } from "@/lib/fleet/hire-deposit-resolution";
-import { reconcileEndedHirePaymentsWithDepositCredit } from "@/lib/fleet/hire-deposit-schedule-allocation";
+import {
+  resolveHireDepositAppliedAmounts,
+  sumDepositAppliedToChargesFromPayments,
+  sumDepositAppliedToRentFromStatusEvents,
+} from "@/lib/fleet/hire-deposit-applied-amounts";
 import {
   signedSettlementBalanceGbp,
 } from "@/lib/fleet/hire-open-balance";
@@ -72,6 +76,7 @@ import {
 } from "@/lib/fleet/hire-driver-charges";
 import {
   EXTRA_CHARGE_PAYMENT_EVENT_TYPES,
+  endedHireExtrasSettlementCapGbp,
   outstandingExtraChargesFromTimedPaymentsGbp,
   resolveOpenExtraChargePayment,
 } from "@/lib/fleet/hire-driver-charge-payment";
@@ -90,6 +95,7 @@ import {
 import { notifyCompanyHirePaymentReviewers, notifyHireDriver } from "@/lib/platform-notifications";
 import { revalidateVehicleFinancialsForHireGroup } from "@/app/actions/rental-vehicle-financials";
 import { parseStaffManualChargeDateYmd } from "@/lib/fleet/hire-driver-charge-mutation";
+import { persistEndedHireCollectionCredit } from "@/lib/fleet/persist-hire-ended-collection-credit";
 import { settlementPaymentMethodRequiresAccount } from "@/lib/fleet/hire-settlement-payment-method";
 import {
   HIRE_DEPOSIT_REFUND_METHODS,
@@ -162,6 +168,10 @@ export type HirePaymentsPageData = {
   depositGbp: number | null;
   /** Confirmed deposit money received (0 if contractual deposit unpaid). */
   depositReceivedGbp: number;
+  /** Deposit applied to unpaid rent (from schedule status events). */
+  depositAppliedToRentGbp: number;
+  /** Deposit applied to outstanding charges (from deposit charge-credit payments). */
+  depositAppliedToChargesGbp: number;
   /** Authoritative hire account position for this payments page load. */
   accountPosition: import("@/lib/fleet/hire-account-position").HireAccountPosition | null;
   currentSignedSettlementGbp: number;
@@ -476,24 +486,9 @@ async function buildPaymentsPageData(
     const rawTerminationSummary = group.termination_settlement as HireTerminationAccountsSummary | null;
     const terminationSummaryForReconcile =
       rawTerminationSummary && typeof rawTerminationSummary === "object" ? rawTerminationSummary : null;
-    const depositDispositionForReconcile = (group.deposit_disposition as string | null) ?? null;
-    if (terminationSummaryForReconcile && depositDispositionForReconcile) {
-      const reconciled = reconcileEndedHirePaymentsWithDepositCredit({
-        rows: enriched,
-        summary,
-        disposition: depositDispositionForReconcile,
-        terminationSummary: {
-          depositGbp: terminationSummaryForReconcile.depositGbp,
-          signedRentBalanceGbp: terminationSummaryForReconcile.signedRentBalanceGbp,
-          accruedRentPaidGbp: terminationSummaryForReconcile.accruedRentPaidGbp,
-        },
-        depositRefundAmountGbp:
-          group.deposit_refund_amount_gbp != null ? Number(group.deposit_refund_amount_gbp) : null,
-        accrualYmd,
-      });
-      enriched = reconciled.rows;
-      summary = reconciled.summary;
-    }
+    // Do not invent Paid rent from deposit disposition on read.
+    // Deposit→rent must be persisted onto rent schedule rows (with history). Painting
+    // unpaid rent as Paid here hid failed/wrong writes (e.g. credit landed on deposit).
 
     if (terminationSummaryForReconcile) {
       enriched = adjustEndedContractPaymentRowDues(
@@ -578,10 +573,22 @@ async function buildPaymentsPageData(
   const { data: balancePayments } = await supabase
     .from("vehicle_hire_balance_payments")
     .select(
-      "id, amount_gbp, direction, payment_method, payment_reference, payment_account_id, paid_at, payment_category",
+      "id, amount_gbp, direction, payment_method, payment_reference, payment_account_id, paid_at, payment_category, notes",
     )
     .eq("hire_group_id", hireGroupId)
     .order("paid_at", { ascending: false });
+
+  const rentScheduleRowIds = dbRows
+    .filter((row) => String(row.row_kind ?? "") !== "deposit")
+    .map((row) => row.id as string)
+    .filter(Boolean);
+  const { data: depositRentCreditEvents } = rentScheduleRowIds.length
+    ? await supabase
+        .from("vehicle_hire_payment_status_events")
+        .select("amendment_payload")
+        .in("schedule_row_id", rentScheduleRowIds)
+        .eq("event_kind", "status_change")
+    : { data: [] as { amendment_payload: unknown }[] };
 
   const { data: chargeRows } = await supabase
     .from("vehicle_hire_driver_charge_line_items")
@@ -636,20 +643,25 @@ async function buildPaymentsPageData(
     eventType: String(event.event_type ?? ""),
     metadata: (event.metadata as Record<string, unknown> | null) ?? {},
   }));
-  const extraChargesOutstandingGbp = driverChargeTimedPayments.length
+  const balancePaymentReceipts = (balancePayments ?? []).map((payment) => ({
+    amountGbp: Number(payment.amount_gbp ?? 0),
+    direction: (payment.direction as string | null) ?? null,
+    paymentCategory: (payment.payment_category as string | null) ?? "settlement",
+  }));
+  /**
+   * Active hire: timed allocation (cash cannot settle charges posted after it).
+   * Ended hire: same timed/metadata history, then pour orphan receipt cash onto open
+   * balances so extras outstanding matches settlement.
+   */
+  const settleOrphanExtraReceipts = Boolean(contractEndedYmd);
+  let extraChargesOutstandingGbp = driverChargeTimedPayments.length
     ? outstandingExtraChargesFromTimedPaymentsGbp({
         charges: mappedCharges,
         payments: driverChargeTimedPayments,
         allocationEvents: extraChargeAllocationEvents,
+        settleOrphanReceipts: settleOrphanExtraReceipts,
       })
-    : outstandingExtraChargesGbp(
-        mappedCharges,
-        (balancePayments ?? []).map((payment) => ({
-          amountGbp: Number(payment.amount_gbp ?? 0),
-          direction: (payment.direction as string | null) ?? null,
-          paymentCategory: (payment.payment_category as string | null) ?? "settlement",
-        })),
-      );
+    : outstandingExtraChargesGbp(mappedCharges, balancePaymentReceipts);
 
   // Heal open settlement when return charges are posted but missing from the balance
   // (e.g. after a concurrent-apply race / duplicate cleanup).
@@ -670,15 +682,9 @@ async function buildPaymentsPageData(
           charges: hireTimeCharges,
           payments: driverChargeTimedPayments,
           allocationEvents: extraChargeAllocationEvents,
+          settleOrphanReceipts: true,
         })
-      : outstandingExtraChargesGbp(
-          hireTimeCharges,
-          (balancePayments ?? []).map((payment) => ({
-            amountGbp: Number(payment.amount_gbp ?? 0),
-            direction: (payment.direction as string | null) ?? null,
-            paymentCategory: (payment.payment_category as string | null) ?? "settlement",
-          })),
-        );
+      : outstandingExtraChargesGbp(hireTimeCharges, balancePaymentReceipts);
     const terminationSnapshot = group.termination_settlement as {
       signedRentBalanceGbp?: number;
     } | null;
@@ -740,6 +746,19 @@ async function buildPaymentsPageData(
     })),
   });
 
+  // Ended hire: settlement open balance is authoritative for how much is still collectable.
+  // Settled / company-owes-driver → no driver extras left to chase on this hire.
+  if (contractEndedYmd && settlementBalance) {
+    const cap = endedHireExtrasSettlementCapGbp({
+      contractEnded: true,
+      settlementDirection: settlementBalance.settlementDirection,
+      openBalanceGbp: settlementBalance.openBalanceGbp,
+    });
+    if (cap != null && extraChargesOutstandingGbp - cap > 0.005) {
+      extraChargesOutstandingGbp = cap;
+    }
+  }
+
   const settlementDirection = (group.settlement_balance_direction as
     | "driver_owes_company"
     | "company_owes_driver"
@@ -783,12 +802,24 @@ async function buildPaymentsPageData(
       paymentAccountName: payment.payment_account_id
         ? settlementAccountNameById.get(payment.payment_account_id as string) ?? null
         : null,
-      notes: null,
+      notes: (payment.notes as string | null) ?? null,
       paidAt: payment.paid_at as string,
       direction: payment.direction as "received_from_driver" | "paid_to_driver",
       paymentCategory: (payment.payment_category as string | null) ?? "settlement",
     }),
   );
+
+  const depositDisposition = (group.deposit_disposition as string | null) ?? null;
+  const depositApplied = resolveHireDepositAppliedAmounts({
+    disposition: depositDisposition,
+    depositReceivedGbp,
+    appliedToRentFromEventsGbp: sumDepositAppliedToRentFromStatusEvents(
+      depositRentCreditEvents ?? [],
+    ),
+    appliedToChargesFromPaymentsGbp: sumDepositAppliedToChargesFromPayments(
+      settlementBalancePayments,
+    ),
+  });
 
   if (staffProfile) {
     const profile = staffProfile;
@@ -861,7 +892,6 @@ async function buildPaymentsPageData(
     contractEndedYmd && rawTerminationSummary && typeof rawTerminationSummary === "object"
       ? rawTerminationSummary
       : null;
-  const depositDisposition = (group.deposit_disposition as string | null) ?? null;
   const depositHeldGbp = hireDepositHeldGbp({
     depositDisposition,
     depositReceivedGbp,
@@ -1073,6 +1103,8 @@ async function buildPaymentsPageData(
       /** Amount currently held pending disposition (received cash), not contractual requirement. */
       depositGbp: depositHeldGbp > 0.005 ? depositHeldGbp : null,
       depositReceivedGbp,
+      depositAppliedToRentGbp: depositApplied.appliedToRentGbp,
+      depositAppliedToChargesGbp: depositApplied.appliedToChargesGbp,
       accountPosition,
       currentSignedSettlementGbp,
       checkinCompleted,
@@ -1156,7 +1188,7 @@ type SubmitPaymentInput = {
 };
 
 async function submitHirePaymentAllocation(input: SubmitPaymentInput): Promise<
-  { ok: true; submissionId: string } | { ok: false; error: string }
+  { ok: true; submissionId: string; allocatedGbp: number } | { ok: false; error: string }
 > {
   const hireGroupId = input.hireGroupId.trim();
   if (!hireGroupId) return { ok: false, error: "Hire not found." };
@@ -1433,7 +1465,10 @@ async function submitHirePaymentAllocation(input: SubmitPaymentInput): Promise<
   }
 
   await refreshVehicleFinancialsForHire(hireGroupId);
-  return { ok: true, submissionId };
+  const allocatedGbp = Math.round(
+    allocation.allocations.reduce((sum, line) => sum + line.allocatedGbp, 0) * 100,
+  ) / 100;
+  return { ok: true, submissionId, allocatedGbp };
 }
 
 async function assertHirePaymentScheduleEditable(
@@ -1452,6 +1487,54 @@ async function assertHirePaymentScheduleEditable(
     return { ok: false, error: "This contract has ended. The payment schedule is read-only." };
   }
   return { ok: true };
+}
+
+/** Staff may record schedule collections on ended hires while settlement is still open. */
+async function assertStaffCanRecordScheduleCollection(
+  hireGroupId: string,
+): Promise<
+  | {
+      ok: true;
+      hireStatus: string;
+      parentCompanyId: string;
+      settlementBalanceDirection: "driver_owes_company" | "company_owes_driver" | "settled" | null;
+      settlementBalanceGbp: number;
+    }
+  | { ok: false; error: string }
+> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("vehicle_hire_groups")
+    .select(
+      "status, parent_company_id, settlement_balance_direction, settlement_balance_gbp",
+    )
+    .eq("id", hireGroupId.trim())
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!data) return { ok: false, error: "Hire not found." };
+  const hireStatus = String(data.status ?? "");
+  const ended = hireStatus === "terminated" || hireStatus === "completed";
+  const settlementBalanceDirection = (data.settlement_balance_direction as
+    | "driver_owes_company"
+    | "company_owes_driver"
+    | "settled"
+    | null) ?? null;
+  if (ended && settlementBalanceDirection === "settled") {
+    return { ok: false, error: "This hire is already settled." };
+  }
+  if (ended && settlementBalanceDirection === "company_owes_driver") {
+    return {
+      ok: false,
+      error: "Use Record refund to pay the driver the open settlement balance.",
+    };
+  }
+  return {
+    ok: true,
+    hireStatus,
+    parentCompanyId: String(data.parent_company_id ?? ""),
+    settlementBalanceDirection,
+    settlementBalanceGbp: Number(data.settlement_balance_gbp ?? 0),
+  };
 }
 
 
@@ -1531,9 +1614,16 @@ export async function submitStaffHirePaymentAction(input: {
 }): Promise<{ ok: true; submissionId: string } | { ok: false; error: string }> {
   const user = await getSessionUser();
   if (!user) return { ok: false, error: "Sign in required." };
-  const editable = await assertHirePaymentScheduleEditable(input.hireGroupId);
-  if (!editable.ok) return editable;
-  return submitHirePaymentAllocation({
+  const gate = await assertStaffCanRecordScheduleCollection(input.hireGroupId);
+  if (!gate.ok) return gate;
+  const ended = gate.hireStatus === "terminated" || gate.hireStatus === "completed";
+  if (ended && input.scheduleTarget === "deposit") {
+    return {
+      ok: false,
+      error: "Deposit is not collectable on an ended hire. Record payment against rent or extra charges.",
+    };
+  }
+  const result = await submitHirePaymentAllocation({
     hireGroupId: input.hireGroupId,
     amountGbp: input.amountGbp,
     paymentReference: input.paymentReference,
@@ -1545,6 +1635,19 @@ export async function submitStaffHirePaymentAction(input: {
     actor: "company_staff",
     userId: user.id,
   });
+  if (!result.ok) return result;
+
+  const settlementCredit = await persistEndedHireCollectionCredit({
+    hireGroupId: input.hireGroupId.trim(),
+    parentCompanyId: gate.parentCompanyId,
+    hireStatus: gate.hireStatus,
+    settlementBalanceDirection: gate.settlementBalanceDirection,
+    settlementBalanceGbp: gate.settlementBalanceGbp,
+    collectedGbp: result.allocatedGbp,
+  });
+  if (!settlementCredit.ok) return settlementCredit;
+
+  return { ok: true, submissionId: result.submissionId };
 }
 
 /** Mark a single schedule row as paid (staff only, immediate approval). */

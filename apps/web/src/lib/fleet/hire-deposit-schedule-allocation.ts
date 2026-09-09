@@ -67,7 +67,10 @@ export function applyDepositCreditToEnrichedRows(
     sortOrder: row.sortOrder,
   }));
 
-  const allocation = allocatePaymentAcrossRows(credit, inputs, accrualYmd, { accruedOnly: true });
+  const allocation = allocatePaymentAcrossRows(credit, inputs, accrualYmd, {
+    accruedOnly: true,
+    rowKind: "rent",
+  });
   const allocById = new Map(allocation.allocations.map((line) => [line.rowId, line.allocatedGbp]));
 
   return rows.map((row) => {
@@ -85,8 +88,9 @@ export function applyDepositCreditToEnrichedRows(
 }
 
 /**
- * When a ended hire applied deposit to rent at termination but the schedule was not updated,
- * reconcile summary + rows for staff/driver UI.
+ * @deprecated Do not use on payments page load. Inventing Paid rent from disposition
+ * hid failed schedule writes. Prefer persisted rent-row deposit credits only.
+ * Kept for unit coverage of the pure helper until callers are fully removed.
  */
 export function reconcileEndedHirePaymentsWithDepositCredit(input: {
   rows: readonly HirePaymentRowComputed[];

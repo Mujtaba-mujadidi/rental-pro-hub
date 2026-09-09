@@ -5,7 +5,7 @@ create table if not exists public.vehicle_hire_driver_charge_line_items (
   hire_group_id uuid not null references public.vehicle_hire_groups (id) on delete cascade,
   parent_company_id uuid not null references public.companies (id) on delete cascade,
   charge_type text not null,
-  amount_gbp numeric(12, 2) not null check (amount_gbp > 0),
+  amount_gbp numeric(12, 2) not null,
   resolution text not null check (resolution in ('waived', 'paid_now', 'add_to_balance', 'voided')),
   source_kind text not null,
   source_id text,
@@ -103,3 +103,35 @@ begin
       alter column source_id type text using source_id::text;
   end if;
 end $$;
+
+-- Waived rows may store £0 (no billed amount).
+do $$
+declare
+  c record;
+begin
+  for c in
+    select con.conname
+    from pg_constraint con
+    join pg_class rel on rel.oid = con.conrelid
+    join pg_namespace nsp on nsp.oid = rel.relnamespace
+    where nsp.nspname = 'public'
+      and rel.relname = 'vehicle_hire_driver_charge_line_items'
+      and con.contype = 'c'
+      and pg_get_constraintdef(con.oid) ilike '%amount_gbp%'
+  loop
+    execute format(
+      'alter table public.vehicle_hire_driver_charge_line_items drop constraint if exists %I',
+      c.conname
+    );
+  end loop;
+end $$;
+
+alter table public.vehicle_hire_driver_charge_line_items
+  drop constraint if exists vehicle_hire_driver_charge_line_items_amount_gbp_check;
+
+alter table public.vehicle_hire_driver_charge_line_items
+  add constraint vehicle_hire_driver_charge_line_items_amount_gbp_check
+  check (
+    amount_gbp > 0
+    or resolution = 'waived'
+  );

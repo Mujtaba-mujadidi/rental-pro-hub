@@ -1,16 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, useTransition, type RefObject } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import type { HirePaymentsPageData } from "@/app/actions/hire-payments";
 import { exportHirePaymentStatementAction } from "@/app/actions/hire-payments";
-import { resolveHirePendingReturnChargeAction } from "@/app/actions/hire-return-charges";
 import { HireDepositDispositionResolveCard } from "@/components/fleet/hire-payments/hire-deposit-disposition-resolve-card";
+import { HirePendingReturnChargeReviewModal } from "@/components/fleet/hire-payments/hire-pending-return-charge-review-modal";
 import { HirePaymentScheduleTable } from "@/components/fleet/hire-payments/hire-payment-schedule-table";
-import { HireSettlementBalancePaymentCard } from "@/components/fleet/hire-payments/hire-settlement-balance-payment-card";
+import { HireAllocatedPaymentComposer } from "@/components/fleet/hire-payments/hire-allocated-payment-composer";
+import { HireSettlementPaymentComposer } from "@/components/fleet/hire-payments/hire-settlement-payment-composer";
 import { HirePaymentStatementDownloadButton } from "@/components/fleet/hire-payments/hire-payment-statement-download-button";
-import { formatUkDateTime } from "@/lib/datetime/uk";
+import { RphSelect } from "@/components/forms/rph-select";
+import { formatUkDate, formatUkDateTime } from "@/lib/datetime/uk";
 import {
   buildHireEndedBalanceLifecycle,
   countHireEndedPendingReviews,
@@ -33,6 +35,7 @@ import {
 } from "@/lib/fleet/hire-ended-payments-display";
 import {
   buildExtraChargePaymentTableRowsFromWorkspace,
+  endedHireExtrasSettlementCapGbp,
   extraChargePaymentStatusClass,
   previewExtraChargePendingAllocation,
   type ExtraChargePaymentTableRow,
@@ -44,7 +47,6 @@ import {
   hireLedgerPaymentTypeLabel,
   summarizeHireSettlementLedger,
 } from "@/lib/fleet/hire-payments-ledger";
-import { formatHireEndHireSignedAmount } from "@/lib/fleet/hire-end-hire-financial";
 import { formatGbp } from "@/lib/fleet/maintenance";
 import { roundGbp } from "@/lib/fleet/hire-money";
 import type { HireDriverChargeWorkspaceRow } from "@/app/actions/rental-hire-termination";
@@ -88,9 +90,8 @@ export function HireEndedCompanyPaymentsView({
   onReload,
   hideIntro = false,
 }: HireEndedCompanyPaymentsViewProps) {
-  const paymentCardRef = useRef<HTMLDivElement | null>(null);
   const [tab, setTab] = useState<EndedBalanceTab>("overview");
-  const [showPaymentComposer, setShowPaymentComposer] = useState(false);
+  const [settlementPaymentOpen, setSettlementPaymentOpen] = useState(false);
   const [statementPending, startStatementTransition] = useTransition();
   const [statementError, setStatementError] = useState<string | null>(null);
 
@@ -140,6 +141,10 @@ export function HireEndedCompanyPaymentsView({
   );
   const canRecordPayment =
     data.canRecordSettlementPayment && data.settlementBalance != null && !data.settlementBalance.settled;
+  const companyOwesDriver =
+    data.settlementBalance?.settlementDirection === "company_owes_driver";
+  const canRecordAllocatedPayment = canRecordPayment && !companyOwesDriver;
+  const canRecordSettlementRefund = canRecordPayment && companyOwesDriver;
   const reviewsLocked = data.reviewsLockedUntilEndHireFinalized;
   const endHireHref = `/rental/hires/${hireGroupId}/end-hire`;
 
@@ -175,11 +180,7 @@ export function HireEndedCompanyPaymentsView({
   };
 
   const goRecordPayment = () => {
-    setShowPaymentComposer(true);
-    setTab("overview");
-    window.setTimeout(() => {
-      paymentCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 50);
+    setSettlementPaymentOpen(true);
   };
 
   const downloadStatement = () => {
@@ -269,7 +270,7 @@ export function HireEndedCompanyPaymentsView({
                         className={dropdownItemClass}
                         onSelect={() => goRecordPayment()}
                       >
-                        Record payment
+                        {companyOwesDriver ? "Record refund" : "Record payment"}
                       </DropdownMenu.Item>
                     ) : null}
                     {balanceCase === "pending_review" ? (
@@ -327,11 +328,8 @@ export function HireEndedCompanyPaymentsView({
               depositPosition={depositPosition}
               depositRefund={depositRefund}
               settledKpis={settledKpis}
-              paymentCardRef={paymentCardRef}
-              showPaymentComposer={showPaymentComposer}
               reviewsLocked={reviewsLocked}
               endHireHref={endHireHref}
-              onReload={onReload}
               onGoReviews={goReviews}
               onGoRecordPayment={goRecordPayment}
             />
@@ -386,6 +384,35 @@ export function HireEndedCompanyPaymentsView({
           ) : null}
         </div>
       </section>
+
+      {canRecordAllocatedPayment ? (
+        <HireAllocatedPaymentComposer
+          hireGroupId={hireGroupId}
+          payments={data}
+          preferredAllocationKind={
+            data.extraChargesOutstandingGbp > 0.005 ? "extra_charges" : "schedule"
+          }
+          submitLabel="Record payment"
+          triggerLabel="Record payment"
+          hideTrigger
+          open={settlementPaymentOpen}
+          onOpenChange={setSettlementPaymentOpen}
+          onSuccess={onReload}
+        />
+      ) : null}
+
+      {canRecordSettlementRefund && data.settlementBalance ? (
+        <HireSettlementPaymentComposer
+          hireGroupId={hireGroupId}
+          settlementBalance={data.settlementBalance}
+          paymentAccounts={data.settlementPaymentAccounts}
+          defaultPaymentAccountId={data.defaultSettlementPaymentAccountId}
+          hideTrigger
+          open={settlementPaymentOpen}
+          onOpenChange={setSettlementPaymentOpen}
+          onSuccess={onReload}
+        />
+      ) : null}
     </div>
   );
 }
@@ -491,11 +518,8 @@ function OverviewTab({
   depositPosition,
   depositRefund,
   settledKpis,
-  paymentCardRef,
-  showPaymentComposer,
   reviewsLocked,
   endHireHref,
-  onReload,
   onGoReviews,
   onGoRecordPayment,
 }: {
@@ -506,11 +530,8 @@ function OverviewTab({
   depositPosition: ReturnType<typeof buildHireEndedDepositPositionDisplay>;
   depositRefund: ReturnType<typeof buildHireEndedDepositRefundDisplay>;
   settledKpis: ReturnType<typeof buildHireEndedSettledKpis>;
-  paymentCardRef: RefObject<HTMLDivElement | null>;
-  showPaymentComposer: boolean;
   reviewsLocked: boolean;
   endHireHref: string;
-  onReload: () => void;
   onGoReviews: (focus?: "deposit" | "charge") => void;
   onGoRecordPayment: () => void;
 }) {
@@ -547,7 +568,7 @@ function OverviewTab({
         <div className="hire-balance-kpi-grid">
           <Kpi label="Final charges" value={formatGbp(settledKpis.finalChargesGbp)} hint="Rent + posted charges" />
           <Kpi label="Received" value={formatGbp(settledKpis.receivedGbp)} hint="Rent and settlement in" />
-          <Kpi label="Deposit used" value={formatGbp(settledKpis.depositUsedGbp)} hint="Applied to unpaid rent" />
+          <Kpi label="Deposit used" value={formatGbp(settledKpis.depositUsedGbp)} hint="Applied to rent and charges" />
           <Kpi label="Refunded" value={formatGbp(settledKpis.refundedGbp)} hint="Paid to driver" />
         </div>
 
@@ -573,6 +594,18 @@ function OverviewTab({
               <dl className="hire-balance-ledger mt-4">
                 {depositRefund.originalDepositGbp > 0.005 ? (
                   <MoneyRow label="Original deposit" value={formatGbp(depositRefund.originalDepositGbp)} />
+                ) : null}
+                {depositRefund.lessUnpaidRentGbp > 0.005 ? (
+                  <MoneyRow
+                    label="Applied to unpaid rent"
+                    value={`−${formatGbp(depositRefund.lessUnpaidRentGbp)}`}
+                  />
+                ) : null}
+                {depositRefund.lessDamageGbp > 0.005 ? (
+                  <MoneyRow
+                    label="Applied to charges"
+                    value={`−${formatGbp(depositRefund.lessDamageGbp)}`}
+                  />
                 ) : null}
                 <MoneyRow label="Refunded to driver" value={formatGbp(depositRefund.refundPaidToDriverGbp)} />
               </dl>
@@ -662,7 +695,11 @@ function OverviewTab({
             <div>
               <p className="hire-balance-panel-kicker">Deposit position</p>
               <h2 className="hire-balance-panel-title">
-                {depositPosition.heldForReview ? "Deposit remains held" : "Deposit on this hire"}
+                {depositPosition.heldForReview
+                  ? "Deposit remains held"
+                  : depositPosition.dispositionResolved
+                    ? (data.depositDispositionLabel ?? "Deposit settled")
+                    : "Deposit on this hire"}
               </h2>
             </div>
             {depositPosition.heldForReview ? (
@@ -681,35 +718,97 @@ function OverviewTab({
                 value={formatGbp(depositPosition.unreceivedGbp)}
               />
             ) : null}
-            <MoneyRow
-              label="Confirmed balance before deposit"
-              value={formatGbp(depositPosition.confirmedBeforeDepositGbp)}
-            />
-            {depositPosition.projectedIfApprovedGbp != null ? (
-              <MoneyRow
-                label="Projected if charge approved"
-                value={formatGbp(depositPosition.projectedIfApprovedGbp)}
-              />
-            ) : null}
-            {depositPosition.heldSeparatelyGbp > 0.005 ? (
-              <MoneyRow
-                label="Deposit held separately"
-                value={formatGbp(depositPosition.heldSeparatelyGbp)}
-              />
-            ) : null}
+            {depositPosition.heldForReview ? (
+              <>
+                <MoneyRow
+                  label="Open balance (deposit not applied yet)"
+                  value={formatGbp(depositPosition.confirmedBeforeDepositGbp)}
+                />
+                {depositPosition.projectedIfApprovedGbp != null ? (
+                  <MoneyRow
+                    label="Projected if charge approved"
+                    value={formatGbp(depositPosition.projectedIfApprovedGbp)}
+                  />
+                ) : null}
+                {depositPosition.heldSeparatelyGbp > 0.005 ? (
+                  <MoneyRow
+                    label="Deposit held separately"
+                    value={formatGbp(depositPosition.heldSeparatelyGbp)}
+                  />
+                ) : null}
+              </>
+            ) : (
+              <>
+                {depositPosition.appliedToRentGbp > 0.005 ? (
+                  <MoneyRow
+                    label="Applied to unpaid rent"
+                    value={`−${formatGbp(depositPosition.appliedToRentGbp)}`}
+                  />
+                ) : null}
+                {depositPosition.appliedToChargesGbp > 0.005 ? (
+                  <MoneyRow
+                    label="Applied to charges"
+                    value={`−${formatGbp(depositPosition.appliedToChargesGbp)}`}
+                  />
+                ) : null}
+                {depositPosition.refundedGbp > 0.005 ? (
+                  <MoneyRow
+                    label="Refunded to driver"
+                    value={formatGbp(depositPosition.refundedGbp)}
+                  />
+                ) : null}
+                {depositPosition.appliedTotalGbp <= 0.005 &&
+                depositPosition.refundedGbp <= 0.005 &&
+                depositRefund ? (
+                  <>
+                    {depositRefund.lessUnpaidRentGbp > 0.005 ? (
+                      <MoneyRow
+                        label="Applied to unpaid rent"
+                        value={`−${formatGbp(depositRefund.lessUnpaidRentGbp)}`}
+                      />
+                    ) : null}
+                    {depositRefund.lessDamageGbp > 0.005 ? (
+                      <MoneyRow
+                        label="Applied to charges"
+                        value={`−${formatGbp(depositRefund.lessDamageGbp)}`}
+                      />
+                    ) : null}
+                    <MoneyRow
+                      label={depositRefund.refundPaidLabel}
+                      value={formatGbp(depositRefund.refundPaidToDriverGbp)}
+                    />
+                  </>
+                ) : null}
+              </>
+            )}
           </dl>
 
-          {depositPosition.stillOwesGbp > 0.005 ? (
-            <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5 dark:border-amber-900/40 dark:bg-amber-950/25">
-              <span className="text-sm font-semibold text-rph-fg">Driver still owes</span>
-              <span className="text-sm font-semibold tabular-nums text-amber-900 dark:text-amber-100">
+          {depositPosition.heldForReview ? (
+            depositPosition.stillOwesGbp > 0.005 ? (
+              <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5 dark:border-amber-900/40 dark:bg-amber-950/25">
+                <span className="text-sm font-semibold text-rph-fg">Driver still owes</span>
+                <span className="text-sm font-semibold tabular-nums text-amber-900 dark:text-amber-100">
+                  {depositPosition.stillOwesLabel}
+                </span>
+              </div>
+            ) : (
+              <div className="rph-alert-ok mt-3 flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold">Confirmed balance</span>
+                <span className="text-sm font-semibold tabular-nums">{depositPosition.stillOwesLabel}</span>
+              </div>
+            )
+          ) : (
+            <div
+              className={`mt-3 flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 ${
+                depositPosition.stillOwesGbp > 0.005
+                  ? "border-amber-200 bg-amber-50/80 dark:border-amber-900/40 dark:bg-amber-950/25"
+                  : "border-emerald-200 bg-emerald-50/80 dark:border-emerald-900/40 dark:bg-emerald-950/25"
+              }`}
+            >
+              <span className="text-sm font-semibold text-rph-fg">Open balance now</span>
+              <span className="text-sm font-semibold tabular-nums">
                 {depositPosition.stillOwesLabel}
               </span>
-            </div>
-          ) : (
-            <div className="rph-alert-ok mt-3 flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold">Confirmed balance</span>
-              <span className="text-sm font-semibold tabular-nums">{depositPosition.stillOwesLabel}</span>
             </div>
           )}
 
@@ -738,35 +837,11 @@ function OverviewTab({
                 </button>
               )}
             </>
-          ) : depositRefund ? (
-            <dl className="hire-balance-ledger mt-4">
-              <MoneyRow label="Less unpaid rent" value={`−${formatGbp(depositRefund.lessUnpaidRentGbp)}`} />
-              <MoneyRow label="Less damage charge" value={`−${formatGbp(depositRefund.lessDamageGbp)}`} />
-              <MoneyRow
-                label={depositRefund.refundPaidLabel}
-                value={formatGbp(depositRefund.refundPaidToDriverGbp)}
-              />
-            </dl>
-          ) : (
-            <p className="mt-3 text-sm text-rph-fg-secondary">No deposit was held on this hire.</p>
-          )}
+          ) : depositRefund?.refundNote ? (
+            <p className="mt-3 text-xs leading-relaxed text-rph-fg-secondary">{depositRefund.refundNote}</p>
+          ) : null}
         </section>
       </div>
-
-      {showPaymentComposer &&
-      data.canRecordSettlementPayment &&
-      data.settlementBalance &&
-      !data.settlementBalance.settled ? (
-        <div ref={paymentCardRef}>
-          <HireSettlementBalancePaymentCard
-            hireGroupId={hireGroupId}
-            settlementBalance={data.settlementBalance}
-            paymentAccounts={data.settlementPaymentAccounts}
-            defaultPaymentAccountId={data.defaultSettlementPaymentAccountId}
-            onSuccess={onReload}
-          />
-        </div>
-      ) : null}
 
       <section className="hire-ended-next-steps">
         <div className="hire-ended-next-steps-copy">
@@ -809,7 +884,9 @@ function OverviewTab({
               )
             ) : (
               <button type="button" className="rph-btn-primary h-10 px-4" onClick={onGoRecordPayment}>
-                Record payment
+                {data.settlementBalance?.settlementDirection === "company_owes_driver"
+                  ? "Record refund"
+                  : "Record payment"}
               </button>
             )}
             <Link href={`/rental/hires/${hireGroupId}/payments`} className="rph-btn-ghost h-10 px-4">
@@ -865,15 +942,34 @@ function ChargesTab({
   const [amending, setAmending] = useState<ExtraChargePaymentTableRow | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewRow, setReviewRow] = useState<ExtraChargePaymentTableRow | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "pending_review" | "waived" | "open" | "paid"
+  >("all");
+  const [sortKey, setSortKey] = useState<"date" | "amount">("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  function toggleColumnSort(nextKey: "date" | "amount") {
+    if (sortKey === nextKey) {
+      setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(nextKey);
+    setSortDir("desc");
+  }
 
   const posted = data.driverChargeLineItems.filter(
     (item) =>
-      (item.resolution === "add_to_balance" ||
-        item.resolution === "paid_now" ||
-        item.resolution === "waived") &&
-      (item.resolution === "waived" || item.amountGbp > 0.005),
+      item.resolution === "add_to_balance" ||
+      item.resolution === "paid_now" ||
+      item.resolution === "waived",
   );
   const pending = data.pendingReviews.charges;
+  const settlementOpenBalanceCapGbp = endedHireExtrasSettlementCapGbp({
+    contractEnded: Boolean(data.contractEndedYmd),
+    settlementDirection: data.settlementBalance?.settlementDirection,
+    openBalanceGbp: data.settlementBalance?.openBalanceGbp,
+  });
   const paymentRows = useMemo(
     () =>
       buildExtraChargePaymentTableRowsFromWorkspace({
@@ -884,18 +980,144 @@ function ChargesTab({
         allowMutate: data.canMutateExtraCharges,
         timedPayments: data.extraChargeTimedPayments,
         allocationEvents: data.extraChargeAllocationEvents,
+        settleOrphanReceipts: Boolean(data.contractEndedYmd),
+        settlementOpenBalanceCapGbp,
       }),
     [
       data.canMutateExtraCharges,
+      data.contractEndedYmd,
       data.driverChargeLineItems,
       data.extraChargeAllocationEvents,
       data.extraChargePendingPayment?.amountGbp,
       data.extraChargeTimedPayments,
       data.extraChargesOutstandingGbp,
       hireGroupId,
+      settlementOpenBalanceCapGbp,
     ],
   );
-  const paymentStatusById = useMemo(() => new Map(paymentRows.map((row) => [row.id, row])), [paymentRows]);
+  const paymentStatusById = useMemo(
+    () => new Map(paymentRows.map((row) => [row.id, row])),
+    [paymentRows],
+  );
+
+  type ChargeTableRow =
+    | {
+        key: string;
+        rowKind: "pending";
+        sortAtMs: number;
+        amountGbp: number;
+        statusKey: "pending_review";
+        searchText: string;
+        review: (typeof pending)[number];
+      }
+    | {
+        key: string;
+        rowKind: "unposted";
+        sortAtMs: number;
+        amountGbp: number;
+        statusKey: "open";
+        searchText: string;
+        item: (typeof data.unpostedReturnCharges)[number];
+      }
+    | {
+        key: string;
+        rowKind: "posted";
+        sortAtMs: number;
+        amountGbp: number;
+        statusKey: "waived" | "open" | "paid";
+        searchText: string;
+        item: (typeof posted)[number];
+      };
+
+  const tableRows = useMemo(() => {
+    const rows: ChargeTableRow[] = [];
+    for (const review of pending) {
+      rows.push({
+        key: `pending-${review.id}`,
+        rowKind: "pending",
+        sortAtMs: Number.POSITIVE_INFINITY,
+        amountGbp: review.proposedGbp ?? 0,
+        statusKey: "pending_review",
+        searchText: [review.label, review.detail, "pending review"]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase(),
+        review,
+      });
+    }
+    for (const item of data.unpostedReturnCharges) {
+      rows.push({
+        key: `unposted-${item.id}`,
+        rowKind: "unposted",
+        sortAtMs: 0,
+        amountGbp: item.amountGbp,
+        statusKey: "open",
+        searchText: [item.label, "on balance"].join(" ").toLowerCase(),
+        item,
+      });
+    }
+    for (const item of posted) {
+      const paymentRow = paymentStatusById.get(item.id);
+      const statusKey: "waived" | "open" | "paid" =
+        item.resolution === "waived"
+          ? "waived"
+          : item.resolution === "paid_now" ||
+              paymentRow?.statusTone === "success" ||
+              (paymentRow?.balanceGbp != null && paymentRow.balanceGbp <= 0.005)
+            ? "paid"
+            : "open";
+      const sortSource = item.chargedOn?.trim() || item.createdAt?.trim() || "";
+      const sortAtMs = sortSource ? Date.parse(sortSource) || 0 : 0;
+      const card = formatEndedChargeCardDisplay(item);
+      rows.push({
+        key: item.id,
+        rowKind: "posted",
+        sortAtMs: Number.isFinite(sortAtMs) ? sortAtMs : 0,
+        amountGbp: item.resolution === "waived" ? 0 : item.amountGbp,
+        statusKey,
+        searchText: [
+          card.title,
+          item.chargeTypeLabel,
+          item.description,
+          item.resolutionLabel,
+          paymentRow?.statusLabel,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase(),
+        item,
+      });
+    }
+
+    const q = search.trim().toLowerCase();
+    return rows
+      .filter((row) => (statusFilter === "all" ? true : row.statusKey === statusFilter))
+      .filter((row) => (!q ? true : row.searchText.includes(q)))
+      .sort((a, b) => {
+        if (sortKey === "amount") {
+          return sortDir === "asc"
+            ? a.amountGbp - b.amountGbp
+            : b.amountGbp - a.amountGbp;
+        }
+        // Date — pending reviews pin to top when newest-first, bottom when oldest-first
+        if (a.rowKind === "pending" && b.rowKind !== "pending") {
+          return sortDir === "desc" ? -1 : 1;
+        }
+        if (b.rowKind === "pending" && a.rowKind !== "pending") {
+          return sortDir === "desc" ? 1 : -1;
+        }
+        return sortDir === "asc" ? a.sortAtMs - b.sortAtMs : b.sortAtMs - a.sortAtMs;
+      });
+  }, [
+    data.unpostedReturnCharges,
+    paymentStatusById,
+    pending,
+    posted,
+    search,
+    sortDir,
+    sortKey,
+    statusFilter,
+  ]);
 
   const pendingReviewTarget = useMemo(() => {
     const pendingPayment = data.extraChargePendingPayment;
@@ -960,57 +1182,143 @@ function ChargesTab({
         )}
       </div>
 
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="min-w-[12rem] flex-1 space-y-1">
+          <span className="text-xs font-medium text-rph-fg-muted">Search</span>
+          <input
+            className="rph-input w-full"
+            placeholder="Charge, status, notes…"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
+        <div className="min-w-[10rem] space-y-1">
+          <span className="text-xs font-medium text-rph-fg-muted">Status</span>
+          <RphSelect
+            value={statusFilter}
+            aria-label="Filter charges by status"
+            options={[
+              { value: "all", label: "All statuses" },
+              { value: "pending_review", label: "Pending review" },
+              { value: "open", label: "Open / on balance" },
+              { value: "paid", label: "Paid" },
+              { value: "waived", label: "Waived" },
+            ]}
+            onValueChange={(value) =>
+              setStatusFilter(value as typeof statusFilter)
+            }
+          />
+        </div>
+      </div>
+
       <div className="rph-table-responsive">
+        <div className="max-h-[min(60vh,28rem)] overflow-x-auto overflow-y-auto overscroll-y-contain">
         <table className="hire-ended-simple-table">
           <thead>
             <tr>
               <th scope="col">Charge</th>
+              <th scope="col" aria-sort={sortKey === "date" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 uppercase tracking-[0.08em] text-[11px] font-semibold text-rph-fg-muted hover:text-rph-fg"
+                  onClick={() => toggleColumnSort("date")}
+                >
+                  Date
+                  <span className="tabular-nums text-[10px]" aria-hidden>
+                    {sortKey === "date" ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
+                  </span>
+                </button>
+              </th>
               <th scope="col">Status</th>
-              <th scope="col">Amount</th>
+              <th scope="col" aria-sort={sortKey === "amount" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 uppercase tracking-[0.08em] text-[11px] font-semibold text-rph-fg-muted hover:text-rph-fg"
+                  onClick={() => toggleColumnSort("amount")}
+                >
+                  Amount
+                  <span className="tabular-nums text-[10px]" aria-hidden>
+                    {sortKey === "amount" ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
+                  </span>
+                </button>
+              </th>
+              <th scope="col">Paid</th>
+              <th scope="col">Balance</th>
               <th scope="col" className="hire-ended-simple-table-actions">
                 Actions
               </th>
             </tr>
           </thead>
           <tbody>
-            {pending.map((review) => (
-              <tr key={`pending-${review.id}`}>
-                <td data-label="Charge">
-                  <p className="font-medium text-rph-fg">{review.label}</p>
-                  {review.detail ? <p className="text-xs text-rph-fg-secondary">{review.detail}</p> : null}
-                </td>
-                <td data-label="Status">
-                  <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
-                    Pending review
-                  </span>
-                </td>
-                <td data-label="Amount" className="tabular-nums">
-                  {review.proposedGbp != null && review.proposedGbp > 0.005
-                    ? formatGbp(review.proposedGbp)
-                    : "—"}
-                </td>
-                <td data-label="Actions" className="hire-ended-simple-table-actions">
-                  <span className="text-xs text-rph-fg-muted">—</span>
-                </td>
-              </tr>
-            ))}
-            {data.unpostedReturnCharges.map((item) => (
-              <tr key={item.id}>
-                <td data-label="Charge">
-                  <p className="font-medium text-rph-fg">{item.label}</p>
-                </td>
-                <td data-label="Status">
-                  <span className="rph-pill">On balance</span>
-                </td>
-                <td data-label="Amount" className="tabular-nums font-medium">
-                  {formatGbp(item.amountGbp)}
-                </td>
-                <td data-label="Actions" className="hire-ended-simple-table-actions">
-                  <span className="text-xs text-rph-fg-muted">—</span>
-                </td>
-              </tr>
-            ))}
-            {posted.map((item) => {
+            {tableRows.map((row) => {
+              if (row.rowKind === "pending") {
+                const review = row.review;
+                return (
+                  <tr key={row.key}>
+                    <td data-label="Charge">
+                      <p className="font-medium text-rph-fg">{review.label}</p>
+                      {review.detail ? (
+                        <p className="text-xs text-rph-fg-secondary">{review.detail}</p>
+                      ) : null}
+                    </td>
+                    <td data-label="Date" className="text-sm text-rph-fg-muted">
+                      —
+                    </td>
+                    <td data-label="Status">
+                      <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+                        Pending review
+                      </span>
+                    </td>
+                    <td data-label="Amount" className="tabular-nums">
+                      {review.proposedGbp != null && review.proposedGbp > 0.005
+                        ? formatGbp(review.proposedGbp)
+                        : "—"}
+                    </td>
+                    <td data-label="Paid" className="tabular-nums">
+                      {formatGbp(0)}
+                    </td>
+                    <td data-label="Balance" className="tabular-nums">
+                      {review.proposedGbp != null && review.proposedGbp > 0.005
+                        ? formatGbp(review.proposedGbp)
+                        : "—"}
+                    </td>
+                    <td data-label="Actions" className="hire-ended-simple-table-actions">
+                      <span className="text-xs text-rph-fg-muted">—</span>
+                    </td>
+                  </tr>
+                );
+              }
+
+              if (row.rowKind === "unposted") {
+                const item = row.item;
+                return (
+                  <tr key={row.key}>
+                    <td data-label="Charge">
+                      <p className="font-medium text-rph-fg">{item.label}</p>
+                    </td>
+                    <td data-label="Date" className="text-sm text-rph-fg-muted">
+                      —
+                    </td>
+                    <td data-label="Status">
+                      <span className="rph-pill">On balance</span>
+                    </td>
+                    <td data-label="Amount" className="tabular-nums font-medium">
+                      {formatGbp(item.amountGbp)}
+                    </td>
+                    <td data-label="Paid" className="tabular-nums">
+                      {formatGbp(0)}
+                    </td>
+                    <td data-label="Balance" className="tabular-nums font-medium">
+                      {formatGbp(item.amountGbp)}
+                    </td>
+                    <td data-label="Actions" className="hire-ended-simple-table-actions">
+                      <span className="text-xs text-rph-fg-muted">—</span>
+                    </td>
+                  </tr>
+                );
+              }
+
+              const item = row.item;
               const card = formatEndedChargeCardDisplay(item);
               const evidenceHref = formatEndedChargeEvidenceHref(hireGroupId, item);
               const paymentRow = paymentStatusById.get(item.id);
@@ -1029,14 +1337,16 @@ function ChargesTab({
                     canVoid: paymentRow.canVoid && !hireTimeLocked,
                   }
                 : null;
+              const dateLabel = item.chargedOn
+                ? formatUkDate(item.chargedOn)
+                : item.createdAt
+                  ? formatUkDateTime(item.createdAt)
+                  : "—";
               return (
-                <tr key={item.id}>
+                <tr key={row.key}>
                   <td data-label="Charge">
                     <p className="font-medium text-rph-fg">{card.title}</p>
-                    <p className="text-xs text-rph-fg-secondary">
-                      {item.chargeTypeLabel}
-                      {item.createdAt ? ` · ${formatUkDateTime(item.createdAt)}` : ""}
-                    </p>
+                    <p className="text-xs text-rph-fg-secondary">{item.chargeTypeLabel}</p>
                     {evidenceHref ? (
                       <Link
                         href={evidenceHref}
@@ -1045,6 +1355,9 @@ function ChargesTab({
                         View evidence
                       </Link>
                     ) : null}
+                  </td>
+                  <td data-label="Date" className="tabular-nums text-sm text-rph-fg-secondary">
+                    {dateLabel}
                   </td>
                   <td data-label="Status">
                     {statusTone ? (
@@ -1059,6 +1372,21 @@ function ChargesTab({
                   </td>
                   <td data-label="Amount" className="tabular-nums font-medium">
                     {item.resolution === "waived" ? formatGbp(0) : formatGbp(item.amountGbp)}
+                  </td>
+                  <td data-label="Paid" className="tabular-nums">
+                    {formatGbp(
+                      item.resolution === "waived" || item.resolution === "voided"
+                        ? 0
+                        : (paymentRow?.paidGbp ?? 0),
+                    )}
+                  </td>
+                  <td data-label="Balance" className="tabular-nums font-medium">
+                    {formatGbp(
+                      item.resolution === "waived" || item.resolution === "voided"
+                        ? 0
+                        : (paymentRow?.balanceGbp ??
+                            (item.resolution === "paid_now" ? 0 : item.amountGbp)),
+                    )}
                   </td>
                   <td data-label="Actions" className="hire-ended-simple-table-actions">
                     {actionRow ? (
@@ -1082,15 +1410,20 @@ function ChargesTab({
                 </tr>
               );
             })}
-            {pending.length === 0 && posted.length === 0 && data.unpostedReturnCharges.length === 0 ? (
+            {tableRows.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-sm text-rph-fg-secondary">
-                  No charges recorded on this hire.
+                <td colSpan={7} className="px-4 py-6 text-sm text-rph-fg-secondary">
+                  {pending.length === 0 &&
+                  posted.length === 0 &&
+                  data.unpostedReturnCharges.length === 0
+                    ? "No charges recorded on this hire."
+                    : "No charges match your filters."}
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
+        </div>
       </div>
 
       <HireAddChargeModal
@@ -1270,7 +1603,7 @@ function ReviewsTab({
         <p className="mt-1 text-sm text-rph-fg-secondary">
           {reviewsLocked
             ? "These decisions are locked until End hire is finalised."
-            : "Approve, waive or adjust amounts for return charges. Resolve the deposit disposition when held."}
+            : "Open a charge to approve or waive it. Waived charges stay on the Charges table."}
         </p>
       </header>
 
@@ -1320,33 +1653,13 @@ function ReviewsTab({
               ? ` · Deposit ${formatGbp(depositHeldGbp)} held`
               : ""}
           </p>
-          <div className="rph-table-responsive">
-            <table className="hire-ended-simple-table">
-              <thead>
-                <tr>
-                  <th scope="col">Charge</th>
-                  <th scope="col">Proposed</th>
-                  <th scope="col">If approved</th>
-                  <th scope="col">Status</th>
-                  <th scope="col" className="hire-ended-simple-table-actions">
-                    Action
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {charges.map((review) => (
-                  <PendingChargeReviewRow
-                    key={review.id}
-                    hireGroupId={hireGroupId}
-                    review={review}
-                    confirmedBalanceGbp={confirmed.confirmedBalanceGbp}
-                    actionsDisabled={reviewsLocked}
-                    onSuccess={onReload}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <PendingChargeReviewsTable
+            hireGroupId={hireGroupId}
+            charges={charges}
+            confirmedBalanceGbp={confirmed.confirmedBalanceGbp}
+            actionsDisabled={reviewsLocked}
+            onSuccess={onReload}
+          />
         </div>
       ) : !data.depositPendingReview ? (
         <p className="rounded-xl border border-rph-border bg-rph-page/60 px-4 py-6 text-sm text-rph-fg-secondary">
@@ -1357,153 +1670,100 @@ function ReviewsTab({
   );
 }
 
-function PendingChargeReviewRow({
+function PendingChargeReviewsTable({
   hireGroupId,
-  review,
+  charges,
   confirmedBalanceGbp,
   actionsDisabled,
   onSuccess,
 }: {
   hireGroupId: string;
-  review: HireEndedPendingChargeReview;
+  charges: HireEndedPendingChargeReview[];
   confirmedBalanceGbp: number;
   actionsDisabled: boolean;
   onSuccess: () => void;
 }) {
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [amount, setAmount] = useState(
-    review.proposedGbp != null && review.proposedGbp > 0 ? review.proposedGbp.toFixed(2) : "",
-  );
-
-  const proposedGbp =
-    review.proposedGbp != null && review.proposedGbp > 0.005 ? review.proposedGbp : null;
-  const projectedGbp =
-    proposedGbp != null ? roundGbp(confirmedBalanceGbp + proposedGbp) : null;
-
-  function run(decision: "approve" | "waive", amountGbp?: number) {
-    setError(null);
-    startTransition(() => {
-      void (async () => {
-        const res = await resolveHirePendingReturnChargeAction({
-          hireGroupId,
-          reviewId: review.id,
-          decision,
-          amountGbp,
-        });
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
-        setEditing(false);
-        onSuccess();
-      })();
-    });
-  }
+  const [reviewing, setReviewing] = useState<HireEndedPendingChargeReview | null>(null);
 
   return (
-    <tr>
-      <td data-label="Charge">
-        <p className="font-medium text-rph-fg">{review.label}</p>
-        {review.detail ? <p className="text-xs text-rph-fg-secondary">{review.detail}</p> : null}
-        {error ? <p className="mt-1 text-xs text-red-600 dark:text-red-300">{error}</p> : null}
-        {editing ? (
-          <label className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-            <span className="text-rph-fg-muted">Amount (£)</span>
-            <input
-              className="rph-input w-28 py-1 text-sm"
-              inputMode="decimal"
-              value={amount}
-              onChange={(event) => setAmount(event.target.value)}
-              disabled={pending}
-            />
-          </label>
-        ) : null}
-      </td>
-      <td data-label="Proposed" className="tabular-nums font-medium">
-        {proposedGbp != null ? formatHireEndHireSignedAmount(proposedGbp, true) : "—"}
-      </td>
-      <td data-label="If approved" className="tabular-nums">
-        {projectedGbp != null ? formatGbp(projectedGbp) : "—"}
-      </td>
-      <td data-label="Status">
-        <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
-          Awaiting review
-        </span>
-      </td>
-      <td data-label="Actions" className="hire-ended-simple-table-actions">
-        {actionsDisabled ? (
-          <span className="text-xs text-rph-fg-muted">Locked</span>
-        ) : editing ? (
-          <div className="flex flex-wrap items-center justify-end gap-1.5">
-            <button
-              type="button"
-              className="rph-btn-ghost h-8 px-2 text-xs"
-              disabled={pending}
-              onClick={() => setEditing(false)}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="rph-btn-primary h-8 px-2 text-xs"
-              disabled={pending}
-              onClick={() => run("approve", Number(amount))}
-            >
-              Approve
-            </button>
-          </div>
-        ) : (
-          <DropdownMenu.Root modal={false}>
-            <DropdownMenu.Trigger asChild>
-              <button
-                type="button"
-                className="hire-ws-payments-row-action-trigger inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-rph-border bg-rph-raised text-rph-fg-secondary transition-colors hover:bg-rph-chrome data-[state=open]:bg-rph-chrome disabled:opacity-50"
-                disabled={pending}
-                aria-label={`Actions for ${review.label}`}
-                title="Actions"
-              >
-                <span aria-hidden className="text-base leading-none">
-                  ⋮
-                </span>
-              </button>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content
-                side="bottom"
-                align="end"
-                sideOffset={6}
-                collisionPadding={12}
-                className={dropdownContentClass}
-              >
-                <DropdownMenu.Item
-                  className={dropdownItemClass}
-                  disabled={pending || proposedGbp == null}
-                  onSelect={() => run("approve", proposedGbp ?? undefined)}
-                >
-                  {proposedGbp != null ? `Approve ${formatGbp(proposedGbp)}` : "Approve"}
-                </DropdownMenu.Item>
-                <DropdownMenu.Item
-                  className={dropdownItemClass}
-                  disabled={pending}
-                  onSelect={() => setEditing(true)}
-                >
-                  Edit and approve…
-                </DropdownMenu.Item>
-                <DropdownMenu.Item
-                  className={dropdownItemClass}
-                  disabled={pending}
-                  onSelect={() => run("waive")}
-                >
-                  Reject charge
-                </DropdownMenu.Item>
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
-        )}
-      </td>
-    </tr>
+    <>
+      <div className="rph-table-responsive">
+        <table className="hire-ended-simple-table">
+          <thead>
+            <tr>
+              <th scope="col">Charge</th>
+              <th scope="col">Proposed</th>
+              <th scope="col">If approved</th>
+              <th scope="col">Status</th>
+              <th scope="col" className="hire-ended-simple-table-actions">
+                Action
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {charges.map((review) => {
+              const proposedGbp =
+                review.proposedGbp != null && review.proposedGbp > 0.005
+                  ? review.proposedGbp
+                  : null;
+              const projectedGbp =
+                proposedGbp != null ? roundGbp(confirmedBalanceGbp + proposedGbp) : null;
+              return (
+                <tr key={review.id}>
+                  <td data-label="Charge">
+                    <p className="font-medium text-rph-fg">{review.label}</p>
+                    {review.detail ? (
+                      <p className="text-xs text-rph-fg-secondary">{review.detail}</p>
+                    ) : null}
+                    {review.evidenceHref ? (
+                      <Link
+                        href={review.evidenceHref}
+                        className="mt-1 inline-block text-xs font-medium text-rph-link hover:text-rph-link-hover"
+                      >
+                        View evidence
+                      </Link>
+                    ) : null}
+                  </td>
+                  <td data-label="Proposed" className="tabular-nums font-medium">
+                    {proposedGbp != null ? formatGbp(proposedGbp) : "—"}
+                  </td>
+                  <td data-label="If approved" className="tabular-nums">
+                    {projectedGbp != null ? formatGbp(projectedGbp) : "—"}
+                  </td>
+                  <td data-label="Status">
+                    <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+                      Awaiting review
+                    </span>
+                  </td>
+                  <td data-label="Actions" className="hire-ended-simple-table-actions">
+                    {actionsDisabled ? (
+                      <span className="text-xs text-rph-fg-muted">Locked</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="rph-btn-primary h-8 px-2.5 text-xs"
+                        onClick={() => setReviewing(review)}
+                      >
+                        Review
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <HirePendingReturnChargeReviewModal
+        open={Boolean(reviewing)}
+        hireGroupId={hireGroupId}
+        review={reviewing}
+        confirmedBalanceGbp={confirmedBalanceGbp}
+        onClose={() => setReviewing(null)}
+        onSuccess={onSuccess}
+      />
+    </>
   );
 }
 

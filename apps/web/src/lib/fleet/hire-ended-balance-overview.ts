@@ -258,7 +258,8 @@ export function buildHireEndedSettledKpis(
     | "depositDisposition"
     | "depositReceivedGbp"
     | "summary"
-  >,
+  > &
+    Partial<Pick<HirePaymentsPageData, "depositAppliedToRentGbp" | "depositAppliedToChargesGbp">>,
 ): HireEndedSettledKpis {
   const ledger = summarizeHireSettlementLedger(data.settlementBalancePayments);
   const rent = buildHireEndedRentCalculation(data);
@@ -271,10 +272,14 @@ export function buildHireEndedSettledKpis(
       )
       .reduce((sum, item) => sum + item.amountGbp, 0),
   );
+  const persistedDepositUsed = roundGbp(
+    Math.max(0, Number(data.depositAppliedToRentGbp ?? 0)) +
+      Math.max(0, Number(data.depositAppliedToChargesGbp ?? 0)),
+  );
   return {
     finalChargesGbp: roundGbp(postedChargesGbp + rent.rentDueToEndGbp),
     receivedGbp: roundGbp(data.summary.totalPaidGbp + ledger.totalReceivedGbp),
-    depositUsedGbp: rent.paidFromDepositGbp,
+    depositUsedGbp: persistedDepositUsed > 0.005 ? persistedDepositUsed : rent.paidFromDepositGbp,
     refundedGbp: ledger.totalPaidGbp,
   };
 }
@@ -286,10 +291,16 @@ export type HireEndedDepositPositionDisplay = {
   confirmedBeforeDepositGbp: number;
   projectedIfApprovedGbp: number | null;
   heldSeparatelyGbp: number;
+  appliedToRentGbp: number;
+  appliedToChargesGbp: number;
+  appliedTotalGbp: number;
+  refundedGbp: number;
   stillOwesGbp: number;
   stillOwesLabel: string;
   heldForReview: boolean;
   holdReason: string | null;
+  /** True when deposit disposition has been resolved (no longer held). */
+  dispositionResolved: boolean;
 };
 
 export function buildHireEndedDepositPositionDisplay(
@@ -299,16 +310,29 @@ export function buildHireEndedDepositPositionDisplay(
     | "depositReceivedGbp"
     | "depositPendingReview"
     | "pendingReviews"
-  >,
+    | "depositDisposition"
+    | "settlementBalancePayments"
+  > &
+    Partial<Pick<HirePaymentsPageData, "depositAppliedToRentGbp" | "depositAppliedToChargesGbp">>,
   confirmed: Pick<HireEndedConfirmedCalculation, "confirmedBalanceGbp" | "projectedBalanceGbp">,
 ): HireEndedDepositPositionDisplay {
   const requiredGbp = roundGbp(Math.max(0, data.terminationSummary?.depositGbp ?? 0));
   const receivedGbp = roundGbp(Math.max(0, data.depositReceivedGbp));
   const unreceivedGbp = roundGbp(Math.max(0, requiredGbp - receivedGbp));
   const confirmedBeforeDepositGbp = confirmed.confirmedBalanceGbp;
-  const heldSeparatelyGbp = data.depositPendingReview
+  const heldForReview = data.depositPendingReview;
+  const heldSeparatelyGbp = heldForReview
     ? roundGbp(Math.max(0, data.pendingReviews.depositHeldGbp || receivedGbp))
     : 0;
+  const appliedToRentGbp = roundGbp(Math.max(0, Number(data.depositAppliedToRentGbp ?? 0)));
+  const appliedToChargesGbp = roundGbp(Math.max(0, Number(data.depositAppliedToChargesGbp ?? 0)));
+  const appliedTotalGbp = roundGbp(appliedToRentGbp + appliedToChargesGbp);
+  const ledger = summarizeHireSettlementLedger(data.settlementBalancePayments);
+  const refundedGbp = heldForReview ? 0 : roundGbp(Math.max(0, ledger.settlementPaidGbp));
+  const dispositionResolved =
+    !heldForReview &&
+    Boolean(data.depositDisposition) &&
+    data.depositDisposition !== "hold_pending";
 
   return {
     requiredGbp,
@@ -317,9 +341,14 @@ export function buildHireEndedDepositPositionDisplay(
     confirmedBeforeDepositGbp,
     projectedIfApprovedGbp: confirmed.projectedBalanceGbp,
     heldSeparatelyGbp,
+    appliedToRentGbp,
+    appliedToChargesGbp,
+    appliedTotalGbp,
+    refundedGbp,
     stillOwesGbp: confirmedBeforeDepositGbp,
     stillOwesLabel: formatGbp(confirmedBeforeDepositGbp),
-    heldForReview: data.depositPendingReview,
+    heldForReview,
     holdReason: null,
+    dispositionResolved,
   };
 }

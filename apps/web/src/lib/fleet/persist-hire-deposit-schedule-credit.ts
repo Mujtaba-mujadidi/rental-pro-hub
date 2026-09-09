@@ -71,10 +71,19 @@ export async function persistDepositCreditToRentSchedule(input: {
 
   const allocation = allocatePaymentAcrossRows(creditGbp, scheduleRows, input.accrualYmd, {
     accruedOnly: true,
+    // Never pour deposit-as-rent credit into the deposit schedule row — that inflates
+    // "deposit paid" and starves unpaid rent rows of the credit history.
+    rowKind: "rent",
   });
   if (!allocation.allocations.length) return { ok: true, creditAppliedGbp: 0 };
 
   for (const line of allocation.allocations) {
+    if (line.rowKind !== "rent") {
+      return {
+        ok: false,
+        error: "Deposit rent credit cannot be applied to the deposit schedule row.",
+      };
+    }
     const row = scheduleRows.find((item) => item.id === line.rowId);
     if (!row) continue;
 

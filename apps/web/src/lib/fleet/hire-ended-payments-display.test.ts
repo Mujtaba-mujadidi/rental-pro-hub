@@ -53,6 +53,8 @@ function payments(
   | "depositGbp"
   | "depositDisposition"
   | "depositReceivedGbp"
+  | "depositAppliedToRentGbp"
+  | "depositAppliedToChargesGbp"
   | "settlementBalancePayments"
   | "driverChargeLineItems"
 > {
@@ -76,6 +78,8 @@ function payments(
     depositReceivedGbp:
       partial.depositReceivedGbp ??
       (partial.depositGbp === 0 ? 0 : partial.depositGbp ?? 500),
+    depositAppliedToRentGbp: partial.depositAppliedToRentGbp ?? 0,
+    depositAppliedToChargesGbp: partial.depositAppliedToChargesGbp ?? 0,
     settlementBalancePayments: partial.settlementBalancePayments ?? [],
     driverChargeLineItems: partial.driverChargeLineItems ?? [],
   };
@@ -223,6 +227,43 @@ describe("buildHireEndedDepositRefundDisplay", () => {
     expect(display?.refundPaidToDriverGbp).toBe(342.86);
     expect(display?.refundPaidLabel).toBe("Total refunded to driver");
     expect(display?.refundNote).toContain("£342.86 of the deposit was refunded");
+  });
+
+  it("uses persisted deposit application after apply_to_balance (not remaining unpaid rent)", () => {
+    const display = buildHireEndedDepositRefundDisplay({
+      payments: payments({
+        depositDisposition: "apply_to_balance",
+        depositReceivedGbp: 600,
+        depositAppliedToRentGbp: 400,
+        depositAppliedToChargesGbp: 200,
+        // After apply, rent sheet is settled — naive recomputation would show £0 used.
+        terminationSummary: termination({
+          accruedRentDueGbp: 400,
+          accruedRentPaidGbp: 400,
+          signedRentBalanceGbp: 0,
+          balanceGbp: 0,
+          depositGbp: 600,
+        }),
+        driverChargeLineItems: [
+          {
+            id: "c1",
+            chargeType: "damage",
+            chargeTypeLabel: "Damage",
+            amountGbp: 200,
+            resolution: "add_to_balance",
+            resolutionLabel: "Added to balance",
+            description: "Fuel",
+            createdAt: "2026-09-08T12:00:00.000Z",
+            chargedOn: "2026-09-08",
+            sourceKind: "checkin_inspection_fuel",
+            canMutate: false,
+          },
+        ],
+      }),
+    });
+    expect(display?.lessUnpaidRentGbp).toBe(400);
+    expect(display?.lessDamageGbp).toBe(200);
+    expect(display?.refundNote).toContain("fully applied");
   });
 
   it("uses driver wording for refund label and note", () => {
@@ -450,6 +491,19 @@ describe("formatEndedChargeCardDisplay", () => {
       }),
     ).toEqual({
       title: "Cleaning fee",
+      severityLabel: null,
+    });
+  });
+
+  it("hides review notes from the table title", () => {
+    expect(
+      formatEndedChargeCardDisplay({
+        description:
+          "Fuel difference — checkout 74% / return 24% · Note: long-term client, we won't charge anything",
+        chargeTypeLabel: "Other",
+      }),
+    ).toEqual({
+      title: "Fuel difference — checkout 74% / return 24%",
       severityLabel: null,
     });
   });
